@@ -36,8 +36,6 @@ type SysDBClient interface {
 	GetCollections(ctx context.Context, in *GetCollectionsRequest, opts ...grpc.CallOption) (*GetCollectionsResponse, error)
 	UpdateCollection(ctx context.Context, in *UpdateCollectionRequest, opts ...grpc.CallOption) (*ChromaResponse, error)
 	ResetState(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ChromaResponse, error)
-	PushLogs(ctx context.Context, in *PushLogsRequest, opts ...grpc.CallOption) (*PushLogsResponse, error)
-	PullLogs(ctx context.Context, in *PullLogsRequest, opts ...grpc.CallOption) (*PullLogsResponse, error)
 }
 
 type sysDBClient struct {
@@ -165,24 +163,6 @@ func (c *sysDBClient) ResetState(ctx context.Context, in *emptypb.Empty, opts ..
 	return out, nil
 }
 
-func (c *sysDBClient) PushLogs(ctx context.Context, in *PushLogsRequest, opts ...grpc.CallOption) (*PushLogsResponse, error) {
-	out := new(PushLogsResponse)
-	err := c.cc.Invoke(ctx, "/chroma.SysDB/PushLogs", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *sysDBClient) PullLogs(ctx context.Context, in *PullLogsRequest, opts ...grpc.CallOption) (*PullLogsResponse, error) {
-	out := new(PullLogsResponse)
-	err := c.cc.Invoke(ctx, "/chroma.SysDB/PullLogs", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // SysDBServer is the server API for SysDB service.
 // All implementations must embed UnimplementedSysDBServer
 // for forward compatibility
@@ -200,8 +180,6 @@ type SysDBServer interface {
 	GetCollections(context.Context, *GetCollectionsRequest) (*GetCollectionsResponse, error)
 	UpdateCollection(context.Context, *UpdateCollectionRequest) (*ChromaResponse, error)
 	ResetState(context.Context, *emptypb.Empty) (*ChromaResponse, error)
-	PushLogs(context.Context, *PushLogsRequest) (*PushLogsResponse, error)
-	PullLogs(context.Context, *PullLogsRequest) (*PullLogsResponse, error)
 	mustEmbedUnimplementedSysDBServer()
 }
 
@@ -247,12 +225,6 @@ func (UnimplementedSysDBServer) UpdateCollection(context.Context, *UpdateCollect
 }
 func (UnimplementedSysDBServer) ResetState(context.Context, *emptypb.Empty) (*ChromaResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResetState not implemented")
-}
-func (UnimplementedSysDBServer) PushLogs(context.Context, *PushLogsRequest) (*PushLogsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PushLogs not implemented")
-}
-func (UnimplementedSysDBServer) PullLogs(context.Context, *PullLogsRequest) (*PullLogsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PullLogs not implemented")
 }
 func (UnimplementedSysDBServer) mustEmbedUnimplementedSysDBServer() {}
 
@@ -501,42 +473,6 @@ func _SysDB_ResetState_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SysDB_PushLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PushLogsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SysDBServer).PushLogs(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/chroma.SysDB/PushLogs",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SysDBServer).PushLogs(ctx, req.(*PushLogsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _SysDB_PullLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PullLogsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SysDBServer).PullLogs(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/chroma.SysDB/PullLogs",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SysDBServer).PullLogs(ctx, req.(*PullLogsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // SysDB_ServiceDesc is the grpc.ServiceDesc for SysDB service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -595,14 +531,6 @@ var SysDB_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetState",
 			Handler:    _SysDB_ResetState_Handler,
-		},
-		{
-			MethodName: "PushLogs",
-			Handler:    _SysDB_PushLogs_Handler,
-		},
-		{
-			MethodName: "PullLogs",
-			Handler:    _SysDB_PullLogs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

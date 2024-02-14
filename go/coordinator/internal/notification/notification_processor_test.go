@@ -2,13 +2,13 @@ package notification
 
 import (
 	"context"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"testing"
 
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

@@ -11,7 +11,6 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -31,31 +30,13 @@ type DBConfig struct {
 	MaxIdleConns int
 	MaxOpenConns int
 	Region       string
-}
-
-func ConnectAurora(cfg DBConfig) *gorm.DB {
-	log.Info("ConnectAurora", zap.String("host", cfg.Address), zap.String("database", cfg.DBName), zap.String("region", cfg.Region), zap.Int("port", cfg.Port))
-	db, err := ConnectPostgres(cfg)
-	if err != nil {
-		panic(err)
-	}
-
-	log.Info("Aurora: AutoMigrate")
-	db.AutoMigrate(&dbmodel.Tenant{})
-	db.AutoMigrate(&dbmodel.Database{})
-	db.AutoMigrate(&dbmodel.Collection{})
-	db.AutoMigrate(&dbmodel.CollectionMetadata{})
-	db.AutoMigrate(&dbmodel.Segment{})
-	db.AutoMigrate(&dbmodel.SegmentMetadata{})
-	db.AutoMigrate(&dbmodel.RecordLog{})
-	db.AutoMigrate(&dbmodel.Notification{})
-
-	return db
+	SslMode      string
 }
 
 func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=require",
-		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port)
+	log.Info("ConnectPostgres", zap.String("host", cfg.Address), zap.String("database", cfg.DBName), zap.String("region", cfg.Region), zap.Int("port", cfg.Port))
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s",
+		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port, cfg.SslMode)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
@@ -84,11 +65,10 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 
 	globalDB = db
 
-	log.Info("db connected success",
+	log.Info("Postgres connected success",
 		zap.String("host", cfg.Address),
 		zap.String("database", cfg.DBName),
 		zap.Error(err))
-
 	return db, nil
 }
 
@@ -137,21 +117,6 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
-func ConfigAuroraForTesting() *gorm.DB {
-	dBConfig := DBConfig{
-		Username: "postgres",
-		Password: "z7_UHv7f2_Pz9Js9BkHN",
-		Address:  "test-instance-1.cd2rjkzioeat.us-west-2.rds.amazonaws.com",
-		Port:     5432,
-		DBName:   "test",
-		Region:   "us-west-2",
-	}
-	db := ConnectAurora(dBConfig)
-	SetGlobalDB(db)
-	CreateTestTables(db)
-	return db
-}
-
 func CreateTestTables(db *gorm.DB) {
 	// Setup tenant related tables
 	db.Migrator().DropTable(&dbmodel.Tenant{})
@@ -182,19 +147,22 @@ func CreateTestTables(db *gorm.DB) {
 	db.Migrator().CreateTable(&dbmodel.Segment{})
 	db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
 
-	// Setup record log related tables
-	db.Migrator().DropTable(&dbmodel.RecordLog{})
-	db.Migrator().CreateTable(&dbmodel.RecordLog{})
-
 	// Setup notification related tables
 	db.Migrator().DropTable(&dbmodel.Notification{})
 	db.Migrator().CreateTable(&dbmodel.Notification{})
 }
 
 func ConfigDatabaseForTesting() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+	db, err := ConnectPostgres(DBConfig{
+		Username: "chroma",
+		Password: "chroma",
+		Address:  "localhost",
+		Port:     5432,
+		DBName:   "chroma",
 	})
+	if err != nil {
+		return nil
+	}
 	if err != nil {
 		panic("failed to connect database")
 	}

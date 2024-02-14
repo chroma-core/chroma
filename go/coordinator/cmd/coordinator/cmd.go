@@ -1,18 +1,18 @@
-package grpccoordinator
+package main
 
 import (
+	"github.com/chroma/chroma-coordinator/internal/coordinator/grpc"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"io"
 	"time"
 
 	"github.com/chroma/chroma-coordinator/cmd/flag"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 var (
-	conf = grpccoordinator.Config{
+	conf = grpc.Config{
 		GrpcConfig: &grpcutils.GrpcConfig{},
 	}
 
@@ -30,22 +30,15 @@ func init() {
 	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
 
 	// System Catalog
-	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "aurora", "System catalog provider")
-	Cmd.Flags().StringVar(&conf.Username, "username", "root", "MetaTable username")
-	Cmd.Flags().StringVar(&conf.Password, "password", "", "MetaTable password")
-	Cmd.Flags().StringVar(&conf.Address, "db-address", "127.0.0.1", "MetaTable db address")
+	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "database", "System catalog provider")
+	Cmd.Flags().StringVar(&conf.Username, "username", "chroma", "MetaTable username")
+	Cmd.Flags().StringVar(&conf.Password, "password", "chroma", "MetaTable password")
+	Cmd.Flags().StringVar(&conf.Address, "db-address", "postgres", "MetaTable db address")
 	Cmd.Flags().IntVar(&conf.Port, "db-port", 5432, "MetaTable db port")
-	Cmd.Flags().StringVar(&conf.DBName, "db-name", "", "MetaTable db name")
+	Cmd.Flags().StringVar(&conf.DBName, "db-name", "chroma", "MetaTable db name")
 	Cmd.Flags().IntVar(&conf.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
 	Cmd.Flags().IntVar(&conf.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
-
-	// Aurora dev
-	Cmd.Flags().StringVar(&conf.AuroraHost, "aurora_host", "test-instance-1.cd2rjkzioeat.us-west-2.rds.amazonaws.com", "Aurora host")
-	Cmd.Flags().IntVar(&conf.AuroraPort, "aurora_port", 5432, "Aurora port")
-	Cmd.Flags().StringVar(&conf.AuroraUser, "aurora_user", "postgres", "Aurora user")
-	Cmd.Flags().StringVar(&conf.AuroraPassword, "aurora_password", "z7_UHv7f2_Pz9Js9BkHN", "Aurora password")
-	Cmd.Flags().StringVar(&conf.AuroraDBName, "aurora_db_name", "test", "Aurora DB name")
-	Cmd.Flags().StringVar(&conf.AuroraRegion, "aurora_region", "us-west-2", "Aurora region")
+	Cmd.Flags().StringVar(&conf.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 
 	// Pulsar
 	Cmd.Flags().StringVar(&conf.PulsarAdminURL, "pulsar-admin-url", "http://localhost:8080", "Pulsar admin url")
@@ -67,6 +60,6 @@ func init() {
 
 func exec(*cobra.Command, []string) {
 	utils.RunProcess(func() (io.Closer, error) {
-		return grpccoordinator.New(conf)
+		return grpc.New(conf)
 	})
 }

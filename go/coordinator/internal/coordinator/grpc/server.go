@@ -1,18 +1,18 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
 	"errors"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma/chroma-coordinator/internal/coordinator"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/notification"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -36,14 +36,7 @@ type Config struct {
 	DBName       string
 	MaxIdleConns int
 	MaxOpenConns int
-
-	// Aurora config
-	AuroraHost     string
-	AuroraPort     int
-	AuroraUser     string
-	AuroraDBName   string
-	AuroraRegion   string
-	AuroraPassword string
+	SslMode      string
 
 	// Notification config
 	NotificationStoreProvider string
@@ -93,24 +86,13 @@ func New(config Config) (*Server, error) {
 			DBName:       config.DBName,
 			MaxIdleConns: config.MaxIdleConns,
 			MaxOpenConns: config.MaxOpenConns,
+			SslMode:      config.SslMode,
 		}
 
 		db, err := dbcore.ConnectPostgres(dBConfig)
 		if err != nil {
 			return nil, err
 		}
-		return NewWithGrpcProvider(config, grpcutils.Default, db)
-	} else if config.SystemCatalogProvider == "aurora" {
-		dBConfig := dbcore.DBConfig{
-			Username: config.AuroraUser,
-			Address:  config.AuroraHost,
-			Port:     config.AuroraPort,
-			DBName:   config.AuroraDBName,
-			Region:   config.AuroraRegion,
-			Password: config.AuroraPassword,
-		}
-
-		db := dbcore.ConnectAurora(dBConfig)
 		return NewWithGrpcProvider(config, grpcutils.Default, db)
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")
@@ -185,16 +167,16 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	s.coordinator = coordinator
 	s.coordinator.Start()
 	if !config.Testing {
-		//memberlist_manager, err := createMemberlistManager(config)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//
-		//// Start the memberlist manager
-		//err = memberlist_manager.Start()
-		//if err != nil {
-		//	return nil, err
-		//}
+		memberlist_manager, err := createMemberlistManager(config)
+		if err != nil {
+			return nil, err
+		}
+
+		// Start the memberlist manager
+		err = memberlist_manager.Start()
+		if err != nil {
+			return nil, err
+		}
 
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)

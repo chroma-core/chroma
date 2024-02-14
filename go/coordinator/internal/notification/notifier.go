@@ -2,10 +2,10 @@ package notification
 
 import (
 	"context"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"

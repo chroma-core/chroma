@@ -1,18 +1,20 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
 	"errors"
 	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
-func (s *Server) PushLogs(ctx context.Context, req *coordinatorpb.PushLogsRequest) (*coordinatorpb.PushLogsResponse, error) {
-	res := &coordinatorpb.PushLogsResponse{}
+func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
+	res := &logservicepb.PushLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
 	if err != nil {
 		log.Error("collection id format error", zap.String("collection.id", req.CollectionId))
@@ -28,39 +30,39 @@ func (s *Server) PushLogs(ctx context.Context, req *coordinatorpb.PushLogsReques
 		}
 		recordsContent = append(recordsContent, data)
 	}
-	recordCount, err := s.coordinator.PushLogs(ctx, collectionID, recordsContent)
+	recordCount, err := s.logService.PushLogs(ctx, collectionID, recordsContent)
 	if err != nil {
 		log.Error("error pushing logs", zap.Error(err))
 		if errors.Is(err, common.ErrPushLogs) {
-			res.Status = failResponseWithError(err, errorCode)
+			res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 			return res, nil
 		}
 	}
 	res.RecordCount = int32(recordCount)
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	log.Info("PushLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", recordCount))
 	return res, nil
 }
 
-func (s *Server) PullLogs(ctx context.Context, req *coordinatorpb.PullLogsRequest) (*coordinatorpb.PullLogsResponse, error) {
-	res := &coordinatorpb.PullLogsResponse{}
+func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (*logservicepb.PullLogsResponse, error) {
+	res := &logservicepb.PullLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
 	records := make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
 	if err != nil {
 		log.Error("collection id format error", zap.String("collection.id", req.CollectionId))
 		return nil, common.ErrCollectionIDFormat
 	}
-	recordLogs, err := s.coordinator.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
 	for index := range recordLogs {
 		record := &coordinatorpb.SubmitEmbeddingRecord{}
 		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
-			res.Status = failResponseWithError(err, errorCode)
+			res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 			return res, nil
 		}
 		records = append(records, record)
 	}
 	res.Records = records
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	log.Info("PullLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", len(records)))
 	return res, nil
 }

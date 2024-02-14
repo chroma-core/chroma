@@ -8,20 +8,8 @@ import (
 	"testing"
 )
 
-func GetAuroraConfig() dbcore.DBConfig {
-	dBConfig := dbcore.DBConfig{
-		Username: "postgres",
-		Password: "z7_UHv7f2_Pz9Js9BkHN",
-		Address:  "test-instance-1.cd2rjkzioeat.us-west-2.rds.amazonaws.com",
-		Port:     5432,
-		DBName:   "test",
-		Region:   "us-west-2",
-	}
-	return dBConfig
-}
-
 func TestRecordLogDb_PushLogs(t *testing.T) {
-	db := dbcore.ConnectAurora(GetAuroraConfig())
+	db := dbcore.ConfigDatabaseForTesting()
 	db.Migrator().DropTable(&dbmodel.RecordLog{})
 	db.Migrator().CreateTable(&dbmodel.RecordLog{})
 	Db := &recordLogDb{
@@ -70,7 +58,7 @@ func TestRecordLogDb_PushLogs(t *testing.T) {
 }
 
 func TestRecordLogDb_PullLogsFromID(t *testing.T) {
-	db := dbcore.ConnectAurora(GetAuroraConfig())
+	db := dbcore.ConfigDatabaseForTesting()
 	db.Migrator().DropTable(&dbmodel.RecordLog{})
 	db.Migrator().CreateTable(&dbmodel.RecordLog{})
 	Db := &recordLogDb{

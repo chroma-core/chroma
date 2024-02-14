@@ -1,16 +1,17 @@
-package grpccoordinator
+package grpc
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
+	"gorm.io/gorm"
 	"testing"
 )
 
@@ -54,30 +55,40 @@ func GetTestEmbeddingRecords(collectionId string) (recordsToSubmit []*coordinato
 	return recordsToSubmit
 }
 
+func resetLogTable(db *gorm.DB) {
+	db.Migrator().DropTable(&dbmodel.RecordLog{})
+	db.Migrator().CreateTable(&dbmodel.RecordLog{})
+}
+
 func TestServer_PushLogs(t *testing.T) {
 	// setup
-	db := dbcore.ConfigAuroraForTesting()
-	s, err := NewWithGrpcProvider(Config{
-		AssignmentPolicy:          "simple",
-		SystemCatalogProvider:     "aurora",
-		NotificationStoreProvider: "memory",
-		NotifierProvider:          "memory",
-		Testing:                   true}, grpcutils.Default, db)
+	s, err := New(Config{
+		DBProvider:   "aurora",
+		AuroraRegion: "us-west-2",
+		DBHost:       "test-instance-1.cd2rjkzioeat.us-west-2.rds.amazonaws.com",
+		DBPort:       5432,
+		DBUser:       "postgres",
+		DBPassword:   "z7_UHv7f2_Pz9Js9BkHN",
+		DBName:       "test",
+		StartGrpc:    false,
+	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
+	db := dbcore.GetDB(context.Background())
+	resetLogTable(db)
 
 	// push some records
 	collectionId := types.NewUniqueID()
 	recordsToSubmit := GetTestEmbeddingRecords(collectionId.String())
-	pushRequest := coordinatorpb.PushLogsRequest{
+	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: collectionId.String(),
 		Records:      recordsToSubmit,
 	}
 	response, err := s.PushLogs(context.Background(), &pushRequest)
 	assert.Nil(t, err)
 	assert.Equal(t, int32(3), response.RecordCount)
-	assert.Equal(t, 200, response.Status.Code)
+	assert.Equal(t, int32(200), response.Status.Code)
 
 	var recordLogs []*dbmodel.RecordLog
 	db.Where("collection_id = ?", types.FromUniqueID(collectionId)).Find(&recordLogs)
@@ -97,32 +108,39 @@ func TestServer_PushLogs(t *testing.T) {
 		assert.Equal(t, record.Vector.Encoding, recordsToSubmit[index].Vector.Encoding)
 		assert.Equal(t, record.Vector.Vector, recordsToSubmit[index].Vector.Vector)
 	}
+
+	resetLogTable(db)
 }
 
 func TestServer_PullLogs(t *testing.T) {
 	// setup
-	db := dbcore.ConfigAuroraForTesting()
-	s, err := NewWithGrpcProvider(Config{
-		AssignmentPolicy:          "simple",
-		SystemCatalogProvider:     "aurora",
-		NotificationStoreProvider: "memory",
-		NotifierProvider:          "memory",
-		Testing:                   true}, grpcutils.Default, db)
+	s, err := New(Config{
+		DBProvider:   "aurora",
+		AuroraRegion: "us-west-2",
+		DBHost:       "test-instance-1.cd2rjkzioeat.us-west-2.rds.amazonaws.com",
+		DBPort:       5432,
+		DBUser:       "postgres",
+		DBPassword:   "z7_UHv7f2_Pz9Js9BkHN",
+		DBName:       "test",
+		StartGrpc:    false,
+	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
+	db := dbcore.GetDB(context.Background())
+	resetLogTable(db)
 
 	// push some records
 	collectionId := types.NewUniqueID()
 	recordsToSubmit := GetTestEmbeddingRecords(collectionId.String())
-	pushRequest := coordinatorpb.PushLogsRequest{
+	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: collectionId.String(),
 		Records:      recordsToSubmit,
 	}
 	s.PushLogs(context.Background(), &pushRequest)
 
 	// pull the records
-	pullRequest := coordinatorpb.PullLogsRequest{
+	pullRequest := logservicepb.PullLogsRequest{
 		CollectionId: collectionId.String(),
 		StartFromId:  0,
 		BatchSize:    10,
@@ -140,4 +158,6 @@ func TestServer_PullLogs(t *testing.T) {
 		assert.Equal(t, recordsToSubmit[index].Vector.Encoding, pullResponse.Records[index].Vector.Encoding)
 		assert.Equal(t, recordsToSubmit[index].Vector.Vector, pullResponse.Records[index].Vector.Vector)
 	}
+
+	resetLogTable(db)
 }

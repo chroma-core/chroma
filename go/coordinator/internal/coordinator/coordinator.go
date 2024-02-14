@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"log"
 
 	"github.com/chroma/chroma-coordinator/internal/metastore"
@@ -24,7 +23,6 @@ type Coordinator struct {
 	collectionAssignmentPolicy CollectionAssignmentPolicy
 	meta                       IMeta
 	notificationProcessor      notification.NotificationProcessor
-	recordLogDb                dbmodel.IRecordLogDb
 }
 
 func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPolicy, db *gorm.DB, notificationStore notification.NotificationStore, notifier notification.Notifier) (*Coordinator, error) {
@@ -43,7 +41,6 @@ func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPo
 		txnImpl := dbcore.NewTxImpl()
 		metaDomain := dao.NewMetaDomain()
 		catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
-		s.recordLogDb = metaDomain.RecordLogDb(ctx)
 	}
 	meta, err := NewMetaTable(s.ctx, catalog)
 	if err != nil {

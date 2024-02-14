@@ -1,11 +1,12 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -19,7 +20,7 @@ func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSeg
 	segment, err := convertSegmentToModel(segmentpb)
 	if err != nil {
 		log.Error("convert segment to model error", zap.Error(err))
-		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrSegmentIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 
@@ -27,14 +28,14 @@ func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSeg
 	if err != nil {
 		if err == common.ErrSegmentUniqueConstraintViolation {
 			log.Error("segment id already exist", zap.Error(err))
-			res.Status = failResponseWithError(err, 409)
+			res.Status = grpcutils.FailResponseWithError(err, 409)
 			return res, nil
 		}
 		log.Error("create segment error", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 
 	return res, nil
 }
@@ -49,14 +50,14 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 	parsedSegmentID, err := types.ToUniqueID(segmentID)
 	if err != nil {
 		log.Error("segment id format error", zap.String("segment.id", *segmentID))
-		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrSegmentIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 
 	parsedCollectionID, err := types.ToUniqueID(collectionID)
 	if err != nil {
 		log.Error("collection id format error", zap.String("collectionpd.id", *collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrCollectionIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 	var scopeValue *string
@@ -69,7 +70,7 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 	segments, err := s.coordinator.GetSegments(ctx, parsedSegmentID, segmentType, scopeValue, topic, parsedCollectionID)
 	if err != nil {
 		log.Error("get segments error", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
 
@@ -79,7 +80,7 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 		segmentpbList = append(segmentpbList, segmentpb)
 	}
 	res.Segments = segmentpbList
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -89,21 +90,21 @@ func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSeg
 	parsedSegmentID, err := types.Parse(segmentID)
 	if err != nil {
 		log.Error(err.Error(), zap.String("segment.id", segmentID))
-		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrSegmentIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 	err = s.coordinator.DeleteSegment(ctx, parsedSegmentID)
 	if err != nil {
 		if err == common.ErrSegmentDeleteNonExistingSegment {
 			log.Error(err.Error(), zap.String("segment.id", segmentID))
-			res.Status = failResponseWithError(err, 404)
+			res.Status = grpcutils.FailResponseWithError(err, 404)
 			return res, nil
 		}
 		log.Error(err.Error(), zap.String("segment.id", segmentID))
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -134,7 +135,7 @@ func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSeg
 		modelMetadata, err := convertSegmentMetadataToModel(metadata)
 		if err != nil {
 			log.Error("convert segment metadata to model error", zap.Error(err))
-			res.Status = failResponseWithError(err, errorCode)
+			res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 			return res, nil
 		}
 		updateSegment.Metadata = modelMetadata
@@ -142,9 +143,9 @@ func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSeg
 	_, err := s.coordinator.UpdateSegment(ctx, updateSegment)
 	if err != nil {
 		log.Error("update segment error", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }

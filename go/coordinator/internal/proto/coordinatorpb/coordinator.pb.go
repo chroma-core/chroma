@@ -1283,234 +1283,6 @@ func (x *Notification) GetStatus() string {
 	return ""
 }
 
-type PushLogsRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CollectionId string                   `protobuf:"bytes,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
-	Records      []*SubmitEmbeddingRecord `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
-}
-
-func (x *PushLogsRequest) Reset() {
-	*x = PushLogsRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_chromadb_proto_coordinator_proto_msgTypes[18]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *PushLogsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PushLogsRequest) ProtoMessage() {}
-
-func (x *PushLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_chromadb_proto_coordinator_proto_msgTypes[18]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PushLogsRequest.ProtoReflect.Descriptor instead.
-func (*PushLogsRequest) Descriptor() ([]byte, []int) {
-	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *PushLogsRequest) GetCollectionId() string {
-	if x != nil {
-		return x.CollectionId
-	}
-	return ""
-}
-
-func (x *PushLogsRequest) GetRecords() []*SubmitEmbeddingRecord {
-	if x != nil {
-		return x.Records
-	}
-	return nil
-}
-
-type PushLogsResponse struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	RecordCount int32   `protobuf:"varint,1,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
-	Status      *Status `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-}
-
-func (x *PushLogsResponse) Reset() {
-	*x = PushLogsResponse{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_chromadb_proto_coordinator_proto_msgTypes[19]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *PushLogsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PushLogsResponse) ProtoMessage() {}
-
-func (x *PushLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_chromadb_proto_coordinator_proto_msgTypes[19]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PushLogsResponse.ProtoReflect.Descriptor instead.
-func (*PushLogsResponse) Descriptor() ([]byte, []int) {
-	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *PushLogsResponse) GetRecordCount() int32 {
-	if x != nil {
-		return x.RecordCount
-	}
-	return 0
-}
-
-func (x *PushLogsResponse) GetStatus() *Status {
-	if x != nil {
-		return x.Status
-	}
-	return nil
-}
-
-type PullLogsRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CollectionId string `protobuf:"bytes,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
-	StartFromId  int64  `protobuf:"varint,2,opt,name=start_from_id,json=startFromId,proto3" json:"start_from_id,omitempty"`
-	BatchSize    int32  `protobuf:"varint,3,opt,name=batch_size,json=batchSize,proto3" json:"batch_size,omitempty"`
-}
-
-func (x *PullLogsRequest) Reset() {
-	*x = PullLogsRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_chromadb_proto_coordinator_proto_msgTypes[20]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *PullLogsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PullLogsRequest) ProtoMessage() {}
-
-func (x *PullLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_chromadb_proto_coordinator_proto_msgTypes[20]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PullLogsRequest.ProtoReflect.Descriptor instead.
-func (*PullLogsRequest) Descriptor() ([]byte, []int) {
-	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *PullLogsRequest) GetCollectionId() string {
-	if x != nil {
-		return x.CollectionId
-	}
-	return ""
-}
-
-func (x *PullLogsRequest) GetStartFromId() int64 {
-	if x != nil {
-		return x.StartFromId
-	}
-	return 0
-}
-
-func (x *PullLogsRequest) GetBatchSize() int32 {
-	if x != nil {
-		return x.BatchSize
-	}
-	return 0
-}
-
-type PullLogsResponse struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Records []*SubmitEmbeddingRecord `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	Status  *Status                  `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-}
-
-func (x *PullLogsResponse) Reset() {
-	*x = PullLogsResponse{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_chromadb_proto_coordinator_proto_msgTypes[21]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *PullLogsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PullLogsResponse) ProtoMessage() {}
-
-func (x *PullLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_chromadb_proto_coordinator_proto_msgTypes[21]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PullLogsResponse.ProtoReflect.Descriptor instead.
-func (*PullLogsResponse) Descriptor() ([]byte, []int) {
-	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *PullLogsResponse) GetRecords() []*SubmitEmbeddingRecord {
-	if x != nil {
-		return x.Records
-	}
-	return nil
-}
-
-func (x *PullLogsResponse) GetStatus() *Status {
-	if x != nil {
-		return x.Status
-	}
-	return nil
-}
-
 var File_chromadb_proto_coordinator_proto protoreflect.FileDescriptor
 
 var file_chromadb_proto_coordinator_proto_rawDesc = []byte{
@@ -1673,35 +1445,7 @@ var file_chromadb_proto_coordinator_proto_rawDesc = []byte{
 	0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x12, 0x0a, 0x04, 0x74, 0x79, 0x70, 0x65, 0x18, 0x03,
 	0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x79, 0x70, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x73, 0x74,
 	0x61, 0x74, 0x75, 0x73, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74,
-	0x75, 0x73, 0x22, 0x6f, 0x0a, 0x0f, 0x50, 0x75, 0x73, 0x68, 0x4c, 0x6f, 0x67, 0x73, 0x52, 0x65,
-	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
-	0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x63, 0x6f,
-	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x37, 0x0a, 0x07, 0x72, 0x65,
-	0x63, 0x6f, 0x72, 0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x1d, 0x2e, 0x63, 0x68,
-	0x72, 0x6f, 0x6d, 0x61, 0x2e, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x45, 0x6d, 0x62, 0x65, 0x64,
-	0x64, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x52, 0x07, 0x72, 0x65, 0x63, 0x6f,
-	0x72, 0x64, 0x73, 0x22, 0x5d, 0x0a, 0x10, 0x50, 0x75, 0x73, 0x68, 0x4c, 0x6f, 0x67, 0x73, 0x52,
-	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x21, 0x0a, 0x0c, 0x72, 0x65, 0x63, 0x6f, 0x72,
-	0x64, 0x5f, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x72,
-	0x65, 0x63, 0x6f, 0x72, 0x64, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x26, 0x0a, 0x06, 0x73, 0x74,
-	0x61, 0x74, 0x75, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x0e, 0x2e, 0x63, 0x68, 0x72,
-	0x6f, 0x6d, 0x61, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74,
-	0x75, 0x73, 0x22, 0x79, 0x0a, 0x0f, 0x50, 0x75, 0x6c, 0x6c, 0x4c, 0x6f, 0x67, 0x73, 0x52, 0x65,
-	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
-	0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x63, 0x6f,
-	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x22, 0x0a, 0x0d, 0x73, 0x74,
-	0x61, 0x72, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28,
-	0x03, 0x52, 0x0b, 0x73, 0x74, 0x61, 0x72, 0x74, 0x46, 0x72, 0x6f, 0x6d, 0x49, 0x64, 0x12, 0x1d,
-	0x0a, 0x0a, 0x62, 0x61, 0x74, 0x63, 0x68, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18, 0x03, 0x20, 0x01,
-	0x28, 0x05, 0x52, 0x09, 0x62, 0x61, 0x74, 0x63, 0x68, 0x53, 0x69, 0x7a, 0x65, 0x22, 0x73, 0x0a,
-	0x10, 0x50, 0x75, 0x6c, 0x6c, 0x4c, 0x6f, 0x67, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
-	0x65, 0x12, 0x37, 0x0a, 0x07, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x18, 0x01, 0x20, 0x03,
-	0x28, 0x0b, 0x32, 0x1d, 0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2e, 0x53, 0x75, 0x62, 0x6d,
-	0x69, 0x74, 0x45, 0x6d, 0x62, 0x65, 0x64, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72,
-	0x64, 0x52, 0x07, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x12, 0x26, 0x0a, 0x06, 0x73, 0x74,
-	0x61, 0x74, 0x75, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x0e, 0x2e, 0x63, 0x68, 0x72,
-	0x6f, 0x6d, 0x61, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74,
-	0x75, 0x73, 0x32, 0xd8, 0x08, 0x0a, 0x05, 0x53, 0x79, 0x73, 0x44, 0x42, 0x12, 0x49, 0x0a, 0x0e,
+	0x75, 0x73, 0x32, 0xd6, 0x07, 0x0a, 0x05, 0x53, 0x79, 0x73, 0x44, 0x42, 0x12, 0x49, 0x0a, 0x0e,
 	0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x44, 0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x12, 0x1d,
 	0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2e, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x44, 0x61,
 	0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x16, 0x2e,
@@ -1762,20 +1506,12 @@ var file_chromadb_proto_coordinator_proto_rawDesc = []byte{
 	0x65, 0x73, 0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x16, 0x2e, 0x67, 0x6f, 0x6f, 0x67,
 	0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x45, 0x6d, 0x70, 0x74,
 	0x79, 0x1a, 0x16, 0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2e, 0x43, 0x68, 0x72, 0x6f, 0x6d,
-	0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x3f, 0x0a, 0x08, 0x50,
-	0x75, 0x73, 0x68, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x17, 0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61,
-	0x2e, 0x50, 0x75, 0x73, 0x68, 0x4c, 0x6f, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x18, 0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2e, 0x50, 0x75, 0x73, 0x68, 0x4c, 0x6f,
-	0x67, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x3f, 0x0a, 0x08,
-	0x50, 0x75, 0x6c, 0x6c, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x17, 0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d,
-	0x61, 0x2e, 0x50, 0x75, 0x6c, 0x6c, 0x4c, 0x6f, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x18, 0x2e, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2e, 0x50, 0x75, 0x6c, 0x6c, 0x4c,
-	0x6f, 0x67, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x43, 0x5a,
-	0x41, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x63, 0x68, 0x72, 0x6f,
-	0x6d, 0x61, 0x2f, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2d, 0x63, 0x6f, 0x6f, 0x72, 0x64, 0x69,
-	0x6e, 0x61, 0x74, 0x6f, 0x72, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x63, 0x6f, 0x6f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x74, 0x6f, 0x72,
-	0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x43, 0x5a, 0x41, 0x67,
+	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61,
+	0x2f, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x2d, 0x63, 0x6f, 0x6f, 0x72, 0x64, 0x69, 0x6e, 0x61,
+	0x74, 0x6f, 0x72, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2f, 0x63, 0x6f, 0x6f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x74, 0x6f, 0x72, 0x70, 0x62,
+	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1790,7 +1526,7 @@ func file_chromadb_proto_coordinator_proto_rawDescGZIP() []byte {
 	return file_chromadb_proto_coordinator_proto_rawDescData
 }
 
-var file_chromadb_proto_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_chromadb_proto_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_chromadb_proto_coordinator_proto_goTypes = []interface{}{
 	(*CreateDatabaseRequest)(nil),    // 0: chroma.CreateDatabaseRequest
 	(*GetDatabaseRequest)(nil),       // 1: chroma.GetDatabaseRequest
@@ -1810,76 +1546,63 @@ var file_chromadb_proto_coordinator_proto_goTypes = []interface{}{
 	(*GetCollectionsResponse)(nil),   // 15: chroma.GetCollectionsResponse
 	(*UpdateCollectionRequest)(nil),  // 16: chroma.UpdateCollectionRequest
 	(*Notification)(nil),             // 17: chroma.Notification
-	(*PushLogsRequest)(nil),          // 18: chroma.PushLogsRequest
-	(*PushLogsResponse)(nil),         // 19: chroma.PushLogsResponse
-	(*PullLogsRequest)(nil),          // 20: chroma.PullLogsRequest
-	(*PullLogsResponse)(nil),         // 21: chroma.PullLogsResponse
-	(*Database)(nil),                 // 22: chroma.Database
-	(*Status)(nil),                   // 23: chroma.Status
-	(*Tenant)(nil),                   // 24: chroma.Tenant
-	(*Segment)(nil),                  // 25: chroma.Segment
-	(SegmentScope)(0),                // 26: chroma.SegmentScope
-	(*UpdateMetadata)(nil),           // 27: chroma.UpdateMetadata
-	(*Collection)(nil),               // 28: chroma.Collection
-	(*SubmitEmbeddingRecord)(nil),    // 29: chroma.SubmitEmbeddingRecord
-	(*emptypb.Empty)(nil),            // 30: google.protobuf.Empty
-	(*ChromaResponse)(nil),           // 31: chroma.ChromaResponse
+	(*Database)(nil),                 // 18: chroma.Database
+	(*Status)(nil),                   // 19: chroma.Status
+	(*Tenant)(nil),                   // 20: chroma.Tenant
+	(*Segment)(nil),                  // 21: chroma.Segment
+	(SegmentScope)(0),                // 22: chroma.SegmentScope
+	(*UpdateMetadata)(nil),           // 23: chroma.UpdateMetadata
+	(*Collection)(nil),               // 24: chroma.Collection
+	(*emptypb.Empty)(nil),            // 25: google.protobuf.Empty
+	(*ChromaResponse)(nil),           // 26: chroma.ChromaResponse
 }
 var file_chromadb_proto_coordinator_proto_depIdxs = []int32{
-	22, // 0: chroma.GetDatabaseResponse.database:type_name -> chroma.Database
-	23, // 1: chroma.GetDatabaseResponse.status:type_name -> chroma.Status
-	24, // 2: chroma.GetTenantResponse.tenant:type_name -> chroma.Tenant
-	23, // 3: chroma.GetTenantResponse.status:type_name -> chroma.Status
-	25, // 4: chroma.CreateSegmentRequest.segment:type_name -> chroma.Segment
-	26, // 5: chroma.GetSegmentsRequest.scope:type_name -> chroma.SegmentScope
-	25, // 6: chroma.GetSegmentsResponse.segments:type_name -> chroma.Segment
-	23, // 7: chroma.GetSegmentsResponse.status:type_name -> chroma.Status
-	27, // 8: chroma.UpdateSegmentRequest.metadata:type_name -> chroma.UpdateMetadata
-	27, // 9: chroma.CreateCollectionRequest.metadata:type_name -> chroma.UpdateMetadata
-	28, // 10: chroma.CreateCollectionResponse.collection:type_name -> chroma.Collection
-	23, // 11: chroma.CreateCollectionResponse.status:type_name -> chroma.Status
-	28, // 12: chroma.GetCollectionsResponse.collections:type_name -> chroma.Collection
-	23, // 13: chroma.GetCollectionsResponse.status:type_name -> chroma.Status
-	27, // 14: chroma.UpdateCollectionRequest.metadata:type_name -> chroma.UpdateMetadata
-	29, // 15: chroma.PushLogsRequest.records:type_name -> chroma.SubmitEmbeddingRecord
-	23, // 16: chroma.PushLogsResponse.status:type_name -> chroma.Status
-	29, // 17: chroma.PullLogsResponse.records:type_name -> chroma.SubmitEmbeddingRecord
-	23, // 18: chroma.PullLogsResponse.status:type_name -> chroma.Status
-	0,  // 19: chroma.SysDB.CreateDatabase:input_type -> chroma.CreateDatabaseRequest
-	1,  // 20: chroma.SysDB.GetDatabase:input_type -> chroma.GetDatabaseRequest
-	3,  // 21: chroma.SysDB.CreateTenant:input_type -> chroma.CreateTenantRequest
-	4,  // 22: chroma.SysDB.GetTenant:input_type -> chroma.GetTenantRequest
-	6,  // 23: chroma.SysDB.CreateSegment:input_type -> chroma.CreateSegmentRequest
-	7,  // 24: chroma.SysDB.DeleteSegment:input_type -> chroma.DeleteSegmentRequest
-	8,  // 25: chroma.SysDB.GetSegments:input_type -> chroma.GetSegmentsRequest
-	10, // 26: chroma.SysDB.UpdateSegment:input_type -> chroma.UpdateSegmentRequest
-	11, // 27: chroma.SysDB.CreateCollection:input_type -> chroma.CreateCollectionRequest
-	13, // 28: chroma.SysDB.DeleteCollection:input_type -> chroma.DeleteCollectionRequest
-	14, // 29: chroma.SysDB.GetCollections:input_type -> chroma.GetCollectionsRequest
-	16, // 30: chroma.SysDB.UpdateCollection:input_type -> chroma.UpdateCollectionRequest
-	30, // 31: chroma.SysDB.ResetState:input_type -> google.protobuf.Empty
-	18, // 32: chroma.SysDB.PushLogs:input_type -> chroma.PushLogsRequest
-	20, // 33: chroma.SysDB.PullLogs:input_type -> chroma.PullLogsRequest
-	31, // 34: chroma.SysDB.CreateDatabase:output_type -> chroma.ChromaResponse
-	2,  // 35: chroma.SysDB.GetDatabase:output_type -> chroma.GetDatabaseResponse
-	31, // 36: chroma.SysDB.CreateTenant:output_type -> chroma.ChromaResponse
-	5,  // 37: chroma.SysDB.GetTenant:output_type -> chroma.GetTenantResponse
-	31, // 38: chroma.SysDB.CreateSegment:output_type -> chroma.ChromaResponse
-	31, // 39: chroma.SysDB.DeleteSegment:output_type -> chroma.ChromaResponse
-	9,  // 40: chroma.SysDB.GetSegments:output_type -> chroma.GetSegmentsResponse
-	31, // 41: chroma.SysDB.UpdateSegment:output_type -> chroma.ChromaResponse
-	12, // 42: chroma.SysDB.CreateCollection:output_type -> chroma.CreateCollectionResponse
-	31, // 43: chroma.SysDB.DeleteCollection:output_type -> chroma.ChromaResponse
-	15, // 44: chroma.SysDB.GetCollections:output_type -> chroma.GetCollectionsResponse
-	31, // 45: chroma.SysDB.UpdateCollection:output_type -> chroma.ChromaResponse
-	31, // 46: chroma.SysDB.ResetState:output_type -> chroma.ChromaResponse
-	19, // 47: chroma.SysDB.PushLogs:output_type -> chroma.PushLogsResponse
-	21, // 48: chroma.SysDB.PullLogs:output_type -> chroma.PullLogsResponse
-	34, // [34:49] is the sub-list for method output_type
-	19, // [19:34] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	18, // 0: chroma.GetDatabaseResponse.database:type_name -> chroma.Database
+	19, // 1: chroma.GetDatabaseResponse.status:type_name -> chroma.Status
+	20, // 2: chroma.GetTenantResponse.tenant:type_name -> chroma.Tenant
+	19, // 3: chroma.GetTenantResponse.status:type_name -> chroma.Status
+	21, // 4: chroma.CreateSegmentRequest.segment:type_name -> chroma.Segment
+	22, // 5: chroma.GetSegmentsRequest.scope:type_name -> chroma.SegmentScope
+	21, // 6: chroma.GetSegmentsResponse.segments:type_name -> chroma.Segment
+	19, // 7: chroma.GetSegmentsResponse.status:type_name -> chroma.Status
+	23, // 8: chroma.UpdateSegmentRequest.metadata:type_name -> chroma.UpdateMetadata
+	23, // 9: chroma.CreateCollectionRequest.metadata:type_name -> chroma.UpdateMetadata
+	24, // 10: chroma.CreateCollectionResponse.collection:type_name -> chroma.Collection
+	19, // 11: chroma.CreateCollectionResponse.status:type_name -> chroma.Status
+	24, // 12: chroma.GetCollectionsResponse.collections:type_name -> chroma.Collection
+	19, // 13: chroma.GetCollectionsResponse.status:type_name -> chroma.Status
+	23, // 14: chroma.UpdateCollectionRequest.metadata:type_name -> chroma.UpdateMetadata
+	0,  // 15: chroma.SysDB.CreateDatabase:input_type -> chroma.CreateDatabaseRequest
+	1,  // 16: chroma.SysDB.GetDatabase:input_type -> chroma.GetDatabaseRequest
+	3,  // 17: chroma.SysDB.CreateTenant:input_type -> chroma.CreateTenantRequest
+	4,  // 18: chroma.SysDB.GetTenant:input_type -> chroma.GetTenantRequest
+	6,  // 19: chroma.SysDB.CreateSegment:input_type -> chroma.CreateSegmentRequest
+	7,  // 20: chroma.SysDB.DeleteSegment:input_type -> chroma.DeleteSegmentRequest
+	8,  // 21: chroma.SysDB.GetSegments:input_type -> chroma.GetSegmentsRequest
+	10, // 22: chroma.SysDB.UpdateSegment:input_type -> chroma.UpdateSegmentRequest
+	11, // 23: chroma.SysDB.CreateCollection:input_type -> chroma.CreateCollectionRequest
+	13, // 24: chroma.SysDB.DeleteCollection:input_type -> chroma.DeleteCollectionRequest
+	14, // 25: chroma.SysDB.GetCollections:input_type -> chroma.GetCollectionsRequest
+	16, // 26: chroma.SysDB.UpdateCollection:input_type -> chroma.UpdateCollectionRequest
+	25, // 27: chroma.SysDB.ResetState:input_type -> google.protobuf.Empty
+	26, // 28: chroma.SysDB.CreateDatabase:output_type -> chroma.ChromaResponse
+	2,  // 29: chroma.SysDB.GetDatabase:output_type -> chroma.GetDatabaseResponse
+	26, // 30: chroma.SysDB.CreateTenant:output_type -> chroma.ChromaResponse
+	5,  // 31: chroma.SysDB.GetTenant:output_type -> chroma.GetTenantResponse
+	26, // 32: chroma.SysDB.CreateSegment:output_type -> chroma.ChromaResponse
+	26, // 33: chroma.SysDB.DeleteSegment:output_type -> chroma.ChromaResponse
+	9,  // 34: chroma.SysDB.GetSegments:output_type -> chroma.GetSegmentsResponse
+	26, // 35: chroma.SysDB.UpdateSegment:output_type -> chroma.ChromaResponse
+	12, // 36: chroma.SysDB.CreateCollection:output_type -> chroma.CreateCollectionResponse
+	26, // 37: chroma.SysDB.DeleteCollection:output_type -> chroma.ChromaResponse
+	15, // 38: chroma.SysDB.GetCollections:output_type -> chroma.GetCollectionsResponse
+	26, // 39: chroma.SysDB.UpdateCollection:output_type -> chroma.ChromaResponse
+	26, // 40: chroma.SysDB.ResetState:output_type -> chroma.ChromaResponse
+	28, // [28:41] is the sub-list for method output_type
+	15, // [15:28] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_chromadb_proto_coordinator_proto_init() }
@@ -2105,54 +1828,6 @@ func file_chromadb_proto_coordinator_proto_init() {
 				return nil
 			}
 		}
-		file_chromadb_proto_coordinator_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PushLogsRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_chromadb_proto_coordinator_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PushLogsResponse); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_chromadb_proto_coordinator_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PullLogsRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_chromadb_proto_coordinator_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PullLogsResponse); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
 	}
 	file_chromadb_proto_coordinator_proto_msgTypes[8].OneofWrappers = []interface{}{}
 	file_chromadb_proto_coordinator_proto_msgTypes[10].OneofWrappers = []interface{}{
@@ -2175,7 +1850,7 @@ func file_chromadb_proto_coordinator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_chromadb_proto_coordinator_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

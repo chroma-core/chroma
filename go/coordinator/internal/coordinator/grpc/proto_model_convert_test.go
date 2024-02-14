@@ -1,10 +1,10 @@
-package grpccoordinator
+package grpc
 
 import (
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"testing"
 
 	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/stretchr/testify/assert"
 )

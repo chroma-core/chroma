@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package chroma;
+option go_package = "github.com/chroma/chroma-coordinator/internal/proto/logservicepb";
+
+import "chromadb/proto/chroma.proto";
+
+message PushLogsRequest {
+  string collection_id = 1;
+  repeated SubmitEmbeddingRecord records = 2;
+}
+
+message PushLogsResponse {
+  int32 record_count = 1;
+  Status status = 2;
+}
+
+message PullLogsRequest {
+  string collection_id = 1;
+  int64 start_from_id = 2;
+  int32 batch_size = 3;
+}
+
+message PullLogsResponse {
+  repeated SubmitEmbeddingRecord records = 1;
+  Status status = 2;
+}
+
+service LogService {
+  rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
+}

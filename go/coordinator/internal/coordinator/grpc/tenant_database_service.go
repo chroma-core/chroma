@@ -1,11 +1,12 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 )
 
 func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDatabaseRequest) (*coordinatorpb.ChromaResponse, error) {
@@ -18,13 +19,13 @@ func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDa
 	_, err := s.coordinator.CreateDatabase(ctx, createDatabase)
 	if err != nil {
 		if err == common.ErrDatabaseUniqueConstraintViolation {
-			res.Status = failResponseWithError(err, 409)
+			res.Status = grpcutils.FailResponseWithError(err, 409)
 			return res, nil
 		}
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -37,17 +38,17 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 	database, err := s.coordinator.GetDatabase(ctx, getDatabase)
 	if err != nil {
 		if err == common.ErrDatabaseNotFound || err == common.ErrTenantNotFound {
-			res.Status = failResponseWithError(err, 404)
+			res.Status = grpcutils.FailResponseWithError(err, 404)
 			return res, nil
 		}
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 	}
 	res.Database = &coordinatorpb.Database{
 		Id:     database.ID,
 		Name:   database.Name,
 		Tenant: database.Tenant,
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -59,13 +60,13 @@ func (s *Server) CreateTenant(ctx context.Context, req *coordinatorpb.CreateTena
 	_, err := s.coordinator.CreateTenant(ctx, createTenant)
 	if err != nil {
 		if err == common.ErrTenantUniqueConstraintViolation {
-			res.Status = failResponseWithError(err, 409)
+			res.Status = grpcutils.FailResponseWithError(err, 409)
 			return res, nil
 		}
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -77,15 +78,15 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 	tenant, err := s.coordinator.GetTenant(ctx, getTenant)
 	if err != nil {
 		if err == common.ErrTenantNotFound {
-			res.Status = failResponseWithError(err, 404)
+			res.Status = grpcutils.FailResponseWithError(err, 404)
 			return res, nil
 		}
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
 	res.Tenant = &coordinatorpb.Tenant{
 		Name: tenant.Name,
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }

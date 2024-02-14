@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/model"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
@@ -30,8 +29,6 @@ type (
 		GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
 		CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
 		GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
-		PushLogs(ctx context.Context, collectionID types.UniqueID, recordContent [][]byte) (int, error)
-		PullLogs(ctx context.Context, collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error)
 	}
 )
 
@@ -122,14 +119,6 @@ func (s *Coordinator) UpdateSegment(ctx context.Context, updateSegment *model.Up
 		return nil, err
 	}
 	return segment, nil
-}
-
-func (s *Coordinator) PushLogs(ctx context.Context, collectionID types.UniqueID, recordsContent [][]byte) (int, error) {
-	return s.recordLogDb.PushLogs(collectionID, recordsContent)
-}
-
-func (s *Coordinator) PullLogs(ctx context.Context, collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error) {
-	return s.recordLogDb.PullLogs(collectionID, id, batchSize)
 }
 
 func verifyCreateCollection(collection *model.CreateCollection) error {

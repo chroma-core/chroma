@@ -1,29 +1,26 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-const errorCode = 500
-const successCode = 200
-const success = "ok"
-
 func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ChromaResponse, error) {
 	res := &coordinatorpb.ChromaResponse{}
 	err := s.coordinator.ResetState(context.Background())
 	if err != nil {
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, err
 	}
-	setResponseStatus(successCode)
+	grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -63,7 +60,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			Database:  req.Database,
 		}
 		res.Created = false
-		res.Status = failResponseWithError(err, successCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.SuccessCode)
 		return res, nil
 	}
 	collection, err := s.coordinator.CreateCollection(ctx, createCollection)
@@ -79,15 +76,15 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		}
 		res.Created = false
 		if err == common.ErrCollectionUniqueConstraintViolation {
-			res.Status = failResponseWithError(err, 409)
+			res.Status = grpcutils.FailResponseWithError(err, 409)
 		} else {
-			res.Status = failResponseWithError(err, errorCode)
+			res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		}
 		return res, nil
 	}
 	res.Collection = convertCollectionToProto(collection)
 	res.Created = collection.Created
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -103,14 +100,14 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	parsedCollectionID, err := types.ToUniqueID(collectionID)
 	if err != nil {
 		log.Error("collection id format error", zap.String("collectionpd.id", *collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrCollectionIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 
 	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, collectionTopic, tenantID, databaseName)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
 	res.Collections = make([]*coordinatorpb.Collection, 0, len(collections))
@@ -119,7 +116,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		res.Collections = append(res.Collections, collectionpb)
 	}
 	log.Info("collection service collections", zap.Any("collections", res.Collections))
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -129,7 +126,7 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	parsedCollectionID, err := types.Parse(collectionID)
 	if err != nil {
 		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrCollectionIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 	deleteCollection := &model.DeleteCollection{
@@ -141,13 +138,13 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	if err != nil {
 		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
 		if err == common.ErrCollectionDeleteNonExistingCollection {
-			res.Status = failResponseWithError(err, 404)
+			res.Status = grpcutils.FailResponseWithError(err, 404)
 		} else {
-			res.Status = failResponseWithError(err, errorCode)
+			res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		}
 		return res, nil
 	}
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
 }
 
@@ -158,7 +155,7 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	parsedCollectionID, err := types.ToUniqueID(&collectionID)
 	if err != nil {
 		log.Error("collection id format error", zap.String("collectionpd.id", collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
+		res.Status = grpcutils.FailResponseWithError(common.ErrCollectionIDFormat, grpcutils.ErrorCode)
 		return res, nil
 	}
 
@@ -179,7 +176,7 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	if resetMetadata {
 		if metadata != nil {
 			log.Error("reset metadata is true and metadata is not nil", zap.Any("metadata", metadata))
-			res.Status = failResponseWithError(common.ErrInvalidMetadataUpdate, errorCode)
+			res.Status = grpcutils.FailResponseWithError(common.ErrInvalidMetadataUpdate, grpcutils.ErrorCode)
 			return res, nil
 		} else {
 			updateCollection.Metadata = nil
@@ -189,7 +186,7 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 			modelMetadata, err := convertCollectionMetadataToModel(metadata)
 			if err != nil {
 				log.Error("error converting collection metadata to model", zap.Error(err))
-				res.Status = failResponseWithError(err, errorCode)
+				res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 				return res, nil
 			}
 			updateCollection.Metadata = modelMetadata
@@ -201,24 +198,10 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	_, err = s.coordinator.UpdateCollection(ctx, updateCollection)
 	if err != nil {
 		log.Error("error updating collection", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		res.Status = grpcutils.FailResponseWithError(err, grpcutils.ErrorCode)
 		return res, nil
 	}
 
-	res.Status = setResponseStatus(successCode)
+	res.Status = grpcutils.SetResponseStatus(grpcutils.SuccessCode)
 	return res, nil
-}
-
-func failResponseWithError(err error, code int32) *coordinatorpb.Status {
-	return &coordinatorpb.Status{
-		Reason: err.Error(),
-		Code:   code,
-	}
-}
-
-func setResponseStatus(code int32) *coordinatorpb.Status {
-	return &coordinatorpb.Status{
-		Reason: success,
-		Code:   code,
-	}
 }
