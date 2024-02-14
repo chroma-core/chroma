@@ -455,3 +455,10 @@ def test_autocasting_validate_embeddings_incompatible_types(
         validate_embeddings(Collection._normalize_embeddings(embds))
 
     assert "Expected each value in the embedding to be a int or float" in str(e)
+
+
+def test_0dim_embedding_validation() -> None:
+    embds = [[]]
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(embds)
+    assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)

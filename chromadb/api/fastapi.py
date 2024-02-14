@@ -1,4 +1,4 @@
-import json
+import orjson as json
 import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
@@ -147,7 +147,7 @@ class FastAPI(ServerAPI):
         """Returns the current server time in nanoseconds to check if the server is alive"""
         resp = self._session.get(self._api_url)
         raise_chroma_error(resp)
-        return int(resp.json()["nanosecond heartbeat"])
+        return int(json.loads(resp.text)["nanosecond heartbeat"])
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
@@ -177,7 +177,7 @@ class FastAPI(ServerAPI):
             params={"tenant": tenant},
         )
         raise_chroma_error(resp)
-        resp_json = resp.json()
+        resp_json = json.loads(resp.text)
         return Database(
             id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
         )
@@ -198,7 +198,7 @@ class FastAPI(ServerAPI):
             self._api_url + "/tenants/" + name,
         )
         raise_chroma_error(resp)
-        resp_json = resp.json()
+        resp_json = json.loads(resp.text)
         return Tenant(name=resp_json["name"])
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
@@ -221,7 +221,7 @@ class FastAPI(ServerAPI):
             },
         )
         raise_chroma_error(resp)
-        json_collections = resp.json()
+        json_collections = json.loads(resp.text)
         collections = []
         for json_collection in json_collections:
             collections.append(Collection(self, **json_collection))
@@ -239,7 +239,7 @@ class FastAPI(ServerAPI):
             params={"tenant": tenant, "database": database},
         )
         raise_chroma_error(resp)
-        return cast(int, resp.json())
+        return cast(int, json.loads(resp.text))
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -268,7 +268,7 @@ class FastAPI(ServerAPI):
             params={"tenant": tenant, "database": database},
         )
         raise_chroma_error(resp)
-        resp_json = resp.json()
+        resp_json = json.loads(resp.text)
         return Collection(
             client=self,
             id=resp_json["id"],
@@ -302,7 +302,7 @@ class FastAPI(ServerAPI):
             self._api_url + "/collections/" + name if name else str(id), params=_params
         )
         raise_chroma_error(resp)
-        resp_json = resp.json()
+        resp_json = json.loads(resp.text)
         return Collection(
             client=self,
             name=resp_json["name"],
@@ -381,7 +381,7 @@ class FastAPI(ServerAPI):
             self._api_url + "/collections/" + str(collection_id) + "/count"
         )
         raise_chroma_error(resp)
-        return cast(int, resp.json())
+        return cast(int, json.loads(resp.text))
 
     @trace_method("FastAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
@@ -434,7 +434,7 @@ class FastAPI(ServerAPI):
         )
 
         raise_chroma_error(resp)
-        body = resp.json()
+        body = json.loads(resp.text)
         return GetResult(
             ids=body["ids"],
             embeddings=body.get("embeddings", None),
@@ -462,7 +462,7 @@ class FastAPI(ServerAPI):
         )
 
         raise_chroma_error(resp)
-        return cast(IDs, resp.json())
+        return cast(IDs, json.loads(resp.text))
 
     @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     def _submit_batch(
@@ -586,7 +586,7 @@ class FastAPI(ServerAPI):
         )
 
         raise_chroma_error(resp)
-        body = resp.json()
+        body = json.loads(resp.text)
 
         return QueryResult(
             ids=body["ids"],
@@ -604,7 +604,7 @@ class FastAPI(ServerAPI):
         """Resets the database"""
         resp = self._session.post(self._api_url + "/reset")
         raise_chroma_error(resp)
-        return cast(bool, resp.json())
+        return cast(bool, json.loads(resp.text))
 
     @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
@@ -612,7 +612,7 @@ class FastAPI(ServerAPI):
         """Returns the version of the server"""
         resp = self._session.get(self._api_url + "/version")
         raise_chroma_error(resp)
-        return cast(str, resp.json())
+        return cast(str, json.loads(resp.text))
 
     @override
     def get_settings(self) -> Settings:
@@ -626,7 +626,7 @@ class FastAPI(ServerAPI):
         if self._max_batch_size == -1:
             resp = self._session.get(self._api_url + "/pre-flight-checks")
             raise_chroma_error(resp)
-            self._max_batch_size = cast(int, resp.json()["max_batch_size"])
+            self._max_batch_size = cast(int, json.loads(resp.text)["max_batch_size"])
         return self._max_batch_size
 
 
@@ -637,7 +637,7 @@ def raise_chroma_error(resp: requests.Response) -> None:
 
     chroma_error = None
     try:
-        body = resp.json()
+        body = json.loads(resp.text)
         if "error" in body:
             if body["error"] in errors.error_types:
                 chroma_error = errors.error_types[body["error"]](body["message"])

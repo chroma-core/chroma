@@ -20,7 +20,7 @@ from tenacity import retry
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
-
+META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
@@ -265,6 +265,10 @@ def validate_metadata(metadata: Metadata) -> Metadata:
     if len(metadata) == 0:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
+        if key == META_KEY_CHROMA_DOCUMENT:
+            raise ValueError(
+                f"Expected metadata to not contain the reserved key {META_KEY_CHROMA_DOCUMENT}"
+            )
         if not isinstance(key, str):
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key)}"
@@ -476,7 +480,11 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
-    for embedding in embeddings:
+    for i, embedding in enumerate(embeddings):
+        if len(embedding) == 0:
+            raise ValueError(
+                f"Expected each embedding in the embeddings to be a non-empty list, got empty embedding at pos {i}"
+            )
         if not all(
             [
                 isinstance(value, (int, float)) and not isinstance(value, bool)
