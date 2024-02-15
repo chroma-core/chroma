@@ -10,9 +10,9 @@ data "external_schema" "gorm" {
   ]
 }
 
-env "gorm" {
+env "dev" {
   src = data.external_schema.gorm.url
-  dev = "postgres://localhost:5432/dev?sslmode=disable"
+  dev = "postgres://localhost:5432/chroma?sslmode=disable"
   migration {
     dir = "file://migrations"
   }

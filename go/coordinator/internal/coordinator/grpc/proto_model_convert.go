@@ -1,4 +1,4 @@
-package grpccoordinator
+package grpc
 
 import (
 	"github.com/chroma/chroma-coordinator/internal/common"

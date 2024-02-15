@@ -23,9 +23,8 @@ RUN apk add \
 RUN mkdir /chroma-coordinator
 WORKDIR /chroma-coordinator
 
-COPY --from=build /src/chroma-coordinator/bin/chroma /chroma-coordinator/bin/chroma
+COPY --from=build /src/chroma-coordinator/bin/coordinator /chroma-coordinator/bin/coordinator
+COPY --from=build /src/chroma-coordinator/bin/logservice /chroma-coordinator/bin/logservice
 ENV PATH=$PATH:/chroma-coordinator/bin
-
-COPY --from=build /src/chroma-coordinator/migrations /chroma-coordinator/migrations
 
 CMD /bin/bash
