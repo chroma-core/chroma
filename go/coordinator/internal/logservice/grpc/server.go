@@ -21,12 +21,7 @@ type Config struct {
 	DBProvider string
 
 	// Postgres config
-	DBHost     string
-	DBPort     int
-	DBUser     string
-	DBName     string
-	DBPassword string
-	SslMode    string
+	DBConfig dbcore.DBConfig
 
 	// whether to start grpc service
 	StartGrpc bool
@@ -43,13 +38,7 @@ func New(config Config) (*Server, error) {
 	log.Info("New Log Service...")
 
 	if config.DBProvider == "postgres" {
-		dBConfig := dbcore.DBConfig{
-			Username: config.DBUser,
-			Address:  config.DBHost,
-			Port:     config.DBPort,
-			DBName:   config.DBName,
-			Password: config.DBPassword,
-		}
+		dBConfig := config.DBConfig
 		_, err := dbcore.ConnectPostgres(dBConfig)
 		if err != nil {
 			log.Error("Error connecting to Postgres DB.", zap.Error(err))

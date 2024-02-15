@@ -31,12 +31,12 @@ func init() {
 	Cmd.Flags().StringVar(&conf.DBProvider, "db-provider", "postgres", "DB provider")
 
 	// DB dev
-	Cmd.Flags().StringVar(&conf.DBHost, "db-host", "postgres", "DB host")
-	Cmd.Flags().IntVar(&conf.DBPort, "db-port", 5432, "DB port")
-	Cmd.Flags().StringVar(&conf.DBUser, "db-user", "chroma", "DB user")
-	Cmd.Flags().StringVar(&conf.DBPassword, "db-password", "chroma", "DB password")
-	Cmd.Flags().StringVar(&conf.DBName, "db-name", "chroma", "DB name")
-	Cmd.Flags().StringVar(&conf.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
+	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-host", "postgres", "DB host")
+	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "DB port")
+	Cmd.Flags().StringVar(&conf.DBConfig.Username, "db-user", "chroma", "DB user")
+	Cmd.Flags().StringVar(&conf.DBConfig.Password, "db-password", "chroma", "DB password")
+	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "chroma", "DB name")
+	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 }
 
 func exec(*cobra.Command, []string) {

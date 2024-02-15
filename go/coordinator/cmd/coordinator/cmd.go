@@ -31,14 +31,14 @@ func init() {
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "database", "System catalog provider")
-	Cmd.Flags().StringVar(&conf.Username, "username", "chroma", "MetaTable username")
-	Cmd.Flags().StringVar(&conf.Password, "password", "chroma", "MetaTable password")
-	Cmd.Flags().StringVar(&conf.Address, "db-address", "postgres", "MetaTable db address")
-	Cmd.Flags().IntVar(&conf.Port, "db-port", 5432, "MetaTable db port")
-	Cmd.Flags().StringVar(&conf.DBName, "db-name", "chroma", "MetaTable db name")
-	Cmd.Flags().IntVar(&conf.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
-	Cmd.Flags().IntVar(&conf.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
-	Cmd.Flags().StringVar(&conf.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
+	Cmd.Flags().StringVar(&conf.DBConfig.Username, "username", "chroma", "MetaTable username")
+	Cmd.Flags().StringVar(&conf.DBConfig.Password, "password", "chroma", "MetaTable password")
+	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-address", "postgres", "MetaTable db address")
+	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "MetaTable db port")
+	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "chroma", "MetaTable db name")
+	Cmd.Flags().IntVar(&conf.DBConfig.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
+	Cmd.Flags().IntVar(&conf.DBConfig.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
+	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 
 	// Pulsar
 	Cmd.Flags().StringVar(&conf.PulsarAdminURL, "pulsar-admin-url", "http://localhost:8080", "Pulsar admin url")

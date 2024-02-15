@@ -29,14 +29,7 @@ type Config struct {
 	SystemCatalogProvider string
 
 	// MetaTable config
-	Username     string
-	Password     string
-	Address      string
-	Port         int
-	DBName       string
-	MaxIdleConns int
-	MaxOpenConns int
-	SslMode      string
+	DBConfig dbcore.DBConfig
 
 	// Notification config
 	NotificationStoreProvider string
@@ -78,16 +71,7 @@ func New(config Config) (*Server, error) {
 	if config.SystemCatalogProvider == "memory" {
 		return NewWithGrpcProvider(config, grpcutils.Default, nil)
 	} else if config.SystemCatalogProvider == "database" {
-		dBConfig := dbcore.DBConfig{
-			Username:     config.Username,
-			Password:     config.Password,
-			Address:      config.Address,
-			Port:         config.Port,
-			DBName:       config.DBName,
-			MaxIdleConns: config.MaxIdleConns,
-			MaxOpenConns: config.MaxOpenConns,
-			SslMode:      config.SslMode,
-		}
+		dBConfig := config.DBConfig
 		db, err := dbcore.ConnectPostgres(dBConfig)
 		if err != nil {
 			return nil, err

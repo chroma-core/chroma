@@ -11,11 +11,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  container-test-job:
     strategy:
       matrix:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
+    container: node:10.18-jessie
     services:
       postgres:
         image: postgres

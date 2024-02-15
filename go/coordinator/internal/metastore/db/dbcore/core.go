@@ -163,9 +163,6 @@ func ConfigDatabaseForTesting() *gorm.DB {
 		DBName:   "chroma",
 	})
 	if err != nil {
-		return nil
-	}
-	if err != nil {
 		panic("failed to connect database")
 	}
 	SetGlobalDB(db)
