@@ -139,20 +139,6 @@ impl StringMetadataIndex for InMemoryStringMetadataIndex {
     }
 }
 
-// struct BlockFileStringMetadataIndex {
-//     path: String,
-//     blockfile: HashMapBlockfile,
-// }
-
-// impl BlockFileStringMetadataIndex {
-//     pub fn new(path: String) -> Self {
-//         BlockFileStringMetadataIndex {
-//             path,
-//             blockfile: HashMapBlockfile::new(),
-//         }
-//     }
-// }
-
 mod test {
     use super::*;
 
