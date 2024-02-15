@@ -38,6 +38,22 @@ CREATE TABLE "public"."databases" (
 );
 -- Create index "idx_tenantid_name" to table: "databases"
 CREATE UNIQUE INDEX "idx_tenantid_name" ON "public"."databases" ("name", "tenant_id");
+-- Create "notifications" table
+CREATE TABLE "public"."notifications" (
+  "id" bigserial NOT NULL,
+  "collection_id" text NULL,
+  "type" text NULL,
+  "status" text NULL,
+  PRIMARY KEY ("id")
+);
+-- Create "record_logs" table
+CREATE TABLE "public"."record_logs" (
+  "collection_id" text NOT NULL,
+  "id" bigserial NOT NULL,
+  "timestamp" bigint NULL,
+  "record" bytea NULL,
+  PRIMARY KEY ("collection_id", "id")
+);
 -- Create "segment_metadata" table
 CREATE TABLE "public"."segment_metadata" (
   "segment_id" text NOT NULL,
