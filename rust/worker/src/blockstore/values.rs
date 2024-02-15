@@ -3,7 +3,7 @@ use arrow::{
     datatypes::Int32Type,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PositionalPostingList {
     pub(crate) doc_ids: Int32Array,
     pub(crate) positions: ListArray,

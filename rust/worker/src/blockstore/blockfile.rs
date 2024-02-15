@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::{collections::HashMap, hash::Hash, sync::Arc};
 
+use super::block::{BlockBuilder, BlockData};
 use super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
 use arrow::array::{
     Array, ArrayRef, AsArray, Int32Array, Int32Builder, ListArray, ListBuilder, RecordBatch,
@@ -23,28 +24,16 @@ struct SparseIndex {
     data_blockfile: Box<dyn Blockfile>,
 }
 
-// impl SparseIndex<K> {}
-
-// TODO: this should be an arrow struct array
-struct BlockInfo<K> {
-    start_key: K,
-    end_key: K,
-    // TODO: make this uuid
-    id: u64,
-}
-
-struct BlockData {
-    // Arrow array of keys in one column and the corresponding data in another column
-    data: RecordBatch,
-}
-
-impl BlockData {
-    fn new(data: RecordBatch) -> Self {
-        Self { data }
-    }
-
-    fn get_size(&self) -> usize {
-        self.data.get_array_memory_size()
+impl SparseIndex {
+    fn new() -> Self {
+        return Self {
+            data_blockfile: Box::new(ArrowBlockfile::new(
+                None,
+                1024,
+                KeyType::String,
+                ValueType::String,
+            )),
+        };
     }
 }
 
@@ -83,7 +72,7 @@ impl BlockCache {
 }
 
 impl Blockfile for ArrowBlockfile {
-    fn get(&self, key: BlockfileKey) -> Result<&Value, Box<dyn crate::errors::ChromaError>> {
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn crate::errors::ChromaError>> {
         match &self.root {
             None => {
                 // TODO: error instead
@@ -100,9 +89,25 @@ impl Blockfile for ArrowBlockfile {
                 let keys = keys.as_any().downcast_ref::<StringArray>().unwrap();
                 // Start at the index of the prefix and scan until we find the key
                 let mut index = target_prefix_index.unwrap();
-                while prefixes.value(index) == &key.prefix {
-                    if keys.value(index) == &key.key {}
-                    index += 1;
+                while prefixes.value(index) == &key.prefix && index < keys.len() {
+                    match &key.key {
+                        Key::String(key) => {
+                            if keys.value(index) == key {
+                                let values = block_data.data.column_by_name("value").unwrap();
+                                let values = values.as_any().downcast_ref::<ListArray>().unwrap();
+                                let value = values
+                                    .value(index)
+                                    .as_any()
+                                    .downcast_ref::<Int32Array>()
+                                    .unwrap()
+                                    .clone();
+                                return Ok(Value::Int32ArrayValue(value));
+                            } else {
+                                index += 1;
+                            }
+                        }
+                        _ => panic!("Unsupported key type"),
+                    }
                 }
 
                 unimplemented!("Need to implement get for block data");
@@ -139,7 +144,7 @@ impl Blockfile for ArrowBlockfile {
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
         unimplemented!();
     }
 
@@ -147,7 +152,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
         unimplemented!();
     }
 
@@ -155,7 +160,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
         unimplemented!();
     }
 
@@ -163,7 +168,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
         unimplemented!();
     }
 
@@ -171,7 +176,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
         unimplemented!();
     }
 
@@ -204,61 +209,44 @@ impl Blockfile for ArrowBlockfile {
         match &self.root {
             None => {
                 let change_size = self.compute_changes_size();
-                if change_size < self.max_block_size {
+                if change_size <= self.max_block_size {
                     // We can just add the changes to the block, no splitting is needed, and there is no current block
-                    match (&self.key_type, &self.value_type) {
-                        (KeyType::String, ValueType::Int32Array) => {
-                            // TODO: non-nullable
-                            let mut prefix_builder = StringBuilder::new();
-                            let mut key_builder = StringBuilder::new();
-                            let mut value_builder = ListBuilder::new(Int32Builder::new());
-                            for (key, value) in self.transaction_state.adds.iter() {
-                                // TODO: figure out how to iterate such that we don't have to clone the key
-                                prefix_builder.append_value(key.prefix.clone());
-                                match &key.key {
-                                    Key::String(key) => {
-                                        key_builder.append_value(key);
-                                    }
-                                    _ => panic!("Unsupported key type"),
-                                }
+                    let mut block_builder =
+                        BlockBuilder::new(self.key_type.clone(), self.value_type.clone());
+                    // TODO: drain this vec so we don't have to clone
+                    for (key, value) in self.transaction_state.adds.iter() {
+                        block_builder.add(key.clone(), value.clone());
+                    }
+                    let block_data = block_builder.build();
+                    self.root = Some(RootBlock::BlockData(block_data));
+                };
+            }
+            Some(RootBlock::BlockData(root_block_data)) => {
+                // Read the current block and see if we need to split based on its size
+                // if we need to split, create a sparse index block and the needed number of data blocks
+                // and move the data from the current block to the new blocks
+                // if we don't need to split, just add the changes to the current block
+                let curr_size = root_block_data.get_size();
+                let change_size = self.compute_changes_size();
+                if curr_size + change_size > self.max_block_size {
+                    // Split the block
+                    // Create a new sparse index
+                    // Create new data blocks
+                    // Move the data from the current block to the new blocks
+                    // Add the changes to the new blocks
+                    // Commit the new blocks
 
-                                match value {
-                                    Value::Int32ArrayValue(array) => {
-                                        value_builder.append_value(array);
-                                    }
-                                    _ => panic!("Unsupported value type"),
-                                }
-                            }
-                            let prefix = prefix_builder.finish();
-                            let key = key_builder.finish();
-                            let value = value_builder.finish();
-                            // TODO: figure out how to deal with nullable, we don't need nullable by the StringBuilder forces it
-                            let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-                                Field::new("prefix", DataType::Utf8, true),
-                                Field::new("key", DataType::Utf8, true),
-                                Field::new(
-                                    "value",
-                                    DataType::List(Arc::new(Field::new(
-                                        "item",
-                                        DataType::Int32,
-                                        true,
-                                    ))),
-                                    true,
-                                ),
-                            ]));
-                            let record_batch = RecordBatch::try_new(
-                                schema,
-                                vec![Arc::new(prefix), Arc::new(key), Arc::new(value)],
-                            );
-                            println!("{:?}", &record_batch);
-                            let block_data = BlockData::new(record_batch.unwrap());
-                            self.root = Some(RootBlock::BlockData(block_data));
-                        }
-                        _ => panic!("Unsupported key and value type"),
-                    };
+                    let new_blocks_needed = (curr_size + change_size) / self.max_block_size;
+                    // let new_blocks = Vec::new();
+                    for _ in 0..new_blocks_needed {
+                        // Create a new block
+                        // Add the changes to the new block
+                        // Commit the new block
+                    }
+                } else {
+                    // Add the changes to the current block
                 }
             }
-            Some(RootBlock::BlockData(root_block_data)) => {}
             Some(RootBlock::SparseIndex(sparse_index)) => {}
         }
         Ok(())
@@ -303,6 +291,10 @@ impl ArrowBlockfile {
     fn commit_sparse_index(&self) {
         unimplemented!();
     }
+
+    fn add_changes_to_block(&self, block_id: u64) {
+        unimplemented!();
+    }
 }
 
 #[cfg(test)]
@@ -318,7 +310,7 @@ mod tests {
         let key1 = BlockfileKey::new("key".to_string(), Key::String("zzzz".to_string()));
         blockfile
             .set(
-                key1,
+                key1.clone(),
                 Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
             )
             .unwrap();
@@ -330,5 +322,14 @@ mod tests {
             )
             .unwrap();
         blockfile.commit_transaction().unwrap();
+
+        let value = blockfile.get(key1).unwrap();
+        println!("GOT VALUE {:?}", value);
+        match value {
+            Value::Int32ArrayValue(array) => {
+                assert_eq!(array.values(), &[1, 2, 3]);
+            }
+            _ => panic!("Unexpected value type"),
+        }
     }
 }
