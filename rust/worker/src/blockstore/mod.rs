@@ -1,6 +1,2 @@
-mod block;
-mod blockfile;
+mod positional_posting_list_value;
 mod types;
-mod values;
-
-// TODO: reexport the types module

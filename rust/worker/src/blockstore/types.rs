@@ -1,14 +1,11 @@
+use super::positional_posting_list_value::PositionalPostingList;
 use crate::errors::ChromaError;
-use arrow::array::{
-    Array, ArrayRef, Int32Array, Int32Builder, ListArray, ListBuilder, StructArray, StructBuilder,
-};
-use arrow::datatypes::{DataType, Field};
+use arrow::array::Int32Array;
 use roaring::RoaringBitmap;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
-use super::values::{PositionalPostingList, PositionalPostingListBuilder};
-
+// ===== Key Types =====
 #[derive(Clone)]
 pub(crate) struct BlockfileKey {
     pub(crate) prefix: String,
@@ -25,22 +22,6 @@ pub(crate) enum Key {
 pub(crate) enum KeyType {
     String,
     Float,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum Value {
-    Int32ArrayValue(Int32Array),
-    PositionalPostingListValue(PositionalPostingList),
-    StringValue(String),
-    RoaringBitmapValue(RoaringBitmap),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum ValueType {
-    Int32Array,
-    PositionalPostingList,
-    RoaringBitmap,
-    String,
 }
 
 impl Display for Key {
@@ -104,8 +85,26 @@ impl Ord for BlockfileKey {
     }
 }
 
+// ===== Value Types =====
+
+#[derive(Debug, Clone)]
+pub(crate) enum Value {
+    Int32ArrayValue(Int32Array),
+    PositionalPostingListValue(PositionalPostingList),
+    StringValue(String),
+    RoaringBitmapValue(RoaringBitmap),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ValueType {
+    Int32Array,
+    PositionalPostingList,
+    RoaringBitmap,
+    String,
+}
+
 pub(crate) trait Blockfile {
-    // TODO: check the into string pattern
+    // ===== Lifecycle methods =====
     fn open(path: &str) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
@@ -116,34 +115,33 @@ pub(crate) trait Blockfile {
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
+
+    // ===== Transaction methods =====
+    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+
+    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+
+    // ===== Data methods =====
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>>;
     fn get_by_prefix(
         &self,
         prefix: String,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
-
     fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>>;
 
-    // TODO: the naming of these methods are off since they don't mention the prefix
-    // THOUGHT: make prefix optional and if its included, then it will be used to filter the results
-    // Get all values with a given prefix where the key is greater than the given key
     fn get_gt(
         &self,
         prefix: String,
         key: Key,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
-    // Get all values with a given prefix where the key is less than the given key
     fn get_lt(
         &self,
         prefix: String,
         key: Key,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
-    // Get all values with a given prefix where the key is greater than or equal to the given key
     fn get_gte(
         &self,
         prefix: String,
@@ -275,12 +273,10 @@ impl Blockfile for HashMapBlockfile {
 
 #[cfg(test)]
 mod tests {
-    use std::{fmt::Debug, sync::Arc};
-
-    use k8s_openapi::List;
-    use prost_types::Struct;
-
     use super::*;
+    use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
+    use arrow::array::Array;
+    use std::fmt::Debug;
 
     impl Debug for BlockfileKey {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -294,7 +290,8 @@ mod tests {
 
     #[test]
     fn test_blockfile_set_get() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile =
+            HashMapBlockfile::create("test", KeyType::String, ValueType::Int32Array).unwrap();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -413,9 +410,9 @@ mod tests {
     #[test]
     fn test_learning_arrow_struct() {
         let mut builder = PositionalPostingListBuilder::new();
-        builder.add_doc_id_and_positions(1, vec![0]);
-        builder.add_doc_id_and_positions(2, vec![0, 1]);
-        builder.add_doc_id_and_positions(3, vec![0, 1, 2]);
+        let _res = builder.add_doc_id_and_positions(1, vec![0]);
+        let _res = builder.add_doc_id_and_positions(2, vec![0, 1]);
+        let _res = builder.add_doc_id_and_positions(3, vec![0, 1, 2]);
         let list_term_1 = builder.build();
 
         // Example of how to use the struct array, which is one value for a term
@@ -432,7 +429,6 @@ mod tests {
             Value::PositionalPostingListValue(arr) => arr,
             _ => panic!("Value is not an arrow struct array"),
         };
-        println!("{:?}", posting_list);
 
         let ids = posting_list.get_doc_ids();
         let ids = ids.as_any().downcast_ref::<Int32Array>().unwrap();
@@ -440,18 +436,16 @@ mod tests {
         let target_id = 2;
 
         // imagine this is binary search instead of linear
-        let mut found = false;
         for i in 0..ids.len() {
             if ids.is_null(i) {
                 continue;
             }
             if ids.value(i) == target_id {
-                found = true;
                 let pos_list = posting_list.get_positions_for_doc_id(target_id).unwrap();
-                println!(
-                    "Found position list: {:?} for target id: {}",
-                    pos_list, target_id
-                );
+                let pos_list = pos_list.as_any().downcast_ref::<Int32Array>().unwrap();
+                assert_eq!(pos_list.len(), 2);
+                assert_eq!(pos_list.value(0), 0);
+                assert_eq!(pos_list.value(1), 1);
                 break;
             }
         }

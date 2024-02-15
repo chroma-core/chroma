@@ -2,6 +2,11 @@ use arrow::{
     array::{AsArray, Int32Array, Int32Builder, ListArray, ListBuilder},
     datatypes::Int32Type,
 };
+use thiserror::Error;
+
+use std::collections::HashSet;
+
+use crate::errors::{ChromaError, ErrorCodes};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PositionalPostingList {
@@ -12,6 +17,7 @@ pub(crate) struct PositionalPostingList {
 pub(crate) struct PositionalPostingListBuilder {
     doc_ids_builder: Int32Builder,
     positions_builder: ListBuilder<Int32Builder>,
+    doc_id_set: HashSet<i32>,
 }
 
 impl PositionalPostingListBuilder {
@@ -19,6 +25,7 @@ impl PositionalPostingListBuilder {
         PositionalPostingListBuilder {
             doc_ids_builder: Int32Builder::new(),
             positions_builder: ListBuilder::new(Int32Builder::new()),
+            doc_id_set: HashSet::new(),
         }
     }
 }
@@ -42,15 +49,38 @@ impl PositionalPostingList {
     }
 }
 
+#[derive(Error, Debug)]
+pub(crate) enum PositionalPostingListBuilderError {
+    #[error("Doc ID already exists in the list")]
+    DocIdAlreadyExists,
+}
+
+impl ChromaError for PositionalPostingListBuilderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PositionalPostingListBuilderError::DocIdAlreadyExists => ErrorCodes::AlreadyExists,
+        }
+    }
+}
+
 impl PositionalPostingListBuilder {
-    pub(crate) fn add_doc_id_and_positions(&mut self, doc_id: i32, positions: Vec<i32>) {
-        // TODO: make sure doc_id is not already in the list. Make sure positions is deduped
+    pub(crate) fn add_doc_id_and_positions(
+        &mut self,
+        doc_id: i32,
+        positions: Vec<i32>,
+    ) -> Result<(), PositionalPostingListBuilderError> {
+        if self.doc_id_set.contains(&doc_id) {
+            return Err(PositionalPostingListBuilderError::DocIdAlreadyExists);
+        }
+
         self.doc_ids_builder.append_value(doc_id);
         let positions = positions
             .into_iter()
             .map(Some)
             .collect::<Vec<Option<i32>>>();
         self.positions_builder.append_value(positions);
+        self.doc_id_set.insert(doc_id);
+        Ok(())
     }
 
     pub(crate) fn build(&mut self) -> PositionalPostingList {
@@ -71,8 +101,8 @@ mod tests {
     fn test_positional_posting_list() {
         let mut builder = PositionalPostingListBuilder::new();
 
-        builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
-        builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
+        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
 
         let list = builder.build();
         assert_eq!(list.get_doc_ids().values()[0], 1);
@@ -85,5 +115,8 @@ mod tests {
             list.get_positions_for_doc_id(2).unwrap(),
             Int32Array::from(vec![4, 5, 6])
         );
+
+        let res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        assert!(res.is_err());
     }
 }
