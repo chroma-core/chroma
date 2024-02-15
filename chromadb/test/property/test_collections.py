@@ -1,5 +1,3 @@
-import math
-
 import pytest
 import logging
 import hypothesis.strategies as st
@@ -56,7 +54,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             metadata=coll.metadata,
             embedding_function=coll.embedding_function,
         )
-        self.set_model(coll.name, coll.metadata,str(coll.id))
+        self.set_model(coll.name, coll.metadata, str(coll.id))
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
@@ -165,7 +163,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll.metadata = (
                 self.model[coll.name] if new_metadata is None else new_metadata
             )
-        self.set_model(coll.name, coll.metadata,str(coll.id))
+        self.set_model(coll.name, coll.metadata, str(coll.id))
 
         # Update API
         c = self.api.get_or_create_collection(
@@ -225,7 +223,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             _name = new_name
         self.set_model(_name, _metadata, str(coll.id))
 
-        c.modify(metadata=new_metadata, name=new_name)
+        c.modify(metadata=_metadata, name=_name)
         c = self.api.get_collection(name=coll.name)
 
         assert c.name == coll.name
@@ -233,7 +231,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return multiple(coll)
 
     def set_model(
-        self, name: str, metadata: Optional[types.CollectionMetadata], id: Optional[str] = None
+        self,
+        name: str,
+        metadata: Optional[types.CollectionMetadata],
+        id: Optional[str] = None,
     ) -> None:
         model = self.model
         model[name] = metadata
