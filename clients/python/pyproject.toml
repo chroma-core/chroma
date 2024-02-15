@@ -26,6 +26,7 @@ dependencies = [
   'typing_extensions >= 4.5.0',
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
+  'orjson>=3.9.12',
 ]
 
 [tool.black]

@@ -43,6 +43,7 @@ dependencies = [
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
   'mmh3>=4.0.1',
+  'orjson>=3.9.12',
 ]
 
 [tool.black]
