@@ -3,7 +3,9 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
+	"strconv"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
@@ -151,11 +153,13 @@ func CreateTestTables(db *gorm.DB) {
 }
 
 func ConfigDatabaseForTesting() *gorm.DB {
+	dbAddress := os.Getenv("POSTGRES_HOST")
+	dbPort, err := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
 	db, err := ConnectPostgres(DBConfig{
 		Username: "chroma",
 		Password: "chroma",
-		Address:  "localhost",
-		Port:     5432,
+		Address:  dbAddress,
+		Port:     dbPort,
 		DBName:   "chroma",
 	})
 	if err != nil {
