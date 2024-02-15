@@ -30,7 +30,9 @@ def run_static_checks(enforcer: QuotaEnforcer, test_cases: List[Tuple[Any, Optio
             enforcer.payload_static_check(**args)
 
 
-def get_enforcer() -> QuotaEnforcer:
+
+@pytest.fixture(scope="module")
+def enforcer() -> QuotaEnforcer:
     settings = Settings(
         chroma_quota_provider_impl =  "chromadb.quota.test_provider.QuotaProviderForTest"
     )
@@ -38,33 +40,30 @@ def get_enforcer() -> QuotaEnforcer:
     return system.require(QuotaEnforcer)
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
-def test_static_enforcer_metadata():
+def test_static_enforcer_metadata(enforcer):
     test_cases = [
         ({generate_random_string(20): generate_random_string(5)}, "METADATA_KEY_LENGTH"),
         ({generate_random_string(5): generate_random_string(5)}, None),
         ({generate_random_string(5): generate_random_string(20)}, "METADATA_VALUE_LENGTH"),
         ({generate_random_string(5): generate_random_string(5)}, None)
     ]
-    enforcer = get_enforcer()
     run_static_checks(enforcer, test_cases, 'metadatas')
 
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
-def test_static_enforcer_documents():
+def test_static_enforcer_documents(enforcer):
     test_cases = [
         (generate_random_string(20), "DOCUMENT_SIZE"),
         (generate_random_string(5), None)
     ]
-    enforcer = get_enforcer()
     run_static_checks(enforcer, test_cases, 'documents')
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
-def test_static_enforcer_embeddings():
+def test_static_enforcer_embeddings(enforcer):
     test_cases = [
         (random.sample(range(1, 101), 100), "EMBEDDINGS_DIMENSION"),
         (random.sample(range(1, 101), 5), None)
     ]
-    enforcer = get_enforcer()
     run_static_checks(enforcer, test_cases, 'embeddings')
 
 # Should not raise an error if no quota provider is present
