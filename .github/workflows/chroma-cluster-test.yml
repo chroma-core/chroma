@@ -41,5 +41,8 @@ jobs:
           tar -xzv -C /usr/local/bin ctlptl
     - name: Set up kind
       run: ctlptl create cluster kind --registry=ctlptl-registry
+    - name: Test Tilt
+      run: tilt ci
     - name: Integration Test
       run: bin/cluster-test.sh ${{ matrix.testfile }}
+
