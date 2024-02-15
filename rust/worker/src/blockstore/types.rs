@@ -138,7 +138,7 @@ pub(crate) trait SplittableBlockFile<V: SplittableBlockFileValue>: Blockfile {
     ) -> Result<&Value, Box<dyn ChromaError>>;
 }
 
-struct HashMapBlockfile {
+pub(crate) struct HashMapBlockfile {
     map: std::collections::HashMap<BlockfileKey, Value>,
 }
 
