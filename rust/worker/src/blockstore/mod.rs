@@ -1,3 +1,4 @@
+mod block;
 mod blockfile;
 mod types;
 mod values;

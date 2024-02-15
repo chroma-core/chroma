@@ -3,6 +3,7 @@ use arrow::array::{
     Array, ArrayRef, Int32Array, Int32Builder, ListArray, ListBuilder, StructArray, StructBuilder,
 };
 use arrow::datatypes::{DataType, Field};
+use roaring::RoaringBitmap;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
@@ -20,32 +21,26 @@ pub(crate) enum Key {
     Float(f32),
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum KeyType {
     String,
     Float,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Value {
     Int32ArrayValue(Int32Array),
     PositionalPostingListValue(PositionalPostingList),
-    Int32(i32),
-    String(String),
-    // Future values can be the struct type for positional inverted indices and
-    // the roaring bitmap for doc ids
+    StringValue(String),
+    RoaringBitmapValue(RoaringBitmap),
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum ValueType {
     Int32Array,
     PositionalPostingList,
-    Int32,
+    RoaringBitmap,
     String,
-}
-
-impl From<String> for Value {
-    fn from(s: String) -> Self {
-        Value::String(s)
-    }
 }
 
 impl Display for Key {
@@ -121,11 +116,11 @@ pub(crate) trait Blockfile {
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
-    fn get(&self, key: BlockfileKey) -> Result<&Value, Box<dyn ChromaError>>;
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>>;
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
     fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
@@ -139,27 +134,27 @@ pub(crate) trait Blockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     // Get all values with a given prefix where the key is less than the given key
     fn get_lt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     // Get all values with a given prefix where the key is greater than or equal to the given key
     fn get_gte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     fn get_lte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 }
 
 struct HashMapBlockfile {
@@ -185,9 +180,9 @@ impl Blockfile for HashMapBlockfile {
             map: std::collections::HashMap::new(),
         })
     }
-    fn get(&self, key: BlockfileKey) -> Result<&Value, Box<dyn ChromaError>> {
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
         match self.map.get(&key) {
-            Some(value) => Ok(value),
+            Some(value) => Ok(value.clone()),
             None => {
                 // TOOD: make error
                 panic!("Key not found");
@@ -198,11 +193,11 @@ impl Blockfile for HashMapBlockfile {
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (key, value) in self.map.iter() {
             if key.prefix == prefix {
-                result.push((key, value));
+                result.push((key.clone(), value.clone()));
             }
         }
         Ok(result)
@@ -217,11 +212,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key > key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -231,11 +226,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key >= key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -245,11 +240,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key < key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -259,11 +254,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key <= key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -305,12 +300,15 @@ mod tests {
             key: Key::String("key1".to_string()),
         };
         let _res = blockfile
-            .set(key.clone(), "value1".to_string().into())
+            .set(
+                key.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
+            )
             .unwrap();
         let value = blockfile.get(key);
         // downcast to string
         match value.unwrap() {
-            Value::String(s) => assert_eq!(s, "value1"),
+            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
             _ => panic!("Value is not a string"),
         }
     }
@@ -327,20 +325,30 @@ mod tests {
             key: Key::String("key2".to_string()),
         };
         let _res = blockfile
-            .set(key1.clone(), "value1".to_string().into())
+            .set(
+                key1.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
+            )
             .unwrap();
         let _res = blockfile
-            .set(key2.clone(), "value2".to_string().into())
+            .set(
+                key2.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![4, 5, 6])),
+            )
             .unwrap();
         let values = blockfile.get_by_prefix("text_prefix".to_string()).unwrap();
         assert_eq!(values.len(), 2);
         // May return values in any order
-        match values[0].1 {
-            Value::String(s) => assert!(s == "value1" || s == "value2"),
+        match &values[0].1 {
+            Value::Int32ArrayValue(arr) => assert!(
+                arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
+            ),
             _ => panic!("Value is not a string"),
         }
-        match values[1].1 {
-            Value::String(s) => assert!(s == "value1" || s == "value2"),
+        match &values[1].1 {
+            Value::Int32ArrayValue(arr) => assert!(
+                arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
+            ),
             _ => panic!("Value is not a string"),
         }
     }
@@ -356,7 +364,7 @@ mod tests {
         let _res = blockfile.set(key.clone(), array).unwrap();
         let value = blockfile.get(key).unwrap();
         match value {
-            Value::Int32ArrayValue(arr) => assert_eq!(arr, &Int32Array::from(vec![1, 2, 3])),
+            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
             _ => panic!("Value is not an arrow int32 array"),
         }
     }
@@ -376,9 +384,18 @@ mod tests {
             prefix: "text_prefix".to_string(),
             key: Key::String("key3".to_string()),
         };
-        let _res = blockfile.set(key1.clone(), Value::Int32(1)).unwrap();
-        let _res = blockfile.set(key2.clone(), Value::Int32(2)).unwrap();
-        let _res = blockfile.set(key3.clone(), Value::Int32(3)).unwrap();
+        let _res = blockfile.set(
+            key1.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![1])),
+        );
+        let _res = blockfile.set(
+            key2.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![2])),
+        );
+        let _res = blockfile.set(
+            key3.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![3])),
+        );
         let values = blockfile
             .get_gt("text_prefix".to_string(), Key::String("key1".to_string()))
             .unwrap();
@@ -437,6 +454,31 @@ mod tests {
                 );
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn test_roaring_bitmap_example() {
+        let mut bitmap = RoaringBitmap::new();
+        bitmap.insert(1);
+        bitmap.insert(2);
+        bitmap.insert(3);
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: Key::String("bitmap1".to_string()),
+        };
+        let _res = blockfile
+            .set(key.clone(), Value::RoaringBitmapValue(bitmap.clone()))
+            .unwrap();
+        let value = blockfile.get(key).unwrap();
+        match value {
+            Value::RoaringBitmapValue(bitmap) => {
+                assert!(bitmap.contains(1));
+                assert!(bitmap.contains(2));
+                assert!(bitmap.contains(3));
+            }
+            _ => panic!("Value is not a roaring bitmap"),
         }
     }
 }
