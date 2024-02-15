@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import logging
 import hypothesis.strategies as st
@@ -54,7 +56,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             metadata=coll.metadata,
             embedding_function=coll.embedding_function,
         )
-        self.set_model(coll.name, coll.metadata)
+        self.set_model(coll.name, coll.metadata,str(coll.id))
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
@@ -85,7 +87,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule()
     def list_collections(self) -> None:
         colls = self.api.list_collections()
-        assert len(colls) == len(self.model)
+        assert len(colls) == len([c for c in self.model if not c.startswith("__id__")])
         for c in colls:
             assert c.name in self.model
 
@@ -163,7 +165,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll.metadata = (
                 self.model[coll.name] if new_metadata is None else new_metadata
             )
-        self.set_model(coll.name, coll.metadata)
+        self.set_model(coll.name, coll.metadata,str(coll.id))
 
         # Update API
         c = self.api.get_or_create_collection(
@@ -189,6 +191,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
         new_metadata: types.Metadata,
         new_name: Optional[str],
     ) -> MultipleResults[strategies.Collection]:
+        # early exit if a col with name exists but with diff id, possibly in another tenant/db
+        if coll.name in self.model and f"__id__:{coll.id}" not in self.model:
+            return multiple()
         if coll.name not in self.model:
             with pytest.raises(Exception):
                 c = self.api.get_collection(name=coll.name)
@@ -218,7 +223,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             self.delete_from_model(coll.name)
             coll.name = new_name
             _name = new_name
-        self.set_model(_name, _metadata)  # type: ignore
+        self.set_model(_name, _metadata, str(coll.id))
 
         c.modify(metadata=new_metadata, name=new_name)
         c = self.api.get_collection(name=coll.name)
@@ -228,14 +233,18 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return multiple(coll)
 
     def set_model(
-        self, name: str, metadata: Optional[types.CollectionMetadata]
+        self, name: str, metadata: Optional[types.CollectionMetadata], id: Optional[str] = None
     ) -> None:
         model = self.model
         model[name] = metadata
+        if id is not None:
+            model[f"__id__:{id}"] = metadata
 
-    def delete_from_model(self, name: str) -> None:
+    def delete_from_model(self, name: str, id: Optional[str] = None) -> None:
         model = self.model
         del model[name]
+        if id is not None:
+            del model[f"__id__:{id}"]
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
