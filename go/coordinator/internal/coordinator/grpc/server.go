@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
-	grpcutils2 "github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -23,7 +23,7 @@ import (
 
 type Config struct {
 	// GrpcConfig config
-	GrpcConfig *grpcutils2.GrpcConfig
+	GrpcConfig *grpcutils.GrpcConfig
 
 	// System catalog provider
 	SystemCatalogProvider string
@@ -70,13 +70,13 @@ type Config struct {
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
 	coordinator  coordinator.ICoordinator
-	grpcServer   grpcutils2.GrpcServer
+	grpcServer   grpcutils.GrpcServer
 	healthServer *health.Server
 }
 
 func New(config Config) (*Server, error) {
 	if config.SystemCatalogProvider == "memory" {
-		return NewWithGrpcProvider(config, grpcutils2.Default, nil)
+		return NewWithGrpcProvider(config, grpcutils.Default, nil)
 	} else if config.SystemCatalogProvider == "database" {
 		dBConfig := dbcore.DBConfig{
 			Username:     config.Username,
@@ -92,13 +92,13 @@ func New(config Config) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NewWithGrpcProvider(config, grpcutils2.Default, db)
+		return NewWithGrpcProvider(config, grpcutils.Default, db)
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")
 	}
 }
 
-func NewWithGrpcProvider(config Config, provider grpcutils2.GrpcProvider, db *gorm.DB) (*Server, error) {
+func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gorm.DB) (*Server, error) {
 	ctx := context.Background()
 	s := &Server{
 		healthServer: health.NewServer(),
