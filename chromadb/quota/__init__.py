@@ -55,7 +55,7 @@ class QuotaEnforcer(Component):
                 if len(document) > document_size_quota:
                     raise QuotaError(resource="DOCUMENT_SIZE", actual=len(document) , quota=document_size_quota)
         embedding_dimension_quota = self._quota_provider.get_for_subject(resource="EMBEDDINGS_DIMENSION", subject=collection_id)
-        if embeddings:
+        if embedding_dimension_quota and embeddings:
             for embedding in embeddings:
                 if len(embedding) > embedding_dimension_quota:
                     raise QuotaError(resource="EMBEDDINGS_DIMENSION", actual=len(embedding), quota=embedding_dimension_quota)

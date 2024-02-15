@@ -3,6 +3,7 @@ import string
 from typing import Optional, List, Tuple, Any
 from unittest.mock import patch
 
+from chromadb.config import System, Settings
 from chromadb.quota import QuotaEnforcer, Resource
 import pytest
 
@@ -29,32 +30,50 @@ def run_static_checks(enforcer: QuotaEnforcer, test_cases: List[Tuple[Any, Optio
             enforcer.payload_static_check(**args)
 
 
+def get_enforcer() -> QuotaEnforcer:
+    settings = Settings(
+        chroma_quota_provider_impl =  "chromadb.quota.test_provider.QuotaProviderForTest"
+    )
+    system = System(settings)
+    return system.require(QuotaEnforcer)
+
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
-def test_static_enforcer_metadata(system):
+def test_static_enforcer_metadata():
     test_cases = [
         ({generate_random_string(20): generate_random_string(5)}, "METADATA_KEY_LENGTH"),
         ({generate_random_string(5): generate_random_string(5)}, None),
         ({generate_random_string(5): generate_random_string(20)}, "METADATA_VALUE_LENGTH"),
         ({generate_random_string(5): generate_random_string(5)}, None)
     ]
-    enforcer = system.require(QuotaEnforcer)
+    enforcer = get_enforcer()
     run_static_checks(enforcer, test_cases, 'metadatas')
 
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
-def test_static_enforcer_documents(system):
+def test_static_enforcer_documents():
     test_cases = [
         (generate_random_string(20), "DOCUMENT_SIZE"),
         (generate_random_string(5), None)
     ]
-    enforcer = system.require(QuotaEnforcer)
+    enforcer = get_enforcer()
     run_static_checks(enforcer, test_cases, 'documents')
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
-def test_static_enforcer_embeddings(system):
+def test_static_enforcer_embeddings():
     test_cases = [
         (random.sample(range(1, 101), 100), "EMBEDDINGS_DIMENSION"),
         (random.sample(range(1, 101), 5), None)
     ]
+    enforcer = get_enforcer()
+    run_static_checks(enforcer, test_cases, 'embeddings')
+
+# Should not raise an error if no quota provider is present
+def test_enforcer_without_quota_provider():
+    test_cases = [
+        (random.sample(range(1, 101), 1), None),
+        (random.sample(range(1, 101), 5), None)
+    ]
+    settings = Settings()
+    system = System(settings)
     enforcer = system.require(QuotaEnforcer)
     run_static_checks(enforcer, test_cases, 'embeddings')
