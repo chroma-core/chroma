@@ -20,6 +20,11 @@ pub(crate) enum Key {
     Float(f32),
 }
 
+pub(crate) enum KeyType {
+    String,
+    Float,
+}
+
 #[derive(Debug)]
 pub(crate) enum Value {
     Int32ArrayValue(Int32Array),
@@ -28,6 +33,13 @@ pub(crate) enum Value {
     String(String),
     // Future values can be the struct type for positional inverted indices and
     // the roaring bitmap for doc ids
+}
+
+pub(crate) enum ValueType {
+    Int32Array,
+    PositionalPostingList,
+    Int32,
+    String,
 }
 
 impl From<String> for Value {
@@ -78,15 +90,35 @@ impl PartialOrd for BlockfileKey {
 
 impl Eq for BlockfileKey {}
 
-// TODO: align with rust collection conventions for this trait
-pub(crate) trait SplittableBlockFileValue {
-    fn get_at_index(&self, index: usize) -> Result<&Value, Box<dyn ChromaError>>;
-    fn len(&self) -> usize;
+impl Ord for BlockfileKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if self.prefix == other.prefix {
+            match self.key {
+                Key::String(ref s1) => match &other.key {
+                    Key::String(s2) => s1.cmp(s2),
+                    _ => panic!("Cannot compare string to float"),
+                },
+                Key::Float(f1) => match &other.key {
+                    Key::Float(f2) => f1.partial_cmp(f2).unwrap(),
+                    _ => panic!("Cannot compare float to string"),
+                },
+            }
+        } else {
+            self.prefix.cmp(&other.prefix)
+        }
+    }
 }
 
 pub(crate) trait Blockfile {
     // TODO: check the into string pattern
     fn open(path: &str) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
+    fn create(
+        path: &str,
+        key_type: KeyType,
+        value_type: ValueType,
+    ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
     fn get(&self, key: BlockfileKey) -> Result<&Value, Box<dyn ChromaError>>;
@@ -130,14 +162,6 @@ pub(crate) trait Blockfile {
     ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
 }
 
-pub(crate) trait SplittableBlockFile<V: SplittableBlockFileValue>: Blockfile {
-    fn get_with_value_hint(
-        &self,
-        key: BlockfileKey,
-        value_hint: Value,
-    ) -> Result<&Value, Box<dyn ChromaError>>;
-}
-
 struct HashMapBlockfile {
     map: std::collections::HashMap<BlockfileKey, Value>,
 }
@@ -145,6 +169,18 @@ struct HashMapBlockfile {
 impl Blockfile for HashMapBlockfile {
     // TODO: change this to respect path instead of ignoring it and creating a new thing
     fn open(_path: &str) -> Result<Self, Box<dyn ChromaError>> {
+        Ok(HashMapBlockfile {
+            map: std::collections::HashMap::new(),
+        })
+    }
+    fn create(
+        path: &str,
+        key_type: KeyType,
+        value_type: ValueType,
+    ) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized,
+    {
         Ok(HashMapBlockfile {
             map: std::collections::HashMap::new(),
         })
@@ -359,48 +395,6 @@ mod tests {
 
     #[test]
     fn test_learning_arrow_struct() {
-        // positional inverted index is term -> doc_ids -> positions
-        // lets construct ["term1", "term2"] -> [[1, 2, 3], [4]] -> [[[0], [0, 1], [0, 1, 2]], [[10]]]
-        // this is implemented as two KV
-        // term1 -> Struct(ids: [1, 2, 3], pos: [[0], [0, 1], [0, 1, 2]])
-        // term2 -> Struct(ids: [4], pos: [[10]])
-        // let mut id_list_builder = Int32Builder::new();
-        // id_list_builder.append_value(1);
-        // id_list_builder.append_value(2);
-        // id_list_builder.append_value(3);
-        // let id_list = id_list_builder.finish();
-
-        // let mut pos_list_builder = ListBuilder::new(Int32Builder::new());
-        // // Create the first list [[0], [0, 1], [0, 1, 2]]
-        // let term1 = pos_list_builder.values();
-        // term1.append_value(0);
-        // pos_list_builder.append(true);
-        // let term1 = pos_list_builder.values();
-        // term1.append_value(0);
-        // term1.append_value(1);
-        // pos_list_builder.append(true);
-        // let term1 = pos_list_builder.values();
-        // term1.append_value(0);
-        // term1.append_value(1);
-        // term1.append_value(2);
-        // pos_list_builder.append(true);
-
-        // // TODO: build the ids such that they don't have to be named "item" and be nullable
-        // let struct_array = StructArray::from(vec![
-        //     (
-        //         Arc::new(Field::new("id_list", DataType::Int32, true)),
-        //         Arc::new(id_list.clone()) as ArrayRef,
-        //     ),
-        //     (
-        //         Arc::new(Field::new_list(
-        //             "pos_list",
-        //             Arc::new(Field::new("item", DataType::Int32, true)),
-        //             true,
-        //         )),
-        //         Arc::new(pos_list_builder.finish()) as ArrayRef,
-        //     ),
-        // ]);
-        // println!("{:?}", struct_array);
         let mut builder = PositionalPostingListBuilder::new();
         builder.add_doc_id_and_positions(1, vec![0]);
         builder.add_doc_id_and_positions(2, vec![0, 1]);
