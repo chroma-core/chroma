@@ -464,12 +464,12 @@ mod tests {
         bitmap.insert(2);
         bitmap.insert(3);
         let mut blockfile = HashMapBlockfile::open("test").unwrap();
-        let key = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("bitmap1".to_string()),
-        };
+        let key = BlockfileKey::new(
+            "text_prefix".to_string(),
+            Key::String("bitmap1".to_string()),
+        );
         let _res = blockfile
-            .set(key.clone(), Value::RoaringBitmapValue(bitmap.clone()))
+            .set(key.clone(), Value::RoaringBitmapValue(bitmap))
             .unwrap();
         let value = blockfile.get(key).unwrap();
         match value {
