@@ -39,7 +39,6 @@ class QuotaEnforcer(Component):
     def payload_static_check(self, metadatas: Optional[Metadatas] = None, documents: Optional[Documents] = None, embeddings: Optional[Embeddings]= None, collection_id: Optional[str]= None):
         if not self.should_enforce:
             return
-        print(embeddings)
         metadata_key_length_quota = self._quota_provider.get_for_subject(resource="METADATA_KEY_LENGTH", subject=collection_id)
         metadata_value_length_quota = self._quota_provider.get_for_subject(resource="METADATA_VALUE_LENGTH", subject=collection_id)
         if metadatas and (metadata_key_length_quota or metadata_key_length_quota):
