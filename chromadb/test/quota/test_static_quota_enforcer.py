@@ -24,10 +24,10 @@ def run_static_checks(enforcer: QuotaEnforcer, test_cases: List[Tuple[Any, Optio
         args = {data_key: [data]}
         if expected_error:
             with pytest.raises(Exception) as exc_info:
-                enforcer.payload_static_check(**args)
+                enforcer.static_check(**args)
             assert expected_error in str(exc_info.value.resource)
         else:
-            enforcer.payload_static_check(**args)
+            enforcer.static_check(**args)
 
 
 
