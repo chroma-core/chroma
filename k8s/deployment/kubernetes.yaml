@@ -77,6 +77,22 @@ spec:
 
 ---
 
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: chroma
+spec:
+  ports:
+    - name: postgres-port
+      port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+  type: ClusterIP
+
+---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -104,22 +120,6 @@ spec:
               value: chroma
           ports:
             - containerPort: 5432
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-  namespace: chroma
-spec:
-  ports:
-    - name: postgres-port
-      port: 5432
-      targetPort: 5432
-  selector:
-    app: postgres
-  type: ClusterIP
 
 ---
 
@@ -292,6 +292,22 @@ spec:
 
 ---
 
+apiVersion: v1
+kind: Service
+metadata:
+  name: logservice
+  namespace: chroma
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: logservice
+  type: ClusterIP
+
+---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -317,19 +333,3 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: logservice
-  namespace: chroma
-spec:
-  ports:
-    - name: grpc
-      port: 50051
-      targetPort: grpc
-  selector:
-    app: logservice
-  type: ClusterIP
