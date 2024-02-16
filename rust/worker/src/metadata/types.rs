@@ -1,3 +1,4 @@
+use crate::blockstore::Blockfile;
 use crate::errors::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
@@ -44,98 +45,43 @@ pub(crate) trait StringMetadataIndex {
 }
 
 struct InMemoryStringMetadataIndex {
-    index: std::collections::HashMap<String, HashMap<String, RoaringBitmap>>,
-    in_txn: bool,
-    uncommitted_adds: std::collections::HashMap<String, HashMap<String, RoaringBitmap>>,
-    uncommitted_deletes: std::collections::HashMap<String, HashMap<String, RoaringBitmap>>,
+    path: String,
+    blockfile: Box<dyn Blockfile>,
 }
 
 impl InMemoryStringMetadataIndex {
     pub fn new() -> Self {
         InMemoryStringMetadataIndex {
-            index: std::collections::HashMap::new(),
-            in_txn: false,
-            uncommitted_adds: std::collections::HashMap::new(),
-            uncommitted_deletes: std::collections::HashMap::new(),
+            path: "in-memory".to_string(),
+            blockfile: Box::new(HashMapBlockfile::new()),
         }
     }
 }
 
 impl StringMetadataIndex for InMemoryStringMetadataIndex {
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        if self.in_txn {
-            return Err(Box::new(GetError::TransactionAlreadyStarted));
-        }
-        self.in_txn = true;
+        self.blockfile.begin_transaction()?;
         Ok(())
     }
 
     fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_txn {
-            return Err(Box::new(GetError::NotInTransaction));
-        }
-
-        for (key, value) in self.uncommitted_adds.iter() {
-            let key_map = self.index.entry(key.to_string()).or_insert(HashMap::new());
-            for (value, bitmap) in value.iter() {
-                let mut existing_bitmap = key_map.entry(value.to_string()).or_insert(RoaringBitmap::new());
-                existing_bitmap.bitor_assign(bitmap);
-            }
-        }
-        for (key, value) in self.uncommitted_deletes.iter() {
-            let key_map = self.index.entry(key.to_string()).or_insert(HashMap::new());
-            for (value, bitmap) in value.iter() {
-                let mut existing_bitmap = key_map.entry(value.to_string()).or_insert(RoaringBitmap::new());
-                existing_bitmap.sub_assign(bitmap);
-            }
-        }
-
-        self.in_txn = false;
-        self.uncommitted_adds.clear();
-        self.uncommitted_deletes.clear();
+        self.blockfile.commit_transaction()?;
         Ok(())
     }
 
     fn put(&mut self, key: &str, value: &str, offset_id: usize) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_txn {
-            return Err(Box::new(GetError::NotInTransaction));
-        }
-
-        let key_map = self.uncommitted_adds.entry(key.to_string()).or_insert(HashMap::new());
-        let bitmap = key_map.entry(value.to_string()).or_insert(RoaringBitmap::new());
-        bitmap.insert(offset_id as u32);
-
-        let key_map = self.uncommitted_deletes.entry(key.to_string()).or_insert(HashMap::new());
-        let mut bitmap = key_map.entry(value.to_string()).or_insert(RoaringBitmap::new());
-        bitmap.remove(offset_id as u32);
-
+        let key = BlockfileKey::new(key, value);
+        self.blockfile.put(key, offset_id)?;
         Ok(())
     }
 
     fn delete(&mut self, key: &str, value: &str, offset_id: usize) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_txn {
-            return Err(Box::new(GetError::NotInTransaction));
-        }
-
-        let key_map = self.uncommitted_deletes.entry(key.to_string()).or_insert(HashMap::new());
-        let bitmap = key_map.entry(value.to_string()).or_insert(RoaringBitmap::new());
-        bitmap.insert(offset_id as u32);
-
-        let key_map = self.uncommitted_adds.entry(key.to_string()).or_insert(HashMap::new());
-        let mut bitmap = key_map.entry(value.to_string()).or_insert(RoaringBitmap::new());
-        bitmap.remove(offset_id as u32);
-
-        Ok(())
+        panic!("Not implemented")
     }
 
     fn get(&self, key: &str, value: &str) -> Result<&RoaringBitmap, Box<dyn ChromaError>> {
-        match self.index.get(key) {
-            Some(key_map) => match key_map.get(value) {
-                Some(bitmap) => return Ok(bitmap),
-                None => return Err(Box::new(GetError::NotFoundError)),
-            },
-            None => return Err(Box::new(GetError::NotFoundError)),
-        };
+        let key = BlockfileKey::new(key, value);
+        self.blockfile.get(key)
     }
 }
 
