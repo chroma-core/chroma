@@ -36,6 +36,8 @@ kubectl apply -f k8s/cr
 kubectl apply -f k8s/test
 
 # Wait for the pods in the chroma namespace to be ready
+kubectl wait --for=condition=complete --timeout=30s job/migration -n chroma
+kubectl delete job migration -n chroma
 kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=400s
 
 # Run mini kube tunnel in the background to expose the service
