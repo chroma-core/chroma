@@ -107,6 +107,22 @@ spec:
 
 ---
 
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: chroma
+spec:
+  ports:
+    - name: postgres-port
+      port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+  type: ClusterIP
+
+---
+
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -128,22 +144,6 @@ spec:
           image: migration
           imagePullPolicy: IfNotPresent
           name: migration
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-  namespace: chroma
-spec:
-  ports:
-    - name: postgres-port
-      port: 5432
-      targetPort: 5432
-  selector:
-    app: postgres
-  type: ClusterIP
 
 ---
 
