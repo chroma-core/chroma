@@ -468,7 +468,6 @@ def system_wrong_auth(
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
-
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
 def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
