@@ -1,12 +1,15 @@
 FROM golang:1.20-alpine3.18 as build
-
+WORKDIR /src/chroma-coordinator
 RUN apk add --no-cache make git build-base bash
 
+ADD ./go/coordinator/go.mod ./go.mod
+ADD ./go/coordinator/go.sum ./go.sum
 ENV PATH=$PATH:/go/bin
-ADD ./go/coordinator /src/chroma-coordinator
+RUN go mod download
 
-RUN cd /src/chroma-coordinator \
-    && make
+ADD ./go/coordinator ./
+ENV GOCACHE=/root/.cache/go-build
+RUN --mount=type=cache,target="/root/.cache/go-build" make
 
 FROM alpine:3.17.3
 
