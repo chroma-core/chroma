@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chroma/chroma-coordinator/cmd/grpccoordinator"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -20,7 +19,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(grpccoordinator.Cmd)
+	rootCmd.AddCommand(Cmd)
 }
 
 func main() {

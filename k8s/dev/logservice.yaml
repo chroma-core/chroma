@@ -1,28 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: coordinator
+  name: logservice
   namespace: chroma
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: coordinator
+      app: logservice
   template:
     metadata:
       labels:
-        app: coordinator
+        app: logservice
     spec:
       containers:
         - command:
-            - "coordinator"
-            - "coordinator"
-            - "--pulsar-admin-url=http://pulsar.chroma:8080"
-            - "--pulsar-url=pulsar://pulsar.chroma:6650"
-            - "--notifier-provider=pulsar"
+            - "logservice"
+            - "logservice"
           image: coordinator
           imagePullPolicy: IfNotPresent
-          name: coordinator
+          name: logservice
           ports:
             - containerPort: 50051
               name: grpc
@@ -30,7 +27,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: coordinator
+  name: logservice
   namespace: chroma
 spec:
   ports:
@@ -38,5 +35,5 @@ spec:
       port: 50051
       targetPort: grpc
   selector:
-    app: coordinator
+    app: logservice
   type: ClusterIP

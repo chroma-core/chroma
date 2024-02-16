@@ -1,13 +1,13 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
 	"errors"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma/chroma-coordinator/internal/coordinator"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
@@ -29,13 +29,7 @@ type Config struct {
 	SystemCatalogProvider string
 
 	// MetaTable config
-	Username     string
-	Password     string
-	Address      string
-	Port         int
-	DBName       string
-	MaxIdleConns int
-	MaxOpenConns int
+	DBConfig dbcore.DBConfig
 
 	// Notification config
 	NotificationStoreProvider string
@@ -77,16 +71,8 @@ func New(config Config) (*Server, error) {
 	if config.SystemCatalogProvider == "memory" {
 		return NewWithGrpcProvider(config, grpcutils.Default, nil)
 	} else if config.SystemCatalogProvider == "database" {
-		dBConfig := dbcore.DBConfig{
-			Username:     config.Username,
-			Password:     config.Password,
-			Address:      config.Address,
-			Port:         config.Port,
-			DBName:       config.DBName,
-			MaxIdleConns: config.MaxIdleConns,
-			MaxOpenConns: config.MaxOpenConns,
-		}
-		db, err := dbcore.Connect(dBConfig)
+		dBConfig := config.DBConfig
+		db, err := dbcore.ConnectPostgres(dBConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +161,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 			return nil, err
 		}
 
-    s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 		})
 		if err != nil {

@@ -3,7 +3,9 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
+	"strconv"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
@@ -11,7 +13,6 @@ import (
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -28,11 +29,13 @@ type DBConfig struct {
 	DBName       string
 	MaxIdleConns int
 	MaxOpenConns int
+	SslMode      string
 }
 
-func Connect(cfg DBConfig) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=require",
-		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port)
+func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
+	log.Info("ConnectPostgres", zap.String("host", cfg.Address), zap.String("database", cfg.DBName), zap.Int("port", cfg.Port))
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s",
+		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port, cfg.SslMode)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
@@ -61,7 +64,7 @@ func Connect(cfg DBConfig) (*gorm.DB, error) {
 
 	globalDB = db
 
-	log.Info("db connected success",
+	log.Info("Postgres connected success",
 		zap.String("host", cfg.Address),
 		zap.String("database", cfg.DBName),
 		zap.Error(err))
@@ -114,14 +117,7 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
-func ConfigDatabaseForTesting() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
-	if err != nil {
-		panic("failed to connect database")
-	}
-	SetGlobalDB(db)
+func CreateTestTables(db *gorm.DB) {
 	// Setup tenant related tables
 	db.Migrator().DropTable(&dbmodel.Tenant{})
 	db.Migrator().CreateTable(&dbmodel.Tenant{})
@@ -154,5 +150,22 @@ func ConfigDatabaseForTesting() *gorm.DB {
 	// Setup notification related tables
 	db.Migrator().DropTable(&dbmodel.Notification{})
 	db.Migrator().CreateTable(&dbmodel.Notification{})
+}
+
+func ConfigDatabaseForTesting() *gorm.DB {
+	dbAddress := os.Getenv("POSTGRES_HOST")
+	dbPort, err := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
+	db, err := ConnectPostgres(DBConfig{
+		Username: "chroma",
+		Password: "chroma",
+		Address:  dbAddress,
+		Port:     dbPort,
+		DBName:   "chroma",
+	})
+	if err != nil {
+		panic("failed to connect database")
+	}
+	SetGlobalDB(db)
+	CreateTestTables(db)
 	return db
 }

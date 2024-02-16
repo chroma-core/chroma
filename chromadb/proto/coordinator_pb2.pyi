@@ -180,3 +180,15 @@ class UpdateCollectionRequest(_message.Message):
     metadata: _chroma_pb2.UpdateMetadata
     reset_metadata: bool
     def __init__(self, id: _Optional[str] = ..., topic: _Optional[str] = ..., name: _Optional[str] = ..., dimension: _Optional[int] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
+
+class Notification(_message.Message):
+    __slots__ = ["id", "collection_id", "type", "status"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    id: int
+    collection_id: str
+    type: str
+    status: str
+    def __init__(self, id: _Optional[int] = ..., collection_id: _Optional[str] = ..., type: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...

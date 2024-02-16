@@ -25,6 +25,7 @@ minikube addons enable ingress-dns -p chroma-test
 # Setup docker to build inside the minikube cluster and build the image
 eval $(minikube -p chroma-test docker-env)
 docker build -t server:latest -f Dockerfile .
+docker build -t migration -f go/coordinator/Dockerfile.migration .
 docker build -t chroma-coordinator:latest -f go/coordinator/Dockerfile .
 docker build -t worker -f rust/worker/Dockerfile . --build-arg CHROMA_KUBERNETES_INTEGRATION=1
 
@@ -35,6 +36,8 @@ kubectl apply -f k8s/cr
 kubectl apply -f k8s/test
 
 # Wait for the pods in the chroma namespace to be ready
+kubectl wait --for=condition=complete --timeout=100s job/migration -n chroma
+kubectl delete job migration -n chroma
 kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=400s
 
 # Run mini kube tunnel in the background to expose the service
