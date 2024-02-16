@@ -77,6 +77,76 @@ spec:
 
 ---
 
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:14.1-alpine
+          env:
+            - name: POSTGRES_DB
+              value: chroma
+            - name: POSTGRES_USER
+              value: chroma
+            - name: POSTGRES_PASSWORD
+              value: chroma
+          ports:
+            - containerPort: 5432
+
+---
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migration
+  namespace: chroma
+spec:
+  template:
+    metadata:
+      labels:
+        app: migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - args:
+            - 'migrate'
+            - 'apply'
+            - '--url'
+            - 'postgres://chroma:chroma@postgres:5432/chroma?sslmode=disable'
+          image: migration
+          imagePullPolicy: IfNotPresent
+          name: migration
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: chroma
+spec:
+  ports:
+    - name: postgres-port
+      port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+  type: ClusterIP
+
+---
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -218,4 +288,48 @@ spec:
       targetPort: grpc
   selector:
     app: coordinator
+  type: ClusterIP
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logservice
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logservice
+  template:
+    metadata:
+      labels:
+        app: logservice
+    spec:
+      containers:
+        - command:
+            - "logservice"
+            - "logservice"
+          image: coordinator
+          imagePullPolicy: IfNotPresent
+          name: logservice
+          ports:
+            - containerPort: 50051
+              name: grpc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: logservice
+  namespace: chroma
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: logservice
   type: ClusterIP

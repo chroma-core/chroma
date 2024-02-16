@@ -17,16 +17,12 @@ jobs:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     services:
-      # Label used to access the service container
       postgres:
-        # Docker Hub image
         image: postgres
-        # Provide the password for postgres
         env:
           POSTGRES_USER: chroma
           POSTGRES_PASSWORD: chroma
           POSTGRES_DB: chroma
-        # Set health checks to wait until postgres has started
         options: >-
           --health-cmd pg_isready
           --health-interval 10s

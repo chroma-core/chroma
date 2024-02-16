@@ -25,6 +25,7 @@ minikube addons enable ingress-dns -p chroma-test
 # Setup docker to build inside the minikube cluster and build the image
 eval $(minikube -p chroma-test docker-env)
 docker build -t server:latest -f Dockerfile .
+docker build -t chroma-coordinator:latest -f go/coordinator/Dockerfile.migration .
 docker build -t chroma-coordinator:latest -f go/coordinator/Dockerfile .
 docker build -t worker -f rust/worker/Dockerfile . --build-arg CHROMA_KUBERNETES_INTEGRATION=1
 
