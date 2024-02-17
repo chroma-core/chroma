@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
@@ -222,7 +221,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 
 		collectionName := createCollection.Name
-		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), &collectionName, nil, tenantID, databaseName)
+		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, nil, tenantID, databaseName)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err
@@ -492,6 +491,22 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 	var result *model.Segment
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// TODO: we should push in collection_id here, add a GET to fix test for now
+		if updateSegment.Collection == nil {
+			results, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, nil, types.NilUniqueID())
+			if err != nil {
+				return err
+			}
+			if results == nil || len(results) == 0 {
+				return common.ErrSegmentUpdateNonExistingSegment
+			}
+			if results != nil && len(results) > 1 {
+				// TODO: fix this error
+				return common.ErrInvalidCollectionUpdate
+			}
+			updateSegment.Collection = results[0].Segment.CollectionID
+		}
+
 		// update segment
 		dbSegment := &dbmodel.UpdateSegment{
 			ID:              updateSegment.ID.String(),

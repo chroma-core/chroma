@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"errors"
+	"github.com/jackc/pgx/v5/pgconn"
 	"sync"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -222,6 +224,18 @@ func (mt *MetaTable) AddCollection(ctx context.Context, createCollection *model.
 	collection, err := mt.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)
 	if err != nil {
 		log.Error("create collection failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("collection id already exists")
+				return nil, common.ErrCollectionUniqueConstraintViolation
+			default:
+				return nil, err
+			}
+		}
 		return nil, err
 	}
 	mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID] = collection
@@ -361,6 +375,19 @@ func (mt *MetaTable) AddSegment(ctx context.Context, createSegment *model.Create
 
 	segment, err := mt.catalog.CreateSegment(ctx, createSegment, createSegment.Ts)
 	if err != nil {
+		log.Error("create segment failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("segment id already exists")
+				return common.ErrSegmentUniqueConstraintViolation
+			default:
+				return err
+			}
+		}
 		return err
 	}
 	mt.segmentsCache[createSegment.ID] = segment
