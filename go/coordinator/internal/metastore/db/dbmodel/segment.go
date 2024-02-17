@@ -7,6 +7,7 @@ import (
 )
 
 type Segment struct {
+	CollectionID *string         `gorm:"collection_id;primaryKey"`
 	ID           string          `gorm:"id;primaryKey"`
 	Type         string          `gorm:"type;type:string;not null"`
 	Scope        string          `gorm:"scope"`
@@ -15,7 +16,6 @@ type Segment struct {
 	IsDeleted    bool            `gorm:"is_deleted;type:bool;default:false"`
 	CreatedAt    time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt    time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
-	CollectionID *string         `gorm:"collection_id"`
 }
 
 func (s Segment) TableName() string {

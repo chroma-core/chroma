@@ -68,6 +68,7 @@ CREATE TABLE "public"."segment_metadata" (
 );
 -- Create "segments" table
 CREATE TABLE "public"."segments" (
+  "collection_id" text NOT NULL,
   "id" text NOT NULL,
   "type" text NOT NULL,
   "scope" text NULL,
@@ -76,8 +77,7 @@ CREATE TABLE "public"."segments" (
   "is_deleted" boolean NULL DEFAULT false,
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "collection_id" text NULL,
-  PRIMARY KEY ("id")
+  PRIMARY KEY ("collection_id", "id")
 );
 -- Create "tenants" table
 CREATE TABLE "public"."tenants" (

@@ -6,6 +6,7 @@ require (
 	ariga.io/atlas-provider-gorm v0.1.1
 	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
 	github.com/google/uuid v1.3.1
+	github.com/lib/pq v1.10.7
 	github.com/pingcap/log v1.1.0
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.7.0
