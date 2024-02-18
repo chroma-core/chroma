@@ -229,6 +229,29 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                         del self._subscriptions[topic_name]
                     return
 
+    @trace_method("SqlEmbeddingsQueue.optimize", OpenTelemetryGranularity.ALL)
+    @override
+    def optimize(self, topic: str) -> int:
+        subscriptions = self._subscriptions[topic]
+        # we clean up to the min of all segment max_seqid that usually is the vector index
+        min_seq_id = min(sub.start for sub in subscriptions)
+        t = Table("embeddings_queue")
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .where(t.topic == ParameterValue(topic))
+            .where(
+                t.seq_id < ParameterValue(min_seq_id)
+            )  # we must leave at least one record in the queue othewrise we loose track of the max_seq_id
+            .delete()
+        )
+        with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+            rowcount = cur.rowcount
+
+        return rowcount
+
     @override
     def min_seqid(self) -> SeqId:
         return -1
@@ -366,7 +389,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         # for consistency between local and distributed configurations
         try:
             if len(filtered_embeddings) > 0:
-                sub.callback(filtered_embeddings)
+                _maybe_new_max_id = sub.callback(filtered_embeddings)
+                if _maybe_new_max_id:
+                    sub.start = _maybe_new_max_id
             if should_unsubscribe:
                 self.unsubscribe(sub.id)
         except BaseException as e:

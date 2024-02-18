@@ -43,6 +43,10 @@ class Cursor(Protocol):
     def fetchall(self) -> Sequence[Tuple[Any, ...]]:
         ...
 
+    @property
+    def rowcount(self) -> int:
+        ...
+
 
 class TxWrapper(ABC, EnforceOverrides):
     """Wrapper class for DBAPI 2.0 Connection objects, with which clients can implement transactions.

@@ -37,6 +37,7 @@ from chromadb.types import (
     Tenant,
     Unspecified,
     UpdateMetadata,
+    SystemOptimizationStats,
 )
 from google.protobuf.empty_pb2 import Empty
 import grpc
@@ -308,3 +309,11 @@ class GrpcSysDB(SysDB):
 
     def reset_and_wait_for_ready(self) -> None:
         self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)
+
+    @overrides
+    def optimize_system(self) -> SystemOptimizationStats:
+        """TBD what this might mean in a distributed context"""
+        return SystemOptimizationStats(
+            db_size_before=-1,
+            db_size_after=-1,
+        )

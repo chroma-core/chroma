@@ -39,6 +39,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    OptimizationStats,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -109,6 +110,24 @@ class SegmentAPI(ServerAPI):
     @override
     def heartbeat(self) -> int:
         return int(time.time_ns())
+
+    @override
+    def optimize(self) -> OptimizationStats:
+        # loop through segments without loading them only the pickle file, as a fallback we can load the segment - we need max_seq_id
+        # call optimize on sysdb (for single-node this works just fine)
+        wal_entries_purged = 0
+        for s in self._sysdb.get_segments(scope=t.SegmentScope.VECTOR):
+            mtr = self._manager.get_segment(s["collection"], VectorReader)  # type: ignore
+            wal_entries_purged += self._producer.optimize(s["topic"])  # type: ignore
+            if s["collection"] not in self._collection_cache:
+                mtr.stop()
+
+        sys_opt_stats = self._sysdb.optimize_system()
+        return OptimizationStats(
+            wal_entries_purged=wal_entries_purged,
+            storage_reduction=sys_opt_stats["db_size_before"]
+            - sys_opt_stats["db_size_after"],
+        )
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:

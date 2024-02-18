@@ -368,7 +368,7 @@ def test_modify_warn_on_DF_change(api, caplog):
 
     collection = api.create_collection("testspace")
 
-    with pytest.raises(Exception, match="not supported") as e:
+    with pytest.raises(Exception, match="not supported"):
         collection.modify(metadata={"hnsw:space": "cosine"})
 
 
@@ -1499,3 +1499,23 @@ def test_ssl_self_signed_with_verify_false(client_ssl):
         client.heartbeat()
     client_ssl.clear_system_cache()
     assert "Unverified HTTPS request" in str(record[0].message)
+
+
+def test_optimize(api):
+    api.reset()
+    collection = api.create_collection("test_optimize")
+    collection.add(
+        embeddings=[[0.1, 0.1, 0.1] for _ in range(10000)],
+        ids=[f"id{i}" for i in range(10000)],
+    )
+    output = api.optimize()
+    if api.get_settings().is_persistent:
+        assert output["storage_reduction"] > 0
+    assert 10000 > output["wal_entries_purged"] > 0
+    if not isinstance(api, FastAPI):
+        with api._sysdb.tx() as cur:
+            cur.execute("SELECT count(*) FROM main.embeddings_queue")
+            count = cur.fetchone()
+            assert count is not None
+            count = count[0]
+            assert count < 10000

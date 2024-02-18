@@ -8,7 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.api.types import GetResult, QueryResult, OptimizationStats
 from chromadb.auth import (
     AuthzDynamicParams,
     AuthzResourceActions,
@@ -167,6 +167,7 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
         )
+        self.router.add_api_route("/api/v1/optimize", self.optimize, methods=["POST"])
 
         self.router.add_api_route(
             "/api/v1/databases",
@@ -620,3 +621,6 @@ class FastAPI(chromadb.server.Server):
         return {
             "max_batch_size": self._api.max_batch_size,
         }
+
+    def optimize(self) -> OptimizationStats:
+        return self._api.optimize()

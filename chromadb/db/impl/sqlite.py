@@ -21,6 +21,8 @@ from threading import local
 from importlib_resources import files
 from importlib_resources.abc import Traversable
 
+from chromadb.types import SystemOptimizationStats
+
 
 class TxWrapper(base.TxWrapper):
     _conn: Connection
@@ -246,3 +248,24 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def unique_constraint_error() -> Type[BaseException]:
         return sqlite3.IntegrityError
+
+    @trace_method("SqliteDB.optimize_system", OpenTelemetryGranularity.ALL)
+    @override
+    def optimize_system(self) -> SystemOptimizationStats:
+        super().optimize_system()
+        # get size of DB file
+        if not self._is_persistent:
+            # we don't need to optimize an in-memory DB
+            return SystemOptimizationStats(
+                db_size_before=-1,
+                db_size_after=-1,
+            )
+        file_size_before = os.path.getsize(self._db_file)
+        with self.tx() as cur:
+            cur.executescript("PRAGMA optimize;ANALYZE;VACUUM;")
+        # get size of DB file after optimization
+        optimized_file_size = os.path.getsize(self._db_file)
+        return SystemOptimizationStats(
+            db_size_before=file_size_before,
+            db_size_after=optimized_file_size,
+        )
