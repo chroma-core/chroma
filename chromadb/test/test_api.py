@@ -1505,13 +1505,13 @@ def test_optimize(api):
     api.reset()
     collection = api.create_collection("test_optimize")
     collection.add(
-        embeddings=[[0.1, 0.1, 0.1] for _ in range(10000)],
-        ids=[f"id{i}" for i in range(10000)],
+        embeddings=[[0.1, 0.1, 0.1] for _ in range(api.max_batch_size)],
+        ids=[f"id{i}" for i in range(api.max_batch_size)],
     )
     output = api.optimize()
     if api.get_settings().is_persistent:
         assert output["storage_reduction"] > 0
-    assert 10000 > output["wal_entries_purged"] > 0
+    assert api.max_batch_size > output["wal_entries_purged"] > 0
     if not isinstance(api, FastAPI):
         with api._sysdb.tx() as cur:
             cur.execute("SELECT count(*) FROM main.embeddings_queue")
