@@ -17,7 +17,7 @@ from typing_extensions import Literal
 from types import TracebackType
 import os
 from uuid import UUID
-from threading import local
+from threading import local, Lock
 from importlib_resources import files
 from importlib_resources.abc import Traversable
 
@@ -58,6 +58,9 @@ class TxWrapper(base.TxWrapper):
         return False
 
 
+_optimization_lock: Lock = Lock()
+
+
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn_pool: Pool
     _settings: Settings
@@ -67,30 +70,34 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _is_persistent: bool
 
     def __init__(self, system: System):
-        self._settings = system.settings
-        self._migration_imports = [
-            files("chromadb.migrations.embeddings_queue"),
-            files("chromadb.migrations.sysdb"),
-            files("chromadb.migrations.metadb"),
-        ]
-        self._is_persistent = self._settings.require("is_persistent")
-        self._opentelemetry_client = system.require(OpenTelemetryClient)
-        if not self._is_persistent:
-            # In order to allow sqlite to be shared between multiple threads, we need to use a
-            # URI connection string with shared cache.
-            # See https://www.sqlite.org/sharedcache.html
-            # https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
-            self._db_file = "file::memory:?cache=shared"
-            self._conn_pool = LockPool(self._db_file, is_uri=True)
-        else:
-            self._db_file = (
-                self._settings.require("persist_directory") + "/chroma.sqlite3"
-            )
-            if not os.path.exists(self._db_file):
-                os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
-            self._conn_pool = PerThreadPool(self._db_file)
-        self._tx_stack = local()
-        super().__init__(system)
+        _optimization_lock.acquire()
+        try:
+            self._settings = system.settings
+            self._migration_imports = [
+                files("chromadb.migrations.embeddings_queue"),
+                files("chromadb.migrations.sysdb"),
+                files("chromadb.migrations.metadb"),
+            ]
+            self._is_persistent = self._settings.require("is_persistent")
+            self._opentelemetry_client = system.require(OpenTelemetryClient)
+            if not self._is_persistent:
+                # In order to allow sqlite to be shared between multiple threads, we need to use a
+                # URI connection string with shared cache.
+                # See https://www.sqlite.org/sharedcache.html
+                # https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
+                self._db_file = "file::memory:?cache=shared"
+                self._conn_pool = LockPool(self._db_file, is_uri=True)
+            else:
+                self._db_file = (
+                    self._settings.require("persist_directory") + "/chroma.sqlite3"
+                )
+                if not os.path.exists(self._db_file):
+                    os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
+                self._conn_pool = PerThreadPool(self._db_file)
+            self._tx_stack = local()
+            super().__init__(system)
+        finally:
+            _optimization_lock.release()
 
     @trace_method("SqliteDB.start", OpenTelemetryGranularity.ALL)
     @override
@@ -148,6 +155,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                     """
             )
             for row in cur.fetchall():
+                if row[0].startswith("embedding_fulltext_search_"):
+                    continue
                 cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
         self._conn_pool.close()
         self.start()
@@ -261,8 +270,23 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                 db_size_after=-1,
             )
         file_size_before = os.path.getsize(self._db_file)
-        with self.tx() as cur:
-            cur.executescript("PRAGMA optimize;ANALYZE;VACUUM;")
+        self._conn_pool.close()
+        _optimization_lock.acquire()
+        try:
+            conn = sqlite3.connect(self._db_file)
+            conn.execute("PRAGMA busy_timeout = 300000;")  # Wait up to 300 seconds
+            conn.execute("BEGIN EXCLUSIVE;")  # Begin exclusive transaction
+            conn.execute("PRAGMA optimize;")
+            conn.execute("ANALYZE;")
+            conn.commit()  # Commit the exclusive transaction
+            conn.executescript("VACUUM;")  # Perform VACUUM
+            # conn.executescript("DROP TABLE IF EXISTS embedding_fulltext_search;")
+        except sqlite3.DatabaseError as e:
+            raise e
+        finally:
+            conn.close()
+            _optimization_lock.release()
+        self.start()
         # get size of DB file after optimization
         optimized_file_size = os.path.getsize(self._db_file)
         return SystemOptimizationStats(
