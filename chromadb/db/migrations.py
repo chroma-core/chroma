@@ -1,3 +1,4 @@
+import sys
 from typing import Sequence
 from typing_extensions import TypedDict, NotRequired
 from importlib_resources.abc import Traversable
@@ -253,7 +254,7 @@ def _read_migration_file(file: MigrationFile, hash_alg: str) -> Migration:
     sql = file["path"].read_text()
 
     if hash_alg == "md5":
-        hash = hashlib.md5(sql.encode("utf-8")).hexdigest()
+        hash = hashlib.md5(sql.encode("utf-8"), usedforsecurity=False).hexdigest() if sys.version_info >= (3, 9) else hashlib.md5(sql.encode("utf-8")).hexdigest()
     elif hash_alg == "sha256":
         hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
     else:

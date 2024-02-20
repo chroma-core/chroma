@@ -1,6 +1,7 @@
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
+from chromadb.quota import QuotaEnforcer
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
@@ -58,7 +59,6 @@ import time
 import logging
 import re
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +101,7 @@ class SegmentAPI(ServerAPI):
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
+        self._quota = self.require(QuotaEnforcer)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
@@ -356,6 +357,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._quota.static_check(metadatas, documents, embeddings, collection_id)
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -398,6 +400,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._quota.static_check(metadatas, documents, embeddings, collection_id)
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -442,6 +445,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._quota.static_check(metadatas, documents, embeddings, collection_id)
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(

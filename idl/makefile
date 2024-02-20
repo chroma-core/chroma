@@ -17,6 +17,7 @@ proto_go:
     	--go-grpc_opt paths=source_relative \
     	--plugin protoc-gen-go-grpc="${GOPATH}/bin/protoc-gen-go-grpc" \
 	    chromadb/proto/*.proto
+	@mv ../go/coordinator/internal/proto/coordinatorpb/chromadb/proto/logservice*.go ../go/coordinator/internal/proto/logservicepb/
 	@mv ../go/coordinator/internal/proto/coordinatorpb/chromadb/proto/*.go ../go/coordinator/internal/proto/coordinatorpb/
 	@rm -rf ../go/coordinator/internal/proto/coordinatorpb/chromadb
 	@echo "Done"

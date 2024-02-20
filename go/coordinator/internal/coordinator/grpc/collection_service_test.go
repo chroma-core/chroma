@@ -1,11 +1,11 @@
-package grpccoordinator
+package grpc
 
 import (
 	"context"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"testing"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"pgregory.net/rapid"

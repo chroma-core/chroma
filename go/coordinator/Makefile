@@ -1,6 +1,7 @@
 .PHONY: build
 build:
-	go build -v -o bin/chroma ./cmd
+	go build -v -o bin/coordinator ./cmd/coordinator/
+	go build -v -o bin/logservice ./cmd/logservice/
 
 test: build
 	go test -cover -race ./...
