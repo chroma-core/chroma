@@ -1,13 +1,11 @@
+use super::positional_posting_list_value::PositionalPostingList;
 use crate::errors::ChromaError;
-use arrow::array::{
-    Array, ArrayRef, Int32Array, Int32Builder, ListArray, ListBuilder, StructArray, StructBuilder,
-};
-use arrow::datatypes::{DataType, Field};
+use arrow::array::Int32Array;
+use roaring::RoaringBitmap;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
-use super::values::{PositionalPostingList, PositionalPostingListBuilder};
-
+// ===== Key Types =====
 #[derive(Clone)]
 pub(crate) struct BlockfileKey {
     pub(crate) prefix: String,
@@ -20,20 +18,10 @@ pub(crate) enum Key {
     Float(f32),
 }
 
-#[derive(Debug)]
-pub(crate) enum Value {
-    Int32ArrayValue(Int32Array),
-    PositionalPostingListValue(PositionalPostingList),
-    Int32(i32),
-    String(String),
-    // Future values can be the struct type for positional inverted indices and
-    // the roaring bitmap for doc ids
-}
-
-impl From<String> for Value {
-    fn from(s: String) -> Self {
-        Value::String(s)
-    }
+#[derive(Debug, Clone)]
+pub(crate) enum KeyType {
+    String,
+    Float,
 }
 
 impl Display for Key {
@@ -78,67 +66,96 @@ impl PartialOrd for BlockfileKey {
 
 impl Eq for BlockfileKey {}
 
-// TODO: align with rust collection conventions for this trait
-pub(crate) trait SplittableBlockFileValue {
-    fn get_at_index(&self, index: usize) -> Result<&Value, Box<dyn ChromaError>>;
-    fn len(&self) -> usize;
+impl Ord for BlockfileKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if self.prefix == other.prefix {
+            match self.key {
+                Key::String(ref s1) => match &other.key {
+                    Key::String(s2) => s1.cmp(s2),
+                    _ => panic!("Cannot compare string to float"),
+                },
+                Key::Float(f1) => match &other.key {
+                    Key::Float(f2) => f1.partial_cmp(f2).unwrap(),
+                    _ => panic!("Cannot compare float to string"),
+                },
+            }
+        } else {
+            self.prefix.cmp(&other.prefix)
+        }
+    }
+}
+
+// ===== Value Types =====
+
+#[derive(Debug, Clone)]
+pub(crate) enum Value {
+    Int32ArrayValue(Int32Array),
+    PositionalPostingListValue(PositionalPostingList),
+    StringValue(String),
+    RoaringBitmapValue(RoaringBitmap),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ValueType {
+    Int32Array,
+    PositionalPostingList,
+    RoaringBitmap,
+    String,
 }
 
 pub(crate) trait Blockfile {
-    // TODO: check the into string pattern
+    // ===== Lifecycle methods =====
     fn open(path: &str) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
-    fn get(&self, key: BlockfileKey) -> Result<&Value, Box<dyn ChromaError>>;
+    fn create(
+        path: &str,
+        key_type: KeyType,
+        value_type: ValueType,
+    ) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
+
+    // ===== Transaction methods =====
+    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+
+    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+
+    // ===== Data methods =====
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>>;
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
-
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>>;
 
-    // TODO: the naming of these methods are off since they don't mention the prefix
-    // THOUGHT: make prefix optional and if its included, then it will be used to filter the results
-    // Get all values with a given prefix where the key is greater than the given key
     fn get_gt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
-    // Get all values with a given prefix where the key is less than the given key
     fn get_lt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
-    // Get all values with a given prefix where the key is greater than or equal to the given key
     fn get_gte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     fn get_lte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 }
 
-pub(crate) trait SplittableBlockFile<V: SplittableBlockFileValue>: Blockfile {
-    fn get_with_value_hint(
-        &self,
-        key: BlockfileKey,
-        value_hint: Value,
-    ) -> Result<&Value, Box<dyn ChromaError>>;
-}
-
-pub(crate) struct HashMapBlockfile {
+struct HashMapBlockfile {
     map: std::collections::HashMap<BlockfileKey, Value>,
 }
 
@@ -149,9 +166,21 @@ impl Blockfile for HashMapBlockfile {
             map: std::collections::HashMap::new(),
         })
     }
-    fn get(&self, key: BlockfileKey) -> Result<&Value, Box<dyn ChromaError>> {
+    fn create(
+        path: &str,
+        key_type: KeyType,
+        value_type: ValueType,
+    ) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized,
+    {
+        Ok(HashMapBlockfile {
+            map: std::collections::HashMap::new(),
+        })
+    }
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
         match self.map.get(&key) {
-            Some(value) => Ok(value),
+            Some(value) => Ok(value.clone()),
             None => {
                 // TOOD: make error
                 panic!("Key not found");
@@ -162,11 +191,11 @@ impl Blockfile for HashMapBlockfile {
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (key, value) in self.map.iter() {
             if key.prefix == prefix {
-                result.push((key, value));
+                result.push((key.clone(), value.clone()));
             }
         }
         Ok(result)
@@ -181,11 +210,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key > key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -195,11 +224,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key >= key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -209,11 +238,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key < key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -223,11 +252,11 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(&BlockfileKey, &Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.iter() {
             if k.prefix == prefix && k.key <= key {
-                result.push((k, v));
+                result.push((k.clone(), v.clone()));
             }
         }
         Ok(result)
@@ -244,12 +273,10 @@ impl Blockfile for HashMapBlockfile {
 
 #[cfg(test)]
 mod tests {
-    use std::{fmt::Debug, sync::Arc};
-
-    use k8s_openapi::List;
-    use prost_types::Struct;
-
     use super::*;
+    use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
+    use arrow::array::Array;
+    use std::fmt::Debug;
 
     impl Debug for BlockfileKey {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -263,18 +290,22 @@ mod tests {
 
     #[test]
     fn test_blockfile_set_get() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile =
+            HashMapBlockfile::create("test", KeyType::String, ValueType::Int32Array).unwrap();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
         };
         let _res = blockfile
-            .set(key.clone(), "value1".to_string().into())
+            .set(
+                key.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
+            )
             .unwrap();
         let value = blockfile.get(key);
         // downcast to string
         match value.unwrap() {
-            Value::String(s) => assert_eq!(s, "value1"),
+            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
             _ => panic!("Value is not a string"),
         }
     }
@@ -291,20 +322,30 @@ mod tests {
             key: Key::String("key2".to_string()),
         };
         let _res = blockfile
-            .set(key1.clone(), "value1".to_string().into())
+            .set(
+                key1.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
+            )
             .unwrap();
         let _res = blockfile
-            .set(key2.clone(), "value2".to_string().into())
+            .set(
+                key2.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![4, 5, 6])),
+            )
             .unwrap();
         let values = blockfile.get_by_prefix("text_prefix".to_string()).unwrap();
         assert_eq!(values.len(), 2);
         // May return values in any order
-        match values[0].1 {
-            Value::String(s) => assert!(s == "value1" || s == "value2"),
+        match &values[0].1 {
+            Value::Int32ArrayValue(arr) => assert!(
+                arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
+            ),
             _ => panic!("Value is not a string"),
         }
-        match values[1].1 {
-            Value::String(s) => assert!(s == "value1" || s == "value2"),
+        match &values[1].1 {
+            Value::Int32ArrayValue(arr) => assert!(
+                arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
+            ),
             _ => panic!("Value is not a string"),
         }
     }
@@ -320,7 +361,7 @@ mod tests {
         let _res = blockfile.set(key.clone(), array).unwrap();
         let value = blockfile.get(key).unwrap();
         match value {
-            Value::Int32ArrayValue(arr) => assert_eq!(arr, &Int32Array::from(vec![1, 2, 3])),
+            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
             _ => panic!("Value is not an arrow int32 array"),
         }
     }
@@ -340,9 +381,18 @@ mod tests {
             prefix: "text_prefix".to_string(),
             key: Key::String("key3".to_string()),
         };
-        let _res = blockfile.set(key1.clone(), Value::Int32(1)).unwrap();
-        let _res = blockfile.set(key2.clone(), Value::Int32(2)).unwrap();
-        let _res = blockfile.set(key3.clone(), Value::Int32(3)).unwrap();
+        let _res = blockfile.set(
+            key1.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![1])),
+        );
+        let _res = blockfile.set(
+            key2.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![2])),
+        );
+        let _res = blockfile.set(
+            key3.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![3])),
+        );
         let values = blockfile
             .get_gt("text_prefix".to_string(), Key::String("key1".to_string()))
             .unwrap();
@@ -359,52 +409,10 @@ mod tests {
 
     #[test]
     fn test_learning_arrow_struct() {
-        // positional inverted index is term -> doc_ids -> positions
-        // lets construct ["term1", "term2"] -> [[1, 2, 3], [4]] -> [[[0], [0, 1], [0, 1, 2]], [[10]]]
-        // this is implemented as two KV
-        // term1 -> Struct(ids: [1, 2, 3], pos: [[0], [0, 1], [0, 1, 2]])
-        // term2 -> Struct(ids: [4], pos: [[10]])
-        // let mut id_list_builder = Int32Builder::new();
-        // id_list_builder.append_value(1);
-        // id_list_builder.append_value(2);
-        // id_list_builder.append_value(3);
-        // let id_list = id_list_builder.finish();
-
-        // let mut pos_list_builder = ListBuilder::new(Int32Builder::new());
-        // // Create the first list [[0], [0, 1], [0, 1, 2]]
-        // let term1 = pos_list_builder.values();
-        // term1.append_value(0);
-        // pos_list_builder.append(true);
-        // let term1 = pos_list_builder.values();
-        // term1.append_value(0);
-        // term1.append_value(1);
-        // pos_list_builder.append(true);
-        // let term1 = pos_list_builder.values();
-        // term1.append_value(0);
-        // term1.append_value(1);
-        // term1.append_value(2);
-        // pos_list_builder.append(true);
-
-        // // TODO: build the ids such that they don't have to be named "item" and be nullable
-        // let struct_array = StructArray::from(vec![
-        //     (
-        //         Arc::new(Field::new("id_list", DataType::Int32, true)),
-        //         Arc::new(id_list.clone()) as ArrayRef,
-        //     ),
-        //     (
-        //         Arc::new(Field::new_list(
-        //             "pos_list",
-        //             Arc::new(Field::new("item", DataType::Int32, true)),
-        //             true,
-        //         )),
-        //         Arc::new(pos_list_builder.finish()) as ArrayRef,
-        //     ),
-        // ]);
-        // println!("{:?}", struct_array);
         let mut builder = PositionalPostingListBuilder::new();
-        builder.add_doc_id_and_positions(1, vec![0]);
-        builder.add_doc_id_and_positions(2, vec![0, 1]);
-        builder.add_doc_id_and_positions(3, vec![0, 1, 2]);
+        let _res = builder.add_doc_id_and_positions(1, vec![0]);
+        let _res = builder.add_doc_id_and_positions(2, vec![0, 1]);
+        let _res = builder.add_doc_id_and_positions(3, vec![0, 1, 2]);
         let list_term_1 = builder.build();
 
         // Example of how to use the struct array, which is one value for a term
@@ -421,7 +429,6 @@ mod tests {
             Value::PositionalPostingListValue(arr) => arr,
             _ => panic!("Value is not an arrow struct array"),
         };
-        println!("{:?}", posting_list);
 
         let ids = posting_list.get_doc_ids();
         let ids = ids.as_any().downcast_ref::<Int32Array>().unwrap();
@@ -429,20 +436,43 @@ mod tests {
         let target_id = 2;
 
         // imagine this is binary search instead of linear
-        let mut found = false;
         for i in 0..ids.len() {
             if ids.is_null(i) {
                 continue;
             }
             if ids.value(i) == target_id {
-                found = true;
                 let pos_list = posting_list.get_positions_for_doc_id(target_id).unwrap();
-                println!(
-                    "Found position list: {:?} for target id: {}",
-                    pos_list, target_id
-                );
+                let pos_list = pos_list.as_any().downcast_ref::<Int32Array>().unwrap();
+                assert_eq!(pos_list.len(), 2);
+                assert_eq!(pos_list.value(0), 0);
+                assert_eq!(pos_list.value(1), 1);
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn test_roaring_bitmap_example() {
+        let mut bitmap = RoaringBitmap::new();
+        bitmap.insert(1);
+        bitmap.insert(2);
+        bitmap.insert(3);
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key = BlockfileKey::new(
+            "text_prefix".to_string(),
+            Key::String("bitmap1".to_string()),
+        );
+        let _res = blockfile
+            .set(key.clone(), Value::RoaringBitmapValue(bitmap))
+            .unwrap();
+        let value = blockfile.get(key).unwrap();
+        match value {
+            Value::RoaringBitmapValue(bitmap) => {
+                assert!(bitmap.contains(1));
+                assert!(bitmap.contains(2));
+                assert!(bitmap.contains(3));
+            }
+            _ => panic!("Value is not a roaring bitmap"),
         }
     }
 }
