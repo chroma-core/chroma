@@ -1,8 +1,7 @@
-use crate::blockstore::Blockfile;
 use crate::errors::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
-use crate::blockstore::{BlockfileKey, HashMapBlockfile, Key, Value};
+use crate::blockstore::{Blockfile, BlockfileKey, HashMapBlockfile, Key, Value};
 
 use async_trait::async_trait;
 use roaring::RoaringBitmap;
@@ -46,23 +45,39 @@ pub(crate) trait StringMetadataIndex {
 
 struct InMemoryStringMetadataIndex {
     blockfile: Box<dyn Blockfile>,
+
+    in_transaction: bool,
+    uncommitted_adds: HashMap<BlockfileKey, RoaringBitmap>,
+
+    // TODO (???)
+    // uncommitted_deletes: HashMap<BlockfileKey, RoaringBitmap>,
 }
 
 impl InMemoryStringMetadataIndex {
     pub fn new() -> Self {
         InMemoryStringMetadataIndex {
             blockfile: Box::new(HashMapBlockfile::open(&"in-memory")).unwrap(),
+            in_transaction: false,
+            uncommitted_adds: HashMap::new(),
         }
     }
 }
 
 impl StringMetadataIndex for InMemoryStringMetadataIndex {
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        if self.in_transaction {
+            return Err(Box::new(GetError::TransactionAlreadyStarted));
+        }
         self.blockfile.begin_transaction()?;
+        self.in_transaction = true;
+        self.uncommitted_adds.clear();
         Ok(())
     }
 
     fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        if !self.in_transaction {
+            return Err(Box::new(GetError::NotInTransaction));
+        }
         self.blockfile.commit_transaction()?;
         Ok(())
     }

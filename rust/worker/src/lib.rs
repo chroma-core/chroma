@@ -5,7 +5,6 @@ mod errors;
 mod index;
 mod ingest;
 mod memberlist;
-mod metadata;
 mod segment;
 mod server;
 mod storage;
