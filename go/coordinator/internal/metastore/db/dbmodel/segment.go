@@ -7,6 +7,10 @@ import (
 )
 
 type Segment struct {
+	/* Making CollectionID the primary key allows fast search when we have CollectionID.
+	   This requires us to push down CollectionID from the caller. We don't think there is
+	   need to modify CollectionID in the near future. Each Segment should always have a
+	   collection as a parent and cannot be modified. */
 	CollectionID *string         `gorm:"collection_id;primaryKey"`
 	ID           string          `gorm:"id;primaryKey"`
 	Type         string          `gorm:"type;type:string;not null"`
