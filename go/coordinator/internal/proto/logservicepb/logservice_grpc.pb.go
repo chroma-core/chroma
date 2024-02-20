@@ -7,7 +7,10 @@
 package logservicepb
 
 import (
+	context "context"
 	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -19,6 +22,7 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LogServiceClient interface {
+	PushLogs(ctx context.Context, in *PushLogsRequest, opts ...grpc.CallOption) (*PushLogsResponse, error)
 }
 
 type logServiceClient struct {
@@ -29,10 +33,20 @@ func NewLogServiceClient(cc grpc.ClientConnInterface) LogServiceClient {
 	return &logServiceClient{cc}
 }
 
+func (c *logServiceClient) PushLogs(ctx context.Context, in *PushLogsRequest, opts ...grpc.CallOption) (*PushLogsResponse, error) {
+	out := new(PushLogsResponse)
+	err := c.cc.Invoke(ctx, "/chroma.LogService/PushLogs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LogServiceServer is the server API for LogService service.
 // All implementations must embed UnimplementedLogServiceServer
 // for forward compatibility
 type LogServiceServer interface {
+	PushLogs(context.Context, *PushLogsRequest) (*PushLogsResponse, error)
 	mustEmbedUnimplementedLogServiceServer()
 }
 
@@ -40,6 +54,9 @@ type LogServiceServer interface {
 type UnimplementedLogServiceServer struct {
 }
 
+func (UnimplementedLogServiceServer) PushLogs(context.Context, *PushLogsRequest) (*PushLogsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PushLogs not implemented")
+}
 func (UnimplementedLogServiceServer) mustEmbedUnimplementedLogServiceServer() {}
 
 // UnsafeLogServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -53,13 +70,36 @@ func RegisterLogServiceServer(s grpc.ServiceRegistrar, srv LogServiceServer) {
 	s.RegisterService(&LogService_ServiceDesc, srv)
 }
 
+func _LogService_PushLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PushLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LogServiceServer).PushLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chroma.LogService/PushLogs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LogServiceServer).PushLogs(ctx, req.(*PushLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LogService_ServiceDesc is the grpc.ServiceDesc for LogService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var LogService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "chroma.LogService",
 	HandlerType: (*LogServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams:     []grpc.StreamDesc{},
-	Metadata:    "chromadb/proto/logservice.proto",
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PushLogs",
+			Handler:    _LogService_PushLogs_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "chromadb/proto/logservice.proto",
 }

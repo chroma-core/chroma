@@ -152,16 +152,23 @@ func CreateTestTables(db *gorm.DB) {
 	db.Migrator().CreateTable(&dbmodel.Notification{})
 }
 
-func ConfigDatabaseForTesting() *gorm.DB {
+func GetDBConfigForTesting() DBConfig {
 	dbAddress := os.Getenv("POSTGRES_HOST")
-	dbPort, err := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
-	db, err := ConnectPostgres(DBConfig{
-		Username: "chroma",
-		Password: "chroma",
-		Address:  dbAddress,
-		Port:     dbPort,
-		DBName:   "chroma",
-	})
+	dbPort, _ := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
+	return DBConfig{
+		Username:     "chroma",
+		Password:     "chroma",
+		Address:      dbAddress,
+		Port:         dbPort,
+		DBName:       "chroma",
+		MaxIdleConns: 10,
+		MaxOpenConns: 100,
+		SslMode:      "disable",
+	}
+}
+
+func ConfigDatabaseForTesting() *gorm.DB {
+	db, err := ConnectPostgres(GetDBConfigForTesting())
 	if err != nil {
 		panic("failed to connect database")
 	}
