@@ -1,15 +1,26 @@
-import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
-import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError } from "./utils";
-import { Collection } from './Collection';
-import { ChromaClientParams, CollectionMetadata, CollectionType, ConfigOptions, CreateCollectionParams, DeleteCollectionParams, GetCollectionParams, GetOrCreateCollectionParams, ListCollectionsParams } from './types';
+import {IEmbeddingFunction} from './embeddings/IEmbeddingFunction';
+import {Configuration, ApiApi as DefaultApi, Api} from "./generated";
+import {handleSuccess, handleError} from "./utils";
+import {Collection} from './Collection';
+import {
+    ChromaClientParams,
+    CollectionMetadata,
+    CollectionType,
+    ConfigOptions,
+    CreateCollectionParams,
+    DeleteCollectionParams,
+    GetCollectionParams,
+    GetOrCreateCollectionParams,
+    ListCollectionsParams
+} from './types';
 import {
     AuthOptions,
     ClientAuthProtocolAdapter,
     IsomorphicFetchClientAuthProtocolAdapter
 } from "./auth";
-import { DefaultEmbeddingFunction } from './embeddings/DefaultEmbeddingFunction';
-import { AdminClient } from './AdminClient';
+import {DefaultEmbeddingFunction} from './embeddings/DefaultEmbeddingFunction';
+import {AdminClient} from './AdminClient';
+import OptimizationStats = Api.OptimizationStats;
 
 const DEFAULT_TENANT = "default_tenant"
 const DEFAULT_DATABASE = "default_database"
@@ -19,7 +30,7 @@ export class ChromaClient {
      * @ignore
      */
     private api: DefaultApi & ConfigOptions;
-    private apiAdapter: ClientAuthProtocolAdapter<any>|undefined;
+    private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
     private tenant: string = DEFAULT_TENANT;
     private database: string = DEFAULT_DATABASE;
     private _adminClient?: AdminClient
@@ -38,12 +49,12 @@ export class ChromaClient {
      * ```
      */
     constructor({
-        path,
-        fetchOptions,
-        auth,
-        tenant = DEFAULT_TENANT,
-        database = DEFAULT_DATABASE,
-    }: ChromaClientParams = {}) {
+                    path,
+                    fetchOptions,
+                    auth,
+                    tenant = DEFAULT_TENANT,
+                    database = DEFAULT_DATABASE,
+                }: ChromaClientParams = {}) {
         if (path === undefined) path = "http://localhost:8000";
         this.tenant = tenant;
         this.database = database;
@@ -141,15 +152,15 @@ export class ChromaClient {
      * ```
      */
     public async createCollection({
-        name,
-        metadata,
-        embeddingFunction
-    }: CreateCollectionParams): Promise<Collection> {
+                                      name,
+                                      metadata,
+                                      embeddingFunction
+                                  }: CreateCollectionParams): Promise<Collection> {
 
         if (embeddingFunction === undefined) {
             embeddingFunction = new DefaultEmbeddingFunction();
         }
-      
+
         const newCollection = await this.api
             .createCollection(this.tenant, this.database, {
                 name,
@@ -187,10 +198,10 @@ export class ChromaClient {
      * ```
      */
     public async getOrCreateCollection({
-        name,
-        metadata,
-        embeddingFunction
-    }: GetOrCreateCollectionParams): Promise<Collection> {
+                                           name,
+                                           metadata,
+                                           embeddingFunction
+                                       }: GetOrCreateCollectionParams): Promise<Collection> {
 
         if (embeddingFunction === undefined) {
             embeddingFunction = new DefaultEmbeddingFunction();
@@ -235,14 +246,14 @@ export class ChromaClient {
      * ```
      */
     public async listCollections({
-        limit,
-        offset,
-    }: ListCollectionsParams = {}): Promise<CollectionType[]> {
+                                     limit,
+                                     offset,
+                                 }: ListCollectionsParams = {}): Promise<CollectionType[]> {
         const response = await this.api.listCollections(
-            this.tenant,
-            this.database,
             limit,
             offset,
+            this.tenant,
+            this.database,
             this.api.options);
         return handleSuccess(response);
     }
@@ -279,9 +290,9 @@ export class ChromaClient {
      * ```
      */
     public async getCollection({
-        name,
-        embeddingFunction
-    }: GetCollectionParams): Promise<Collection> {
+                                   name,
+                                   embeddingFunction
+                               }: GetCollectionParams): Promise<Collection> {
         const response = await this.api
             .getCollection(name, this.tenant, this.database, this.api.options)
             .then(handleSuccess)
@@ -316,12 +327,25 @@ export class ChromaClient {
      * ```
      */
     public async deleteCollection({
-        name
-    }: DeleteCollectionParams): Promise<void> {
+                                      name
+                                  }: DeleteCollectionParams): Promise<void> {
         return await this.api
             .deleteCollection(name, this.tenant, this.database, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
+    }
+
+    /**
+     * Runs DB optimization to improve performance and reduce storage.
+     * @returns {Promise<number>} A promise that resolves to the optimization response from the Chroma API.
+     *
+     * @example
+     * ```typescript
+     * const heartbeat = await client.optimize();
+     * ```
+     */
+    public async optimize(): Promise<OptimizationStats> {
+        return await this.api.optimize(this.api.options).then(handleSuccess).catch(handleError);
     }
 
 }

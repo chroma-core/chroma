@@ -193,3 +193,10 @@ test('wrong code returns an error', async () => {
     expect(results.error).toBeDefined()
     expect(results.error).toContain("ValueError('Expected where operator")
 })
+
+test("it should run optimize", async () => {
+    const optimizationResponse = await chroma.optimize();
+    expect(optimizationResponse).toBeDefined();
+    expect(optimizationResponse.storage_reduction).toBeDefined();
+    expect(optimizationResponse.wal_entries_purged).toBeDefined();
+});
