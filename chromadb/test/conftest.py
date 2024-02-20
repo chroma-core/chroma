@@ -246,7 +246,7 @@ def _fastapi_fixture(
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host="localhost",
-        chroma_server_http_port=str(port),
+        chroma_server_http_port=port,
         allow_reset=True,
         chroma_client_auth_provider=chroma_client_auth_provider,
         chroma_client_auth_credentials=chroma_client_auth_credentials,
@@ -286,7 +286,7 @@ def fastapi_ssl() -> Generator[System, None, None]:
 def basic_http_client() -> Generator[System, None, None]:
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_http_port="8000",
+        chroma_server_http_port=8000,
         allow_reset=True,
     )
     system = System(settings)

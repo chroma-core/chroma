@@ -66,7 +66,7 @@ class GetAPITest(unittest.TestCase):
                 chroma_api_impl="chromadb.api.fastapi.FastAPI",
                 persist_directory="./foo",
                 chroma_server_host="foo",
-                chroma_server_http_port="80",
+                chroma_server_http_port=80,
             )
         )
         assert mock.called
@@ -78,7 +78,7 @@ class GetAPITest(unittest.TestCase):
         settings = chromadb.config.Settings(
             chroma_api_impl="chromadb.api.fastapi.FastAPI",
             chroma_server_host="foo",
-            chroma_server_http_port="80",
+            chroma_server_http_port=80,
             chroma_server_headers={"foo": "bar"},
         )
         client = chromadb.Client(settings)
@@ -106,7 +106,7 @@ def test_legacy_values() -> None:
                 chroma_api_impl="chromadb.api.local.LocalAPI",
                 persist_directory="./foo",
                 chroma_server_host="foo",
-                chroma_server_http_port="80",
+                chroma_server_http_port=80,
             )
         )
         client.clear_system_cache()
