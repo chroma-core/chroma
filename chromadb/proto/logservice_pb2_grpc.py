@@ -2,6 +2,8 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
+from chromadb.proto import logservice_pb2 as chromadb_dot_proto_dot_logservice__pb2
+
 
 class LogServiceStub(object):
     """Missing associated documentation comment in .proto file."""
@@ -12,14 +14,31 @@ class LogServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.PushLogs = channel.unary_unary(
+            "/chroma.LogService/PushLogs",
+            request_serializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.FromString,
+        )
 
 
 class LogServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
+    def PushLogs(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_LogServiceServicer_to_server(servicer, server):
-    rpc_method_handlers = {}
+    rpc_method_handlers = {
+        "PushLogs": grpc.unary_unary_rpc_method_handler(
+            servicer.PushLogs,
+            request_deserializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.SerializeToString,
+        ),
+    }
     generic_handler = grpc.method_handlers_generic_handler(
         "chroma.LogService", rpc_method_handlers
     )
@@ -29,3 +48,32 @@ def add_LogServiceServicer_to_server(servicer, server):
 # This class is part of an EXPERIMENTAL API.
 class LogService(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def PushLogs(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/chroma.LogService/PushLogs",
+            chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.SerializeToString,
+            chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
