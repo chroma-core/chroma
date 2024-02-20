@@ -688,7 +688,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             )
 
         model, _, preprocess = open_clip.create_model_and_transforms(
-            model_name=model_name, pretrained=checkpoint, cache_dir=cache_dir if cache_dir is not None else None
+            model_name=model_name, pretrained=checkpoint, cache_dir=cache_dir
         )
         self._model = model
         self._preprocess = preprocess
@@ -819,5 +819,3 @@ _classes = [
 
 def get_builtins() -> List[str]:
     return _classes
-
-print(os.listdir())
