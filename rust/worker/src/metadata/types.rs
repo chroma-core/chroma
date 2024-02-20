@@ -71,8 +71,7 @@ impl StringMetadataIndex for InMemoryStringMetadataIndex {
 
     fn put(&mut self, key: &str, value: &str, offset_id: usize) -> Result<(), Box<dyn ChromaError>> {
         let key = BlockfileKey::new(key, value);
-        self.blockfile.put(key, offset_id)?;
-        Ok(())
+        return self.blockfile.set(key, offset_id)?;
     }
 
     fn delete(&mut self, key: &str, value: &str, offset_id: usize) -> Result<(), Box<dyn ChromaError>> {
@@ -81,7 +80,7 @@ impl StringMetadataIndex for InMemoryStringMetadataIndex {
 
     fn get(&self, key: &str, value: &str) -> Result<&RoaringBitmap, Box<dyn ChromaError>> {
         let key = BlockfileKey::new(key, value);
-        self.blockfile.get(key)
+        Ok(self.blockfile.get(key)?)
     }
 }
 
