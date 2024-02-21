@@ -1,9 +1,24 @@
 use super::positional_posting_list_value::PositionalPostingList;
-use crate::errors::ChromaError;
+use crate::errors::{ChromaError, ErrorCodes};
+use thiserror::Error;
 use arrow::array::Int32Array;
 use roaring::RoaringBitmap;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
+                
+#[derive(Debug, Error)]
+pub(crate) enum BlockfileError {
+    #[error("Key not found")]
+    NotFoundError,
+}
+
+impl ChromaError for BlockfileError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BlockfileError::NotFoundError => ErrorCodes::InvalidArgument,
+        }
+    }
+}
 
 // ===== Key Types =====
 #[derive(Clone)]
@@ -36,6 +51,16 @@ impl Display for Key {
 impl BlockfileKey {
     pub(crate) fn new(prefix: String, key: Key) -> Self {
         BlockfileKey { prefix, key }
+    }
+}
+
+impl Debug for BlockfileKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BlockfileKey(prefix: {}, key: {})",
+            self.prefix, self.key
+        )
     }
 }
 
@@ -155,7 +180,7 @@ pub(crate) trait Blockfile {
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 }
 
-struct HashMapBlockfile {
+pub(crate) struct HashMapBlockfile {
     map: std::collections::HashMap<BlockfileKey, Value>,
 }
 
@@ -181,10 +206,7 @@ impl Blockfile for HashMapBlockfile {
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
         match self.map.get(&key) {
             Some(value) => Ok(value.clone()),
-            None => {
-                // TOOD: make error
-                panic!("Key not found");
-            }
+            None => Err(Box::new(BlockfileError::NotFoundError)),
         }
     }
 
@@ -276,17 +298,6 @@ mod tests {
     use super::*;
     use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
     use arrow::array::Array;
-    use std::fmt::Debug;
-
-    impl Debug for BlockfileKey {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "BlockfileKey(prefix: {}, key: {})",
-                self.prefix, self.key
-            )
-        }
-    }
 
     #[test]
     fn test_blockfile_set_get() {
