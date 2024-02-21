@@ -31,6 +31,7 @@ var (
 	ErrInvalidCollectionUpdate          = errors.New("invalid collection update, reset collection true and collection value not empty")
 	ErrSegmentUniqueConstraintViolation = errors.New("unique constraint violation")
 	ErrSegmentDeleteNonExistingSegment  = errors.New("delete non existing segment")
+	ErrSegmentUpdateNonExistingSegment  = errors.New("update non existing segment")
 
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")

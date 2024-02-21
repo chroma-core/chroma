@@ -21,7 +21,7 @@ func (s *segmentMetadataDb) DeleteBySegmentID(segmentID string) error {
 func (s *segmentMetadataDb) DeleteBySegmentIDAndKeys(segmentID string, keys []string) error {
 	return s.db.
 		Where("segment_id = ?", segmentID).
-		Where("`key` IN ?", keys).
+		Where("key IN ?", keys).
 		Delete(&dbmodel.SegmentMetadata{}).Error
 }
 

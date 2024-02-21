@@ -165,20 +165,23 @@ func generateSegmentUpdatesWithoutID(in *dbmodel.UpdateSegment) map[string]inter
 		}
 	}
 
-	if in.ResetCollection {
-		if in.Collection == nil {
-			ret["collection_id"] = nil
-		}
-	} else {
-		if in.Collection != nil {
-			ret["collection_id"] = *in.Collection
-		}
-	}
-	log.Info("generate segment updates without id", zap.Any("updates", ret))
+	// TODO: check this
+	//if in.ResetCollection {
+	//	if in.Collection == nil {
+	//		ret["collection_id"] = nil
+	//	}
+	//} else {
+	//	if in.Collection != nil {
+	//		ret["collection_id"] = *in.Collection
+	//	}
+	//}
+	//log.Info("generate segment updates without id", zap.Any("updates", ret))
 	return ret
 }
 
 func (s *segmentDb) Update(in *dbmodel.UpdateSegment) error {
 	updates := generateSegmentUpdatesWithoutID(in)
-	return s.db.Model(&dbmodel.Segment{}).Where("id = ?", in.ID).Updates(updates).Error
+	return s.db.Model(&dbmodel.Segment{}).
+		Where("collection_id = ?", &in.Collection).
+		Where("id = ?", in.ID).Updates(updates).Error
 }

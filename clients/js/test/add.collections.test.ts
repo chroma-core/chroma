@@ -100,3 +100,17 @@ test('It should return an error when inserting duplicate IDs in the same batch',
     expect(e.message).toMatch('duplicates')
   }
 })
+
+
+test('should error on empty embedding', async () => {
+  await chroma.reset()
+  const collection = await chroma.createCollection({ name: "test" });
+  const ids = ["id1"]
+  const embeddings = [[]]
+  const metadatas = [{ test: 'test1', 'float_value': 0.1 }]
+  try {
+    await collection.add({ ids, embeddings, metadatas });
+  } catch (e: any) {
+    expect(e.message).toMatch('got empty embedding at pos')
+  }
+})

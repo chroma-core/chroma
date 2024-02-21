@@ -1,18 +1,18 @@
-package grpccoordinator
+package main
 
 import (
+	"github.com/chroma/chroma-coordinator/internal/coordinator/grpc"
+	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"io"
 	"time"
 
 	"github.com/chroma/chroma-coordinator/cmd/flag"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
-	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 var (
-	conf = grpccoordinator.Config{
+	conf = grpc.Config{
 		GrpcConfig: &grpcutils.GrpcConfig{},
 	}
 
@@ -30,14 +30,15 @@ func init() {
 	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
 
 	// System Catalog
-	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "memory", "System catalog provider")
-	Cmd.Flags().StringVar(&conf.Username, "username", "root", "MetaTable username")
-	Cmd.Flags().StringVar(&conf.Password, "password", "", "MetaTable password")
-	Cmd.Flags().StringVar(&conf.Address, "db-address", "127.0.0.1", "MetaTable db address")
-	Cmd.Flags().IntVar(&conf.Port, "db-port", 5432, "MetaTable db port")
-	Cmd.Flags().StringVar(&conf.DBName, "db-name", "", "MetaTable db name")
-	Cmd.Flags().IntVar(&conf.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
-	Cmd.Flags().IntVar(&conf.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
+	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "database", "System catalog provider")
+	Cmd.Flags().StringVar(&conf.DBConfig.Username, "username", "chroma", "MetaTable username")
+	Cmd.Flags().StringVar(&conf.DBConfig.Password, "password", "chroma", "MetaTable password")
+	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-address", "postgres", "MetaTable db address")
+	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "MetaTable db port")
+	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "chroma", "MetaTable db name")
+	Cmd.Flags().IntVar(&conf.DBConfig.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
+	Cmd.Flags().IntVar(&conf.DBConfig.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
+	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 
 	// Pulsar
 	Cmd.Flags().StringVar(&conf.PulsarAdminURL, "pulsar-admin-url", "http://localhost:8080", "Pulsar admin url")
@@ -59,6 +60,6 @@ func init() {
 
 func exec(*cobra.Command, []string) {
 	utils.RunProcess(func() (io.Closer, error) {
-		return grpccoordinator.New(conf)
+		return grpc.New(conf)
 	})
 }

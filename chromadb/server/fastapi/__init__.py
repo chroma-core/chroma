@@ -35,6 +35,7 @@ from chromadb.errors import (
     InvalidDimensionException,
     InvalidHTTPVersion,
 )
+from chromadb.quota import QuotaError
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CreateDatabase,
@@ -140,6 +141,7 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
+        self._app.add_exception_handler(QuotaError, self.quota_exception_handler)
 
         self._app.on_event("shutdown")(self.shutdown)
 
@@ -290,6 +292,12 @@ class FastAPI(chromadb.server.Server):
 
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
+
+    async def quota_exception_handler(request: Request, exc: QuotaError):
+        return JSONResponse(
+            status_code=429,
+            content={"message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"},
+        )
 
     def heartbeat(self) -> Dict[str, int]:
         return self.root()

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logservice
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logservice
+  template:
+    metadata:
+      labels:
+        app: logservice
+    spec:
+      containers:
+        - command:
+            - "logservice"
+            - "logservice"
+          image: coordinator
+          imagePullPolicy: IfNotPresent
+          name: logservice
+          ports:
+            - containerPort: 50051
+              name: grpc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logservice
+  namespace: chroma
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: logservice
+  type: ClusterIP
