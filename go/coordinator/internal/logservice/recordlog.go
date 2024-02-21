@@ -2,8 +2,6 @@ package logservice
 
 import (
 	"context"
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/pingcap/log"
@@ -12,10 +10,8 @@ import (
 var _ IRecordLog = (*RecordLog)(nil)
 
 type RecordLog struct {
-	ctx          context.Context
-	recordLogDb  dbmodel.IRecordLogDb
-	arrowPool    memory.Allocator
-	recordSchema *arrow.Schema
+	ctx         context.Context
+	recordLogDb dbmodel.IRecordLogDb
 }
 
 func NewLogService(ctx context.Context) (*RecordLog, error) {
