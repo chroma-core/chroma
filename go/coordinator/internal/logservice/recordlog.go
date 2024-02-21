@@ -28,21 +28,6 @@ func NewLogService(ctx context.Context) (*RecordLog, error) {
 
 func (s *RecordLog) Start() error {
 	log.Info("RecordLog start")
-	s.arrowPool = memory.NewGoAllocator()
-	s.recordSchema = arrow.NewSchema(
-		[]arrow.Field{
-			{Name: "id", Type: arrow.BinaryTypes.String},
-			{Name: "vector", Type: arrow.StructOf(
-				[]arrow.Field{
-					{Name: "dimension", Type: arrow.PrimitiveTypes.Int32},
-					{Name: "vector", Type: arrow.BinaryTypes.String},
-					{Name: "scalarEncoding", Type: arrow.PrimitiveTypes.Int32},
-				}...)},
-			{Name: "updateMetadata", Type: arrow.PrimitiveTypes.Float64},
-			{Name: "operation", Type: arrow.PrimitiveTypes.Float64},
-		},
-		nil,
-	)
 	return nil
 }
 

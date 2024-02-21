@@ -13,10 +13,6 @@ type recordLogDb struct {
 	db *gorm.DB
 }
 
-func (s *recordLogDb) GetRecordBlob() {
-	log.Info("GetRecordBlob")
-}
-
 func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]byte) (int, error) {
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var timestamp = time.Now().UnixNano()
@@ -37,6 +33,7 @@ func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]b
 		err := tx.CreateInBatches(recordLogs, len(recordLogs)).Error
 		if err != nil {
 			log.Error("Batch insert error", zap.Error(err))
+			tx.Rollback()
 			return err
 		}
 		return nil
