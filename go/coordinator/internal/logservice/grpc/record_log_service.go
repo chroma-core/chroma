@@ -20,6 +20,7 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
+		record.CollectionId = ""
 		data, err := proto.Marshal(record)
 		if err != nil {
 			log.Error("marshaling error", zap.Error(err))
