@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
 	"github.com/chroma/chroma-coordinator/internal/types"
@@ -16,7 +15,11 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
 	if err != nil {
 		log.Error("collection id format error", zap.String("collection.id", req.CollectionId))
-		return nil, common.ErrCollectionIDFormat
+		grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("collection_id", "wrong collection_id format")
+		if err != nil {
+			return nil, grpcError
+		}
+		return nil, err
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
