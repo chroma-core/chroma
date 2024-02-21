@@ -18,9 +18,9 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 		grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("collection_id", "wrong collection_id format")
 		if err != nil {
 			log.Error("error building grpc error", zap.Error(err))
-			return nil, grpcError
+			return nil, err
 		}
-		return nil, err
+		return nil, grpcError
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
