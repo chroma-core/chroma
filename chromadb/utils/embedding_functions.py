@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+      
 def _verify_sha256(fname: str, expected_sha256: str) -> bool:
     sha256_hash = hashlib.sha256()
     with open(fname, "rb") as f:
@@ -50,18 +51,100 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
     return sha256_hash.hexdigest() == expected_sha256
 
 
+class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
+    # Since we do dynamic imports we have to type this as Any
+    models: Dict[str, Any] = {}
+    def __init__(
+        self,
+        # model_name: str = "jinaai/jina-embeddings-v2-base-en", # TODO make SentenceTransformer branch with PEFT
+        adapters_path: str = "",
+        device: str = "cpu",
+        normalize_embeddings: bool = True,
+        model_name = "jinaai/jina-embeddings-v2-base-en"
+    ):
+                
+        try:  
+            from AutoModelForSentenceEmbedding import (  
+                AutoModelForSentenceEmbedding,  
+            )  
+        except ModuleNotFoundError:  
+            raise ValueError("The sentence-transformers python package is not installed. Please install it with `pip install sentence-transformers`")
+        
+        
+        if model_name not in self.models:
+            try:
+                from transformers import AutoTokenizer
+            except ModuleNotFoundError:
+                raise ValueError("The transformers python package is not installed. Please install it with `pip install transformers`")
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+            )    
+            
+            model = AutoModelForSentenceEmbedding(model_name, tokenizer)
+            
+            if len(adapters_path) > 0:
+                self._peft = True
+                
+                try:
+                    from peft import PeftModel
+                except ModuleNotFoundError:
+                    raise ValueError("The peft python package is not installed. Please install it with `pip install peft`")
+                
+                model = PeftModel.from_pretrained(model, adapters_path)
+                model.to(device)
+                model.eval()
+                model = model.merge_and_unload()
+                
+            else:
+                self._peft = False
+            self.models[model_name] = model
+        self._model_name = model_name
+        self._model = self.models[model_name]
+        self._device = device
+        self._tokenizer = tokenizer
+        self._normalize_embeddings = normalize_embeddings
+    def __call__(self, input: Documents) -> Embeddings:
+        device = self._device
+        
+        if len(input) <= 0:
+            return []
+        
+        if self._peft:
+            embeddings = []
+            
+            try:
+                from torch import inference_mode
+            except ModuleNotFoundError:
+                    raise ValueError("The torch python package is not installed. Please install it with `pip install torch`")
+                
+            with inference_mode():
+                for query in input:
+                    inputs = self._tokenizer(query, padding="max_length", max_length=8192, truncation=True, return_tensors="pt")    
+                    
+                    if device == "cpu": 
+                        query_embs = self._model(**{k:v for k, v in inputs.items()})
+                    else:
+                        query_embs = self._model(**{k:v.to(device) for k, v in inputs.items()}).detach().cpu()
+                    embeddings.append(query_embs[0].numpy().tolist())
+            return embeddings
+        else:
+            return self._model.encode(
+                list(input),
+                convert_to_numpy=True,
+                normalize_embeddings=self._normalize_embeddings,
+            ).tolist()
+          
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
-
-    # If you have a beefier machine, try "gtr-t5-large".
-    # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
+    
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
     ):
+        
         if model_name not in self.models:
             try:
                 from sentence_transformers import SentenceTransformer
