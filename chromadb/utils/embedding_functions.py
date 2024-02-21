@@ -665,7 +665,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
 class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
-        self, model_name: str = "ViT-B-32", checkpoint: str = "laion2b_s34b_b79k"
+        self, model_name: str = "ViT-B-32", checkpoint: str = "laion2b_s34b_b79k", cache_dir = None
     ) -> None:
         try:
             import open_clip
@@ -688,7 +688,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             )
 
         model, _, preprocess = open_clip.create_model_and_transforms(
-            model_name=model_name, pretrained=checkpoint
+            model_name=model_name, pretrained=checkpoint, cache_dir=cache_dir
         )
         self._model = model
         self._preprocess = preprocess
