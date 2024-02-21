@@ -1,5 +1,6 @@
 import os
 import shutil
+
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
@@ -203,8 +204,18 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._persist_data.label_to_id = self._label_to_id
         self._persist_data.id_to_seq_id = self._id_to_seq_id
 
-        with open(self._get_metadata_file(), "wb") as metadata_file:
-            pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+        temp_metadata_file = f"{self._get_metadata_file()}.tmp"
+        try:
+            with open(temp_metadata_file, "wb") as metadata_file:
+                pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+            os.replace(temp_metadata_file, self._get_metadata_file())
+
+            # Explicitly delete the temporary file
+            os.remove(temp_metadata_file)
+        finally:
+            # If the temp file still exists, delete it
+            if temp_metadata_file and os.path.exists(temp_metadata_file):
+                os.remove(temp_metadata_file)
 
     @trace_method(
         "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
