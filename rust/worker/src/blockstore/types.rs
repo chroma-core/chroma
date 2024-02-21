@@ -31,12 +31,14 @@ pub(crate) struct BlockfileKey {
 pub(crate) enum Key {
     String(String),
     Float(f32),
+    Bool(bool),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum KeyType {
     String,
     Float,
+    Bool,
 }
 
 impl Display for Key {
@@ -44,6 +46,7 @@ impl Display for Key {
         match self {
             Key::String(s) => write!(f, "{}", s),
             Key::Float(fl) => write!(f, "{}", fl),
+            Key::Bool(b) => write!(f, "{}", b),
         }
     }
 }
@@ -97,11 +100,15 @@ impl Ord for BlockfileKey {
             match self.key {
                 Key::String(ref s1) => match &other.key {
                     Key::String(s2) => s1.cmp(s2),
-                    _ => panic!("Cannot compare string to float"),
+                    _ => panic!("Cannot compare string to float or bool"),
                 },
                 Key::Float(f1) => match &other.key {
                     Key::Float(f2) => f1.partial_cmp(f2).unwrap(),
-                    _ => panic!("Cannot compare float to string"),
+                    _ => panic!("Cannot compare float to string or bool"),
+                },
+                Key::Bool(b1) => match &other.key {
+                    Key::Bool(b2) => b1.cmp(b2),
+                    _ => panic!("Cannot compare bool to string or float"),
                 },
             }
         } else {
@@ -358,6 +365,21 @@ mod tests {
                 arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
             ),
             _ => panic!("Value is not a string"),
+        }
+    }
+
+    #[test]
+    fn test_bool_key() {
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: Key::Bool(true),
+        };
+        let _res = blockfile.set(key.clone(), Value::Int32ArrayValue(Int32Array::from(vec![1])));
+        let value = blockfile.get(key).unwrap();
+        match value {
+            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1])),
+            _ => panic!("Value is not an arrow int32 array"),
         }
     }
 
