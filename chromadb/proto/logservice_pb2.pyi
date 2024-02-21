@@ -29,13 +29,7 @@ class PushLogsRequest(_message.Message):
     ) -> None: ...
 
 class PushLogsResponse(_message.Message):
-    __slots__ = ["record_count", "status"]
+    __slots__ = ["record_count"]
     RECORD_COUNT_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
     record_count: int
-    status: _chroma_pb2.Status
-    def __init__(
-        self,
-        record_count: _Optional[int] = ...,
-        status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, record_count: _Optional[int] = ...) -> None: ...
