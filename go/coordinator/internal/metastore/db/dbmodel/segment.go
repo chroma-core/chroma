@@ -7,6 +7,11 @@ import (
 )
 
 type Segment struct {
+	/* Making CollectionID the primary key allows fast search when we have CollectionID.
+	   This requires us to push down CollectionID from the caller. We don't think there is
+	   need to modify CollectionID in the near future. Each Segment should always have a
+	   collection as a parent and cannot be modified. */
+	CollectionID *string         `gorm:"collection_id;primaryKey"`
 	ID           string          `gorm:"id;primaryKey"`
 	Type         string          `gorm:"type;type:string;not null"`
 	Scope        string          `gorm:"scope"`
@@ -15,7 +20,6 @@ type Segment struct {
 	IsDeleted    bool            `gorm:"is_deleted;type:bool;default:false"`
 	CreatedAt    time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt    time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
-	CollectionID *string         `gorm:"collection_id"`
 }
 
 func (s Segment) TableName() string {
