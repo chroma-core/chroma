@@ -16,8 +16,8 @@ pub enum FullTextIndexError {
 impl ChromaError for FullTextIndexError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FullTextIndexError::FullTextError => ErrorCodes::FailedPrecondition,
             FullTextIndexError::AlreadyInTransaction => ErrorCodes::FailedPrecondition,
+            FullTextIndexError::NotInTransaction => ErrorCodes::FailedPrecondition,
         }
     }
 }
