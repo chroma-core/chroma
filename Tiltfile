@@ -1,3 +1,5 @@
+update_settings(max_parallel_updates=6)
+
 docker_build('migration',
              context='.',
              dockerfile='./go/coordinator/Dockerfile.migration'
