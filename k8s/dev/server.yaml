@@ -49,4 +49,17 @@ spec:
         - name: chroma
           emptyDir: {}
 
-
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: chroma
+spec:
+  ports:
+    - name: server-port
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: server
+  type: ClusterIP
