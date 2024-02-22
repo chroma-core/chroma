@@ -1,4 +1,4 @@
-mod tokenizer;
+pub mod tokenizer;
 mod types;
 
 pub use types::*;

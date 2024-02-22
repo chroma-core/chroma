@@ -7,7 +7,7 @@ pub(crate) trait ChromaTokenStream {
     fn get_tokens(&self) -> &Vec<Token>;
 }
 
-struct TantivyChromaTokenStream {
+pub(crate) struct TantivyChromaTokenStream {
     tokens: Vec<Token>
 }
 
@@ -35,7 +35,7 @@ pub(crate) trait ChromaTokenizer {
     fn encode(&mut self, text: &str) -> Box<dyn ChromaTokenStream>;
 }
 
-struct TantivyChromaTokenizer {
+pub(crate) struct TantivyChromaTokenizer {
     tokenizer: Box<NgramTokenizer>
 }
 
