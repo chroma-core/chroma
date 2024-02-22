@@ -55,7 +55,6 @@ impl ChromaTokenizer for TantivyChromaTokenizer {
 
 mod test {
     use super::*;
-    use tantivy::tokenizer::NgramTokenizer;
 
     #[test]
     fn test_chroma_tokenizer() {
