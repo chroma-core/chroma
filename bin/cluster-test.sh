@@ -4,12 +4,18 @@ set -e
 export CHROMA_CLUSTER_TEST_ONLY=1
 export CHROMA_SERVER_HOST=localhost:8000
 export PULSAR_BROKER_URL=localhost
-export CHROMA_COORDINATOR_HOST=$(kubectl get svc coordinator -n chroma -o=jsonpath='{.spec.clusterIP}')
+export CHROMA_COORDINATOR_HOST=localhost
 export CHROMA_SERVER_GRPC_PORT="50051"
+
+kubectl port-forward svc/coordinator 50051:50051 &
+
 
 echo "Chroma Server is running at port $CHROMA_SERVER_HOST"
 echo "Pulsar Broker is running at port $PULSAR_BROKER_URL"
 echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
+
+kubectl -n chroma port-forward svc/coordinator 50051:50051 &
+
 
 echo testing: python -m pytest "$@"
 python -m pytest "$@"
