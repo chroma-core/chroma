@@ -11,8 +11,6 @@ echo "Chroma Server is running at port $CHROMA_SERVER_HOST"
 echo "Pulsar Broker is running at port $PULSAR_BROKER_URL"
 echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
 
-sleep 10
-
 echo testing: python -m pytest "$@"
 python -m pytest "$@"
 
