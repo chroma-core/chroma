@@ -13,13 +13,14 @@ import (
 func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
 	res := &logservicepb.PushLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	if err != nil {
+	if err != nil || collectionID == types.NilUniqueID() {
 		log.Error("collection id format error", zap.String("collection.id", req.CollectionId))
 		grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("collection_id", "wrong collection_id format")
 		if err != nil {
-			return nil, grpcError
+			log.Error("error building grpc error", zap.Error(err))
+			return nil, err
 		}
-		return nil, err
+		return nil, grpcError
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
@@ -29,9 +30,9 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 			log.Error("marshaling error", zap.Error(err))
 			grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("records", "marshaling error")
 			if err != nil {
-				return nil, grpcError
+				return nil, err
 			}
-			return nil, err
+			return nil, grpcError
 		}
 		recordsContent = append(recordsContent, data)
 	}

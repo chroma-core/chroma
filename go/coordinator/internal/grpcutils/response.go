@@ -9,13 +9,15 @@ import (
 )
 
 func BuildInvalidArgumentGrpcError(fieldName string, desc string) (error, error) {
+	log.Info("InvalidArgument", zap.String("fieldName", fieldName), zap.String("desc", desc))
 	st := status.New(codes.InvalidArgument, "invalid "+fieldName)
 	v := &errdetails.BadRequest_FieldViolation{
 		Field:       fieldName,
 		Description: desc,
 	}
-	br := &errdetails.BadRequest{}
-	br.FieldViolations = append(br.FieldViolations, v)
+	br := &errdetails.BadRequest{
+		FieldViolations: []*errdetails.BadRequest_FieldViolation{v},
+	}
 	st, err := st.WithDetails(br)
 	if err != nil {
 		log.Error("Unexpected error attaching metadata", zap.Error(err))
