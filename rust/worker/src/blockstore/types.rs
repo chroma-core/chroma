@@ -121,6 +121,7 @@ impl Ord for BlockfileKey {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Value {
+    Int32Value(i32),
     Int32ArrayValue(Int32Array),
     PositionalPostingListValue(PositionalPostingList),
     StringValue(String),
