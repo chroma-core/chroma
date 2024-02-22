@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
+# TODO make url configuration consistent.
 export CHROMA_CLUSTER_TEST_ONLY=1
 export CHROMA_SERVER_HOST=localhost:8000
 export PULSAR_BROKER_URL=localhost
@@ -19,11 +20,3 @@ kubectl -n chroma port-forward svc/pulsar 8080:8080 &
 kubectl -n chroma port-forward svc/server 8000:8000 &
 
 "$@"
-
-#
-#echo testing: python -m pytest "$@"
-#python -m pytest "$@"
-#
-#export CHROMA_KUBERNETES_INTEGRATION=1
-#cd go/coordinator
-#go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager
