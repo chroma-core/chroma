@@ -79,6 +79,10 @@ impl PositionalPostingListBuilder {
         self.positions.insert(doc_id, positions);
         Ok(())
     }
+    
+    pub(crate) fn contains_doc_id(&self, doc_id: i32) -> bool {
+        self.doc_ids.contains(&doc_id)
+    }
 
     pub(crate) fn add_positions_for_doc_id(
         &mut self,
