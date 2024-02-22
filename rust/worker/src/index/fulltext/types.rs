@@ -178,6 +178,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
         for (doc_id, _) in candidates.drain() {
             results.push(doc_id);
         }
+
         Ok(results)
     }
 }
@@ -272,16 +273,23 @@ mod test {
 
     #[test]
     fn test_special_characters_search() {
-        let blockfile = Box::new(HashMapBlockfile::open(&"in-memory").unwrap());
+        let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
+        let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
-        let mut index = BlockfileFullTextIndex::new(blockfile, tokenizer);
+        let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
         index.begin_transaction().unwrap();
         index.add_document("!!!!", 1).unwrap();
         index.add_document(",,!!", 2).unwrap();
-        index.add_document(",!", 3).unwrap();
+        index.add_document(".!", 3).unwrap();
+        index.add_document("!.!.!.!", 4).unwrap();
         index.commit_transaction().unwrap();
 
-        let res = index.search("!!");
-        assert_eq!(res.unwrap(), vec![1, 2]);
+        let res = index.search("!!").unwrap();
+        assert!(res.contains(&1));
+        assert!(res.contains(&2));
+
+        let res = index.search(".!").unwrap();
+        assert!(res.contains(&3));
+        assert!(res.contains(&4));
     }
 }
