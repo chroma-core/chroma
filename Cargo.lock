@@ -5229,7 +5229,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tantivy",
- "tantivy-tokenizer-api",
  "tempfile",
  "thiserror",
  "tokio",
