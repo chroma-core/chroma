@@ -4,7 +4,7 @@ use super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
 
 pub(super) fn get_key_size(blockfile_key: &BlockfileKey) -> usize {
     let prefix_size = blockfile_key.prefix.len();
-    let key_size = match blockfile_key.key {
+    let key_size = match &blockfile_key.key {
         Key::String(key) => key.len(),
         Key::Float(_) => 4,
     };

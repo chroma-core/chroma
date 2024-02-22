@@ -1,3 +1,4 @@
+use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -5,6 +6,7 @@ use super::arrow_utils::{get_key_size, get_value_size};
 use super::block::{BlockBuilder, BlockData};
 use super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
 use arrow::array::{Array, Int32Array, ListArray, RecordBatch, StringArray};
+use futures::executor::block_on;
 // arrow backed blockfile
 
 // arrow backed sparse index is a blockfile where keys are the start key of a block and the value is
@@ -34,7 +36,7 @@ impl SparseIndex {
 
 enum RootBlock {
     SparseIndex(SparseIndex),
-    BlockData(BlockData),
+    BlockData(Arc<BlockData>),
 }
 
 struct ArrowBlockfile {
@@ -42,37 +44,104 @@ struct ArrowBlockfile {
     max_block_size: usize,
     key_type: KeyType,
     value_type: ValueType,
-    in_transaction: bool,
-    transaction_state: TransactionState,
+    transaction_state: Option<TransactionState>,
 }
 
 struct TransactionState {
-    block_delta: Vec<BlockDelta>,
+    block_delta: Vec<Arc<BlockDelta>>,
+    root_block_delta: Option<Arc<BlockDelta>>,
 }
 
 impl TransactionState {
     fn new() -> Self {
         Self {
             block_delta: Vec::new(),
+            root_block_delta: None,
         }
+    }
+
+    fn add_delta(&mut self, delta: Arc<BlockDelta>) {
+        self.block_delta.push(delta);
+    }
+
+    fn get_delta_for_block(&self, block: &Arc<BlockData>) -> Option<Arc<BlockDelta>> {
+        for delta in &self.block_delta {
+            match delta.source_block {
+                None => continue,
+                Some(ref source_block) => {
+                    if Arc::ptr_eq(source_block, &block) {
+                        return Some(delta.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
-struct BlockDelta {
-    source_block: Option<Arc<BlockData>>,
+struct BlockDeltaInner {
     adds: BTreeMap<BlockfileKey, Value>,
     deletes: Vec<BlockfileKey>,
     split_into: Option<Vec<BlockDelta>>,
+}
+
+impl BlockDeltaInner {
+    fn add(&mut self, key: BlockfileKey, value: Value) {
+        if self.deletes.contains(&key) {
+            self.deletes.retain(|x| x != &key);
+        }
+        self.adds.insert(key, value);
+    }
+
+    fn delete(&mut self, key: BlockfileKey) {
+        if self.adds.contains_key(&key) {
+            self.adds.remove(&key);
+        }
+        self.deletes.push(key);
+    }
+
+    fn can_add(&self, curr_data_size: usize, max_block_size: usize, bytes: usize) -> bool {
+        let curr_adds_size = self.adds.iter().fold(0, |acc, (key, value)| {
+            acc + get_key_size(key) + get_value_size(value)
+        });
+        println!("Current adds size: {}", curr_adds_size);
+        let curr_deletes_size = self
+            .deletes
+            .iter()
+            .fold(0, |acc, key| acc + get_key_size(key));
+        let total_size = curr_data_size + curr_adds_size - curr_deletes_size;
+        total_size + bytes <= max_block_size
+    }
+}
+
+#[derive(Clone)]
+struct BlockDelta {
+    source_block: Option<Arc<BlockData>>,
+    inner: Arc<RwLock<BlockDeltaInner>>,
     max_block_size: usize, // TODO: this shouldn't be redundantly stored in every struct
 }
 
 impl BlockDelta {
-    fn new(source_block: Arc<BlockData>) -> Self {
+    fn new() -> Self {
         Self {
-            source_block: Some(source_block),
-            adds: BTreeMap::new(),
-            deletes: Vec::new(),
-            split_into: None,
+            source_block: None,
+            inner: Arc::new(RwLock::new(BlockDeltaInner {
+                adds: BTreeMap::new(),
+                deletes: Vec::new(),
+                split_into: None,
+            })),
+            max_block_size: 1024,
+        }
+    }
+
+    fn from(block: Arc<BlockData>) -> Self {
+        Self {
+            source_block: Some(block),
+            inner: Arc::new(RwLock::new(BlockDeltaInner {
+                adds: BTreeMap::new(),
+                deletes: Vec::new(),
+                split_into: None,
+            })),
             max_block_size: 1024,
         }
     }
@@ -82,43 +151,64 @@ impl BlockDelta {
     }
 
     fn was_split(&self) -> bool {
-        self.split_into.is_some()
+        self.inner.read().split_into.is_some()
     }
 
-    fn split(&self) -> Vec<BlockDelta> {
-        unimplemented!();
+    fn split(&self) {
+        let mut inner = self.inner.write();
+        // use std::mem::take to move the adds out since we are going to clear it
+        let adds = std::mem::take(&mut inner.adds);
+        let block_1 = BlockDelta::new();
+        let block_2 = BlockDelta::new();
+        let mut overall_size = 0;
+        // Case 1: There is a source_block and we need to account for the data in it
+        // Case 2: There is no source_block and we only need to account for the data in the adds
+        // Ignore case 1 for now
+
+        if self.source_block.is_some() {
+            return unimplemented!();
+        } else {
+            // Incrementally add until we reach as close to 50% of the total size as possible
+            for (key, value) in adds {
+                let key_size = get_key_size(&key);
+                let value_size = get_value_size(&value);
+                let entry_size = key_size + value_size;
+                if overall_size + entry_size <= self.max_block_size / 2 {
+                    overall_size += entry_size;
+                    block_1.add(key, value);
+                } else {
+                    block_2.add(key, value);
+                }
+            }
+        }
+
+        let mut split_into = Vec::new();
+        split_into.push(block_1);
+        split_into.push(block_2);
+        self.inner.write().split_into = Some(split_into);
     }
 
     fn can_add(&self, bytes: usize) -> bool {
         // TODO: this should perform the rounding and padding to estimate the correct block size
+        // TODO: the source block size includes the padding and rounding, but we want the actual data size so we can compute
+        // what writing out a new block would look like
         let curr_data_size = match &self.source_block {
             None => 0,
             Some(block) => block.get_size(),
         };
-        let curr_adds_size = self.adds.iter().fold(0, |acc, (key, value)| {
-            acc + get_key_size(key) + get_value_size(value)
-        });
-        let curr_deletes_size = self
-            .deletes
-            .iter()
-            .fold(0, |acc, key| acc + get_key_size(key));
-        let total_size = curr_data_size + curr_adds_size + curr_deletes_size;
-        total_size + bytes <= self.max_block_size
-    }
-}
 
-struct BlockCache {
-    cache: std::collections::HashMap<u64, RecordBatch>,
-}
-
-impl BlockCache {
-    fn new() -> Self {
-        unimplemented!();
+        let inner = self.inner.read();
+        inner.can_add(curr_data_size, self.max_block_size, bytes)
     }
 
-    // A block is a record batch with the schema (key, value) and is sorted by key
-    fn get_block(&self, block_id: u64) -> Result<RecordBatch, Box<dyn crate::errors::ChromaError>> {
-        unimplemented!();
+    fn add(&self, key: BlockfileKey, value: Value) {
+        let mut inner = self.inner.write();
+        inner.add(key, value);
+    }
+
+    fn delete(&self, key: BlockfileKey) {
+        let mut inner = self.inner.write();
+        inner.delete(key);
     }
 }
 
@@ -236,155 +326,76 @@ impl Blockfile for ArrowBlockfile {
         key: BlockfileKey,
         value: Value,
     ) -> Result<(), Box<dyn crate::errors::ChromaError>> {
-        if !self.in_transaction {
+        if !self.in_transaction() {
             panic!("Transaction not in progress");
         }
-        if self.transaction_state.adds.contains_key(&key) {
-            panic!("Key already exists");
-        }
 
-        let mut entry_size = 0;
-        match &value {
-            Value::Int32ArrayValue(array) => {
-                entry_size += array.get_buffer_memory_size();
-            }
-            _ => panic!("Unsupported value type"),
-        }
-
-        // compute the size of the prefix + key
-        let prefix_size = key.prefix.len();
-        let key_size = match &key.key {
-            Key::String(key) => key.len(),
-            _ => panic!("Unsupported"),
+        let transaction_state = match self.transaction_state {
+            None => panic!("Transaction not in progress"),
+            Some(ref mut state) => state,
         };
-        entry_size += prefix_size + key_size;
-        println!("Entry size: {}", entry_size);
 
-        match &self.root {
+        let entry_size = get_key_size(&key) + get_value_size(&value);
+
+        // Get target dirty block
+        let delta = match &self.root {
             None => {
-                // let mut delta = BlockDelta::new(None);
-                // if delta.can_add(entry_size) {
-                //     delta.add_bytes(entry_size);
-                // } else {
-                //     // We need to split this block
-                //     // Create a new sparse index
-                //     // Create new data blocks
-                //     // Move the data from the current block to the new blocks
-                //     // Add the changes to the new blocks
-                //     // Commit the new blocks
-                // }
+                // Check if the transaction state has a root block delta, if not create one
+                match &transaction_state.root_block_delta {
+                    None => {
+                        let delta = Arc::new(BlockDelta::new());
+                        transaction_state.root_block_delta = Some(delta.clone());
+                        delta
+                    }
+                    Some(delta) => delta.clone(),
+                }
             }
             Some(RootBlock::BlockData(block_data)) => {
-                let curr_size = block_data.get_size();
-                if curr_size + entry_size > self.max_block_size {
-                    // Split the block
-                    // Create a new sparse index
-                    // Create new data blocks
-                    // Move the data from the current block to the new blocks
-                    // Add the changes to the new blocks
-                    // Commit the new blocks
-                    unimplemented!();
-                } else {
-                    // Add the changes to the current block
-                    // let mut delta = BlockDelta::new(Some(block_data.id));
-                    // delta.add_bytes(entry_size);
+                match transaction_state.get_delta_for_block(&block_data) {
+                    None => {
+                        // TODO: BlockDelta is a Arc-inner pattern and doesn't need to be wrapped in an Arc again
+                        let delta = Arc::new(BlockDelta::from(block_data.clone()));
+                        transaction_state.add_delta(delta.clone());
+                        delta
+                    }
+                    Some(delta) => delta,
                 }
             }
             Some(RootBlock::SparseIndex(sparse_index)) => {
                 unimplemented!();
             }
-        }
+        };
 
-        self.transaction_state.adds.insert(key, value);
+        if delta.can_add(entry_size) {
+            println!("Adding to existing delta");
+            delta.add(key, value);
+        } else {
+            println!("Splitting delta");
+            delta.split();
+            let new_deltas = delta.inner.read().split_into.as_ref().unwrap();
+
+            // Add the new deltas to the transaction state
+            for new_delta in new_deltas {
+                // TODO: this doesn't need to be arc wrapped
+                transaction_state.add_delta(Arc::new(new_delta.clone()));
+            }
+        }
 
         Ok(())
     }
 
     fn begin_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
-        if self.in_transaction {
+        if self.in_transaction() {
             // TODO: return error
             panic!("Transaction already in progress");
         }
-        self.in_transaction = true;
+        self.transaction_state = Some(TransactionState::new());
         Ok(())
     }
 
     fn commit_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
         // First determine the root block type
-        match &self.root {
-            None => {
-                let change_size = self.compute_changes_size();
-                if change_size <= self.max_block_size {
-                    // We can just add the changes to the block, no splitting is needed, and there is no current block
-                    let mut block_builder =
-                        BlockBuilder::new(self.key_type.clone(), self.value_type.clone(), None);
-                    // TODO: drain this vec so we don't have to clone
-                    for (key, value) in self.transaction_state.adds.iter() {
-                        block_builder.add(key.clone(), value.clone());
-                    }
-                    let block_data = block_builder.build();
-                    println!(
-                        "After comitting single block size is: {:?}",
-                        block_data.get_size()
-                    );
-                    self.root = Some(RootBlock::BlockData(block_data));
-                } else {
-                    unimplemented!("Need to split the block");
-                }
-            }
-            Some(RootBlock::BlockData(root_block_data)) => {
-                // Read the current block and see if we need to split based on its size
-                // if we need to split, create a sparse index block and the needed number of data blocks
-                // and move the data from the current block to the new blocks
-                // if we don't need to split, just add the changes to the current block
-                let curr_size = root_block_data.get_size();
-                let change_size = self.compute_changes_size();
-                if curr_size + change_size > self.max_block_size {
-                    // Split the block
-                    // Create a new sparse index
-                    // Create new data blocks
-                    // Move the data from the current block to the new blocks
-                    // Add the changes to the new blocks
-                    // Commit the new blocks
-                    println!(
-                        "curr_size: {:?} change_size: {:?} max_block_size: {:?}",
-                        curr_size, change_size, self.max_block_size
-                    );
-                    let new_blocks_needed = (curr_size + change_size) / self.max_block_size;
-                    println!("New blocks needed: {}", new_blocks_needed);
-                    // let new_blocks = Vec::new();
-                    for _ in 0..new_blocks_needed {
-                        // Create a new block
-                        // Add the changes to the new block
-                        // Commit the new block
-                        let mut builder =
-                            BlockBuilder::new(self.key_type.clone(), self.value_type.clone(), None);
-                        let mut added = 0;
-                        for (key, value) in self.transaction_state.adds.iter() {
-                            if added < self.max_block_size {
-                                builder.add(key.clone(), value.clone());
-                                match value {
-                                    Value::Int32ArrayValue(array) => {
-                                        added += array.get_buffer_memory_size();
-                                    }
-                                    _ => panic!("Unsupported value type"),
-                                }
-                            } else {
-                                println!("Block is full, creating new block");
-                                added = 0;
-                                // Create a new block
-                                // Add the changes to the new block
-                                // Commit the new block
-                            }
-                        }
-                    }
-                } else {
-                    // Add the changes to the current block
-                }
-            }
-            Some(RootBlock::SparseIndex(sparse_index)) => {}
-        }
-        self.in_transaction = false;
+        self.transaction_state = None;
         Ok(())
     }
 }
@@ -398,72 +409,15 @@ impl ArrowBlockfile {
     ) -> Self {
         Self {
             root,
-            transaction_state: TransactionState {
-                adds: BTreeMap::new(),
-                deletes: Vec::new(),
-                // block_delta: Vec::new(),
-            },
-            in_transaction: false,
+            transaction_state: None,
             max_block_size,
             key_type,
             value_type,
         }
     }
 
-    fn compute_changes_size(&self) -> usize {
-        println!("=== ARROW BLOCKFILE CHANGESET SIZE ===");
-        let mut prefix_size = 0;
-        let mut key_size = 0;
-        let mut value_size = 0;
-        let mut size = 0;
-        for (key, value) in self.transaction_state.adds.iter() {
-            size += key.prefix.len();
-            prefix_size += key.prefix.len();
-            match &key.key {
-                Key::String(key) => {
-                    size += key.len();
-                    key_size += key.len();
-                }
-                _ => panic!("Unsupported key type"),
-            }
-            match value {
-                Value::Int32ArrayValue(array) => {
-                    size += array.get_buffer_memory_size();
-                    value_size += array.get_buffer_memory_size();
-                }
-                _ => panic!("Unsupported value type"),
-            }
-        }
-        // round all sizes to multiple of the arrow blockfile alignemnet - 64 bytes
-        // add the size of the offset buffer for string arrays, we assume the offset buffer is 4 bytes per int
-        // the prefix is always a string, the key may be a float and then there is no offset buffer
-        let align = 64;
-        prefix_size = prefix_size + (align - (prefix_size % align));
-        println!("Size of prefixes value buffer: {}", prefix_size);
-        let mut prefix_offset_buffer_size = 4 * self.transaction_state.adds.len();
-        prefix_offset_buffer_size =
-            prefix_offset_buffer_size + (align - (prefix_offset_buffer_size % align));
-        println!(
-            "Size of prefix offset buffer: {}",
-            prefix_offset_buffer_size
-        );
-        prefix_size += prefix_offset_buffer_size;
-        key_size = key_size + (align - (key_size % align));
-        value_size = value_size + (align - (value_size % align));
-        size = size + (align - (size % align));
-        println!("Size of prefixes in changeset: {}", prefix_size);
-        println!("Size of keys in changeset: {}", key_size);
-        println!("Size of values in changeset: {}", value_size);
-        println!("Size of changes in changeset: {}", size);
-        size
-    }
-
-    fn commit_sparse_index(&self) {
-        unimplemented!();
-    }
-
-    fn add_changes_to_block(&self, block_id: u64) {
-        unimplemented!();
+    fn in_transaction(&self) -> bool {
+        self.transaction_state.is_some()
     }
 }
 
@@ -509,14 +463,14 @@ mod tests {
 
         // Add one block worth of data
         blockfile.begin_transaction().unwrap();
-        let n = 42;
+        let n = 200;
         for i in 0..n {
             let key = BlockfileKey::new("key".to_string(), Key::String(i.to_string()));
             blockfile
                 .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
                 .unwrap();
         }
-        blockfile.commit_transaction().unwrap();
+        // blockfile.commit_transaction().unwrap();
 
         // blockfile.begin_transaction().unwrap();
         // let bytes_per_entry = 8;
