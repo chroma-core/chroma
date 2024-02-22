@@ -98,3 +98,12 @@ metadata:
   namespace: chroma
 spec:
   members:
+---
+apiVersion: chroma.cluster/v1
+kind: MemberList
+metadata:
+  name: test-memberlist
+  namespace: chroma
+spec:
+  members:
+---
