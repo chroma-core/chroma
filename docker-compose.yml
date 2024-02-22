@@ -29,8 +29,15 @@ services:
       - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME}
       - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY}
       - CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE}
+    restart: unless-stopped # possible values are: "no", always", "on-failure", "unless-stopped"
     ports:
-      - 8000:8000
+      - "8000:8000"
+    healthcheck:
+      # below test does not require curl or wget to be installed
+      test: [ "CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - net
 
