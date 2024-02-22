@@ -181,7 +181,6 @@ impl FullTextIndex for BlockfileFullTextIndex {
         for (doc_id, _) in candidates.drain() {
             results.push(doc_id);
         }
-
         Ok(results)
     }
 }
