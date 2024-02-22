@@ -742,6 +742,10 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         """
 
         self._model_name = model_name
+        self._model_provider = self._model_name.split('.')[0]
+        
+        if self._model_provider not in ["amazon", "cohere"]:
+            raise ValueError(f"Model {self._model_name} is not supported. You can find the full list of supported foundation models in Amazon Bedrock at https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html")
 
         self._client = session.client(
             service_name="bedrock-runtime",
@@ -751,8 +755,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         accept = "application/json"
         content_type = "application/json"
-        provider = self._model_name.split('.')[0]
-        if provider == "amazon":
+        if self._model_provider == "amazon":
             embeddings = []
             for text in input:
                 input_body = {
@@ -767,7 +770,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 )
                 embedding = json.load(response.get("body")).get("embedding")
                 embeddings.append(embedding)
-        elif provider == "cohere":
+        elif self._model_provider == "cohere":
             # See Amazon Bedrock User Guide > Cohere Embed models for more information
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed.html
             input_body = {
@@ -782,8 +785,6 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 contentType=content_type,
             )
             embeddings = json.load(response.get("body")).get("embeddings")
-        else:
-            raise NotImplemented
         return embeddings
 
 
