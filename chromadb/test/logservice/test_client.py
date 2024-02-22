@@ -12,6 +12,7 @@ from chromadb.proto.chroma_pb2 import (
     ScalarEncoding,
     Vector,
 )
+from chromadb.test.conftest import skip_if_not_cluster
 
 test_vector_1 = [random.random() for _ in range(1000)]
 test_record_1 = SubmitEmbeddingRecord(
@@ -35,6 +36,7 @@ test_record_2 = SubmitEmbeddingRecord(
 
 
 class LogServiceClientTest(unittest.TestCase):
+    @skip_if_not_cluster()
     def test_push_logs(self) -> None:
         log_service = GrpcLogService()
         collection_id = UUID("00000000-0000-0000-0000-000000000001")
@@ -55,6 +57,7 @@ class LogServiceClientTest(unittest.TestCase):
         )
         assert record_count == 2
 
+    @skip_if_not_cluster()
     def test_push_logs_invalid_collection_id_error(self) -> None:
         with self.assertRaises(grpc.RpcError) as context:
             log_service = GrpcLogService()
