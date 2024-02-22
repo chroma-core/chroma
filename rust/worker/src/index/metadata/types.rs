@@ -94,8 +94,7 @@ impl MetadataIndex for BlockfileMetadataIndex {
         if !self.in_transaction {
             return Err(Box::new(MetadataIndexError::NotInTransaction));
         }
-        for (key, rbm) in &self.uncommitted_rbms {
-            // TODO we shouldn't clone.
+        for (key, rbm) in self.uncommitted_rbms.drain() {
             self.blockfile.set(key.clone(), Value::RoaringBitmapValue(rbm.clone()));
         }
         self.blockfile.commit_transaction()?;
