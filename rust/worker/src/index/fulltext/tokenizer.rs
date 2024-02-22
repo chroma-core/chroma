@@ -4,6 +4,7 @@ use tantivy::tokenizer::{NgramTokenizer, Token, Tokenizer, TokenStream};
 
 pub(crate) trait ChromaTokenStream {
     fn process(&mut self, sink: &mut dyn FnMut(&Token));
+    fn get_tokens(&self) -> &Vec<Token>;
 }
 
 struct TantivyChromaTokenStream {
@@ -23,6 +24,10 @@ impl ChromaTokenStream for TantivyChromaTokenStream {
         for token in &self.tokens {
             sink(token);
         }
+    }
+
+    fn get_tokens(&self) -> &Vec<Token> {
+        &self.tokens
     }
 }
 
@@ -65,6 +70,17 @@ mod test {
         token_stream.process(&mut |token| {
             tokens.push(token.clone());
         });
+        assert_eq!(tokens.len(), 11);
+        assert_eq!(tokens[0].text, "h");
+        assert_eq!(tokens[1].text, "e");
+    }
+
+    #[test]
+    fn test_get_tokens() {
+        let tokenizer: Box<NgramTokenizer> = Box::new(NgramTokenizer::new(1, 1, false).unwrap());
+        let mut chroma_tokenizer = TantivyChromaTokenizer::new(tokenizer);
+        let token_stream = chroma_tokenizer.encode("hello world");
+        let tokens = token_stream.get_tokens();
         assert_eq!(tokens.len(), 11);
         assert_eq!(tokens[0].text, "h");
         assert_eq!(tokens[1].text, "e");
