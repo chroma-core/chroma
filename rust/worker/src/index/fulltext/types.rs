@@ -23,7 +23,9 @@ pub(crate) trait FullTextIndex {
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
     fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
 
+    // Must be done inside a transaction.
     fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>>;
+    // Only searches committed state.
     fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>>;
 }
 
@@ -89,9 +91,13 @@ impl FullTextIndex for BlockfileFullTextIndex {
 
     fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
         let tokens = self.tokenizer.encode(query);
-        let mut candidates: HashMap<String, HashMap<i32, Vec<i32>> = HashMap::new();
+        let mut candidates: HashMap<i32, Vec<i32>> = HashMap::new();
         for token in tokens.get_tokens() {
             panic!("Not implemented")
+        }
+        let mut results = vec![];
+        for (doc_id, _) in candidates.drain() {
+            results.push(doc_id);
         }
         Ok(results)
     }
@@ -99,10 +105,46 @@ impl FullTextIndex for BlockfileFullTextIndex {
 
 mod test {
     use super::*;
+    use tantivy::tokenizer::NgramTokenizer;
+    use crate::blockstore::HashMapBlockfile;
+    use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 
     #[test]
-    fn test_blockfile_fulltext_index() {
-        let blockfile = Box::new(MemoryBlockfile::new());
+    fn test_new() {
+        let blockfile = Box::new(HashMapBlockfile::open(&"in-memory").unwrap());
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let _index = BlockfileFullTextIndex::new(blockfile, tokenizer);
+    }
+
+    #[test]
+    fn test_index_single_document() {
+        let blockfile = Box::new(HashMapBlockfile::open(&"in-memory").unwrap());
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut index = BlockfileFullTextIndex::new(blockfile, tokenizer);
+        index.begin_transaction().unwrap();
+        index.add_document("hello world", 1).unwrap();
+        index.commit_transaction().unwrap();
+
+        let res = index.search("hello");
+        assert_eq!(res.unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn test_search_absent_token() {
+        let blockfile = Box::new(HashMapBlockfile::open(&"in-memory").unwrap());
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut index = BlockfileFullTextIndex::new(blockfile, tokenizer);
+        index.begin_transaction().unwrap();
+        index.add_document("hello world", 1).unwrap();
+        index.commit_transaction().unwrap();
+
+        let res = index.search("chroma");
+        assert!(res.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_index_and_search_multiple_documents() {
+        let blockfile = Box::new(HashMapBlockfile::open(&"in-memory").unwrap());
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
         let mut index = BlockfileFullTextIndex::new(blockfile, tokenizer);
         index.begin_transaction().unwrap();
@@ -119,5 +161,20 @@ mod test {
 
         let res = index.search("llo chro");
         assert_eq!(res.unwrap(), vec![2]);
+    }
+
+    #[test]
+    fn test_special_characters_search() {
+        let blockfile = Box::new(HashMapBlockfile::open(&"in-memory").unwrap());
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut index = BlockfileFullTextIndex::new(blockfile, tokenizer);
+        index.begin_transaction().unwrap();
+        index.add_document("!!!!", 1).unwrap();
+        index.add_document(",,!!", 2).unwrap();
+        index.add_document(",!", 3).unwrap();
+        index.commit_transaction().unwrap();
+
+        let res = index.search("!!");
+        assert_eq!(res.unwrap(), vec![1, 2]);
     }
 }
