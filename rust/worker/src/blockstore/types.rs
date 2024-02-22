@@ -1,9 +1,24 @@
 use super::positional_posting_list_value::PositionalPostingList;
-use crate::errors::ChromaError;
+use crate::errors::{ChromaError, ErrorCodes};
+use thiserror::Error;
 use arrow::array::Int32Array;
 use roaring::RoaringBitmap;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
+                
+#[derive(Debug, Error)]
+pub(crate) enum BlockfileError {
+    #[error("Key not found")]
+    NotFoundError,
+}
+
+impl ChromaError for BlockfileError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BlockfileError::NotFoundError => ErrorCodes::InvalidArgument,
+        }
+    }
+}
 
 // ===== Key Types =====
 #[derive(Clone)]
@@ -16,12 +31,14 @@ pub(crate) struct BlockfileKey {
 pub(crate) enum Key {
     String(String),
     Float(f32),
+    Bool(bool),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum KeyType {
     String,
     Float,
+    Bool,
 }
 
 impl Display for Key {
@@ -29,6 +46,7 @@ impl Display for Key {
         match self {
             Key::String(s) => write!(f, "{}", s),
             Key::Float(fl) => write!(f, "{}", fl),
+            Key::Bool(b) => write!(f, "{}", b),
         }
     }
 }
@@ -36,6 +54,16 @@ impl Display for Key {
 impl BlockfileKey {
     pub(crate) fn new(prefix: String, key: Key) -> Self {
         BlockfileKey { prefix, key }
+    }
+}
+
+impl Debug for BlockfileKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BlockfileKey(prefix: {}, key: {})",
+            self.prefix, self.key
+        )
     }
 }
 
@@ -72,11 +100,15 @@ impl Ord for BlockfileKey {
             match self.key {
                 Key::String(ref s1) => match &other.key {
                     Key::String(s2) => s1.cmp(s2),
-                    _ => panic!("Cannot compare string to float"),
+                    _ => panic!("Cannot compare string to float or bool"),
                 },
                 Key::Float(f1) => match &other.key {
                     Key::Float(f2) => f1.partial_cmp(f2).unwrap(),
-                    _ => panic!("Cannot compare float to string"),
+                    _ => panic!("Cannot compare float to string or bool"),
+                },
+                Key::Bool(b1) => match &other.key {
+                    Key::Bool(b2) => b1.cmp(b2),
+                    _ => panic!("Cannot compare bool to string or float"),
                 },
             }
         } else {
@@ -155,7 +187,7 @@ pub(crate) trait Blockfile {
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 }
 
-struct HashMapBlockfile {
+pub(crate) struct HashMapBlockfile {
     map: std::collections::HashMap<BlockfileKey, Value>,
 }
 
@@ -181,10 +213,7 @@ impl Blockfile for HashMapBlockfile {
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
         match self.map.get(&key) {
             Some(value) => Ok(value.clone()),
-            None => {
-                // TOOD: make error
-                panic!("Key not found");
-            }
+            None => Err(Box::new(BlockfileError::NotFoundError)),
         }
     }
 
@@ -276,17 +305,6 @@ mod tests {
     use super::*;
     use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
     use arrow::array::Array;
-    use std::fmt::Debug;
-
-    impl Debug for BlockfileKey {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "BlockfileKey(prefix: {}, key: {})",
-                self.prefix, self.key
-            )
-        }
-    }
 
     #[test]
     fn test_blockfile_set_get() {
@@ -347,6 +365,21 @@ mod tests {
                 arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
             ),
             _ => panic!("Value is not a string"),
+        }
+    }
+
+    #[test]
+    fn test_bool_key() {
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: Key::Bool(true),
+        };
+        let _res = blockfile.set(key.clone(), Value::Int32ArrayValue(Int32Array::from(vec![1])));
+        let value = blockfile.get(key).unwrap();
+        match value {
+            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1])),
+            _ => panic!("Value is not an arrow int32 array"),
         }
     }
 
