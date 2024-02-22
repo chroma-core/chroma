@@ -5,6 +5,7 @@ import orjson
 # https://anyio.readthedocs.io/en/stable/threads.html#adjusting-the-default-maximum-worker-thread-count
 from anyio import (
     to_thread,
+    CapacityLimiter,
 )  # this is used to transform sync code to async. By default, AnyIO uses 40 threads pool
 from fastapi import FastAPI as _FastAPI, Response, Request
 from fastapi.responses import JSONResponse
@@ -142,6 +143,8 @@ class FastAPI(chromadb.server.Server):
         self._system = System(settings)
         self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
+        self._thread_pool_size = settings.chroma_server_thread_pool_size
+        self._capacity_limiter = CapacityLimiter(self._thread_pool_size)
         self._system.start()
 
         self._app.middleware("http")(check_http_version_middleware)
@@ -496,7 +499,11 @@ class FastAPI(chromadb.server.Server):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         return await to_thread.run_sync(  # type: ignore
-            self._api.delete_collection, collection_name, tenant, database
+            self._api.delete_collection,
+            collection_name,
+            tenant,
+            database,
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
@@ -520,6 +527,7 @@ class FastAPI(chromadb.server.Server):
                 add.metadatas,
                 add.documents,
                 add.uris,
+                limiter=self._capacity_limiter,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -545,6 +553,7 @@ class FastAPI(chromadb.server.Server):
             add.metadatas,
             add.documents,
             add.uris,
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
@@ -568,6 +577,7 @@ class FastAPI(chromadb.server.Server):
             upsert.metadatas,
             upsert.documents,
             upsert.uris,
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
@@ -594,6 +604,7 @@ class FastAPI(chromadb.server.Server):
                 None,
                 get.where_document,
                 get.include,
+                limiter=self._capacity_limiter,
             ),
         )
 
@@ -615,6 +626,7 @@ class FastAPI(chromadb.server.Server):
                 delete.ids,
                 delete.where,
                 delete.where_document,
+                limiter=self._capacity_limiter,
             ),
         )
 
@@ -629,7 +641,10 @@ class FastAPI(chromadb.server.Server):
     )
     async def count(self, collection_id: str) -> int:
         return cast(
-            int, await to_thread.run_sync(self._api._count, _uuid(collection_id))
+            int,
+            await to_thread.run_sync(
+                self._api._count, _uuid(collection_id), limiter=self._capacity_limiter
+            ),
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
@@ -665,6 +680,7 @@ class FastAPI(chromadb.server.Server):
                 query.where,
                 query.where_document,
                 query.include,
+                limiter=self._capacity_limiter,
             ),
         )
         return nnresult

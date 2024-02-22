@@ -82,6 +82,7 @@ _abstract_type_keys: Dict[str, str] = {
 DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
+
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
@@ -139,6 +140,8 @@ class Settings(BaseSettings):  # type: ignore
         return v
 
     chroma_server_nofile: Optional[int] = None
+    # the number of maximum threads to handle synchronous tasks in the FastAPI server
+    chroma_server_thread_pool_size: Optional[int] = 40
 
     pulsar_broker_url: Optional[str] = None
     pulsar_admin_port: Optional[int] = 8080
@@ -320,13 +323,16 @@ class System(Component):
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
 
-        if settings["chroma_segment_cache_policy"] is not None and settings["chroma_segment_cache_policy"] != "LRU":
+        if (
+            settings["chroma_segment_cache_policy"] is not None
+            and settings["chroma_segment_cache_policy"] != "LRU"
+        ):
             logger.error(
-                f"Failed to set chroma_segment_cache_policy: Only LRU is available."
+                "Failed to set chroma_segment_cache_policy: Only LRU is available."
             )
             if settings["chroma_memory_limit_bytes"] == 0:
                 logger.error(
-                    f"Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
+                    "Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
                 )
 
         # Apply the nofile limit if set
