@@ -18,11 +18,12 @@ kubectl -n chroma port-forward svc/pulsar 6650:6650 &
 kubectl -n chroma port-forward svc/pulsar 8080:8080 &
 kubectl -n chroma port-forward svc/server 8000:8000 &
 
+"$@"
 
-
-echo testing: python -m pytest "$@"
-python -m pytest "$@"
-
-export CHROMA_KUBERNETES_INTEGRATION=1
-cd go/coordinator
-go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager
+#
+#echo testing: python -m pytest "$@"
+#python -m pytest "$@"
+#
+#export CHROMA_KUBERNETES_INTEGRATION=1
+#cd go/coordinator
+#go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager

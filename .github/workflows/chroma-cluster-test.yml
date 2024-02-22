@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  test-python:
     strategy:
       matrix:
         python: ['3.8']
@@ -43,6 +43,5 @@ jobs:
       run: ctlptl create cluster kind --registry=ctlptl-registry
     - name: Start Tilt
       run: tilt ci
-    - name: Integration Test
-      run: bin/cluster-test.sh ${{ matrix.testfile }}
-
+    - name: Test
+      run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.testfile }}"'
