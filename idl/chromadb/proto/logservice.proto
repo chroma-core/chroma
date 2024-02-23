@@ -26,4 +26,5 @@ message PullLogsResponse {
 
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
 }
