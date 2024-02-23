@@ -281,6 +281,8 @@ class SqliteMetadataSegment(MetadataReader):
             if upsert:
                 return self._update_record(cur, record)
             else:
+                if "wal_replay" in record.keys() and record["wal_replay"]:
+                    return
                 logger.warning(f"Insert of existing embedding ID: {record['id']}")
                 # We are trying to add for a record that already exists. Fail the call.
                 # We don't throw an exception since this is in principal an async path
@@ -415,7 +417,8 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
+            if "wal_replay" not in record.keys() or not record["wal_replay"]:
+                logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
         else:
             id = result[0]
 
@@ -446,7 +449,8 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
+            if "wal_replay" not in record.keys() or not record["wal_replay"]:
+                logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
         else:
             id = result[0]
             if record["metadata"]:

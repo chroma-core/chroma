@@ -288,7 +288,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .where(t.topic == ParameterValue(subscription.topic_name))
             .where(t.seq_id > ParameterValue(subscription.start))
             .where(t.seq_id <= ParameterValue(subscription.end))
-            .select(t.seq_id, t.operation, t.id, t.vector, t.encoding, t.metadata)
+            .select(
+                t.seq_id, t.operation, t.id, t.vector, t.encoding, t.metadata, t.topic
+            )
             .orderby(t.seq_id)
         )
         with self.tx() as cur:
@@ -312,6 +314,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                             embedding=vector,
                             encoding=encoding,
                             metadata=json.loads(row[5]) if row[5] else None,
+                            wal_replay=True,
                         )
                     ],
                 )

@@ -240,6 +240,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._max_seq_id = max(self._max_seq_id, record["seq_id"])
                 id = record["id"]
                 op = record["operation"]
+                wal_replay = (
+                    record["wal_replay"] if "wal_replay" in record.keys() else False
+                )
                 exists_in_index = self._id_to_label.get(
                     id, None
                 ) is not None or self._brute_force_index.has_id(id)
@@ -251,7 +254,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         if exists_in_bf_index:
                             self._brute_force_index.delete([record])
                     else:
-                        logger.warning(f"Delete of nonexisting embedding ID: {id}")
+                        if not wal_replay:
+                            logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
                     if record["embedding"] is not None:
@@ -259,16 +263,18 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             self._curr_batch.apply(record)
                             self._brute_force_index.upsert([record])
                         else:
-                            logger.warning(
-                                f"Update of nonexisting embedding ID: {record['id']}"
-                            )
+                            if not wal_replay:
+                                logger.warning(
+                                    f"Update of nonexisting embedding ID: {record['id']}"
+                                )
                 elif op == Operation.ADD:
                     if record["embedding"] is not None:
                         if not exists_in_index:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
                         else:
-                            logger.warning(f"Add of existing embedding ID: {id}")
+                            if not wal_replay:
+                                logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
                     if record["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)

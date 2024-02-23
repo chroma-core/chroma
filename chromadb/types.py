@@ -106,6 +106,7 @@ class EmbeddingRecord(TypedDict):
     # single node, since data written with older versions of the code won't be able to
     # populate it.
     collection_id: Optional[UUID]
+    wal_replay: Optional[bool]
 
 
 class SubmitEmbeddingRecord(TypedDict):
