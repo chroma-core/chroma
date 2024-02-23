@@ -44,3 +44,20 @@ func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]b
 	}
 	return len(recordsContent), nil
 }
+
+func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error) {
+	var collectionIDStr = types.FromUniqueID(collectionID)
+	log.Info("PullLogs",
+		zap.String("collectionID", *collectionIDStr),
+		zap.Int64("ID", id),
+		zap.Int("batch_size", batchSize))
+
+	var recordLogs []*dbmodel.RecordLog
+	s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Limit(batchSize).Find(&recordLogs)
+	log.Info("PullLogs",
+		zap.String("collectionID", *collectionIDStr),
+		zap.Int64("ID", id),
+		zap.Int("batch_size", batchSize),
+		zap.Int("count", len(recordLogs)))
+	return recordLogs, nil
+}
