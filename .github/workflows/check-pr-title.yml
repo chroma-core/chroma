@@ -27,5 +27,5 @@ jobs:
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: 'Please tag your PR title with one of: \\[ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
+                body: 'Please tag your PR title with one of: \\[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
               })
