@@ -14,6 +14,17 @@ message PushLogsResponse {
   int32 record_count = 1;
 }
 
+message PullLogsRequest {
+  string collection_id = 1;
+  int64 start_from_id = 2;
+  int32 batch_size = 3;
+}
+
+message PullLogsResponse {
+  repeated SubmitEmbeddingRecord records = 1;
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
 }

@@ -1,6 +1,7 @@
 package grpcutils
 
 import (
+	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -28,4 +29,17 @@ func BuildInvalidArgumentGrpcError(fieldName string, desc string) (error, error)
 
 func BuildInternalGrpcError(msg string) error {
 	return status.Error(codes.Internal, msg)
+}
+
+func BuildErrorForCollectionId(collectionID types.UniqueID, err error) error {
+	if err != nil || collectionID == types.NilUniqueID() {
+		log.Error("collection id format error", zap.String("collection.id", collectionID.String()))
+		grpcError, err := BuildInvalidArgumentGrpcError("collection_id", "wrong collection_id format")
+		if err != nil {
+			log.Error("error building grpc error", zap.Error(err))
+			return err
+		}
+		return grpcError
+	}
+	return nil
 }

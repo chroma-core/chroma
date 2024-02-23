@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
@@ -13,14 +14,9 @@ import (
 func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
 	res := &logservicepb.PushLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	if err != nil || collectionID == types.NilUniqueID() {
-		log.Error("collection id format error", zap.String("collection.id", req.CollectionId))
-		grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("collection_id", "wrong collection_id format")
-		if err != nil {
-			log.Error("error building grpc error", zap.Error(err))
-			return nil, err
-		}
-		return nil, grpcError
+	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	if err != nil {
+		return nil, err
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
@@ -43,5 +39,31 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	}
 	res.RecordCount = int32(recordCount)
 	log.Info("PushLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", recordCount))
+	return res, nil
+}
+
+func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (*logservicepb.PullLogsResponse, error) {
+	res := &logservicepb.PullLogsResponse{}
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
+	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	if err != nil {
+		log.Error("error pulling logs", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error pushing logs")
+	}
+	for index := range recordLogs {
+		record := &coordinatorpb.SubmitEmbeddingRecord{}
+		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
+			log.Error("Unmarshal error", zap.Error(err))
+			return nil, grpcutils.BuildInternalGrpcError("error unmarshal record logs")
+		}
+		records = append(records, record)
+	}
+	res.Records = records
+	log.Info("PullLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", len(records)))
 	return res, nil
 }
