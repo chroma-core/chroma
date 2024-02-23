@@ -99,6 +99,7 @@ class SegmentAPI(ServerAPI):
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._system = system
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
@@ -840,6 +841,11 @@ class SegmentAPI(ServerAPI):
                 )
             self._collection_cache[collection_id] = collections[0]
         return self._collection_cache[collection_id]
+
+    @trace_method("SegmentAPI.close", OpenTelemetryGranularity.ALL)
+    @override
+    def close(self) -> None:
+        self._system.stop()
 
 
 def _records(

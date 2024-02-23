@@ -459,6 +459,11 @@ class Client(SharedSystemClient, ClientAPI):
                 f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
             )
 
+    @override
+    def close(self) -> None:
+        if self.get_settings().is_persistent:
+            self._server.close()
+
     # endregion
 
 

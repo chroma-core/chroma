@@ -629,6 +629,11 @@ class FastAPI(ServerAPI):
             self._max_batch_size = cast(int, json.loads(resp.text)["max_batch_size"])
         return self._max_batch_size
 
+    @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
+    @override
+    def close(self) -> None:
+        self._session.close()
+
 
 def raise_chroma_error(resp: requests.Response) -> None:
     """Raises an error if the response is not ok, using a ChromaError if possible"""
