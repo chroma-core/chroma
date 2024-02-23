@@ -14,11 +14,15 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from typing import Dict, Optional, Any, Mapping
+from typing import Dict, Optional
+
+import numpy
+import uuid
+from chromadb.test.property.strategies import hashing_embedding_function
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
-    collections: Bundle[strategies.Collection]
+    collections: Bundle[strategies.ExternalCollection]
     _model: Dict[str, Optional[types.CollectionMetadata]]
 
     collections = Bundle("collections")
@@ -35,8 +39,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     @rule(target=collections, coll=strategies.collections())
     def create_coll(
-        self, coll: strategies.Collection
-    ) -> MultipleResults[strategies.Collection]:
+        self, coll: strategies.ExternalCollection
+    ) -> MultipleResults[strategies.ExternalCollection]:
         # Metadata can either be None or a non-empty dict
         if coll.name in self.model or (
             coll.metadata is not None and len(coll.metadata) == 0
@@ -54,14 +58,14 @@ class CollectionStateMachine(RuleBasedStateMachine):
             metadata=coll.metadata,
             embedding_function=coll.embedding_function,
         )
-        self.set_model(coll.name, coll.metadata, str(coll.id))
+        self.set_model(coll.name, coll.metadata)
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
     @rule(coll=collections)
-    def get_coll(self, coll: strategies.Collection) -> None:
+    def get_coll(self, coll: strategies.ExternalCollection) -> None:
         if coll.name in self.model:
             c = self.api.get_collection(name=coll.name)
             assert c.name == coll.name
@@ -71,7 +75,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
                 self.api.get_collection(name=coll.name)
 
     @rule(coll=consumes(collections))
-    def delete_coll(self, coll: strategies.Collection) -> None:
+    def delete_coll(self, coll: strategies.ExternalCollection) -> None:
         if coll.name in self.model:
             self.api.delete_collection(name=coll.name)
             self.delete_from_model(coll.name)
@@ -85,7 +89,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule()
     def list_collections(self) -> None:
         colls = self.api.list_collections()
-        assert len(colls) == len([c for c in self.model if not c.startswith("__id__")])
+        assert len(colls) == len(self.model)
         for c in colls:
             assert c.name in self.model
 
@@ -119,9 +123,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
     )
     def get_or_create_coll(
         self,
-        coll: strategies.Collection,
+        coll: strategies.ExternalCollection,
         new_metadata: Optional[types.Metadata],
-    ) -> MultipleResults[strategies.Collection]:
+    ) -> MultipleResults[strategies.ExternalCollection]:
         # Cases for get_or_create
 
         # Case 0
@@ -163,7 +167,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll.metadata = (
                 self.model[coll.name] if new_metadata is None else new_metadata
             )
-        self.set_model(coll.name, coll.metadata, str(coll.id))
+        self.set_model(coll.name, coll.metadata)
 
         # Update API
         c = self.api.get_or_create_collection(
@@ -185,20 +189,19 @@ class CollectionStateMachine(RuleBasedStateMachine):
     )
     def modify_coll(
         self,
-        coll: strategies.Collection,
+        coll: strategies.ExternalCollection,
         new_metadata: types.Metadata,
         new_name: Optional[str],
-    ) -> MultipleResults[strategies.Collection]:
-        # early exit if a col with name exists but with diff id, possibly in another tenant/db
-        if coll.name in self.model and f"__id__:{coll.id}" not in self.model:
-            return multiple()
+    ) -> MultipleResults[strategies.ExternalCollection]:
         if coll.name not in self.model:
             with pytest.raises(Exception):
                 c = self.api.get_collection(name=coll.name)
             return multiple()
 
         c = self.api.get_collection(name=coll.name)
-        _metadata: Optional[Mapping[str, Any]] = coll.metadata
+        print("before API:", c)
+        print("model:", self.model)
+        _metadata: Optional[Mapping[str, Any]] = self.model[coll.name]
         _name: str = coll.name
         if new_metadata is not None:
             if len(new_metadata) == 0:
@@ -221,10 +224,12 @@ class CollectionStateMachine(RuleBasedStateMachine):
             self.delete_from_model(coll.name)
             coll.name = new_name
             _name = new_name
-        self.set_model(_name, _metadata, str(coll.id))
 
+        self.set_model(_name, _metadata)
         c.modify(metadata=_metadata, name=_name)
         c = self.api.get_collection(name=coll.name)
+        print("after API:", c)
+        print("model:", self.model)
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
@@ -234,18 +239,13 @@ class CollectionStateMachine(RuleBasedStateMachine):
         self,
         name: str,
         metadata: Optional[types.CollectionMetadata],
-        id: Optional[str] = None,
     ) -> None:
         model = self.model
         model[name] = metadata
-        if id is not None:
-            model[f"__id__:{id}"] = metadata
 
-    def delete_from_model(self, name: str, id: Optional[str] = None) -> None:
+    def delete_from_model(self, name: str) -> None:
         model = self.model
         del model[name]
-        if id is not None:
-            del model[f"__id__:{id}"]
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
@@ -255,3 +255,87 @@ class CollectionStateMachine(RuleBasedStateMachine):
 def test_collections(caplog: pytest.LogCaptureFixture, api: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore
+
+
+# Below are tests that have failed in the past. If your test fails, please add
+# it to protect against regressions in the test harness itself. If you need
+# help doing so, talk to ben.
+
+
+def test_previously_failing_one(api: ClientAPI) -> None:
+    state = CollectionStateMachine(api)
+    state.initialize()
+    # I don't know why the typechecker is red here. This code is correct and is
+    # pulled from the logs.
+    (v1,) = state.get_or_create_coll(
+        coll=strategies.ExternalCollection(
+            name='jjn2yjLW1zp2T\n',
+            metadata=None,
+            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863)
+        ),
+        new_metadata=None
+    )
+    (v6,) = state.get_or_create_coll(
+        coll=strategies.ExternalCollection(
+            name='jjn2yjLW1zp2T\n',
+            metadata=None,
+            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863)
+        ),
+        new_metadata=None
+    )
+    state.modify_coll(
+        coll=v1,
+        new_metadata={'7': -1281, 'fGe': -0.0, 'K5j': 'im'},
+        new_name=None
+    )
+    state.modify_coll(
+        coll=v6,
+        new_metadata=None,
+        new_name=None
+    )
+
+
+# https://github.com/chroma-core/chroma/commit/cf476d70f0cebb7c87cb30c7172ba74d6ea175cd#diff-e81868b665d149bb315d86890dea6fc6a9fc9fc9ea3089aa7728142b54f622c5R210
+def test_previously_failing_two(api: ClientAPI) -> None:
+    state = CollectionStateMachine(api)
+    state.initialize()
+    (v13,) = state.get_or_create_coll(
+        coll=strategies.ExternalCollection(
+            name='C1030',
+            metadata={},
+            embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32)
+        ),
+        new_metadata=None
+    )
+    (v15,) = state.modify_coll(
+        coll=v13,
+        new_metadata={'0': '10', '40': '0', 'p1nviWeL7fO': 'qN', '7b': 'YS', 'VYWq4LEMWjCo': True},
+        new_name='OF5F0MzbQg\n'
+    )
+    state.get_or_create_coll(
+        coll=strategies.ExternalCollection(
+            name='VS0QGh',
+            metadata={'h': 5.681951615025145e-227, 'A1': 61126, 'uhUhLEEMfeC_kN': 2147483647, 'weF': 'pSP', 'B3DSaP': False, '6H533K': 1.192092896e-07},
+            embedding_function=hashing_embedding_function(dim=1915, dtype=numpy.float32)
+        ),
+        new_metadata={'xVW09xUpDZA': 31734,
+                      'g': 1.1,
+                      'n1dUTalF-MY': -1000000.0,
+                      'y': 'G3EtXTZ',
+                      'ugXZ_hK': 5494
+                      }
+    )
+    (v17,) = state.modify_coll(
+        coll=v15,
+        new_metadata={'L35J2S': 'K0l026'},
+        new_name='Ai1\n'
+    )
+    (v18,) = state.get_or_create_coll(coll=v13, new_metadata=None)
+    state.get_or_create_coll(
+        coll=strategies.ExternalCollection(
+            name='VS0QGh',
+            metadata=None,
+            embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16)
+        ),
+        new_metadata=None
+    )
