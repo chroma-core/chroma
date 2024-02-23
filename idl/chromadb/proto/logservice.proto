@@ -3,6 +3,17 @@ syntax = "proto3";
 package chroma;
 option go_package = "github.com/chroma/chroma-coordinator/internal/proto/logservicepb";
 
-service LogService {
+import "chromadb/proto/chroma.proto";
 
+message PushLogsRequest {
+  string collection_id = 1;
+  repeated SubmitEmbeddingRecord records = 2;
+}
+
+message PushLogsResponse {
+  int32 record_count = 1;
+}
+
+service LogService {
+  rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
 }
