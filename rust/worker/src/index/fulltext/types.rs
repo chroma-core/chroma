@@ -7,14 +7,17 @@ use crate::index::fulltext::tokenizer::{ChromaTokenizer, ChromaTokenStream};
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
-    #[error("FullText error")]
-    FullTextError,
+    #[error("Already in a transaction")]
+    AlreadyInTransaction,
+    #[error("Not in a transaction")]
+    NotInTransaction,
 }
 
 impl ChromaError for FullTextIndexError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FullTextIndexError::FullTextError => ErrorCodes::Unimplemented,
+            FullTextIndexError::FullTextError => ErrorCodes::FailedPrecondition,
+            FullTextIndexError::AlreadyInTransaction => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -56,7 +59,7 @@ impl BlockfileFullTextIndex {
 impl FullTextIndex for BlockfileFullTextIndex {
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
         if self.in_transaction {
-            return Err(Box::new(FullTextIndexError::FullTextError));
+            return Err(Box::new(FullTextIndexError::AlreadyInTransaction));
         }
         self.posting_lists_blockfile.begin_transaction()?;
         self.frequencies_blockfile.begin_transaction()?;
@@ -66,7 +69,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
 
     fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
         if !self.in_transaction {
-            return Err(Box::new(FullTextIndexError::FullTextError));
+            return Err(Box::new(FullTextIndexError::NotInTransaction));
         }
         self.in_transaction = false;
         for (key, mut value) in self.uncommitted.drain() {
@@ -86,7 +89,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
 
     fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
         if !self.in_transaction {
-            return Err(Box::new(FullTextIndexError::FullTextError));
+            return Err(Box::new(FullTextIndexError::NotInTransaction));
         }
         let tokens = self.tokenizer.encode(document);
         for token in tokens.get_tokens() {
