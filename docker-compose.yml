@@ -33,8 +33,8 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
-      # below test does not require curl or wget to be installed
-      test: [ "CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000" ]
+      # Adjust below to match your container port
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat" ]
       interval: 30s
       timeout: 10s
       retries: 3
