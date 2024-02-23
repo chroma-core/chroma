@@ -17,12 +17,19 @@ spec:
         - name: pulsar
           image: apachepulsar/pulsar
           command: [ "/pulsar/bin/pulsar", "standalone" ]
+
           ports:
             - containerPort: 6650
             - containerPort: 8080
           volumeMounts:
             - name: pulsardata
               mountPath: /pulsar/data
+          readinessProbe:
+             httpGet:
+               path: /admin/v2/brokers/health
+               port: 8080
+             initialDelaySeconds: 10
+             periodSeconds: 5
       volumes:
         - name: pulsardata
           emptyDir: {}

@@ -51,15 +51,15 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	}
 	records := make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
 	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
-	if err != nil {
-		log.Error("error pulling logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pushing logs")
-	}
 	for index := range recordLogs {
 		record := &coordinatorpb.SubmitEmbeddingRecord{}
 		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
 			log.Error("Unmarshal error", zap.Error(err))
-			return nil, grpcutils.BuildInternalGrpcError("error unmarshal record logs")
+			grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("records", "marshaling error")
+			if err != nil {
+				return nil, err
+			}
+			return nil, grpcError
 		}
 		records = append(records, record)
 	}
