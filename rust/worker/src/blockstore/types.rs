@@ -2,9 +2,8 @@ use super::positional_posting_list_value::PositionalPostingList;
 use crate::errors::ChromaError;
 use arrow::array::Int32Array;
 use roaring::RoaringBitmap;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-
 // ===== Key Types =====
 #[derive(Clone)]
 pub(crate) struct BlockfileKey {
@@ -36,6 +35,16 @@ impl Display for Key {
 impl BlockfileKey {
     pub(crate) fn new(prefix: String, key: Key) -> Self {
         BlockfileKey { prefix, key }
+    }
+}
+
+impl Debug for BlockfileKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BlockfileKey(prefix: {}, key: {})",
+            self.prefix, self.key
+        )
     }
 }
 
@@ -276,17 +285,6 @@ mod tests {
     use super::*;
     use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
     use arrow::array::Array;
-    use std::fmt::Debug;
-
-    impl Debug for BlockfileKey {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "BlockfileKey(prefix: {}, key: {})",
-                self.prefix, self.key
-            )
-        }
-    }
 
     #[test]
     fn test_blockfile_set_get() {

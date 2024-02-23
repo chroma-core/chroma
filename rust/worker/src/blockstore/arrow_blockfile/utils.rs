@@ -1,6 +1,6 @@
 use arrow::array::Array;
 
-use super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
+use crate::blockstore::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
 
 pub(super) fn get_key_size(blockfile_key: &BlockfileKey) -> usize {
     let prefix_size = blockfile_key.prefix.len();

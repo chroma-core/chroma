@@ -3,11 +3,10 @@ use std::sync::Arc;
 use arrow::{
     array::{Array, ArrayBuilder, Int32Builder, ListBuilder, StringBuilder},
     datatypes::{DataType, Field},
-    ipc::List,
     record_batch::RecordBatch,
 };
 
-use super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
+use super::super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
 
 // TODO: this should be an arrow struct array
 struct BlockInfo<K> {
