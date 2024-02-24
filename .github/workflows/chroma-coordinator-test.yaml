@@ -34,7 +34,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Build and test
-      run: cd go/coordinator && make test
+      run: cd go && make test
       env:
         POSTGRES_HOST: localhost
         POSTGRES_PORT: 5432
