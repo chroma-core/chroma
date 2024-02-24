@@ -9,10 +9,6 @@ message Status {
   int32 code = 2; // TODO: What is the enum of this code?
 }
 
-message ChromaResponse {
-  Status status = 1;
-}
-
 // Types here should mirror chromadb/types.py
 
 enum Operation {

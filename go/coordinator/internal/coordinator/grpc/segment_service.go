@@ -11,10 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSegmentRequest) (*coordinatorpb.ChromaResponse, error) {
+func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSegmentRequest) (*coordinatorpb.CreateSegmentResponse, error) {
 	segmentpb := req.GetSegment()
 
-	res := &coordinatorpb.ChromaResponse{}
+	res := &coordinatorpb.CreateSegmentResponse{}
 
 	segment, err := convertSegmentToModel(segmentpb)
 	if err != nil {
@@ -84,9 +84,9 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 	return res, nil
 }
 
-func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSegmentRequest) (*coordinatorpb.ChromaResponse, error) {
+func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSegmentRequest) (*coordinatorpb.DeleteSegmentResponse, error) {
 	segmentID := req.GetId()
-	res := &coordinatorpb.ChromaResponse{}
+	res := &coordinatorpb.DeleteSegmentResponse{}
 	parsedSegmentID, err := types.Parse(segmentID)
 	if err != nil {
 		log.Error(err.Error(), zap.String("segment.id", segmentID))
@@ -108,8 +108,8 @@ func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSeg
 	return res, nil
 }
 
-func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSegmentRequest) (*coordinatorpb.ChromaResponse, error) {
-	res := &coordinatorpb.ChromaResponse{}
+func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSegmentRequest) (*coordinatorpb.UpdateSegmentResponse, error) {
+	res := &coordinatorpb.UpdateSegmentResponse{}
 	updateSegment := &model.UpdateSegment{
 		ID:              types.MustParse(req.Id),
 		ResetTopic:      req.GetResetTopic(),

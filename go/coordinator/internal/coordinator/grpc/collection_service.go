@@ -16,8 +16,8 @@ const errorCode = 500
 const successCode = 200
 const success = "ok"
 
-func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ChromaResponse, error) {
-	res := &coordinatorpb.ChromaResponse{}
+func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ResetStateResponse, error) {
+	res := &coordinatorpb.ResetStateResponse{}
 	err := s.coordinator.ResetState(context.Background())
 	if err != nil {
 		res.Status = failResponseWithError(err, errorCode)
@@ -123,9 +123,9 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
-func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.DeleteCollectionRequest) (*coordinatorpb.ChromaResponse, error) {
+func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.DeleteCollectionRequest) (*coordinatorpb.DeleteCollectionResponse, error) {
 	collectionID := req.GetId()
-	res := &coordinatorpb.ChromaResponse{}
+	res := &coordinatorpb.DeleteCollectionResponse{}
 	parsedCollectionID, err := types.Parse(collectionID)
 	if err != nil {
 		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
@@ -151,8 +151,8 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	return res, nil
 }
 
-func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.UpdateCollectionRequest) (*coordinatorpb.ChromaResponse, error) {
-	res := &coordinatorpb.ChromaResponse{}
+func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.UpdateCollectionRequest) (*coordinatorpb.UpdateCollectionResponse, error) {
+	res := &coordinatorpb.UpdateCollectionResponse{}
 
 	collectionID := req.Id
 	parsedCollectionID, err := types.ToUniqueID(&collectionID)
