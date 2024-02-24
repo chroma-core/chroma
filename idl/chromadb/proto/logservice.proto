@@ -24,7 +24,16 @@ message PullLogsResponse {
   repeated SubmitEmbeddingRecord records = 1;
 }
 
+message GetAllCollectionIDsToCompactRequest {
+  // Empty
+}
+
+message GetAllCollectionIDsToCompactResponse {
+  repeated string collection_ids = 1;
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
+  rpc GetAllCollectionIDsToCompact(GetAllCollectionIDsToCompactRequest) returns (GetAllCollectionIDsToCompactResponse) {}
 }
