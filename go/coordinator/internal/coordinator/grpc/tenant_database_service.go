@@ -8,8 +8,8 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 )
 
-func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDatabaseRequest) (*coordinatorpb.ChromaResponse, error) {
-	res := &coordinatorpb.ChromaResponse{}
+func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDatabaseRequest) (*coordinatorpb.CreateDatabaseResponse, error) {
+	res := &coordinatorpb.CreateDatabaseResponse{}
 	createDatabase := &model.CreateDatabase{
 		ID:     req.GetId(),
 		Name:   req.GetName(),
@@ -51,8 +51,8 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 	return res, nil
 }
 
-func (s *Server) CreateTenant(ctx context.Context, req *coordinatorpb.CreateTenantRequest) (*coordinatorpb.ChromaResponse, error) {
-	res := &coordinatorpb.ChromaResponse{}
+func (s *Server) CreateTenant(ctx context.Context, req *coordinatorpb.CreateTenantRequest) (*coordinatorpb.CreateTenantResponse, error) {
+	res := &coordinatorpb.CreateTenantResponse{}
 	createTenant := &model.CreateTenant{
 		Name: req.GetName(),
 	}
