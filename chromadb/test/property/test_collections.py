@@ -199,8 +199,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
             return multiple()
 
         c = self.api.get_collection(name=coll.name)
-        print("before API:", c)
-        print("model:", self.model)
         _metadata: Optional[Mapping[str, Any]] = self.model[coll.name]
         _name: str = coll.name
         if new_metadata is not None:
@@ -228,8 +226,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
         self.set_model(_name, _metadata)
         c.modify(metadata=_metadata, name=_name)
         c = self.api.get_collection(name=coll.name)
-        print("after API:", c)
-        print("model:", self.model)
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
