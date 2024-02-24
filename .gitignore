@@ -3,8 +3,8 @@
 
 **/__pycache__
 
-go/coordinator/bin/
-go/coordinator/**/testdata/
+go/bin/
+go/**/testdata/
 
 *.log
 
