@@ -61,3 +61,7 @@ func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize 
 		zap.Int("count", len(recordLogs)))
 	return recordLogs, nil
 }
+
+func GetAllCollectionIDsToCompact() ([]string, error) {
+	return nil, nil
+}
