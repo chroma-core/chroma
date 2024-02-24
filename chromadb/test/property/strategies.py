@@ -236,10 +236,21 @@ def embedding_function_strategy(
 
 
 @dataclass
-class Collection:
+class ExternalCollection:
+    """
+    An external view of a collection.
+    """
     name: str
-    id: uuid.UUID
     metadata: Optional[types.Metadata]
+    embedding_function: Optional[types.EmbeddingFunction[Embeddable]]
+
+
+@dataclass
+class Collection(ExternalCollection):
+    """
+    An internal view of a collection.
+    """
+    id: uuid.UUID
     dimension: int
     dtype: npt.DTypeLike
     topic: str
@@ -247,7 +258,7 @@ class Collection:
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
-    embedding_function: Optional[types.EmbeddingFunction[Embeddable]] = None
+
 
 @st.composite
 def collections(
