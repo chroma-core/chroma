@@ -7,7 +7,7 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class PushLogsRequest(_message.Message):
-    __slots__ = ("collection_id", "records")
+    __slots__ = ["collection_id", "records"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
@@ -15,13 +15,13 @@ class PushLogsRequest(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., records: _Optional[_Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]] = ...) -> None: ...
 
 class PushLogsResponse(_message.Message):
-    __slots__ = ("record_count",)
+    __slots__ = ["record_count"]
     RECORD_COUNT_FIELD_NUMBER: _ClassVar[int]
     record_count: int
     def __init__(self, record_count: _Optional[int] = ...) -> None: ...
 
 class PullLogsRequest(_message.Message):
-    __slots__ = ("collection_id", "start_from_id", "batch_size")
+    __slots__ = ["collection_id", "start_from_id", "batch_size"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     START_FROM_ID_FIELD_NUMBER: _ClassVar[int]
     BATCH_SIZE_FIELD_NUMBER: _ClassVar[int]
@@ -31,7 +31,17 @@ class PullLogsRequest(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., start_from_id: _Optional[int] = ..., batch_size: _Optional[int] = ...) -> None: ...
 
 class PullLogsResponse(_message.Message):
-    __slots__ = ("records",)
+    __slots__ = ["records"]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     records: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.SubmitEmbeddingRecord]
     def __init__(self, records: _Optional[_Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]] = ...) -> None: ...
+
+class GetAllCollectionIDsToCompactRequest(_message.Message):
+    __slots__ = []
+    def __init__(self) -> None: ...
+
+class GetAllCollectionIDsToCompactResponse(_message.Message):
+    __slots__ = ["collection_ids"]
+    COLLECTION_IDS_FIELD_NUMBER: _ClassVar[int]
+    collection_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, collection_ids: _Optional[_Iterable[str]] = ...) -> None: ...
