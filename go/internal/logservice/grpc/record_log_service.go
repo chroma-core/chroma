@@ -67,3 +67,7 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	log.Info("PullLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", len(records)))
 	return res, nil
 }
+
+func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservicepb.GetAllCollectionIDsToCompactRequest) (*logservicepb.GetAllCollectionIDsToCompactResponse, error) {
+	return nil, nil
+}
