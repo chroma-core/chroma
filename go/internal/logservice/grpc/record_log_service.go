@@ -79,17 +79,11 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	return res, nil
 }
 
-<<<<<<< HEAD
 func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logservicepb.GetAllCollectionInfoToCompactRequest) (*logservicepb.GetAllCollectionInfoToCompactResponse, error) {
 	res := &logservicepb.GetAllCollectionInfoToCompactResponse{}
 	res.AllCollectionInfo = make([]*logservicepb.CollectionInfo, 0)
 	var recordLogs []*dbmodel.RecordLog
 	recordLogs, err := s.logService.GetAllCollectionIDsToCompact()
-=======
-func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservicepb.GetAllCollectionInfoToCompactRequest) (*logservicepb.GetAllCollectionInfoToCompactResponse, error) {
-	res := &logservicepb.GetAllCollectionInfoToCompactResponse{}
-	collectionIds, err := s.logService.GetAllCollectionIDsToCompact()
->>>>>>> f88409b6 (proto)
 	if err != nil {
 		log.Error("error getting collection info", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError("error getting collection info")
