@@ -1,7 +1,7 @@
 kind: Namespace
 apiVersion: v1
 metadata:
-  name: chroma
+  name: {{ .Values.namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -32,12 +32,12 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: default
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
   name: pod-list-role
 rules:
 - apiGroups: [""]
@@ -48,11 +48,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: pod-list-role-binding
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: default
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 roleRef:
   kind: Role
   name: pod-list-role
@@ -95,7 +95,7 @@ apiVersion: chroma.cluster/v1
 kind: MemberList
 metadata:
   name: worker-memberlist
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   members:
 ---
@@ -103,7 +103,7 @@ apiVersion: chroma.cluster/v1
 kind: MemberList
 metadata:
   name: test-memberlist
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   members:
 ---

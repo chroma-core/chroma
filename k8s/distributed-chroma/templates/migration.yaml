@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: migration
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   template:
     metadata:

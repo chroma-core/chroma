@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   replicas: 1
   selector:
