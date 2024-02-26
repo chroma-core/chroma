@@ -27,7 +27,7 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import resolve_provider
 from chromadb.errors import AuthorizationError
-from chromadb.server.fastapi.utils import fastapi_json_response
+from chromadb.utils.fastapi import fastapi_json_response
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -116,7 +116,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
