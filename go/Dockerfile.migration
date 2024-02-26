@@ -1,0 +1,4 @@
+FROM arigaio/atlas:latest
+workdir /app
+COPY ./go/migrations migrations
+COPY ./go/atlas.hcl atlas.hcl

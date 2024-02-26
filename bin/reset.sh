@@ -2,7 +2,7 @@
 
 eval $(minikube -p chroma-test docker-env)
 
-docker build -t chroma-coordinator:latest -f go/coordinator/Dockerfile .
+docker build -t chroma-coordinator:latest -f go/Dockerfile .
 
 kubectl delete deployment coordinator -n chroma
 
