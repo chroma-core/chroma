@@ -79,6 +79,6 @@ func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservi
 		log.Error("error pulling logs", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
 	}
-	res.CollectionIds = collectionIds
+	log.Info("GetAllCollectionIDsToCompact success", zap.Int("collectionCount", len(collectionIds)))
 	return res, nil
 }
