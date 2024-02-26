@@ -4,7 +4,7 @@ import "github.com/chroma/chroma-coordinator/internal/types"
 
 type RecordLog struct {
 	CollectionID *string `gorm:"collection_id;primaryKey;autoIncrement:false"`
-	ID           int64   `gorm:"id;primaryKey;"` // auto_increment id
+	ID           int64   `gorm:"id;primaryKey;autoIncrement:false"`
 	Timestamp    int64   `gorm:"timestamp;"`
 	Record       *[]byte `gorm:"record;type:bytea"`
 }

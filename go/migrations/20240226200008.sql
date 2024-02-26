@@ -21,6 +21,7 @@ CREATE TABLE "public"."collections" (
   "is_deleted" boolean NULL DEFAULT false,
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "log_position" bigint NULL,
   PRIMARY KEY ("id")
 );
 -- Create index "collections_name_key" to table: "collections"
@@ -49,7 +50,7 @@ CREATE TABLE "public"."notifications" (
 -- Create "record_logs" table
 CREATE TABLE "public"."record_logs" (
   "collection_id" text NOT NULL,
-  "id" bigserial NOT NULL,
+  "id" bigint NOT NULL,
   "timestamp" bigint NULL,
   "record" bytea NULL,
   PRIMARY KEY ("collection_id", "id")
