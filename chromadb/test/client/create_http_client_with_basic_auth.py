@@ -1,5 +1,5 @@
 # This file is used by test_create_http_client.py to test the initialization
-# of the HttpClient class with settings.
+# of an HttpClient class with auth settings.
 #
 # See https://github.com/chroma-core/chroma/issues/1554
 
