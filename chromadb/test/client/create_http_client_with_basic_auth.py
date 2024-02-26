@@ -18,6 +18,8 @@ def main() -> None:
             )
         )
     except ValueError:
+        # We don't expect to be able to connect to Chroma. We just want to make sure
+        # there isn't an ImportError.
         sys.exit(0)
 
 
