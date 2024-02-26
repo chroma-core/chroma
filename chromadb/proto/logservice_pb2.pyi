@@ -85,9 +85,13 @@ class GetAllCollectionInfoToCompactResponse(_message.Message):
     __slots__ = ["all_collection_info"]
     ALL_COLLECTION_INFO_FIELD_NUMBER: _ClassVar[int]
     all_collection_info: _containers.RepeatedCompositeFieldContainer[CollectionInfo]
+<<<<<<< HEAD
     def __init__(
         self,
         all_collection_info: _Optional[
             _Iterable[_Union[CollectionInfo, _Mapping]]
         ] = ...,
     ) -> None: ...
+=======
+    def __init__(self, all_collection_info: _Optional[_Iterable[_Union[CollectionInfo, _Mapping]]] = ...) -> None: ...
+>>>>>>> f88409b6 (proto)
