@@ -24,7 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type LogServiceClient interface {
 	PushLogs(ctx context.Context, in *PushLogsRequest, opts ...grpc.CallOption) (*PushLogsResponse, error)
 	PullLogs(ctx context.Context, in *PullLogsRequest, opts ...grpc.CallOption) (*PullLogsResponse, error)
-	GetAllCollectionIDsToCompact(ctx context.Context, in *GetAllCollectionIDsToCompactRequest, opts ...grpc.CallOption) (*GetAllCollectionIDsToCompactResponse, error)
+	GetAllCollectionInfoToCompact(ctx context.Context, in *GetAllCollectionInfoToCompactRequest, opts ...grpc.CallOption) (*GetAllCollectionInfoToCompactResponse, error)
 }
 
 type logServiceClient struct {
@@ -53,9 +53,9 @@ func (c *logServiceClient) PullLogs(ctx context.Context, in *PullLogsRequest, op
 	return out, nil
 }
 
-func (c *logServiceClient) GetAllCollectionIDsToCompact(ctx context.Context, in *GetAllCollectionIDsToCompactRequest, opts ...grpc.CallOption) (*GetAllCollectionIDsToCompactResponse, error) {
-	out := new(GetAllCollectionIDsToCompactResponse)
-	err := c.cc.Invoke(ctx, "/chroma.LogService/GetAllCollectionIDsToCompact", in, out, opts...)
+func (c *logServiceClient) GetAllCollectionInfoToCompact(ctx context.Context, in *GetAllCollectionInfoToCompactRequest, opts ...grpc.CallOption) (*GetAllCollectionInfoToCompactResponse, error) {
+	out := new(GetAllCollectionInfoToCompactResponse)
+	err := c.cc.Invoke(ctx, "/chroma.LogService/GetAllCollectionInfoToCompact", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (c *logServiceClient) GetAllCollectionIDsToCompact(ctx context.Context, in 
 type LogServiceServer interface {
 	PushLogs(context.Context, *PushLogsRequest) (*PushLogsResponse, error)
 	PullLogs(context.Context, *PullLogsRequest) (*PullLogsResponse, error)
-	GetAllCollectionIDsToCompact(context.Context, *GetAllCollectionIDsToCompactRequest) (*GetAllCollectionIDsToCompactResponse, error)
+	GetAllCollectionInfoToCompact(context.Context, *GetAllCollectionInfoToCompactRequest) (*GetAllCollectionInfoToCompactResponse, error)
 	mustEmbedUnimplementedLogServiceServer()
 }
 
@@ -82,8 +82,8 @@ func (UnimplementedLogServiceServer) PushLogs(context.Context, *PushLogsRequest)
 func (UnimplementedLogServiceServer) PullLogs(context.Context, *PullLogsRequest) (*PullLogsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PullLogs not implemented")
 }
-func (UnimplementedLogServiceServer) GetAllCollectionIDsToCompact(context.Context, *GetAllCollectionIDsToCompactRequest) (*GetAllCollectionIDsToCompactResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetAllCollectionIDsToCompact not implemented")
+func (UnimplementedLogServiceServer) GetAllCollectionInfoToCompact(context.Context, *GetAllCollectionInfoToCompactRequest) (*GetAllCollectionInfoToCompactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAllCollectionInfoToCompact not implemented")
 }
 func (UnimplementedLogServiceServer) mustEmbedUnimplementedLogServiceServer() {}
 
@@ -134,20 +134,20 @@ func _LogService_PullLogs_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LogService_GetAllCollectionIDsToCompact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetAllCollectionIDsToCompactRequest)
+func _LogService_GetAllCollectionInfoToCompact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAllCollectionInfoToCompactRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LogServiceServer).GetAllCollectionIDsToCompact(ctx, in)
+		return srv.(LogServiceServer).GetAllCollectionInfoToCompact(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/chroma.LogService/GetAllCollectionIDsToCompact",
+		FullMethod: "/chroma.LogService/GetAllCollectionInfoToCompact",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LogServiceServer).GetAllCollectionIDsToCompact(ctx, req.(*GetAllCollectionIDsToCompactRequest))
+		return srv.(LogServiceServer).GetAllCollectionInfoToCompact(ctx, req.(*GetAllCollectionInfoToCompactRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -168,8 +168,8 @@ var LogService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _LogService_PullLogs_Handler,
 		},
 		{
-			MethodName: "GetAllCollectionIDsToCompact",
-			Handler:    _LogService_GetAllCollectionIDsToCompact_Handler,
+			MethodName: "GetAllCollectionInfoToCompact",
+			Handler:    _LogService_GetAllCollectionInfoToCompact_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

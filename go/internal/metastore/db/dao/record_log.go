@@ -1,6 +1,8 @@
 package dao
 
 import (
+	"database/sql"
+	"errors"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
@@ -53,7 +55,11 @@ func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize 
 		zap.Int("batch_size", batchSize))
 
 	var recordLogs []*dbmodel.RecordLog
-	s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Limit(batchSize).Find(&recordLogs)
+	result := s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Limit(batchSize).Find(&recordLogs)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Error("PullLogs error", zap.Error(result.Error))
+		return nil, result.Error
+	}
 	log.Info("PullLogs",
 		zap.String("collectionID", *collectionIDStr),
 		zap.Int64("ID", id),
@@ -62,6 +68,38 @@ func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize 
 	return recordLogs, nil
 }
 
-func GetAllCollectionIDsToCompact() ([]string, error) {
-	return nil, nil
+func (s *recordLogDb) GetAllCollectionsToCompact() ([]string, error) {
+	log.Info("GetAllCollectionsToCompact")
+	var collectionIds []string
+	var rawSql = `
+	    with summary as (
+		  select r.collection_id, r.id, r.timestamp, row_number() over(partition by r.collection_id order by r.id) as rank
+		  from record_logs r, collections c
+		  where r.collection_id = c.id
+		  and r.id>c.log_position
+		)
+		select * from summary
+		where rank=1;`
+	rows, err := s.db.Raw(rawSql).Rows()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Error("GetAllCollectionsToCompact Close error", zap.Error(err))
+		}
+	}(rows)
+	if err != nil {
+		log.Error("GetAllCollectionsToCompact error", zap.Error(err))
+		return nil, err
+	}
+	for rows.Next() {
+		var batchCollectionIds []string
+		err := s.db.ScanRows(rows, &batchCollectionIds)
+		if err != nil {
+			log.Error("GetAllCollectionsToCompact ScanRows error", zap.Error(err))
+			return nil, err
+		}
+		collectionIds = append(collectionIds, batchCollectionIds...)
+	}
+	log.Info("GetAllCollectionsToCompact find collectionIds count", zap.Int("count", len(collectionIds)))
+	return collectionIds, nil
 }

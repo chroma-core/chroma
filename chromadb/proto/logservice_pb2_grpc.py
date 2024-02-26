@@ -24,10 +24,10 @@ class LogServiceStub(object):
                 request_serializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.SerializeToString,
                 response_deserializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.FromString,
                 )
-        self.GetAllCollectionIDsToCompact = channel.unary_unary(
-                '/chroma.LogService/GetAllCollectionIDsToCompact',
-                request_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionIDsToCompactRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionIDsToCompactResponse.FromString,
+        self.GetAllCollectionInfoToCompact = channel.unary_unary(
+                '/chroma.LogService/GetAllCollectionInfoToCompact',
+                request_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.SerializeToString,
+                response_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.FromString,
                 )
 
 
@@ -46,7 +46,7 @@ class LogServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetAllCollectionIDsToCompact(self, request, context):
+    def GetAllCollectionInfoToCompact(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -65,10 +65,10 @@ def add_LogServiceServicer_to_server(servicer, server):
                     request_deserializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.FromString,
                     response_serializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.SerializeToString,
             ),
-            'GetAllCollectionIDsToCompact': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAllCollectionIDsToCompact,
-                    request_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionIDsToCompactRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionIDsToCompactResponse.SerializeToString,
+            'GetAllCollectionInfoToCompact': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllCollectionInfoToCompact,
+                    request_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.FromString,
+                    response_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -115,7 +115,7 @@ class LogService(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def GetAllCollectionIDsToCompact(request,
+    def GetAllCollectionInfoToCompact(request,
             target,
             options=(),
             channel_credentials=None,
@@ -125,8 +125,8 @@ class LogService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.LogService/GetAllCollectionIDsToCompact',
-            chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionIDsToCompactRequest.SerializeToString,
-            chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionIDsToCompactResponse.FromString,
+        return grpc.experimental.unary_unary(request, target, '/chroma.LogService/GetAllCollectionInfoToCompact',
+            chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.SerializeToString,
+            chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

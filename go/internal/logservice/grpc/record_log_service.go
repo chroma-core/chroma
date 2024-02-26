@@ -51,6 +51,10 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	}
 	records := make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
 	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	if err != nil {
+		log.Error("error pulling logs", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
+	}
 	for index := range recordLogs {
 		record := &coordinatorpb.SubmitEmbeddingRecord{}
 		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
@@ -69,5 +73,12 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 }
 
 func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservicepb.GetAllCollectionIDsToCompactRequest) (*logservicepb.GetAllCollectionIDsToCompactResponse, error) {
-	return nil, nil
+	res := &logservicepb.GetAllCollectionIDsToCompactResponse{}
+	collectionIds, err := s.logService.GetAllCollectionIDsToCompact()
+	if err != nil {
+		log.Error("error pulling logs", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
+	}
+	res.CollectionIds = collectionIds
+	return res, nil
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"testing"
 )
@@ -34,14 +35,35 @@ func (suite *RecordLogDbTestSuite) SetupSuite() {
 
 func (suite *RecordLogDbTestSuite) SetupTest() {
 	log.Info("setup test")
+	suite.db.Migrator().DropTable(&dbmodel.Collection{})
+	suite.db.Migrator().CreateTable(&dbmodel.Collection{})
 	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
 	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+
+	// create test collection
+	collectionName := "collection1"
+	collectionTopic := "topic1"
+	var collectionDimension int32 = 6
+	collection := &dbmodel.Collection{
+		ID:          suite.collectionId.String(),
+		Name:        &collectionName,
+		Topic:       &collectionTopic,
+		Dimension:   &collectionDimension,
+		DatabaseID:  types.NewUniqueID().String(),
+		LogPosition: 0,
+	}
+	err := suite.db.Create(collection).Error
+	if err != nil {
+		log.Error("create collection error", zap.Error(err))
+	}
 }
 
 func (suite *RecordLogDbTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
-	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+	//suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
+	//suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+	//suite.db.Migrator().DropTable(&dbmodel.Collection{})
+	//suite.db.Migrator().CreateTable(&dbmodel.Collection{})
 }
 
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
@@ -80,6 +102,12 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
 }
 
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
+	// pull empty logs
+	var recordLogs []*dbmodel.RecordLog
+	recordLogs, err := suite.Db.PullLogs(suite.collectionId, 0, 3)
+	assert.NoError(suite.t, err)
+	assert.Len(suite.t, recordLogs, 0)
+
 	// push some logs
 	count, err := suite.Db.PushLogs(suite.collectionId, suite.records[:3])
 	assert.NoError(suite.t, err)
@@ -89,7 +117,6 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	assert.Equal(suite.t, 2, count)
 
 	// pull logs from id 0 batch_size 3
-	var recordLogs []*dbmodel.RecordLog
 	recordLogs, err = suite.Db.PullLogs(suite.collectionId, 0, 3)
 	assert.NoError(suite.t, err)
 	assert.Len(suite.t, recordLogs, 3)
@@ -116,6 +143,22 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 		assert.Equal(suite.t, int64(index+3), recordLogs[index].ID, "id mismatch for index %d", index)
 		assert.Equal(suite.t, suite.records[index+2], *recordLogs[index].Record, "record mismatch for index %d", index)
 	}
+}
+
+func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() {
+	// push some logs
+	count, err := suite.Db.PushLogs(suite.collectionId, suite.records[:3])
+	assert.NoError(suite.t, err)
+	assert.Equal(suite.t, 3, count)
+	count, err = suite.Db.PushLogs(suite.collectionId, suite.records[3:])
+	assert.NoError(suite.t, err)
+	assert.Equal(suite.t, 2, count)
+
+	// get all collection ids to compact
+	collectionIds, err := suite.Db.GetAllCollectionsToCompact()
+	assert.NoError(suite.t, err)
+	assert.Len(suite.t, collectionIds, 1)
+	assert.Equal(suite.t, suite.collectionId.String(), collectionIds[0])
 }
 
 func TestRecordLogDbTestSuite(t *testing.T) {

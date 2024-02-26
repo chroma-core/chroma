@@ -24,16 +24,23 @@ message PullLogsResponse {
   repeated SubmitEmbeddingRecord records = 1;
 }
 
-message GetAllCollectionIDsToCompactRequest {
+message CollectionInfo {
+  string collection_id = 1;
+  // The first log id of the collection that needs to be compacted
+  int64 first_log_id = 2;
+  int64 first_log_id_ts = 3;
+}
+
+message GetAllCollectionInfoToCompactRequest {
   // Empty
 }
 
-message GetAllCollectionIDsToCompactResponse {
+message GetAllCollectionInfoToCompactResponse {
   repeated string collection_ids = 1;
 }
 
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
-  rpc GetAllCollectionIDsToCompact(GetAllCollectionIDsToCompactRequest) returns (GetAllCollectionIDsToCompactResponse) {}
+  rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
 }

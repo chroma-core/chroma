@@ -36,11 +36,21 @@ class PullLogsResponse(_message.Message):
     records: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.SubmitEmbeddingRecord]
     def __init__(self, records: _Optional[_Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]] = ...) -> None: ...
 
-class GetAllCollectionIDsToCompactRequest(_message.Message):
+class CollectionInfo(_message.Message):
+    __slots__ = ["collection_id", "first_log_id", "first_log_id_ts"]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    FIRST_LOG_ID_FIELD_NUMBER: _ClassVar[int]
+    FIRST_LOG_ID_TS_FIELD_NUMBER: _ClassVar[int]
+    collection_id: str
+    first_log_id: int
+    first_log_id_ts: int
+    def __init__(self, collection_id: _Optional[str] = ..., first_log_id: _Optional[int] = ..., first_log_id_ts: _Optional[int] = ...) -> None: ...
+
+class GetAllCollectionInfoToCompactRequest(_message.Message):
     __slots__ = []
     def __init__(self) -> None: ...
 
-class GetAllCollectionIDsToCompactResponse(_message.Message):
+class GetAllCollectionInfoToCompactResponse(_message.Message):
     __slots__ = ["collection_ids"]
     COLLECTION_IDS_FIELD_NUMBER: _ClassVar[int]
     collection_ids: _containers.RepeatedScalarFieldContainer[str]

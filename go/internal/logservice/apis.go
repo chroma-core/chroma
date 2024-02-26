@@ -25,5 +25,5 @@ func (s *RecordLog) PullLogs(ctx context.Context, collectionID types.UniqueID, i
 }
 
 func (s *RecordLog) GetAllCollectionIDsToCompact() ([]string, error) {
-	return s.recordLogDb.GetAllCollectionIDsToCompact()
+	return s.recordLogDb.GetAllCollectionsToCompact()
 }
