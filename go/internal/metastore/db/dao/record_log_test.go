@@ -77,10 +77,10 @@ func (suite *RecordLogDbTestSuite) SetupTest() {
 
 func (suite *RecordLogDbTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	//suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
-	//suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
-	//suite.db.Migrator().DropTable(&dbmodel.Collection{})
-	//suite.db.Migrator().CreateTable(&dbmodel.Collection{})
+	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
+	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+	suite.db.Migrator().DropTable(&dbmodel.Collection{})
+	suite.db.Migrator().CreateTable(&dbmodel.Collection{})
 }
 
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
