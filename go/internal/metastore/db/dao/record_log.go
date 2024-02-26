@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"database/sql"
 	"errors"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/types"
@@ -78,6 +79,38 @@ func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize 
 	return recordLogs, nil
 }
 
-func GetAllCollectionIDsToCompact() ([]string, error) {
-	return nil, nil
+func (s *recordLogDb) GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error) {
+	log.Info("GetAllCollectionsToCompact")
+	var recordLogs []*dbmodel.RecordLog
+	var rawSql = `
+	    with summary as (
+		  select r.collection_id, r.id, r.timestamp, row_number() over(partition by r.collection_id order by r.id) as rank
+		  from record_logs r, collections c
+		  where r.collection_id = c.id
+		  and r.id>c.log_position
+		)
+		select * from summary
+		where rank=1;`
+	rows, err := s.db.Raw(rawSql).Rows()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Error("GetAllCollectionsToCompact Close error", zap.Error(err))
+		}
+	}(rows)
+	if err != nil {
+		log.Error("GetAllCollectionsToCompact error", zap.Error(err))
+		return nil, err
+	}
+	for rows.Next() {
+		var batchRecordLogs []*dbmodel.RecordLog
+		err := s.db.ScanRows(rows, &recordLogs)
+		if err != nil {
+			log.Error("GetAllCollectionsToCompact ScanRows error", zap.Error(err))
+			return nil, err
+		}
+		recordLogs = append(recordLogs, batchRecordLogs...)
+	}
+	log.Info("GetAllCollectionsToCompact find collections count", zap.Int("count", len(recordLogs)))
+	return recordLogs, nil
 }

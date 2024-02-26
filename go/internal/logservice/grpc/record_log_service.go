@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
 	"github.com/chroma/chroma-coordinator/internal/types"
@@ -10,6 +11,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
+
+type CollectionInfo struct {
+	CollectionId string
+	FirstLogId   int64
+	FirstLogTs   int64
+}
 
 func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
 	res := &logservicepb.PushLogsResponse{}
@@ -51,6 +58,10 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	}
 	records := make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
 	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	if err != nil {
+		log.Error("error pulling logs", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
+	}
 	for index := range recordLogs {
 		record := &coordinatorpb.SubmitEmbeddingRecord{}
 		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
@@ -68,6 +79,24 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	return res, nil
 }
 
-func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservicepb.GetAllCollectionIDsToCompactRequest) (*logservicepb.GetAllCollectionIDsToCompactResponse, error) {
-	return nil, nil
+func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logservicepb.GetAllCollectionInfoToCompactRequest) (*logservicepb.GetAllCollectionInfoToCompactResponse, error) {
+	res := &logservicepb.GetAllCollectionInfoToCompactResponse{}
+	res.AllCollectionInfo = make([]*logservicepb.CollectionInfo, 0)
+	var recordLogs []*dbmodel.RecordLog
+	recordLogs, err := s.logService.GetAllCollectionIDsToCompact()
+	if err != nil {
+		log.Error("error getting collection info", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error getting collection info")
+	}
+	for index := range recordLogs {
+		collectionInfo := &logservicepb.CollectionInfo{
+			CollectionId: *recordLogs[index].CollectionID,
+			FirstLogId:   recordLogs[index].ID,
+			FirstLogIdTs: recordLogs[index].Timestamp,
+		}
+		res.AllCollectionInfo = append(res.AllCollectionInfo, collectionInfo)
+	}
+	// print everything for now, we can make this smaller once
+	log.Info("GetAllCollectionInfoToCompact success", zap.Int("collectionCount", len(res.AllCollectionInfo)))
+	return res, nil
 }

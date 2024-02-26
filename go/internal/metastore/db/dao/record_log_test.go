@@ -177,6 +177,30 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	}
 }
 
+func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() {
+	// push some logs
+	count, err := suite.Db.PushLogs(suite.collectionId1, suite.records)
+	assert.NoError(suite.t, err)
+	assert.Equal(suite.t, 5, count)
+
+	// get all collection ids to compact
+	collectionInfos, err := suite.Db.GetAllCollectionsToCompact()
+	assert.NoError(suite.t, err)
+	assert.Len(suite.t, collectionInfos, 1)
+	assert.Equal(suite.t, suite.collectionId1.String(), *collectionInfos[0].CollectionID)
+	assert.Equal(suite.t, int64(1), collectionInfos[0].ID)
+
+	// move log position
+	suite.db.Model(&dbmodel.Collection{}).Where("id = ?", suite.collectionId1.String()).Update("log_position", 2)
+
+	// get all collection ids to compact
+	collectionInfos, err = suite.Db.GetAllCollectionsToCompact()
+	assert.NoError(suite.t, err)
+	assert.Len(suite.t, collectionInfos, 1)
+	assert.Equal(suite.t, suite.collectionId1.String(), *collectionInfos[0].CollectionID)
+	assert.Equal(suite.t, int64(3), collectionInfos[0].ID)
+}
+
 func TestRecordLogDbTestSuite(t *testing.T) {
 	testSuite := new(RecordLogDbTestSuite)
 	testSuite.t = t
