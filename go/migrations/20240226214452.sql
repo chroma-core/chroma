@@ -49,7 +49,7 @@ CREATE TABLE "public"."notifications" (
 -- Create "record_logs" table
 CREATE TABLE "public"."record_logs" (
   "collection_id" text NOT NULL,
-  "id" bigserial NOT NULL,
+  "id" bigint NOT NULL,
   "timestamp" bigint NULL,
   "record" bytea NULL,
   PRIMARY KEY ("collection_id", "id")
