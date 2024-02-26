@@ -36,7 +36,7 @@ message GetAllCollectionInfoToCompactRequest {
 }
 
 message GetAllCollectionInfoToCompactResponse {
-  repeated string collection_ids = 1;
+  repeated CollectionInfo all_collection_info = 1;
 }
 
 service LogService {

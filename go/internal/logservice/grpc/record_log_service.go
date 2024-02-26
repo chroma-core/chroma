@@ -72,8 +72,8 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	return res, nil
 }
 
-func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservicepb.GetAllCollectionIDsToCompactRequest) (*logservicepb.GetAllCollectionIDsToCompactResponse, error) {
-	res := &logservicepb.GetAllCollectionIDsToCompactResponse{}
+func (s *Server) GetAllCollectionIDsToCompact(ctx context.Context, req *logservicepb.GetAllCollectionInfoToCompactRequest) (*logservicepb.GetAllCollectionInfoToCompactResponse, error) {
+	res := &logservicepb.GetAllCollectionInfoToCompactResponse{}
 	collectionIds, err := s.logService.GetAllCollectionIDsToCompact()
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
