@@ -5,7 +5,7 @@ use crate::{
 use std::collections::HashMap;
 use thiserror::Error;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum UpdateMetadataValue {
     Int(i32),
     Float(f64),

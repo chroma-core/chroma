@@ -9,7 +9,7 @@ use crate::{
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct EmbeddingRecord {
     pub(crate) id: String,
     pub(crate) seq_id: SeqId,

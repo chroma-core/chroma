@@ -54,9 +54,9 @@ impl DistributedHNSWSegment {
         )?))
     }
 
-    pub(crate) fn write_records(&self, records: Vec<Box<EmbeddingRecord>>) {
+    pub(crate) fn write_records(&self, records: &Vec<Box<EmbeddingRecord>>) {
         for record in records {
-            let op = Operation::try_from(record.operation);
+            let op = Operation::try_from(record.operation.clone());
             match op {
                 Ok(Operation::Add) => {
                     // TODO: make lock xor lock

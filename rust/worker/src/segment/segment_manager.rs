@@ -75,7 +75,7 @@ impl SegmentManager {
         let segment_cache = self.inner.vector_segments.upgradable_read();
         match segment_cache.get(&target_segment.id) {
             Some(segment) => {
-                segment.write_records(vec![record]);
+                segment.write_records(&vec![record]);
             }
             None => {
                 let mut segment_cache = RwLockUpgradableReadGuard::upgrade(segment_cache);
@@ -89,7 +89,7 @@ impl SegmentManager {
 
                 match new_segment {
                     Ok(new_segment) => {
-                        new_segment.write_records(vec![record]);
+                        new_segment.write_records(&vec![record]);
                         segment_cache.insert(target_segment.id, new_segment);
                     }
                     Err(e) => {
