@@ -37,6 +37,8 @@ func (suite *RecordLogDbTestSuite) SetupSuite() {
 
 func (suite *RecordLogDbTestSuite) SetupTest() {
 	log.Info("setup test")
+	suite.db.Migrator().DropTable(&dbmodel.Segment{})
+	suite.db.Migrator().CreateTable(&dbmodel.Segment{})
 	suite.db.Migrator().DropTable(&dbmodel.Collection{})
 	suite.db.Migrator().CreateTable(&dbmodel.Collection{})
 	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
@@ -47,12 +49,11 @@ func (suite *RecordLogDbTestSuite) SetupTest() {
 	collectionTopic := "topic1"
 	var collectionDimension int32 = 6
 	collection := &dbmodel.Collection{
-		ID:          suite.collectionId1.String(),
-		Name:        &collectionName,
-		Topic:       &collectionTopic,
-		Dimension:   &collectionDimension,
-		DatabaseID:  types.NewUniqueID().String(),
-		LogPosition: 0,
+		ID:         suite.collectionId1.String(),
+		Name:       &collectionName,
+		Topic:      &collectionTopic,
+		Dimension:  &collectionDimension,
+		DatabaseID: types.NewUniqueID().String(),
 	}
 	err := suite.db.Create(collection).Error
 	if err != nil {
@@ -62,12 +63,11 @@ func (suite *RecordLogDbTestSuite) SetupTest() {
 	collectionName = "collection2"
 	collectionTopic = "topic2"
 	collection = &dbmodel.Collection{
-		ID:          suite.collectionId2.String(),
-		Name:        &collectionName,
-		Topic:       &collectionTopic,
-		Dimension:   &collectionDimension,
-		DatabaseID:  types.NewUniqueID().String(),
-		LogPosition: 0,
+		ID:         suite.collectionId2.String(),
+		Name:       &collectionName,
+		Topic:      &collectionTopic,
+		Dimension:  &collectionDimension,
+		DatabaseID: types.NewUniqueID().String(),
 	}
 	err = suite.db.Create(collection).Error
 	if err != nil {
@@ -77,10 +77,12 @@ func (suite *RecordLogDbTestSuite) SetupTest() {
 
 func (suite *RecordLogDbTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
-	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+	suite.db.Migrator().DropTable(&dbmodel.Segment{})
+	suite.db.Migrator().CreateTable(&dbmodel.Segment{})
 	suite.db.Migrator().DropTable(&dbmodel.Collection{})
 	suite.db.Migrator().CreateTable(&dbmodel.Collection{})
+	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
+	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
 }
 
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
