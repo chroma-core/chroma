@@ -3411,6 +3411,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "proptest-state-machine"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3420,6 +3421,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> e06b8edc ([ENH] Property testing for metadata indices)
 name = "prost"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5352,7 +5355,10 @@ dependencies = [
  "num_cpus",
  "parking_lot",
  "proptest",
+<<<<<<< HEAD
  "proptest-state-machine",
+=======
+>>>>>>> e06b8edc ([ENH] Property testing for metadata indices)
  "prost 0.12.3",
  "prost-types 0.12.3",
  "pulsar",

@@ -162,6 +162,7 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_string_value_metadata_index_error_when_not_in_transaction() {
