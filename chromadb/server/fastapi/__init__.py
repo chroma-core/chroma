@@ -51,7 +51,7 @@ from starlette.requests import Request
 
 import logging
 
-from chromadb.server.fastapi.utils import fastapi_json_response, string_to_uuid as _uuid
+from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient

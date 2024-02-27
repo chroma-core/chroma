@@ -10,6 +10,7 @@ def fastapi_json_response(error: ChromaError) -> JSONResponse:
         status_code=error.code(),
     )
 
+
 def string_to_uuid(uuid_str: str) -> UUID:
     try:
         return UUID(uuid_str)
