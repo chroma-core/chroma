@@ -88,11 +88,11 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 		log.Error("error getting collection info", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError("error getting collection info")
 	}
-	for index := range recordLogs {
+	for _, recordLog := range recordLogs {
 		collectionInfo := &logservicepb.CollectionInfo{
-			CollectionId: *recordLogs[index].CollectionID,
-			FirstLogId:   recordLogs[index].ID,
-			FirstLogIdTs: recordLogs[index].Timestamp,
+			CollectionId: *recordLog.CollectionID,
+			FirstLogId:   recordLog.ID,
+			FirstLogIdTs: recordLog.Timestamp,
 		}
 		res.AllCollectionInfo = append(res.AllCollectionInfo, collectionInfo)
 	}
