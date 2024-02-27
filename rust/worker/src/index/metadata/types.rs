@@ -146,8 +146,10 @@ fn kv_to_blockfile_key(key: &str, value: MetadataIndexValue) -> BlockfileKey {
     BlockfileKey::new(key.to_string(), blockfilekey_key)
 }
 
+#[cfg(test)]
 mod test {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_string_value_metadata_index_error_when_not_in_transaction() {
@@ -276,5 +278,19 @@ mod test {
 
         let bitmap = index.get("key", MetadataIndexValue::String("value".to_string())).unwrap();
         assert_eq!(bitmap.len(), 0);
+    }
+
+    proptest! {
+        #[test]
+        fn test_string_value_metadata_index_proptest(_v in "[1-9][0-9]{0,8}") {
+            let mut index = BlockfileMetadataIndex::new();
+            index.begin_transaction().unwrap();
+            index.set("key", MetadataIndexValue::String("value".to_string()), 1).unwrap();
+            index.commit_transaction().unwrap();
+
+            let bitmap = index.get("key", MetadataIndexValue::String("value".to_string())).unwrap();
+            assert_eq!(bitmap.len(), 1);
+            assert_eq!(bitmap.contains(1), true);
+        }
     }
 }
