@@ -16,7 +16,7 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: worker-memberlist-reader
+  name: worker-memberlist-readerwriter
 rules:
 - apiGroups:
   - chroma.cluster
@@ -37,11 +37,26 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: worker-memberlist-reader-binding
+  name: coordinator-worker-memberlist-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: worker-memberlist-reader
+  name: worker-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: coordinator-serviceaccount
+  namespace: chroma
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: worker-memberlist-readerwriter-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: worker-memberlist-readerwriter
 subjects:
 - kind: ServiceAccount
   name: default

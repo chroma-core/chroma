@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: server
+  name: frontend-server
   namespace: {{ .Values.namespace }}
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: server
+      app: frontend-server
   template:
     metadata:
       labels:
-        app: server
+        app: frontend-server
     spec:
       containers:
-        - name: server
+        - name: frontend-server
           image: server
           imagePullPolicy: IfNotPresent
           ports:
@@ -53,7 +53,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: server
+  name: frontend-server
   namespace: {{ .Values.namespace }}
 spec:
   ports:
@@ -61,5 +61,5 @@ spec:
       port: 8000
       targetPort: 8000
   selector:
-    app: server
+    app: frontend-server
   type: ClusterIP
