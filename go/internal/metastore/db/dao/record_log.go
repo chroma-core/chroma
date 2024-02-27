@@ -90,7 +90,8 @@ func (s *recordLogDb) GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error)
 		  and r.id>c.log_position
 		)
 		select * from summary
-		where rank=1;`
+		where rank=1
+		order by timestamp;`
 	rows, err := s.db.Raw(rawSql).Rows()
 	defer func(rows *sql.Rows) {
 		err := rows.Close()

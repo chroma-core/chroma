@@ -1,13 +1,13 @@
 package dao
 
 import (
+	"github.com/chroma/chroma-coordinator/internal/logservice/testutils"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"testing"
 )
@@ -37,52 +37,12 @@ func (suite *RecordLogDbTestSuite) SetupSuite() {
 
 func (suite *RecordLogDbTestSuite) SetupTest() {
 	log.Info("setup test")
-	suite.db.Migrator().DropTable(&dbmodel.Segment{})
-	suite.db.Migrator().CreateTable(&dbmodel.Segment{})
-	suite.db.Migrator().DropTable(&dbmodel.Collection{})
-	suite.db.Migrator().CreateTable(&dbmodel.Collection{})
-	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
-	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
-
-	// create test collection
-	collectionName := "collection1"
-	collectionTopic := "topic1"
-	var collectionDimension int32 = 6
-	collection := &dbmodel.Collection{
-		ID:         suite.collectionId1.String(),
-		Name:       &collectionName,
-		Topic:      &collectionTopic,
-		Dimension:  &collectionDimension,
-		DatabaseID: types.NewUniqueID().String(),
-	}
-	err := suite.db.Create(collection).Error
-	if err != nil {
-		log.Error("create collection error", zap.Error(err))
-	}
-
-	collectionName = "collection2"
-	collectionTopic = "topic2"
-	collection = &dbmodel.Collection{
-		ID:         suite.collectionId2.String(),
-		Name:       &collectionName,
-		Topic:      &collectionTopic,
-		Dimension:  &collectionDimension,
-		DatabaseID: types.NewUniqueID().String(),
-	}
-	err = suite.db.Create(collection).Error
-	if err != nil {
-		log.Error("create collection error", zap.Error(err))
-	}
+	testutils.SetupTest(suite.db, suite.collectionId1, suite.collectionId2)
 }
 
 func (suite *RecordLogDbTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	suite.db.Migrator().DropTable(&dbmodel.Segment{})
-	suite.db.Migrator().CreateTable(&dbmodel.Segment{})
-	suite.db.Migrator().DropTable(&dbmodel.Collection{})
-	suite.db.Migrator().CreateTable(&dbmodel.Collection{})
-	suite.db.Migrator().DropTable(&dbmodel.RecordLog{})
-	suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+	testutils.TearDownTest(suite.db)
 }
 
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
@@ -191,7 +151,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() 
 	assert.Equal(suite.t, int64(1), collectionInfos[0].ID)
 
 	// move log position
-	suite.db.Model(&dbmodel.Collection{}).Where("id = ?", suite.collectionId1.String()).Update("log_position", 2)
+	testutils.MoveLogPosition(suite.db, suite.collectionId1, 2)
 
 	// get all collection ids to compact
 	collectionInfos, err = suite.Db.GetAllCollectionsToCompact()
@@ -199,6 +159,20 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() 
 	assert.Len(suite.t, collectionInfos, 1)
 	assert.Equal(suite.t, suite.collectionId1.String(), *collectionInfos[0].CollectionID)
 	assert.Equal(suite.t, int64(3), collectionInfos[0].ID)
+
+	// push some logs
+	count, err = suite.Db.PushLogs(suite.collectionId2, suite.records)
+	assert.NoError(suite.t, err)
+	assert.Equal(suite.t, 5, count)
+
+	// get all collection ids to compact
+	collectionInfos, err = suite.Db.GetAllCollectionsToCompact()
+	assert.NoError(suite.t, err)
+	assert.Len(suite.t, collectionInfos, 2)
+	assert.Equal(suite.t, suite.collectionId1.String(), *collectionInfos[0].CollectionID)
+	assert.Equal(suite.t, int64(3), collectionInfos[0].ID)
+	assert.Equal(suite.t, suite.collectionId2.String(), *collectionInfos[1].CollectionID)
+	assert.Equal(suite.t, int64(1), collectionInfos[1].ID)
 }
 
 func TestRecordLogDbTestSuite(t *testing.T) {
