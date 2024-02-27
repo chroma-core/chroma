@@ -6,7 +6,7 @@ apiVersion: chroma.cluster/v1
 kind: MemberList
 metadata:
   name: worker-memberlist
-  namespace: chroma
+  namespace: {{ .Values.namespace}}
 spec:
   members:
 
@@ -44,7 +44,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: coordinator-serviceaccount
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 
 ---
 
@@ -61,7 +61,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: worker-serviceaccount
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 
 ---
 
@@ -76,4 +76,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: default
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
