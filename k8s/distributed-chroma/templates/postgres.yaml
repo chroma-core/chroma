@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   replicas: 1
   selector:
@@ -30,7 +30,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   ports:
     - name: postgres-port

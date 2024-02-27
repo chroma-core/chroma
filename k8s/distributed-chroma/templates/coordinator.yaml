@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: coordinator
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.coordinator.replicaCount }}
   selector:
     matchLabels:
       app: coordinator
@@ -13,6 +13,7 @@ spec:
       labels:
         app: coordinator
     spec:
+      serviceAccountName: coordinator-serviceaccount
       containers:
         - command:
             - "coordinator"
@@ -24,19 +25,47 @@ spec:
           imagePullPolicy: IfNotPresent
           name: coordinator
           ports:
-            - containerPort: 50051
+            - containerPort: 50001
               name: grpc
+
 ---
+
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: chroma
+  namespace: {{ .Values.namespace }}
 spec:
   ports:
     - name: grpc
-      port: 50051
+      port: {{ .Values.coordinator.port }}
       targetPort: grpc
   selector:
     app: coordinator
   type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coordinator-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coordinator-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: coordinator-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

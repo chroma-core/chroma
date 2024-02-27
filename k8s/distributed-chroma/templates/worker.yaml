@@ -1,37 +1,41 @@
+---
+
 apiVersion: v1
 kind: Service
 metadata:
-  name: segment-server
-  namespace: chroma
+  name: worker
+  namespace: {{ .Values.namespace }}
 spec:
   ports:
-    - name: segment-server-port
+    - name: worker-server-port
       port: 50051
       targetPort: 50051
   selector:
-    app: segment-server
+    app: worker-server
   type: ClusterIP
 
 ---
 
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: segment-server
-  namespace: chroma
+  name: worker
+  namespace: {{ .Values.namespace }}
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: segment-server
+      app: worker
   template:
     metadata:
       labels:
-        app: segment-server
+        app: worker
         member-type: worker
     spec:
+      serviceAccountName: worker-serviceaccount
       containers:
-        - name: segment-server
+        - name: worker
           image: worker
           imagePullPolicy: IfNotPresent
           command: ["cargo", "run"]
@@ -43,45 +47,43 @@ spec:
           env:
             - name: CHROMA_WORKER__PULSAR_URL
               value: pulsar://pulsar.chroma:6650
-            - name: CHROMA_WORKER__PULSAR_NAMESPACE
-              value: default
-            - name: CHROMA_WORKER__PULSAR_TENANT
-              value: default
             - name: CHROMA_WORKER__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-          # livenessProbe:
-          #   grpc:
-          #     port: 50051
-          #   initialDelaySeconds: 10
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: worker
       volumes:
         - name: chroma
           emptyDir: {}
 
 ---
 
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  namespace: chroma
-  name: pod-watcher
-rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+  name: worker-serviceaccount
+  namespace: {{ .Values.namespace }}
 
 ---
+
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: pod-watcher-binding
-  namespace: chroma
-subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: chroma
+  name: worker-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
 roleRef:
+  apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: pod-watcher
-  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: worker-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
