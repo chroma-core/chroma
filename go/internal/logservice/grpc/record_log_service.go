@@ -97,6 +97,6 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 		res.AllCollectionInfo = append(res.AllCollectionInfo, collectionInfo)
 	}
 	// print everything for now, we can make this smaller once
-	log.Info("GetAllCollectionInfoToCompact success", zap.Int("collectionCount", len(res.AllCollectionInfo)))
+	log.Info("GetAllCollectionInfoToCompact success", zap.Any("collectionInfo", res.AllCollectionInfo))
 	return res, nil
 }
