@@ -60,6 +60,7 @@ class QuotaEnforcer(Component):
 
     def static_check(self, metadatas: Optional[Metadatas] = None, documents: Optional[Documents] = None,
                      embeddings: Optional[Embeddings] = None, collection_id: Optional[str] = None):
+
         if not self.should_enforce:
             return
         metadata_key_length_quota = self._quota_provider.get_for_subject(resource=Resource.METADATA_KEY_LENGTH,
