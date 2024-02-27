@@ -292,7 +292,7 @@ class FastAPI(chromadb.server.Server):
     def app(self) -> fastapi.FastAPI:
         return self._app
 
-    async def rate_limit_exception_handler(request: Request, exc: RateLimitError):
+    async def rate_limit_exception_handler(self, request: Request, exc: RateLimitError):
         return JSONResponse(
             status_code=429,
             content={"message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"},
