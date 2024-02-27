@@ -177,3 +177,11 @@ jobs:
             ref: 'main'
           })
           console.log(result)
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+    - name: Release Helm Charts
+      uses: helm/chart-releaser-action@v1.6.0
+      with:
+        charts_dir: 'k8s/charts/'
+      env:
+        CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
