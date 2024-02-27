@@ -293,7 +293,7 @@ class FastAPI(chromadb.server.Server):
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
 
-    async def quota_exception_handler(request: Request, exc: QuotaError):
+    async def quota_exception_handler(self, request: Request, exc: QuotaError):
         return JSONResponse(
             status_code=429,
             content={"message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"},
