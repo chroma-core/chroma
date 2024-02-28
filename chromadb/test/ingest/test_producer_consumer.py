@@ -56,7 +56,7 @@ def sqlite_persistent() -> Generator[Tuple[Producer, Consumer], None, None]:
 
 def pulsar() -> Generator[Tuple[Producer, Consumer], None, None]:
     """Fixture generator for pulsar Producer + Consumer. This fixture requires a running
-    pulsar cluster. You can use bin/cluster-test.sh to start a standalone pulsar and run this test.
+    pulsar cluster. You can use `tilt up` to start a standalone pulsar and run this test.
     Assumes pulsar_broker_url etc is set from the environment variables like PULSAR_BROKER_URL.
     """
     system = System(

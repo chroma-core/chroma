@@ -44,7 +44,7 @@ jobs:
     - name: Start Tilt
       run: tilt ci
     - name: Test
-      run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.testfile }}"'
+      run: python -m pytest "${{ matrix.testfile }}"
   test-go:
     runs-on: '16core-64gb-ubuntu-latest'
     steps:
@@ -65,4 +65,4 @@ jobs:
     - name: Start Tilt
       run: tilt ci
     - name: Test
-      run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager'
+      run: cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager
