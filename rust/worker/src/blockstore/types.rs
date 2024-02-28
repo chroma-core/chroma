@@ -113,18 +113,6 @@ pub(crate) enum ValueType {
 }
 
 pub(crate) trait Blockfile {
-    // ===== Lifecycle methods =====
-    fn open(path: &str) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
-    fn create(
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
-
     // ===== Transaction methods =====
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
 
@@ -164,29 +152,19 @@ pub(crate) trait Blockfile {
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 }
 
-struct HashMapBlockfile {
+pub(crate) struct HashMapBlockfile {
     map: std::collections::HashMap<BlockfileKey, Value>,
 }
 
+impl HashMapBlockfile {
+    pub(super) fn new() -> Self {
+        Self {
+            map: std::collections::HashMap::new(),
+        }
+    }
+}
+
 impl Blockfile for HashMapBlockfile {
-    // TODO: change this to respect path instead of ignoring it and creating a new thing
-    fn open(_path: &str) -> Result<Self, Box<dyn ChromaError>> {
-        Ok(HashMapBlockfile {
-            map: std::collections::HashMap::new(),
-        })
-    }
-    fn create(
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized,
-    {
-        Ok(HashMapBlockfile {
-            map: std::collections::HashMap::new(),
-        })
-    }
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
         match self.map.get(&key) {
             Some(value) => Ok(value.clone()),
@@ -288,8 +266,7 @@ mod tests {
 
     #[test]
     fn test_blockfile_set_get() {
-        let mut blockfile =
-            HashMapBlockfile::create("test", KeyType::String, ValueType::Int32Array).unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -310,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_blockfile_get_by_prefix() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key1 = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -350,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_storing_arrow_in_blockfile() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -366,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_blockfile_get_gt() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key1 = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -414,7 +391,7 @@ mod tests {
         let list_term_1 = builder.build();
 
         // Example of how to use the struct array, which is one value for a term
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("term1".to_string()),
@@ -455,7 +432,7 @@ mod tests {
         bitmap.insert(1);
         bitmap.insert(2);
         bitmap.insert(3);
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey::new(
             "text_prefix".to_string(),
             Key::String("bitmap1".to_string()),

@@ -1,6 +1,7 @@
 use crate::blockstore::types::Key;
 use crate::blockstore::types::{Blockfile, BlockfileKey};
 use std::collections::{BTreeMap, HashMap};
+use uuid::Uuid;
 
 // A sentinel blockfilekey wrapper to represent the start blocks range
 #[derive(Clone, Debug)]
@@ -45,14 +46,13 @@ impl Ord for SparseIndexEntry {
     }
 }
 
-// TODO: move this to use arrow
 pub(super) struct SparseIndex {
-    forward: BTreeMap<SparseIndexEntry, u64>,
-    reverse: HashMap<u64, SparseIndexEntry>,
+    forward: BTreeMap<SparseIndexEntry, Uuid>,
+    reverse: HashMap<Uuid, SparseIndexEntry>,
 }
 
 impl SparseIndex {
-    pub(super) fn new(initial_block_id: u64) -> Self {
+    pub(super) fn new(initial_block_id: Uuid) -> Self {
         let mut forward = BTreeMap::new();
         forward.insert(SparseIndexEntry::Start, initial_block_id);
         let mut reverse = HashMap::new();
@@ -67,10 +67,10 @@ impl SparseIndex {
         }
     }
 
-    pub(super) fn get_target_block_id(&self, search_key: BlockfileKey) -> u64 {
+    pub(super) fn get_target_block_id(&self, search_key: &BlockfileKey) -> Uuid {
         let mut iter_curr = self.forward.iter();
         let mut iter_next = self.forward.iter().skip(1);
-        let search_key = SparseIndexEntry::Key(search_key);
+        let search_key = SparseIndexEntry::Key(search_key.clone());
         while let Some((curr_key, curr_block_id)) = iter_curr.next() {
             if let Some((next_key, _)) = iter_next.next() {
                 if search_key >= *curr_key && search_key < *next_key {
@@ -83,7 +83,7 @@ impl SparseIndex {
         panic!("No blocks in the sparse index");
     }
 
-    pub(super) fn add_block(&mut self, start_key: BlockfileKey, block_id: u64) {
+    pub(super) fn add_block(&mut self, start_key: BlockfileKey, block_id: Uuid) {
         self.forward
             .insert(SparseIndexEntry::Key(start_key.clone()), block_id);
         self.reverse
@@ -102,59 +102,38 @@ mod tests {
 
     #[test]
     fn test_sparse_index() {
-        let mut sparse_index = SparseIndex::new(0);
-        let mut block_id_1 = 1;
+        let mut block_id_1 = uuid::Uuid::new_v4();
+        let mut sparse_index = SparseIndex::new(block_id_1);
         let mut blockfile_key =
             BlockfileKey::new("prefix".to_string(), Key::String("a".to_string()));
         sparse_index.add_block(blockfile_key.clone(), block_id_1);
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_1
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
 
         blockfile_key = BlockfileKey::new("prefix".to_string(), Key::String("b".to_string()));
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_1
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
 
         // Split the range into two blocks (start, c), and (c, end)
-        let block_id_2 = 2;
+        let block_id_2 = uuid::Uuid::new_v4();
         blockfile_key = BlockfileKey::new("prefix".to_string(), Key::String("c".to_string()));
         sparse_index.add_block(blockfile_key.clone(), block_id_2);
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_2
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_2);
 
         // d should fall into the second block
         blockfile_key = BlockfileKey::new("prefix".to_string(), Key::String("d".to_string()));
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_2
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_2);
 
         // Split the second block into (c, f) and (f, end)
-        let block_id_3 = 3;
+        let block_id_3 = uuid::Uuid::new_v4();
         blockfile_key = BlockfileKey::new("prefix".to_string(), Key::String("f".to_string()));
         sparse_index.add_block(blockfile_key.clone(), block_id_3);
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_3
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_3);
 
         // g should fall into the third block
         blockfile_key = BlockfileKey::new("prefix".to_string(), Key::String("g".to_string()));
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_3
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_3);
 
         // b should fall into the first block
         blockfile_key = BlockfileKey::new("prefix".to_string(), Key::String("b".to_string()));
-        assert_eq!(
-            sparse_index.get_target_block_id(blockfile_key.clone()),
-            block_id_1
-        );
+        assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
     }
 }
