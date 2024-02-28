@@ -4,4 +4,3 @@ namespace: "chroma"
 
 coordinator:
   replicaCount: 1
-  port: 50051
