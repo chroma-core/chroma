@@ -38,7 +38,7 @@ metadata:
 spec:
   ports:
     - name: grpc
-      port: {{ .Values.coordinator.port }}
+      port: 50001
       targetPort: grpc
   selector:
     app: coordinator

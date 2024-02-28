@@ -127,6 +127,7 @@ def grpc_with_real_server() -> Generator[SysDB, None, None]:
         Settings(
             allow_reset=True,
             chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+            chroma_server_grpc_port=50051,
         )
     )
     client = system.instance(GrpcSysDB)
