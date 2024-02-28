@@ -150,6 +150,9 @@ fn kv_to_blockfile_key(key: &str, value: MetadataIndexValue) -> BlockfileKey {
 mod test {
     use super::*;
     use proptest::prelude::*;
+    use proptest::test_runner::Config;
+    use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+    use system_under_test::MyHeap;
 
     #[test]
     fn test_string_value_metadata_index_error_when_not_in_transaction() {
@@ -278,6 +281,40 @@ mod test {
 
         let bitmap = index.get("key", MetadataIndexValue::String("value".to_string())).unwrap();
         assert_eq!(bitmap.len(), 0);
+    }
+
+    pub struct MetadataIndexStateMachine;
+
+    #[derive(Clone, Debug)]
+    pub enum Transition {
+        BeginTransaction,
+        CommitTransaction,
+        Set(String, MetadataIndexValue, usize),
+        Delete(String, MetadataIndexValue, usize),
+        Get(String, MetadataIndexValue),
+    }
+
+    impl ReferenceStateMachine for MetadataIndexStateMachine {
+        type State = (
+            // Because MetadataIndex is parametrized across different metadata types
+            // with the MetadataIndexValue enum, we need to store the type
+            // of the index the test is running. We can put any value in the first
+            // element of the tuple as long as its the correct type.
+            MetadataIndexValue, 
+            // {metadata key: {metadata value: offset id bitmap}}
+            HashMap<String, HashMap<MetadataIndexValue, RoaringBitmap>>
+        );
+        type Transition = Transition;
+
+        fn init_state() -> BoxedStrategy<Self::State> {
+            // Pick a value type.
+            prop_oneof![
+                Just((MetadataIndexValue::String("".to_string()), HashMap::new())),
+                Just((MetadataIndexValue::Float(0.0), HashMap::new())),
+                Just((MetadataIndexValue::Bool(false), HashMap::new())),
+            ]
+            .boxed()
+        }
     }
 
     proptest! {
