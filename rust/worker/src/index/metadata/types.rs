@@ -301,6 +301,8 @@ mod test {
             // of the index the test is running. We can put any value in the first
             // element of the tuple as long as its the correct type.
             MetadataIndexValue, 
+            // Are we in a transaction?
+            bool,
             // {metadata key: {metadata value: offset id bitmap}}
             HashMap<String, HashMap<MetadataIndexValue, RoaringBitmap>>
         );
@@ -314,6 +316,23 @@ mod test {
                 Just((MetadataIndexValue::Bool(false), HashMap::new())),
             ]
             .boxed()
+        }
+
+        fn transitions(state: &Self::State) -> BoxedStrategy<Self::Transition> {
+            let (value, in_transaction, _) = state;
+            let key_strat = ".{1,10}";
+            possible_transitions = vec![
+                Transition::Set(key_strat.clone(), value.clone(), 1),
+                Transition::Delete(key_strat.clone(), value.clone(), 1),
+                Transition::Get(key_strat.clone(), value.clone()),
+            ];
+            if !in_transaction {
+                possible_transitions.push(Transition::BeginTransaction);
+            } else {
+                possible_transitions.push(Transition::CommitTransaction);
+            }
+
+            prop_oneof!possible_transitions.boxed()
         }
     }
 
