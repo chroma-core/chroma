@@ -163,6 +163,9 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
 mod test {
     use super::*;
     use proptest::prelude::*;
+    use proptest::test_runner::Config;
+    use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+    use system_under_test::MyHeap;
 
     #[test]
     fn test_string_value_metadata_index_error_when_not_in_transaction() {
@@ -298,6 +301,48 @@ mod test {
     use proptest::test_runner::Config;
     use rand::prelude::{IteratorRandom, SliceRandom};
     use std::rc::Rc;
+
+    pub struct MetadataIndexStateMachine;
+
+    #[derive(Clone, Debug)]
+    pub enum Transition {
+        BeginTransaction,
+        CommitTransaction,
+        Set(String, MetadataIndexValue, usize),
+        Delete(String, MetadataIndexValue, usize),
+        Get(String, MetadataIndexValue),
+    }
+
+    impl ReferenceStateMachine for MetadataIndexStateMachine {
+        type State = (
+            // Because MetadataIndex is parametrized across different metadata types
+            // with the MetadataIndexValue enum, we need to store the type
+            // of the index the test is running. We can put any value in the first
+            // element of the tuple as long as its the correct type.
+            MetadataIndexValue, 
+            // {metadata key: {metadata value: offset id bitmap}}
+            HashMap<String, HashMap<MetadataIndexValue, RoaringBitmap>>
+        );
+        type Transition = Transition;
+
+        fn init_state() -> BoxedStrategy<Self::State> {
+            // Pick a value type.
+            prop_oneof![
+                Just((MetadataIndexValue::String("".to_string()), HashMap::new())),
+                Just((MetadataIndexValue::Float(0.0), HashMap::new())),
+                Just((MetadataIndexValue::Bool(false), HashMap::new())),
+            ]
+            .boxed()
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_string_value_metadata_index_proptest(_v in "[1-9][0-9]{0,8}") {
+            let mut index = BlockfileMetadataIndex::new();
+            index.begin_transaction().unwrap();
+            index.set("key", MetadataIndexValue::String("value".to_string()), 1).unwrap();
+            index.commit_transaction().unwrap();
 
     pub(crate) trait PropTestValue: MetadataIndexValue +
                                     PartialEq +
