@@ -21,10 +21,11 @@ CREATE TABLE "public"."collections" (
   "is_deleted" boolean NULL DEFAULT false,
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "log_position" bigint NULL DEFAULT 0,
   PRIMARY KEY ("id")
 );
--- Create index "collections_name_key" to table: "collections"
-CREATE UNIQUE INDEX "collections_name_key" ON "public"."collections" ("name");
+-- Create index "uni_collections_name" to table: "collections"
+CREATE UNIQUE INDEX "uni_collections_name" ON "public"."collections" ("name");
 -- Create "databases" table
 CREATE TABLE "public"."databases" (
   "id" text NOT NULL,

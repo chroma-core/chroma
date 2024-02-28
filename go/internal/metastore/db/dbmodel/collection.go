@@ -7,15 +7,16 @@ import (
 )
 
 type Collection struct {
-	ID         string          `gorm:"id;primaryKey"`
-	Name       *string         `gorm:"name;unique"`
-	Topic      *string         `gorm:"topic"`
-	Dimension  *int32          `gorm:"dimension"`
-	DatabaseID string          `gorm:"database_id"`
-	Ts         types.Timestamp `gorm:"ts;type:bigint;default:0"`
-	IsDeleted  bool            `gorm:"is_deleted;type:bool;default:false"`
-	CreatedAt  time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
-	UpdatedAt  time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	ID          string          `gorm:"id;primaryKey"`
+	Name        *string         `gorm:"name;unique"`
+	Topic       *string         `gorm:"topic"`
+	Dimension   *int32          `gorm:"dimension"`
+	DatabaseID  string          `gorm:"database_id"`
+	Ts          types.Timestamp `gorm:"ts;type:bigint;default:0"`
+	IsDeleted   bool            `gorm:"is_deleted;type:bool;default:false"`
+	CreatedAt   time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt   time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	LogPosition int64           `gorm:"log_position;default:0"`
 }
 
 func (v Collection) TableName() string {
