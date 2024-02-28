@@ -1,19 +1,22 @@
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use super::super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
-use super::arrow_utils::{get_key_size, get_value_size};
-use super::block::BlockData;
+use super::block::Block;
+use super::provider::ArrowBlockProvider;
 use super::sparse_index::SparseIndex;
+use super::utils::{get_key_size, get_value_size};
 
 const MAX_BLOCK_SIZE: usize = 1024;
 
-struct ArrowBlockfile {
+pub(crate) struct ArrowBlockfile {
     sparse_index: SparseIndex,
     key_type: KeyType,
     value_type: ValueType,
     transaction_state: Option<TransactionState>,
+    block_provider: ArrowBlockProvider,
 }
 
 struct TransactionState {
@@ -33,12 +36,12 @@ impl TransactionState {
         self.block_delta.push(delta);
     }
 
-    fn get_delta_for_block(&self, block: &Arc<BlockData>) -> Option<Arc<BlockDelta>> {
+    fn get_delta_for_block(&self, search_id: &Uuid) -> Option<Arc<BlockDelta>> {
         for delta in &self.block_delta {
             match delta.source_block {
                 None => continue,
                 Some(ref source_block) => {
-                    if Arc::ptr_eq(source_block, &block) {
+                    if source_block.id == *search_id {
                         return Some(delta.clone());
                     }
                 }
@@ -85,7 +88,7 @@ impl BlockDeltaInner {
 
 #[derive(Clone)]
 struct BlockDelta {
-    source_block: Option<Arc<BlockData>>,
+    source_block: Option<Arc<Block>>,
     inner: Arc<RwLock<BlockDeltaInner>>,
 }
 
@@ -101,7 +104,7 @@ impl BlockDelta {
         }
     }
 
-    fn from(block: Arc<BlockData>) -> Self {
+    fn from(block: Arc<Block>) -> Self {
         Self {
             source_block: Some(block),
             inner: Arc::new(RwLock::new(BlockDeltaInner {
@@ -118,40 +121,6 @@ impl BlockDelta {
 
     fn was_split(&self) -> bool {
         self.inner.read().split_into.is_some()
-    }
-
-    fn split(&self) {
-        let mut inner = self.inner.write();
-        // use std::mem::take to move the adds out since we are going to clear it
-        let adds = std::mem::take(&mut inner.adds);
-        let block_1 = BlockDelta::new();
-        let block_2 = BlockDelta::new();
-        let mut overall_size = 0;
-        // Case 1: There is a source_block and we need to account for the data in it
-        // Case 2: There is no source_block and we only need to account for the data in the adds
-        // Ignore case 1 for now
-
-        if self.source_block.is_some() {
-            return unimplemented!();
-        } else {
-            // Incrementally add until we reach as close to 50% of the total size as possible
-            for (key, value) in adds {
-                let key_size = get_key_size(&key);
-                let value_size = get_value_size(&value);
-                let entry_size = key_size + value_size;
-                if overall_size + entry_size <= MAX_BLOCK_SIZE / 2 {
-                    overall_size += entry_size;
-                    block_1.add(key, value);
-                } else {
-                    block_2.add(key, value);
-                }
-            }
-        }
-
-        let mut split_into = Vec::new();
-        split_into.push(block_1);
-        split_into.push(block_2);
-        self.inner.write().split_into = Some(split_into);
     }
 
     fn can_add(&self, bytes: usize) -> bool {
@@ -226,29 +195,6 @@ impl Blockfile for ArrowBlockfile {
         unimplemented!();
     }
 
-    // TODO: have open vs create, we need create in order to define the type
-    // of the value
-    // the open method should be able to infer the type of the value based
-    // on the record batch schema
-    fn open(path: &str) -> Result<Self, Box<dyn crate::errors::ChromaError>>
-    where
-        Self: Sized,
-    {
-        // Fetch the sparse index
-        unimplemented!();
-    }
-
-    fn create(
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Self, Box<dyn crate::errors::ChromaError>>
-    where
-        Self: Sized,
-    {
-        unimplemented!();
-    }
-
     fn get_by_prefix(
         &self,
         prefix: String,
@@ -303,50 +249,28 @@ impl Blockfile for ArrowBlockfile {
         };
 
         let entry_size = get_key_size(&key) + get_value_size(&value);
+        let target_block_id = self.sparse_index.get_target_block_id(&key);
 
-        // Get target dirty block
-        // let delta = match &self.root {
-        //     None => {
-        //         // Check if the transaction state has a root block delta, if not create one
-        //         match &transaction_state.root_block_delta {
-        //             None => {
-        //                 let delta = Arc::new(BlockDelta::new());
-        //                 transaction_state.root_block_delta = Some(delta.clone());
-        //                 delta
-        //             }
-        //             Some(delta) => delta.clone(),
-        //         }
-        //     }
-        //     Some(RootBlock::BlockData(block_data)) => {
-        //         match transaction_state.get_delta_for_block(&block_data) {
-        //             None => {
-        //                 // TODO: BlockDelta is a Arc-inner pattern and doesn't need to be wrapped in an Arc again
-        //                 let delta = Arc::new(BlockDelta::from(block_data.clone()));
-        //                 transaction_state.add_delta(delta.clone());
-        //                 delta
-        //             }
-        //             Some(delta) => delta,
-        //         }
-        //     }
-        //     Some(RootBlock::SparseIndex(sparse_index)) => {
-        //         unimplemented!();
-        //     }
-        // };
+        let delta = match transaction_state.get_delta_for_block(&target_block_id) {
+            None => {
+                println!("Creating new block delta");
+                let target_block = match self.block_provider.get_block(&target_block_id) {
+                    None => panic!("Block not found"), // TODO: This should not panic tbh
+                    Some(block) => block,
+                };
+                let delta = Arc::new(BlockDelta::from(target_block));
+                transaction_state.add_delta(delta.clone());
+                delta
+            }
+            Some(delta) => delta,
+        };
 
-        // if delta.can_add(entry_size) {
-        //     println!("Adding to existing delta");
-        //     delta.add(key, value);
-        // } else {
-        //     println!("Splitting delta");
-        //     delta.split();
-        //     // let new_deltas = delta.inner.read().split_into.as_ref().unwrap();
-
-        //     // Add the new deltas to the transaction state
-        //     // for new_delta in new_deltas {
-        //     //     // TODO: this doesn't need to be arc wrapped
-        //     //     transaction_state.add_delta(Arc::new(new_delta.clone()));
-        //     // }
-        // }
+        if delta.can_add(entry_size) {
+            println!("Adding to existing block");
+            delta.add(key, value);
+        } else {
+            println!("Splitting block");
+        }
 
         Ok(())
     }
@@ -368,10 +292,16 @@ impl Blockfile for ArrowBlockfile {
 }
 
 impl ArrowBlockfile {
-    fn new(key_type: KeyType, value_type: ValueType) -> Self {
+    pub(super) fn new(
+        key_type: KeyType,
+        value_type: ValueType,
+        block_provider: ArrowBlockProvider,
+    ) -> Self {
+        let initial_block = block_provider.create_block();
         Self {
-            sparse_index: SparseIndex::new(0), // TODO: sparse index init id should be allocated
+            sparse_index: SparseIndex::new(initial_block.id),
             transaction_state: None,
+            block_provider,
             key_type,
             value_type,
         }
@@ -389,7 +319,9 @@ mod tests {
 
     #[test]
     fn test_blockfile() {
-        let mut blockfile = ArrowBlockfile::new(KeyType::String, ValueType::Int32Array);
+        let mut block_provider = ArrowBlockProvider::new();
+        let mut blockfile =
+            ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
 
         blockfile.begin_transaction().unwrap();
         let key1 = BlockfileKey::new("key".to_string(), Key::String("zzzz".to_string()));
@@ -420,7 +352,9 @@ mod tests {
 
     #[test]
     fn test_splitting() {
-        let mut blockfile = ArrowBlockfile::new(KeyType::String, ValueType::Int32Array);
+        let mut block_provider = ArrowBlockProvider::new();
+        let mut blockfile =
+            ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
 
         // Add one block worth of data
         blockfile.begin_transaction().unwrap();

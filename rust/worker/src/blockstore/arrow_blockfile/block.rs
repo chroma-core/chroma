@@ -5,20 +5,41 @@ use arrow::{
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
+use uuid::Uuid;
 
 use super::super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
 
-// TODO: this should be an arrow struct array
-struct BlockInfo<K> {
-    start_key: K,
-    end_key: K,
-    // TODO: make this uuid
-    id: u64,
+enum BlockState {
+    Uninitialized,
+    Initialized,
 }
 
-pub(crate) struct BlockData {
+pub(super) struct Block {
+    pub(super) id: Uuid,
+    data: Option<BlockData>,
+    state: BlockState,
+}
+
+impl Block {
+    pub(super) fn new(id: Uuid) -> Self {
+        Self {
+            id,
+            data: None,
+            state: BlockState::Uninitialized,
+        }
+    }
+
+    pub(super) fn get_size(&self) -> usize {
+        match &self.data {
+            Some(data) => data.get_size(),
+            None => 0,
+        }
+    }
+}
+
+struct BlockData {
     // Arrow record batch with the schema (prefix, key, value)
-    pub(crate) data: RecordBatch,
+    data: RecordBatch,
 }
 
 enum KeyBuilder {
@@ -77,8 +98,8 @@ impl BlockBuilderOptions {
 
     pub(super) fn default() -> Self {
         Self {
-            item_capacity: 3,
-            prefix_data_capacity: 9,
+            item_capacity: 1024,
+            prefix_data_capacity: 1024,
             key_data_capacity: 1024,
         }
     }
@@ -161,12 +182,7 @@ impl BlockBuilder {
             }
         };
 
-        // println!(
-        //     "Size of prefix value slice in builder: {}",
-        //     prefix.to_data().get_buffer_memory_size()
-        // );
-
-        // println!("Size of key in builder: {}", key.get_buffer_memory_size());
+        println!("Size of key in builder: {}", key.get_buffer_memory_size());
         // println!(
         //     "Size of value in builder: {}",
         //     value.get_buffer_memory_size()
@@ -190,8 +206,58 @@ impl BlockBuilder {
         BlockData::new(record_batch.unwrap())
     }
 
-    pub(crate) fn get_size(&self) -> usize {
+    pub(super) fn get_size(&self) -> usize {
         let size = 0;
         size
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::blockstore::types::Key;
+    use arrow::util::bit_util;
+
+    use arrow::array::Int32Array;
+
+    use super::*;
+
+    #[test]
+    fn test_block_builder() {
+        let num_entries = 1000;
+
+        let mut keys = Vec::new();
+        let mut key_bytes = 0;
+        for i in 0..num_entries {
+            keys.push(Key::String(i.to_string()));
+            key_bytes += i.to_string().len();
+        }
+
+        let prefix = "key".to_string();
+        let prefix_bytes = prefix.len() * num_entries;
+        let mut block_builder = BlockBuilder::new(
+            KeyType::String,
+            ValueType::Int32Array,
+            Some(BlockBuilderOptions::new(
+                num_entries,
+                prefix_bytes,
+                key_bytes,
+            )),
+        );
+
+        for i in 0..num_entries {
+            block_builder.add(
+                BlockfileKey::new(prefix.clone(), keys[i].clone()),
+                Value::Int32ArrayValue(Int32Array::from(vec![i as i32])),
+            );
+        }
+        // NOTE: RESUME BY SPLITTING THE SIZE OF THE BLOCKS OFFSETS AND ROUNDING THE DATA AND THE OFFSET SEPERATELY
+        let prefix_total_bytes = bit_util::round_upto_multiple_of_64(prefix_bytes)
+            + bit_util::round_upto_multiple_of_64(4 * num_entries);
+        let key_total_bytes = bit_util::round_upto_multiple_of_64(key_bytes)
+            + bit_util::round_upto_multiple_of_64(4 * num_entries);
+
+        println!("Expected prefix total size: {}", prefix_total_bytes);
+        println!("Expected key total size: {}", key_total_bytes);
+        let block_data = block_builder.build();
     }
 }
