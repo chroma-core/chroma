@@ -26,9 +26,9 @@ spec:
             - name: IS_PERSISTENT
               value: "TRUE"
             - name: CHROMA_PRODUCER_IMPL
-              value: "chromadb.db.mixins.logservice.LogService"
+              value: "chromadb.logservice.logservice.LogService"
             - name: CHROMA_CONSUMER_IMPL
-              value: "chromadb.db.mixins.logservice.LogService"
+              value: "chromadb.logservice.logservice.LogService"
             - name: CHROMA_SEGMENT_MANAGER_IMPL
               value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
             - name: PULSAR_BROKER_URL

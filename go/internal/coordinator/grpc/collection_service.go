@@ -17,6 +17,7 @@ const successCode = 200
 const success = "ok"
 
 func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ResetStateResponse, error) {
+	log.Info("reset state")
 	res := &coordinatorpb.ResetStateResponse{}
 	err := s.coordinator.ResetState(context.Background())
 	if err != nil {

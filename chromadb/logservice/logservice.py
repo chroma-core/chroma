@@ -7,6 +7,9 @@ from chromadb.ingest import (
     Consumer,
     ConsumerCallbackFn,
 )
+from chromadb.proto.chroma_pb2 import (
+    SubmitEmbeddingRecord as ProtoSubmitEmbeddingRecord,
+)
 from chromadb.proto.convert import to_proto_submit
 from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
@@ -21,7 +24,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from overrides import override
-from typing import Sequence, Optional, Dict, Set
+from typing import Sequence, Optional, Dict, cast
 from uuid import UUID
 import logging
 
@@ -41,12 +44,23 @@ class LogService(Producer, Consumer):
     def __init__(self, system: System):
         self._log_service_url = system.settings.require("chroma_logservice_host")
         self._log_service_port = system.settings.require("chroma_logservice_port")
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
+        super().__init__(system)
+
+    @trace_method("LogService.start", OpenTelemetryGranularity.ALL)
+    @override
+    def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._log_service_url}:{self._log_service_port}"
         )
         self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
-        self._opentelemetry_client = system.require(OpenTelemetryClient)
-        super().__init__(system)
+        super().start()
+
+    @trace_method("LogService.stop", OpenTelemetryGranularity.ALL)
+    @override
+    def stop(self) -> None:
+        self._channel.close()
+        super().stop()
 
     @trace_method("LogService.reset_state", OpenTelemetryGranularity.ALL)
     @override
@@ -70,7 +84,7 @@ class LogService(Producer, Consumer):
         if not self._running:
             raise RuntimeError("Component not running")
 
-        return self.submit_embeddings(topic_name, [embedding])[0]
+        return self.submit_embeddings(topic_name, [embedding])[0]  # type: ignore
 
     @trace_method("LogService.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
@@ -86,9 +100,11 @@ class LogService(Producer, Consumer):
             return []
 
         # push records to the log service
-        collection_id_to_embeddings: Dict[UUID, Sequence[SubmitEmbeddingRecord]] = {}
+        collection_id_to_embeddings: Dict[UUID, list[SubmitEmbeddingRecord]] = {}
         for embedding in embeddings:
-            collection_id = embedding.get("collection_id")
+            collection_id = cast(UUID, embedding.get("collection_id"))
+            if collection_id is None:
+                raise ValueError("collection_id is required")
             if collection_id not in collection_id_to_embeddings:
                 collection_id_to_embeddings[collection_id] = []
             collection_id_to_embeddings[collection_id].append(embedding)
@@ -96,7 +112,12 @@ class LogService(Producer, Consumer):
         counts = []
         for collection_id, records in collection_id_to_embeddings.items():
             protos_to_submit = [to_proto_submit(record) for record in records]
-            counts.append(self.push_logs(collection_id, protos_to_submit))
+            counts.append(
+                self.push_logs(
+                    collection_id,
+                    cast(Sequence[SubmitEmbeddingRecord], protos_to_submit),
+                )
+            )
 
         return counts
 
@@ -111,6 +132,7 @@ class LogService(Producer, Consumer):
         id: Optional[UUID] = None,
     ) -> UUID:
         logger.info(f"Subscribing to {topic_name}, noop for logservice")
+        return UUID(int=0)
 
     @trace_method("LogService.unsubscribe", OpenTelemetryGranularity.ALL)
     @override
@@ -139,7 +161,7 @@ class LogService(Producer, Consumer):
 
     def pull_logs(
         self, collection_id: UUID, start_id: int, batch_size: int
-    ) -> Sequence[SubmitEmbeddingRecord]:
+    ) -> Sequence[ProtoSubmitEmbeddingRecord]:
         request = PullLogsRequest(
             collection_id=str(collection_id),
             start_from_id=start_id,
@@ -147,6 +169,3 @@ class LogService(Producer, Consumer):
         )
         response = self._log_service_stub.PullLogs(request)
         return response.records  # type: ignore
-
-    def __del__(self):
-        self._channel.close()
