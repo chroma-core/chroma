@@ -23,7 +23,8 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     g++ && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir /chroma
+RUN mkdir /chroma 
+RUN chmod 777 -R /chroma
 RUN mount -t cifs //$STORAGEACCT.file.core.windows.net/testingdb /chroma -o vers=3.0,username=$STORAGEACCT,password=$STORAGEKEY,dir_mode=0777,file_mode=0777,serverino
 WORKDIR /chroma
 
