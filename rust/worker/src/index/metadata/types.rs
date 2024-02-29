@@ -403,6 +403,23 @@ mod test {
         }
     }
 
+    fn vec_rbm_eq(a: &Vec<u32>, b: &RoaringBitmap) -> bool {
+        if a.len() != b.len() as usize {
+            return false;
+        }
+        for offset in a {
+            if !b.contains(*offset) {
+                return false;
+            }
+        }
+        for offset in b {
+            if !a.contains(&offset) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     impl StateMachineTest for BlockfileMetadataIndex<String> {
         type SystemUnderTest = Self;
         type Reference = MetadataIndexStateMachine<String>;
@@ -458,10 +475,26 @@ mod test {
                     }
                 },
                 MetadataIndexTransition::Delete(k, v, oid) => {
-                    state.delete(&k, v, oid).unwrap();
+                    let in_transaction = state.in_transaction();
+                    let res = state.delete(&k, v, oid);
+                    if !in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
                 },
                 MetadataIndexTransition::Get(k, v) => {
-                    let _ = state.get(&k, v).unwrap();
+                    let in_transaction = state.in_transaction();
+                    let res = state.get(&k, v.clone());
+                    if in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        let rbm = res.unwrap();
+                        assert!(vec_rbm_eq(
+                            ref_state.data.get(&k).unwrap().get(&v).unwrap(),
+                            &rbm
+                        ));
+                    }
                 },
             }
             state
@@ -471,19 +504,10 @@ mod test {
             assert_eq!(state.in_transaction(), ref_state.in_transaction);
             for (k, v) in &ref_state.data {
                 for (kk, ref_data) in v {
-                    let state_data = state.get(k, kk.clone()).unwrap();
-                    assert_eq!(state_data.len(), ref_data.len() as u64);
-
-                    for offset in &state_data {
-                        if !ref_data.contains(&(offset)) {
-                            assert!(false);
-                        }
-                    }
-                    for offset in ref_data {
-                        if !state_data.contains(*offset) {
-                            assert!(false);
-                        }
-                    }
+                    assert!(vec_rbm_eq(
+                        ref_data,
+                        &state.get(k, kk.clone()).unwrap()
+                    ));
                 }
             }
         }
@@ -496,7 +520,7 @@ mod test {
             failure_persistence: None,
             // Enable verbose mode to make the state machine test print the
             // transitions for each case.
-            verbose: 1,
+            verbose: 0,
             // Only run 10 cases by default to avoid running out of system resources
             // and taking too long to finish.
             cases: 10,
