@@ -298,13 +298,9 @@ mod test {
     use rand::prelude::{IteratorRandom, SliceRandom};
     use std::rc::Rc;
 
-    pub struct MetadataIndexStateMachine;
-
     pub(crate) trait PropTestValue: MetadataIndexValue +
-                                    Default +
                                     PartialEq +
                                     Eq +
-                                    Arbitrary +
                                     Clone +
                                     std::hash::Hash +
                                     std::fmt::Debug {
@@ -323,8 +319,34 @@ mod test {
         }
     }
 
+    // f32 doesn't implement Hash or Eq so we need to wrap it to use
+    // in our reference state machine's HashMap. This is a bit of a hack
+    // but only used in tests.
+    #[derive(Clone, Debug, PartialEq)]
+    struct FloatWrapper(f32);
+
+    impl std::hash::Hash for FloatWrapper {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.0.to_bits().hash(state);
+        }
+    }
+
+    impl Eq for FloatWrapper {}
+
+    impl MetadataIndexValue for FloatWrapper {
+        fn to_blockfile_key(&self) -> Key {
+            self.0.to_blockfile_key()
+        }
+    }
+
+    impl PropTestValue for FloatWrapper {
+        fn strategy() -> BoxedStrategy<Self> {
+            (0..1000).prop_map(|x| FloatWrapper(x as f32)).boxed()
+        }
+    }
+
     #[derive(Clone, Debug)]
-    pub(crate) enum MetadataIndexTransition<T: PropTestValue> {
+    pub(crate) enum Transition<T: PropTestValue> {
         BeginTransaction,
         CommitTransaction,
         Set(String, T, u32),
@@ -340,29 +362,19 @@ mod test {
         data: HashMap<String, HashMap<T, Vec<u32>>>,
     }
 
-    fn vec_rbm_eq(a: &Vec<u32>, b: &RoaringBitmap) -> bool {
-        if a.len() != b.len() as usize {
-            return false;
-        }
-        for offset in a {
-            if !b.contains(*offset) {
-                return false;
-            }
-        }
-        for offset in b {
-            if !a.contains(&offset) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     impl<T: PropTestValue> ReferenceState<T> {
         fn new() -> Self {
             ReferenceState {
                 in_transaction: false,
                 data: HashMap::new(),
             }
+        }
+
+        fn random_entry(self: &Self) -> Option<(String, T, u32)> {
+            let k = self.data.keys().choose(&mut rand::thread_rng())?;
+            let v = self.data.get(k)?.keys().choose(&mut rand::thread_rng())?;
+            let vv = self.data.get(k)?.get(v)?.choose(&mut rand::thread_rng())?;
+            Some((k.clone(), v.clone(), vv.clone()))
         }
 
         fn kv_rbm_eq(
@@ -381,54 +393,149 @@ mod test {
         }
     }
 
-    pub(crate) struct MetadataIndexStateMachine<T: PropTestValue> {
+    // Reference state stores a Vec<u32>, SUT stores a RoaringBitmap. So we
+    // need to compare them manually.
+    fn vec_rbm_eq(a: &Vec<u32>, b: &RoaringBitmap) -> bool {
+        if a.len() != b.len() as usize {
+            return false;
+        }
+        for offset in a {
+            if !b.contains(*offset) {
+                return false;
+            }
+        }
+        for offset in b {
+            if !a.contains(&offset) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub(crate) struct ReferenceStateMachineImpl<T: PropTestValue> {
         unused: Option<T>,
     }
 
-    impl<T: PropTestValue + 'static> ReferenceStateMachine for MetadataIndexStateMachine<T> {
+    impl<T: PropTestValue + 'static> ReferenceStateMachine for ReferenceStateMachineImpl<T> {
         type State = ReferenceState<T>;
-        type Transition = MetadataIndexTransition<T>;
+        type Transition = Transition<T>;
 
         fn init_state() -> BoxedStrategy<Self::State> {
             return Just(ReferenceState::<T>::new()).boxed();
         }
 
-        fn transitions(_state: &Self::State) -> BoxedStrategy<Self::Transition> {
+        fn transitions(state: &ReferenceState<T>) -> BoxedStrategy<Transition<T>> {
+            let random_entry_from_ref = state.random_entry();
+            if random_entry_from_ref.is_none() {
+                return prop_oneof![
+                    Just(Transition::BeginTransaction),
+                    (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
+                        Transition::Set(k.to_string(), v, oid as u32)
+                    }),
+                ].boxed();
+            }
+
+            let random_entry_from_ref = random_entry_from_ref.unwrap();
+            let (rk, rv, roid) = random_entry_from_ref;
+            let rk = Rc::new(rk);
+            let rv = Rc::new(rv);
             return prop_oneof![
-                Just(MetadataIndexTransition::BeginTransaction),
-                Just(MetadataIndexTransition::CommitTransaction),
-                // Add random data
-                // (".{0,10}", Default::default.strategy(), 1..1000).prop_map(move |(k, v, oid)| {
-                //     MetadataIndexTransition::Set(k.to_string(), v, oid as u32)
-                // }),
-                // // Try to delete random data
-                // (".{0,10}", Default::default.strategy(), 1..1000).prop_map(move |(k, v, oid)| {
-                //     MetadataIndexTransition::Delete(k.to_string(), v, oid as u32)
-                // }),
-                // Try to get random data
-                (".{0,10}", T::strategy()).prop_map(move |(k, v)| {
-                    MetadataIndexTransition::Get(k.to_string(), v)
+                Just(Transition::BeginTransaction),
+                Just(Transition::CommitTransaction),
+                (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
+                    Transition::Set(k.to_string(), v, oid as u32)
                 }),
-                // TODO we should get set and delete data that we know is in the model
+                (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
+                    Transition::Delete(k.to_string(), v, oid as u32)
+                }),
+                (".{0,10}", T::strategy()).prop_map(move |(k, v)| {
+                    Transition::Get(k.to_string(), v)
+                }),
+
+                Just(Transition::Set((*rk).clone(), (*rv).clone(), roid)),
+                (".{1,10}").prop_map({
+                    let rv = Rc::clone(&rv);
+                    move |k| {
+                        Transition::Set(k.to_string(), (*rv).clone(), roid)
+                    }
+                }),
+                (T::strategy()).prop_map({
+                    let rk = Rc::clone(&rk);
+                    move |v| {
+                        Transition::Set((*rk).clone(), v, roid)
+                    }
+                }),
+                (1..1000).prop_map({
+                    let rk = Rc::clone(&rk);
+                    let rv = Rc::clone(&rv);
+                    move |oid| {
+                        Transition::Set((*rk).clone(), (*rv).clone(), oid as u32)
+                    }
+                }),
+
+                Just(Transition::Delete((*rk).clone(), (*rv).clone(), roid)),
+                (".{1,10}").prop_map({
+                    let rv = Rc::clone(&rv);
+                    move |k| {
+                        Transition::Delete(k.to_string(), (*rv).clone(), roid)
+                    }
+                }),
+                (T::strategy()).prop_map({
+                    let rk = Rc::clone(&rk);
+                    move |v| {
+                        Transition::Delete((*rk).clone(), v, roid)
+                    }
+                }),
+                (1..1000).prop_map({
+                    let rk = Rc::clone(&rk);
+                    let rv = Rc::clone(&rv);
+                    move |oid| {
+                        Transition::Delete((*rk).clone(), (*rv).clone(), oid as u32)
+                    }
+                }),
+
+                Just(Transition::Get((*rk).clone(), (*rv).clone())),
+                (".{1,10}").prop_map({
+                    let rv = Rc::clone(&rv);
+                    move |k| {
+                        Transition::Get(k.to_string(), (*rv).clone())
+                    }
+                }),
+                (T::strategy()).prop_map({
+                    let rk = Rc::clone(&rk);
+                    move |v| {
+                        Transition::Get((*rk).clone(), v)
+                    }
+                }),
+                (1..1000).prop_map({
+                    let rk = Rc::clone(&rk);
+                    let rv = Rc::clone(&rv);
+                    move |oid| {
+                        Transition::Get((*rk).clone(), (*rv).clone())
+                    }
+                }),
             ].boxed();
         }
 
-        fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
+        fn apply(mut state: ReferenceState<T>, transition: &Transition<T>) -> Self::State {
             match transition {
-                MetadataIndexTransition::BeginTransaction => {
+                Transition::BeginTransaction => {
                     state.in_transaction = true;
                 },
-                MetadataIndexTransition::CommitTransaction => {
+                Transition::CommitTransaction => {
                     state.in_transaction = false;
                 },
-                MetadataIndexTransition::Set(k, v, oid) => {
+                Transition::Set(k, v, oid) => {
                     if !state.in_transaction {
                         return state;
                     }
                     let entry = state.data.entry(k.clone()).or_insert(HashMap::new());
-                    entry.entry(v.clone()).or_insert(Vec::new()).push(*oid);
+                    let entry = entry.entry(v.clone()).or_insert(Vec::new());
+                    if !entry.contains(oid) {
+                        entry.push(*oid);
+                    }
                 },
-                MetadataIndexTransition::Delete(k, v, oid) => {
+                Transition::Delete(k, v, oid) => {
                     if !state.in_transaction {
                         return state;
                     }
@@ -437,7 +544,7 @@ mod test {
                         offsets.retain(|x| *x != *oid);
                     }
                 },
-                MetadataIndexTransition::Get(_, _) => {
+                Transition::Get(_, _) => {
                     // No-op
                 },
             }
@@ -447,7 +554,7 @@ mod test {
 
     impl<T: PropTestValue + 'static> StateMachineTest for BlockfileMetadataIndex<T> {
         type SystemUnderTest = Self;
-        type Reference = MetadataIndexStateMachine<T>;
+        type Reference = ReferenceStateMachineImpl<T>;
 
         fn init_test(_ref_state: &ReferenceState<T>) -> Self::SystemUnderTest {
             // We don't need to set up on _ref_state since we always initialize
@@ -458,10 +565,10 @@ mod test {
         fn apply(
             mut state: Self::SystemUnderTest,
             ref_state: &ReferenceState<T>,
-            transition: MetadataIndexTransition<T>,
+            transition: Transition<T>,
         ) -> Self::SystemUnderTest {
             match transition {
-                MetadataIndexTransition::BeginTransaction => {
+                Transition::BeginTransaction => {
                     let already_in_transaction = state.in_transaction();
                     let res = state.begin_transaction();
                     assert!(state.in_transaction());
@@ -471,7 +578,7 @@ mod test {
                         assert!(res.is_ok());
                     }
                 },
-                MetadataIndexTransition::CommitTransaction => {
+                Transition::CommitTransaction => {
                     let in_transaction = state.in_transaction();
                     let res = state.commit_transaction();
                     assert_eq!(state.in_transaction(), false);
@@ -481,7 +588,7 @@ mod test {
                         assert!(res.is_ok());
                     }
                 },
-                MetadataIndexTransition::Set(k, v, oid) => {
+                Transition::Set(k, v, oid) => {
                     let in_transaction = state.in_transaction();
                     let res = state.set(&k, v.clone(), oid);
                     if !in_transaction {
@@ -490,7 +597,7 @@ mod test {
                         assert!(res.is_ok());
                     }
                 },
-                MetadataIndexTransition::Delete(k, v, oid) => {
+                Transition::Delete(k, v, oid) => {
                     let in_transaction = state.in_transaction();
                     let res = state.delete(&k, v, oid);
                     if !in_transaction {
@@ -499,7 +606,7 @@ mod test {
                         assert!(res.is_ok());
                     }
                 },
-                MetadataIndexTransition::Get(k, v) => {
+                Transition::Get(k, v) => {
                     let in_transaction = state.in_transaction();
                     let res = state.get(&k, v.clone());
                     if in_transaction {
@@ -544,6 +651,9 @@ mod test {
 
         #[test]
         fn proptest_boolean_metadata_index(sequential 1..100 => BlockfileMetadataIndex<bool>);
+
+        #[test]
+        fn proptest_numeric_metadata_index(sequential 1..100 => BlockfileMetadataIndex<FloatWrapper>);
     }
 
     impl PropTestValue for bool {
