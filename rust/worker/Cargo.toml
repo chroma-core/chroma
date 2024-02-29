@@ -41,11 +41,8 @@ tantivy = "0.21.1"
 
 [dev-dependencies]
 proptest = "1.4.0"
-<<<<<<< HEAD
 proptest-state-machine = "0.1.0"
 "rand" = "0.8.5"
-=======
->>>>>>> e06b8edc ([ENH] Property testing for metadata indices)
 
 [build-dependencies]
 tonic-build = "0.10"

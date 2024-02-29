@@ -162,10 +162,6 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use proptest::prelude::*;
-    use proptest::test_runner::Config;
-    use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
-    use system_under_test::MyHeap;
 
     #[test]
     fn test_string_value_metadata_index_error_when_not_in_transaction() {
@@ -305,63 +301,112 @@ mod test {
     pub struct MetadataIndexStateMachine;
 
     #[derive(Clone, Debug)]
-    pub enum Transition {
+    pub(crate) enum MetadataIndexTransition<T: MetadataIndexValue> {
         BeginTransaction,
         CommitTransaction,
-        Set(String, MetadataIndexValue, usize),
-        Delete(String, MetadataIndexValue, usize),
-        Get(String, MetadataIndexValue),
+        Set(String, T, u32),
+        Delete(String, T, u32),
+        Get(String, T),
     }
 
-    impl ReferenceStateMachine for MetadataIndexStateMachine {
-        type State = (
-            // Because MetadataIndex is parametrized across different metadata types
-            // with the MetadataIndexValue enum, we need to store the type
-            // of the index the test is running. We can put any value in the first
-            // element of the tuple as long as its the correct type.
-            MetadataIndexValue, 
-            // Are we in a transaction?
-            bool,
-            // {metadata key: {metadata value: offset id bitmap}}
-            HashMap<String, HashMap<MetadataIndexValue, RoaringBitmap>>
-        );
-        type Transition = Transition;
+    pub(crate) struct MetadataIndexStateMachine<T: MetadataIndexValue> {
+        unused: Option<T>,
+    }
+
+    #[derive(Clone, Debug)]
+    pub(crate) struct ReferenceState<T: MetadataIndexValue> {
+        // Are we in a transaction?
+        in_transaction: bool,
+        // {metadata key: {metadata value: offset ids}}
+        data: HashMap<String, HashMap<T, Vec<u32>>>,
+    }
+
+    impl<T: MetadataIndexValue> ReferenceState<T> {
+        fn new() -> Self {
+            ReferenceState {
+                in_transaction: false,
+                data: HashMap::new(),
+            }
+        }
+    }
+
+    // We define three separate state machines: one for each type of metadata
+    // index. We _could_ hack around this by using a single state machine and
+    // matching on key types within, but that has three problems:
+    // 1. It's not as clear what's going on.
+    // 2. It generates a lot of unnecessary transitions by trying to run
+    //    data operations of the wrong type.
+    // 3. Perhaps most seriously, proptest wouldn't know the input types(*) so
+    //    couldn't reduce failing tests.
+    //
+    // (*) We could always have it generate input of all three types and ignore
+    // the ones that don't match, but that makes reducing harder and makes
+    // everything much harder to read.
+
+    impl ReferenceStateMachine for MetadataIndexStateMachine<String> {
+        type State = ReferenceState<String>;
+        type Transition = MetadataIndexTransition<String>;
 
         fn init_state() -> BoxedStrategy<Self::State> {
-            // Pick a value type.
-            prop_oneof![
-                Just((MetadataIndexValue::String("".to_string()), HashMap::new())),
-                Just((MetadataIndexValue::Float(0.0), HashMap::new())),
-                Just((MetadataIndexValue::Bool(false), HashMap::new())),
-            ]
-            .boxed()
+            return Just(ReferenceState::<String>::new()).boxed();
         }
 
-        fn transitions(state: &Self::State) -> BoxedStrategy<Self::Transition> {
-            let (value, in_transaction, _) = state;
-            let key_strat = ".{1,10}";
-            possible_transitions = vec![
-                Transition::Set(key_strat.clone(), value.clone(), 1),
-                Transition::Delete(key_strat.clone(), value.clone(), 1),
-                Transition::Get(key_strat.clone(), value.clone()),
-            ];
-            if !in_transaction {
-                possible_transitions.push(Transition::BeginTransaction);
-            } else {
-                possible_transitions.push(Transition::CommitTransaction);
-            }
+        fn transitions(_state: &Self::State) -> BoxedStrategy<Self::Transition> {
+            return prop_oneof![
+                Just(MetadataIndexTransition::BeginTransaction),
+                Just(MetadataIndexTransition::CommitTransaction),
+                // Add random data
+                (".{0,10}", ".{0,10}", 1..1000).prop_map(move |(k, v, oid)| {
+                    MetadataIndexTransition::Set(k.to_string(), v.to_string(), oid as u32)
+                }),
+                // Try to delete random data
+                (".{0,10}", ".{0,10}", 1..1000).prop_map(move |(k, v, oid)| {
+                    MetadataIndexTransition::Delete(k.to_string(), v.to_string(), oid as u32)
+                }),
+                // Try to get random data
+                (".{0,10}", ".{0,10}").prop_map(move |(k, v)| {
+                    MetadataIndexTransition::Get(k.to_string(), v.to_string())
+                }),
+                // TODO we should get set and delete data that we know is in the model
+            ].boxed();
+        }
 
-            prop_oneof!possible_transitions.boxed()
+        fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
+            match transition {
+                MetadataIndexTransition::BeginTransaction => {
+                    state.in_transaction = true;
+                },
+                MetadataIndexTransition::CommitTransaction => {
+                    state.in_transaction = false;
+                },
+                MetadataIndexTransition::Set(k, v, oid) => {
+                    if !state.in_transaction {
+                        return state;
+                    }
+                    let entry = state.data.entry(k.clone()).or_insert(HashMap::new());
+                    entry.entry(v.clone()).or_insert(Vec::new()).push(*oid);
+                },
+                MetadataIndexTransition::Delete(k, v, oid) => {
+                    if !state.in_transaction {
+                        return state;
+                    }
+                    let entry = state.data.entry(k.clone()).or_insert(HashMap::new());
+                    if let Some(offsets) = entry.get_mut(v) {
+                        offsets.retain(|x| *x != *oid);
+                    }
+                },
+                MetadataIndexTransition::Get(_, _) => {
+                    // No-op
+                },
+            }
+            state
         }
     }
 
-    proptest! {
-        #[test]
-        fn test_string_value_metadata_index_proptest(_v in "[1-9][0-9]{0,8}") {
-            let mut index = BlockfileMetadataIndex::new();
-            index.begin_transaction().unwrap();
-            index.set("key", MetadataIndexValue::String("value".to_string()), 1).unwrap();
-            index.commit_transaction().unwrap();
+    impl StateMachineTest for BlockfileMetadataIndex<String> {
+        type SystemUnderTest = Self;
+        type Reference = MetadataIndexStateMachine<String>;
+    }
 
     pub(crate) trait PropTestValue: MetadataIndexValue +
                                     PartialEq +
@@ -376,6 +421,89 @@ mod test {
         fn strategy() -> BoxedStrategy<Self> {
             ".{0,10}".prop_map(|x| x.to_string()).boxed()
         }
+
+        fn apply(
+            mut state: Self::SystemUnderTest,
+            ref_state: &ReferenceState<String>,
+            transition: MetadataIndexTransition<String>,
+        ) -> Self::SystemUnderTest {
+            match transition {
+                MetadataIndexTransition::BeginTransaction => {
+                    let already_in_transaction = state.in_transaction();
+                    let res = state.begin_transaction();
+                    assert!(state.in_transaction());
+                    if already_in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
+                },
+                MetadataIndexTransition::CommitTransaction => {
+                    let in_transaction = state.in_transaction();
+                    let res = state.commit_transaction();
+                    assert_eq!(state.in_transaction(), false);
+                    if !in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
+                },
+                MetadataIndexTransition::Set(k, v, oid) => {
+                    let in_transaction = state.in_transaction();
+                    let res = state.set(&k, v.clone(), oid);
+                    if !in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
+                },
+                MetadataIndexTransition::Delete(k, v, oid) => {
+                    state.delete(&k, v, oid).unwrap();
+                },
+                MetadataIndexTransition::Get(k, v) => {
+                    let _ = state.get(&k, v).unwrap();
+                },
+            }
+            state
+        }
+
+        fn check_invariants(state: &Self::SystemUnderTest, ref_state: &ReferenceState<String>) {
+            assert_eq!(state.in_transaction(), ref_state.in_transaction);
+            for (k, v) in &ref_state.data {
+                for (kk, ref_data) in v {
+                    let state_data = state.get(k, kk.clone()).unwrap();
+                    assert_eq!(state_data.len(), ref_data.len() as u64);
+
+                    for offset in &state_data {
+                        if !ref_data.contains(&(offset)) {
+                            assert!(false);
+                        }
+                    }
+                    for offset in ref_data {
+                        if !state_data.contains(*offset) {
+                            assert!(false);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    prop_state_machine! {
+        #![proptest_config(Config {
+            // Turn failure persistence off for demonstration. This means that no
+            // regression file will be captured.
+            failure_persistence: None,
+            // Enable verbose mode to make the state machine test print the
+            // transitions for each case.
+            verbose: 1,
+            // Only run 10 cases by default to avoid running out of system resources
+            // and taking too long to finish.
+            cases: 10,
+            .. Config::default()
+        })]
+        #[test]
+        fn proptest_string_metadata_index(sequential 1..100 => BlockfileMetadataIndex<String>);
     }
 
     impl PropTestValue for bool {
@@ -676,7 +804,7 @@ mod test {
                     let res = state.get(&k, v.clone());
                     if in_transaction {
                         assert!(res.is_err());
-                    } else {
+                } else {
                         let rbm = res.unwrap();
                         assert!(
                             ref_state.kv_rbm_eq(&rbm, &k, &v)
