@@ -1,17 +1,18 @@
-from chromadb.db.base import SqlDB, ParameterValue, get_sql
+import sys
+
+import grpc
+
 from chromadb.ingest import (
     Producer,
     Consumer,
-    encode_vector,
-    decode_vector,
     ConsumerCallbackFn,
 )
+from chromadb.proto.convert import to_proto_submit
+from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest
+from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.types import (
     SubmitEmbeddingRecord,
-    EmbeddingRecord,
     SeqId,
-    ScalarEncoding,
-    Operation,
 )
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
@@ -20,12 +21,8 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from overrides import override
-from collections import defaultdict
-from typing import Sequence, Tuple, Optional, Dict, Set, cast
+from typing import Sequence, Optional, Dict, Set
 from uuid import UUID
-from pypika import Table, functions
-import uuid
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,20 +33,18 @@ class LogService(Producer, Consumer):
     Distributed Chroma Log Service
     """
 
-    class Subscription:
-        callback: ConsumerCallbackFn
-
-        def __init__(
-            self,
-            callback: ConsumerCallbackFn,
-        ):
-            self.callback = callback
-
-    _subscriptions: Dict[str, Set[Subscription]]
-    _max_batch_size: Optional[int]
+    _log_service_stub: LogServiceStub
+    _channel: grpc.Channel
+    _log_service_url: str
+    _log_service_port: int
 
     def __init__(self, system: System):
-        self._subscriptions = defaultdict(set)
+        self._log_service_url = system.settings.require("chroma_logservice_host")
+        self._log_service_port = system.settings.require("chroma_logservice_port")
+        self._channel = grpc.insecure_channel(
+            f"{self._log_service_url}:{self._log_service_port}"
+        )
+        self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
@@ -57,16 +52,15 @@ class LogService(Producer, Consumer):
     @override
     def reset_state(self) -> None:
         super().reset_state()
-        self._subscriptions = defaultdict(set)
 
     @override
     def create_topic(self, topic_name: str) -> None:
-        raise RuntimeError("create topic not supported for LogService")
+        raise NotImplementedError("Not implemented")
 
     @trace_method("LogService.delete_topic", OpenTelemetryGranularity.ALL)
     @override
     def delete_topic(self, topic_name: str) -> None:
-        raise RuntimeError("delete topic not supported for LogService")
+        raise NotImplementedError("Not implemented")
 
     @trace_method("LogService.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
@@ -83,25 +77,28 @@ class LogService(Producer, Consumer):
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
     ) -> Sequence[SeqId]:
+        logger.info(f"Submitting {len(embeddings)} embeddings to {topic_name}")
+
         if not self._running:
             raise RuntimeError("Component not running")
 
         if len(embeddings) == 0:
             return []
 
-        if len(embeddings) > self.max_batch_size:
-            raise ValueError(
-                f"""
-                    Cannot submit more than {self.max_batch_size:,} embeddings at once.
-                    Please submit your embeddings in batches of size
-                    {self.max_batch_size:,} or less.
-                    """
-            )
+        # push records to the log service
+        collection_id_to_embeddings: Dict[UUID, Sequence[SubmitEmbeddingRecord]] = {}
+        for embedding in embeddings:
+            collection_id = embedding.get("collection_id")
+            if collection_id not in collection_id_to_embeddings:
+                collection_id_to_embeddings[collection_id] = []
+            collection_id_to_embeddings[collection_id].append(embedding)
 
-        # TODO: push records to the log service
+        counts = []
+        for collection_id, records in collection_id_to_embeddings.items():
+            protos_to_submit = [to_proto_submit(record) for record in records]
+            counts.append(self.push_logs(collection_id, protos_to_submit))
 
-        # TODO:why need seq id?
-        return 0
+        return counts
 
     @trace_method("LogService.subscribe", OpenTelemetryGranularity.ALL)
     @override
@@ -113,60 +110,43 @@ class LogService(Producer, Consumer):
         end: Optional[SeqId] = None,
         id: Optional[UUID] = None,
     ) -> UUID:
-        if not self._running:
-            raise RuntimeError("Component not running")
-
-        subscription_id = id or uuid.uuid4()
-        start, end = self._validate_range(start, end)
-
-        subscription = self.Subscription(
-            subscription_id, topic_name, start, end, consume_fn
-        )
-
-        # Backfill first, so if it errors we do not add the subscription
-        self._backfill(subscription)
-        self._subscriptions[topic_name].add(subscription)
-
-        return subscription_id
+        logger.info(f"Subscribing to {topic_name}, noop for logservice")
 
     @trace_method("LogService.unsubscribe", OpenTelemetryGranularity.ALL)
     @override
     def unsubscribe(self, subscription_id: UUID) -> None:
-        for topic_name, subscriptions in self._subscriptions.items():
-            for subscription in subscriptions:
-                if subscription.id == subscription_id:
-                    subscriptions.remove(subscription)
-                    if len(subscriptions) == 0:
-                        del self._subscriptions[topic_name]
-                    return
+        logger.info(f"Unsubscribing from {subscription_id}, noop for logservice")
 
     @override
     def min_seqid(self) -> SeqId:
-        return -1
+        return 0
 
     @override
     def max_seqid(self) -> SeqId:
-        return 2**63 - 1
+        return sys.maxsize
 
     @property
-    @trace_method("LogService.max_batch_size", OpenTelemetryGranularity.ALL)
     @override
     def max_batch_size(self) -> int:
-        if self._max_batch_size is None:
-            with self.tx() as cur:
-                cur.execute("PRAGMA compile_options;")
-                compile_options = cur.fetchall()
+        return sys.maxsize
 
-                for option in compile_options:
-                    if "MAX_VARIABLE_NUMBER" in option[0]:
-                        # The pragma returns a string like 'MAX_VARIABLE_NUMBER=999'
-                        self._max_batch_size = int(option[0].split("=")[1]) // (
-                            self.VARIABLES_PER_RECORD
-                        )
+    def push_logs(
+        self, collection_id: UUID, records: Sequence[SubmitEmbeddingRecord]
+    ) -> int:
+        request = PushLogsRequest(collection_id=str(collection_id), records=records)
+        response = self._log_service_stub.PushLogs(request)
+        return response.record_count  # type: ignore
 
-                if self._max_batch_size is None:
-                    # This value is the default for sqlite3 versions < 3.32.0
-                    # It is the safest value to use if we can't find the pragma for some
-                    # reason
-                    self._max_batch_size = 999 // self.VARIABLES_PER_RECORD
-        return self._max_batch_size
+    def pull_logs(
+        self, collection_id: UUID, start_id: int, batch_size: int
+    ) -> Sequence[SubmitEmbeddingRecord]:
+        request = PullLogsRequest(
+            collection_id=str(collection_id),
+            start_from_id=start_id,
+            batch_size=batch_size,
+        )
+        response = self._log_service_stub.PullLogs(request)
+        return response.records  # type: ignore
+
+    def __del__(self):
+        self._channel.close()

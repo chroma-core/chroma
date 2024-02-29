@@ -26,9 +26,9 @@ spec:
             - name: IS_PERSISTENT
               value: "TRUE"
             - name: CHROMA_PRODUCER_IMPL
-              value: "chromadb.ingest.impl.pulsar.PulsarProducer"
+              value: "chromadb.db.mixins.logservice.LogService"
             - name: CHROMA_CONSUMER_IMPL
-              value: "chromadb.ingest.impl.pulsar.PulsarConsumer"
+              value: "chromadb.db.mixins.logservice.LogService"
             - name: CHROMA_SEGMENT_MANAGER_IMPL
               value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
             - name: PULSAR_BROKER_URL
@@ -45,6 +45,12 @@ spec:
               value: "50051"
             - name: CHROMA_COORDINATOR_HOST
               value: "coordinator.chroma"
+            - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
+              value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"
+            - name: CHROMA_LOGSERVICE_HOST
+              value: "logservice.chroma"
+            - name: CHROMA_LOGSERVICE_PORT
+              value: "50051"
       volumes:
         - name: chroma
           emptyDir: {}
