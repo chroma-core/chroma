@@ -14,6 +14,8 @@ COPY ./requirements.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
 
 FROM python:3.10-slim-bookworm as final
+ARG STORAGEACCT
+ARG STORAGEKEY
 
 RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     build-essential \
