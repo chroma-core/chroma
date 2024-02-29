@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 2f10573e102ad9d6e0498c036d6ac48fc5d035003bf9b5caeeee1329ed3db6a3 # shrinks to (initial_state, transitions) = (ReferenceState { in_transaction: false, data: {} }, [Set("¥琤&<", "{M:<\u{62d5f}\u{84544}", 270), Delete("\u{82758}TѨ\u{b85f7}\u{4}v\u{685db}\u{202e}C", "\u{dd686}`\"'Ѩ.", 928), CommitTransaction, BeginTransaction, Get(".`\u{7f}𐢗\r6", "\u{4a3a1}\u{41e6d}Tl"), Get("Ѩ_u", "*`\u{e0e3a}="), Get("?\u{10a273}V", "🕴"), BeginTransaction, Get("\u{cc1e6}\u{1044d3}.\u{15cbf}`8'", "l)-'%"), Get("/\u{1b}?{ \u{56b95}\u{8a}\u{1b}t¥", "a*\\r\"ID\t"), Set("Ö", "%\u{971e6}\u{202e}\0$\u{811ab}", 976), Get("6\u{202e}\0d<", ".𢄰j=\u{7f}🕴?")])
