@@ -24,7 +24,7 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir /chroma
-RUN mount -t cifs //$STORAGEACCT.file.core.windows.net/myshare /chroma -o vers=3.0,username=$STORAGEACCT,password=$STORAGEKEY,dir_mode=0777,file_mode=0777,serverino
+RUN mount -t cifs //$STORAGEACCT.file.core.windows.net/testingdb /chroma -o vers=3.0,username=$STORAGEACCT,password=$STORAGEKEY,dir_mode=0777,file_mode=0777,serverino
 WORKDIR /chroma
 
 COPY --from=builder /install /usr/local
