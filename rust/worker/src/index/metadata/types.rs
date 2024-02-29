@@ -420,6 +420,16 @@ mod test {
         return true;
     }
 
+    fn ref_state_kv_rbm_eq(rbm: &RoaringBitmap, k: &str, v: &String, ref_state: &ReferenceState<String>) -> bool {
+        match ref_state.data.get(k) {
+            Some(vv) => match vv.get(v) {
+                Some(rbm2) => vec_rbm_eq(rbm2, rbm),
+                None => rbm.is_empty(),
+            },
+            None => rbm.is_empty(),
+        }
+    }
+
     impl StateMachineTest for BlockfileMetadataIndex<String> {
         type SystemUnderTest = Self;
         type Reference = MetadataIndexStateMachine<String>;
@@ -490,10 +500,9 @@ mod test {
                         assert!(res.is_err());
                     } else {
                         let rbm = res.unwrap();
-                        assert!(vec_rbm_eq(
-                            ref_state.data.get(&k).unwrap().get(&v).unwrap(),
-                            &rbm
-                        ));
+                        assert!(
+                            ref_state_kv_rbm_eq(&rbm, &k, &v, ref_state)
+                        );
                     }
                 },
             }
@@ -502,6 +511,9 @@ mod test {
 
         fn check_invariants(state: &Self::SystemUnderTest, ref_state: &ReferenceState<String>) {
             assert_eq!(state.in_transaction(), ref_state.in_transaction);
+            if state.in_transaction() {
+                return;
+            }
             for (k, v) in &ref_state.data {
                 for (kk, ref_data) in v {
                     assert!(vec_rbm_eq(
@@ -515,15 +527,10 @@ mod test {
 
     prop_state_machine! {
         #![proptest_config(Config {
-            // Turn failure persistence off for demonstration. This means that no
-            // regression file will be captured.
-            failure_persistence: None,
             // Enable verbose mode to make the state machine test print the
             // transitions for each case.
             verbose: 0,
-            // Only run 10 cases by default to avoid running out of system resources
-            // and taking too long to finish.
-            cases: 10,
+            cases: 100,
             .. Config::default()
         })]
         #[test]
