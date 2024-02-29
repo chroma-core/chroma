@@ -23,14 +23,14 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     g++ && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir /chroma 
-# RUN chmod 777 -R /chroma
-# RUN mount -t cifs //$STORAGEACCT.file.core.windows.net/testingdb /chroma -o vers=3.0,username=$STORAGEACCT,password=$STORAGEKEY,dir_mode=0777,file_mode=0777,serverino
-WORKDIR /chroma
+RUN mkdir chroma 
+RUN chmod 777 -R chroma
+RUN mount -t cifs //$STORAGEACCT.file.core.windows.net/testingdb chroma -o vers=3.0,username=$STORAGEACCT,password=$STORAGEKEY,dir_mode=0777,file_mode=0777,serverino
+WORKDIR chroma
 
 COPY --from=builder /install /usr/local
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
-COPY ./ /chroma
+COPY ./ chroma
 
 EXPOSE 8000
 
