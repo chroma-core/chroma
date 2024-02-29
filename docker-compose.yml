@@ -10,7 +10,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # volumes:
+    volumes:
+     - db:/chroma
     #   - ./:/chroma
       # Be aware that indexed data are located in "/chroma/chroma/"
       # Default configuration for persist_directory in chromadb/config.py
@@ -35,3 +36,9 @@ services:
 # volumes:
 #   backups:
 #     driver: local
+volumes:
+  db:
+    driver: azure_file
+    driver_opts:
+      share_name: testingdb
+      storage_account_name: stagingchromadbstorage
