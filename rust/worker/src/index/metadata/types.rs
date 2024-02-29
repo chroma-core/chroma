@@ -310,11 +310,13 @@ mod test {
                                     std::fmt::Debug {
         fn strategy() -> BoxedStrategy<Self>;
     }
+
     impl PropTestValue for String {
         fn strategy() -> BoxedStrategy<Self> {
             ".{0,10}".prop_map(|x| x.to_string()).boxed()
         }
     }
+
     impl PropTestValue for bool {
         fn strategy() -> BoxedStrategy<Self> {
             prop_oneof![Just(true), Just(false)].boxed()
@@ -330,10 +332,6 @@ mod test {
         Get(String, T),
     }
 
-    pub(crate) struct MetadataIndexStateMachine<T: PropTestValue> {
-        unused: Option<T>,
-    }
-
     #[derive(Clone, Debug)]
     pub(crate) struct ReferenceState<T: PropTestValue> {
         // Are we in a transaction?
@@ -342,22 +340,29 @@ mod test {
         data: HashMap<String, HashMap<T, Vec<u32>>>,
     }
 
-    impl<T: PropTestValue> ReferenceState<T> {
-        fn vec_rbm_eq(self: &Self, a: &Vec<u32>, b: &RoaringBitmap) -> bool {
-            if a.len() != b.len() as usize {
+    fn vec_rbm_eq(a: &Vec<u32>, b: &RoaringBitmap) -> bool {
+        if a.len() != b.len() as usize {
+            return false;
+        }
+        for offset in a {
+            if !b.contains(*offset) {
                 return false;
             }
-            for offset in a {
-                if !b.contains(*offset) {
-                    return false;
-                }
+        }
+        for offset in b {
+            if !a.contains(&offset) {
+                return false;
             }
-            for offset in b {
-                if !a.contains(&offset) {
-                    return false;
-                }
+        }
+        return true;
+    }
+
+    impl<T: PropTestValue> ReferenceState<T> {
+        fn new() -> Self {
+            ReferenceState {
+                in_transaction: false,
+                data: HashMap::new(),
             }
-            return true;
         }
 
         fn kv_rbm_eq(
@@ -368,7 +373,7 @@ mod test {
         ) -> bool {
             match self.data.get(k) {
                 Some(vv) => match vv.get(v) {
-                    Some(rbm2) => self.vec_rbm_eq(rbm2, rbm),
+                    Some(rbm2) => vec_rbm_eq(rbm2, rbm),
                     None => rbm.is_empty(),
                 },
                 None => rbm.is_empty(),
@@ -376,28 +381,9 @@ mod test {
         }
     }
 
-    impl<T: PropTestValue> ReferenceState<T> {
-        fn new() -> Self {
-            ReferenceState {
-                in_transaction: false,
-                data: HashMap::new(),
-            }
-        }
+    pub(crate) struct MetadataIndexStateMachine<T: PropTestValue> {
+        unused: Option<T>,
     }
-
-
-    // We define three separate state machines: one for each type of metadata
-    // index. We _could_ hack around this by using a single state machine and
-    // matching on key types within, but that has three problems:
-    // 1. It's not as clear what's going on.
-    // 2. It generates a lot of unnecessary transitions by trying to run
-    //    data operations of the wrong type.
-    // 3. Perhaps most seriously, proptest wouldn't know the input types(*) so
-    //    couldn't reduce failing tests.
-    //
-    // (*) We could always have it generate input of all three types and ignore
-    // the ones that don't match, but that makes reducing harder and makes
-    // everything much harder to read.
 
     impl<T: PropTestValue + 'static> ReferenceStateMachine for MetadataIndexStateMachine<T> {
         type State = ReferenceState<T>;
@@ -536,7 +522,7 @@ mod test {
             }
             for (k, v) in &ref_state.data {
                 for (kk, ref_data) in v {
-                    assert!(ref_state.vec_rbm_eq(
+                    assert!(vec_rbm_eq(
                         ref_data,
                         &state.get(k, kk.clone()).unwrap()
                     ));
