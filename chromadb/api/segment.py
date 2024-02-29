@@ -471,6 +471,7 @@ class SegmentAPI(ServerAPI):
         return True
 
     @trace_method("SegmentAPI._get", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.GET_PER_MINUTE)
     @override
     def _get(
         self,
@@ -649,6 +650,7 @@ class SegmentAPI(ServerAPI):
         return metadata_segment.count()
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
     @override
     def _query(
         self,
