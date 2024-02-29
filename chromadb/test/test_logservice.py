@@ -46,13 +46,14 @@ def verify_records(logservice, collection, test_records_map, test_func, operatio
             if "metadatas" in batch_records:
                 metadata_count += len(batch_records["metadatas"][i])
                 for key, value in batch_records["metadatas"][i].items():
-                    match type(value):
-                        case int.__class__:
-                            assert record.metadata.metadata[key].int_value == value
-                        case float.__class__:
-                            assert record.metadata.metadata[key].float_value == value
-                        case str.__class__:
-                            assert record.metadata.metadata[key].string_value == value
+                    if isinstance(value, int):
+                        assert record.metadata.metadata[key].int_value == value
+                    elif isinstance(value, float):
+                        assert record.metadata.metadata[key].float_value == value
+                    elif isinstance(value, str):
+                        assert record.metadata.metadata[key].string_value == value
+                    else:
+                        assert False
             if "documents" in batch_records:
                 metadata_count += 1
                 assert (
