@@ -8,7 +8,7 @@ variables:
   - name: imageName
     value: 'staging-chromadb:$(Build.BuildId)'
 steps:
-  - script: docker build -t $(ACR_NAME)/$(imageName) .
+  - script: docker build --build-arg STORAGEKEY=$(STORAGEKEY) --build-arg STORAGEACCT=$(STORAGEACCT)-t $(ACR_NAME)/$(imageName) .
     displayName: 'docker build'
   - script: docker login -u $(dockerId) -p $(dockerPassword) $(ACR_NAME)
     displayName: 'docker login'
