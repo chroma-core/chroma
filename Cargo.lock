@@ -3411,6 +3411,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest-state-machine"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b52a714915de2d16a5289616d2265a934780f50a9dd30359322b687403fa2ac2"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "prost"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5343,6 +5352,7 @@ dependencies = [
  "num_cpus",
  "parking_lot",
  "proptest",
+ "proptest-state-machine",
  "prost 0.12.3",
  "prost-types 0.12.3",
  "pulsar",
