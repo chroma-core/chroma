@@ -32,12 +32,6 @@ services:
     networks:
       - net
 
-# volumes:
-#   backups:
-#     driver: local
 volumes:
   backups:
-    driver: azure_file
-    driver_opts:
-      share_name: testingdb
-      storage_account_name: stagingchromadbstorage
+    driver: local
