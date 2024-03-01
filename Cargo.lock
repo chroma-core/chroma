@@ -4347,6 +4347,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "stringslice"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dad614e9c8a0773603982e0c1d3192f2bce1c0ee193caf0526b8ae3c6c3e38c"
+
+[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5372,6 +5378,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "stringslice",
  "tantivy",
  "tempfile",
  "thiserror",

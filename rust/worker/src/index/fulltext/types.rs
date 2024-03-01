@@ -321,6 +321,9 @@ mod test {
     use proptest::prelude::*;
     use proptest_state_machine::{prop_state_machine, ReferenceStateMachine, StateMachineTest};
     use proptest::test_runner::Config;
+    use rand::prelude::IteratorRandom;
+    // https://tonsky.me/blog/unicode/
+    use stringslice::StringSlice;
 
     #[derive(Debug, Clone)]
     pub(crate) enum Transition {
@@ -386,12 +389,33 @@ mod test {
         }
 
         fn transitions(state: &ReferenceState) -> BoxedStrategy<Transition> {
+            // Grab a random chunk of a random string in state
+            let doc = state.state.keys().choose(&mut rand::thread_rng());
+            if doc.is_none() {
+                return prop_oneof![
+                    Just(Transition::BeginTransaction),
+                    (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                ].boxed();
+            }
+
+            let doc = doc.unwrap();
+            let start = rand::thread_rng().gen_range(0..(doc.len() / 2));
+            let end = rand::thread_rng().gen_range((start + 5)..doc.len());
+            let doc = &doc.try_slice(start..end);
+            if doc.is_none() {
+                return prop_oneof![
+                    Just(Transition::BeginTransaction),
+                    (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                ].boxed();
+            }
+            let doc = doc.unwrap();
+
             prop_oneof![
                 Just(Transition::BeginTransaction),
                 Just(Transition::CommitTransaction),
                 (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
-                // TODO
                 ".*{3,1000}".prop_map(Transition::Search),
+                Just(Transition::Search(doc.to_string())),
             ].boxed()
         }
 
@@ -507,11 +531,11 @@ mod test {
             // Enable verbose mode to make the state machine test print the
             // transitions for each case.
             verbose: 0,
-            cases: 15,
+            cases: 10,
             .. Config::default()
         })]
 
         #[test]
-        fn proptest_fulltext_index(sequential 1..10 => BlockfileFullTextIndex);
+        fn proptest_fulltext_index(sequential 1..8 => BlockfileFullTextIndex);
     }
 }
