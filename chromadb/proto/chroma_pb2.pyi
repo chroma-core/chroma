@@ -39,12 +39,6 @@ class Status(_message.Message):
     code: int
     def __init__(self, reason: _Optional[str] = ..., code: _Optional[int] = ...) -> None: ...
 
-class ChromaResponse(_message.Message):
-    __slots__ = ["status"]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: Status
-    def __init__(self, status: _Optional[_Union[Status, _Mapping]] = ...) -> None: ...
-
 class Vector(_message.Message):
     __slots__ = ["dimension", "vector", "encoding"]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]

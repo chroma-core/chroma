@@ -236,10 +236,29 @@ def embedding_function_strategy(
 
 
 @dataclass
-class Collection:
+class ExternalCollection:
+    """
+    An external view of a collection.
+    
+    This strategy only contains information about a collection that a client of Chroma
+    sees -- that is, it contains none of Chroma's internal bookkeeping. It should
+    be used to test the API and client code.
+    """
     name: str
-    id: uuid.UUID
     metadata: Optional[types.Metadata]
+    embedding_function: Optional[types.EmbeddingFunction[Embeddable]]
+
+
+@dataclass
+class Collection(ExternalCollection):
+    """
+    An internal view of a collection.
+
+    This strategy contains all the information Chroma uses internally to manage a
+    collection. It is a superset of ExternalCollection and should be used to test
+    internal Chroma logic.
+    """
+    id: uuid.UUID
     dimension: int
     dtype: npt.DTypeLike
     topic: str
@@ -249,7 +268,6 @@ class Collection:
     has_documents: bool = False
     has_embeddings: bool = False
     has_like_metadata: bool = False
-    embedding_function: Optional[types.EmbeddingFunction[Embeddable]] = None
 
 
 @st.composite

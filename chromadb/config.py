@@ -76,7 +76,7 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
-
+    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl"
 }
 
 DEFAULT_TENANT = "default_tenant"
@@ -102,7 +102,7 @@ class Settings(BaseSettings):  # type: ignore
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
     chroma_quota_provider_impl:Optional[str] = None
-
+    chroma_rate_limiting_provider_impl:Optional[str] = None
     # Distributed architecture specific components
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"

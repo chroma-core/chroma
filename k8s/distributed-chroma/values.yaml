@@ -1,0 +1,6 @@
+# Default values for distributed-chroma.
+
+namespace: "chroma"
+
+coordinator:
+  replicaCount: 1
