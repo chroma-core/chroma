@@ -18,7 +18,8 @@ jobs:
         platform: ['16core-64gb-ubuntu-latest']
         testfile: ["chromadb/test/db/test_system.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
-                   "chromadb/test/segment/distributed/test_memberlist_provider.py"]
+                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
+                   "chromadb/test/test_logservice.py"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
