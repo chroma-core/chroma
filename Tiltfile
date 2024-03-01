@@ -73,6 +73,7 @@ k8s_resource('worker', resource_deps=['coordinator'],labels=["chroma"])
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
   'k8s/test/coordinator_service.yaml',
+  'k8s/test/logservice_service.yaml',
   'k8s/test/minio.yaml',
   'k8s/test/pulsar_service.yaml',
   'k8s/test/worker_service.yaml',
