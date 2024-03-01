@@ -47,6 +47,8 @@ k8s_resource(
     'coordinator-serviceaccount-rolebinding:RoleBinding',
     'coordinator-worker-memberlist-binding:clusterrolebinding',
 
+    'logservice-serviceaccount:serviceaccount',
+
     'worker-serviceaccount:serviceaccount',
     'worker-serviceaccount-rolebinding:RoleBinding',
     'worker-memberlist-readerwriter:ClusterRole',
