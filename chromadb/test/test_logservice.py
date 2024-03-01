@@ -1,10 +1,11 @@
-# type: ignore
 import array
+from typing import Dict, Any, Callable
 
 from chromadb.config import System, Settings
 from chromadb.logservice.logservice import LogService
 from chromadb.test.conftest import skip_if_not_cluster
-from chromadb.test.test_api import records
+from chromadb.test.test_api import records  # type: ignore
+from chromadb.api.models.Collection import Collection
 
 batch_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
@@ -31,7 +32,13 @@ contains_records = {
 }
 
 
-def verify_records(logservice, collection, test_records_map, test_func, operation):
+def verify_records(
+    logservice: LogService,
+    collection: Collection,
+    test_records_map: Dict[str, Dict[str, Any]],
+    test_func: Callable,  # type: ignore
+    operation: int,
+) -> None:
     start_id = 1
     for batch_records in test_records_map.values():
         test_func(**batch_records)
@@ -65,7 +72,7 @@ def verify_records(logservice, collection, test_records_map, test_func, operatio
 
 
 @skip_if_not_cluster()
-def test_add(api):
+def test_add(api):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
@@ -82,7 +89,7 @@ def test_add(api):
 
 
 @skip_if_not_cluster()
-def test_update(api):
+def test_update(api):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
@@ -101,7 +108,7 @@ def test_update(api):
 
 
 @skip_if_not_cluster()
-def test_delete(api):
+def test_delete(api):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
@@ -131,7 +138,7 @@ def test_delete(api):
 
 
 @skip_if_not_cluster()
-def test_upsert(api):
+def test_upsert(api):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
