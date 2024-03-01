@@ -48,7 +48,7 @@ spec:
             - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
               value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"
             - name: CHROMA_LOGSERVICE_HOST
-              value: "logservice.chroma"
+              value: "logservice"
             - name: CHROMA_LOGSERVICE_PORT
               value: "50052"
       volumes:

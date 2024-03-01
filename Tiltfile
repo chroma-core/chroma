@@ -66,8 +66,8 @@ k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"])
 k8s_resource('pulsar', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
 k8s_resource('migration', resource_deps=['postgres'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['migration'], labels=["chroma"], port_forwards='50052:50051')
-k8s_resource('frontend-server', resource_deps=['pulsar'],labels=["chroma"], port_forwards=8000 )
-k8s_resource('coordinator', resource_deps=['pulsar', 'frontend-server', 'migration'], labels=["chroma"], port_forwards=50051)
+k8s_resource('frontend-server', resource_deps=['logservice'],labels=["chroma"], port_forwards=8000 )
+k8s_resource('coordinator', resource_deps=['frontend-server', 'migration'], labels=["chroma"], port_forwards=50051)
 k8s_resource('worker', resource_deps=['coordinator'],labels=["chroma"])
 
 # Extra stuff to make debugging and testing easier
