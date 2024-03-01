@@ -6,7 +6,7 @@ metadata:
 spec:
   ports:
     - name: grpc
-      port: 50052
+      port: 50051
       targetPort: 50051
   selector:
     app: logservice

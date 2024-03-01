@@ -32,7 +32,7 @@ metadata:
 spec:
   ports:
     - name: grpc
-      port: 50052
+      port: 50051
       targetPort: grpc
   selector:
     app: logservice
