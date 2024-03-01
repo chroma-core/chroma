@@ -12,6 +12,7 @@ echo "Pulsar Broker is running at port $PULSAR_BROKER_URL"
 echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
 
 kubectl -n chroma port-forward svc/coordinator-lb 50051:50051 &
+kubectl -n chroma port-forward svc/logservice-lb 50052:50051 &
 kubectl -n chroma port-forward svc/pulsar-lb 6650:6650 &
 kubectl -n chroma port-forward svc/pulsar-lb 8080:8080 &
 kubectl -n chroma port-forward svc/frontend-server 8000:8000 &

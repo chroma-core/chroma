@@ -94,11 +94,11 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		assignmentPolicy = coordinator.NewSimpleAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
 	} else if config.AssignmentPolicy == "rendezvous" {
 		log.Info("Using rendezvous assignment policy")
-		err := utils.CreateTopics(config.PulsarAdminURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
-		if err != nil {
-			log.Error("Failed to create topics", zap.Error(err))
-			return nil, err
-		}
+		//err := utils.CreateTopics(config.PulsarAdminURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
+		//if err != nil {
+		//	log.Error("Failed to create topics", zap.Error(err))
+		//	return nil, err
+		//}
 		assignmentPolicy = coordinator.NewRendezvousAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
 	} else {
 		return nil, errors.New("invalid assignment policy, only simple and rendezvous are supported")
