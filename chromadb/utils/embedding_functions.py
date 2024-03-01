@@ -815,6 +815,40 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         )
 
 
+class TransformerEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(
+        self,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        cache_dir: Optional[str] = None,
+    ):
+        try:
+            from transformers import AutoModel, AutoTokenizer
+
+            self._torch = importlib.import_module("torch")
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self._model = AutoModel.from_pretrained(model_name, cache_dir=cache_dir)
+        except ImportError:
+            raise ValueError(
+                "The transformers and/or pytorch python package is not installed. Please install it with "
+                "`pip install transformers` or `pip install torch`"
+            )
+
+    @staticmethod
+    def _normalize(v: npt.NDArray) -> npt.NDArray:
+        norm = np.linalg.norm(v, axis=1)
+        norm[norm == 0] = 1e-12
+        return cast(npt.NDArray, v / norm[:, np.newaxis])
+
+    def __call__(self, input: Documents) -> Embeddings:
+        inputs = self._tokenizer(
+            input, padding=True, truncation=True, return_tensors="pt"
+        )
+        with self._torch.no_grad():
+            outputs = self._model(**inputs)
+        embeddings = outputs.last_hidden_state.mean(dim=1)
+        return [e.tolist() for e in self._normalize(embeddings)]
+
+
 # List of all classes in this module
 _classes = [
     name
