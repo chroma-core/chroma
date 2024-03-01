@@ -21,10 +21,10 @@ def _encode_span_id(span_id: int) -> str:
 def _encode_trace_id(trace_id: int) -> str:
     return binascii.hexlify(trace_id.to_bytes(16, 'big')).decode()
 
-# How to use it?
-#  interceptors = [OtelInterceptor()]
-#  channel = grpc.intercept_channel(channel, *interceptors)
-#
+# Using OtelInterceptor with gRPC:
+# 1. Instantiate the interceptor: interceptors = [OtelInterceptor()]
+# 2. Intercept the channel: channel = grpc.intercept_channel(channel, *interceptors)
+
 class OtelInterceptor(
     grpc.UnaryUnaryClientInterceptor,
     grpc.UnaryStreamClientInterceptor,
