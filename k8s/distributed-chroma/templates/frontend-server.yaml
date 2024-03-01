@@ -50,7 +50,7 @@ spec:
             - name: CHROMA_LOGSERVICE_HOST
               value: "logservice.chroma"
             - name: CHROMA_LOGSERVICE_PORT
-              value: "50052"
+              value: "50051"
       volumes:
         - name: chroma
           emptyDir: {}
