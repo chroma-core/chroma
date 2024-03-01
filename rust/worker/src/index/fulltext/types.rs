@@ -395,6 +395,7 @@ mod test {
                 return prop_oneof![
                     Just(Transition::BeginTransaction),
                     (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                    ".*{3,1000}".prop_map(Transition::Search),
                 ].boxed();
             }
 
@@ -406,10 +407,10 @@ mod test {
                 return prop_oneof![
                     Just(Transition::BeginTransaction),
                     (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                    ".*{3,1000}".prop_map(Transition::Search),
                 ].boxed();
             }
             let doc = doc.unwrap();
-
             prop_oneof![
                 Just(Transition::BeginTransaction),
                 Just(Transition::CommitTransaction),
