@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "chroma" / "models"
+DEFAULT_CACHE_DIR = os.environ.get("CHROMA_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "chroma"))
 
 
 def _verify_sha256(fname: str, expected_sha256: str) -> bool:
@@ -63,7 +63,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
-        cache_dir: Optional[str] = None,
+        cache_dir: Optional[str] = str(os.path.join(DEFAULT_CACHE_DIR, "sentence_transformers")),
     ):
         if model_name not in self.models:
             try:
@@ -345,7 +345,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "hkunlp/instructor-base",
         device: str = "cpu",
         instruction: Optional[str] = None,
-        cache_dir: Optional[str] = None,
+        cache_dir: Optional[str] = str(os.path.join(DEFAULT_CACHE_DIR, "instructor")),
     ):
         try:
             from InstructorEmbedding import INSTRUCTOR
@@ -372,7 +372,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    DOWNLOAD_PATH = os.path.join(DEFAULT_CACHE_DIR, "onnx_models", MODEL_NAME)
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
