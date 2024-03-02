@@ -1,6 +1,6 @@
 from functools import partial
 from typing import Any, Callable, Dict, Optional, Sequence, cast
-from chromadb.server.fastapi.utils import string_to_uuid
+from chromadb.utils.fastapi import string_to_uuid
 from chromadb.api import ServerAPI
 from chromadb.auth import AuthzResourceTypes
 

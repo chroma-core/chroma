@@ -3,6 +3,8 @@ import shutil
 import tempfile
 import pytest
 from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
+
+from chromadb.api.types import validate_metadata
 from chromadb.config import System, Settings
 from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB
@@ -677,3 +679,10 @@ def test_delete_segment(
         res = cur.execute(sql, params)
         # assert that all FTS rows are gone
         assert len(res.fetchall()) == 0
+
+
+def test_metadata_validation_forbidden_key() -> None:
+    with pytest.raises(ValueError, match="chroma:document"):
+        validate_metadata(
+            {"chroma:document": "this is not the document you are looking for"}
+        )

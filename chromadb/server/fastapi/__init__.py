@@ -35,6 +35,8 @@ from chromadb.errors import (
     InvalidDimensionException,
     InvalidHTTPVersion,
 )
+from chromadb.quota import QuotaError
+from chromadb.rate_limiting import RateLimitError
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CreateDatabase,
@@ -50,7 +52,7 @@ from starlette.requests import Request
 
 import logging
 
-from chromadb.server.fastapi.utils import fastapi_json_response, string_to_uuid as _uuid
+from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -140,6 +142,8 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
+        self._app.add_exception_handler(QuotaError, self.quota_exception_handler)
+        self._app.add_exception_handler(RateLimitError, self.rate_limit_exception_handler)
 
         self._app.on_event("shutdown")(self.shutdown)
 
@@ -288,8 +292,21 @@ class FastAPI(chromadb.server.Server):
     def app(self) -> fastapi.FastAPI:
         return self._app
 
+    async def rate_limit_exception_handler(self, request: Request, exc: RateLimitError):
+        return JSONResponse(
+            status_code=429,
+            content={"message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"},
+        )
+
+
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
+
+    async def quota_exception_handler(self, request: Request, exc: QuotaError):
+        return JSONResponse(
+            status_code=429,
+            content={"message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"},
+        )
 
     def heartbeat(self) -> Dict[str, int]:
         return self.root()

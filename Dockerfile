@@ -25,7 +25,9 @@ COPY --from=builder /install /usr/local
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
 COPY ./ /chroma
 
-RUN chmod +x /docker_entrypoint.sh
+RUN apt-get update --fix-missing && apt-get install -y curl && \
+    chmod +x /docker_entrypoint.sh && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV CHROMA_HOST_ADDR "0.0.0.0"
 ENV CHROMA_HOST_PORT 8000

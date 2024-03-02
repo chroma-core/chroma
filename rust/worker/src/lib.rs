@@ -1,4 +1,5 @@
 mod assignment;
+mod blockstore;
 mod config;
 mod errors;
 mod index;

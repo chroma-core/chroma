@@ -70,15 +70,18 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
+    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
     "chromadb.ingest.CollectionAssignmentPolicy": "chroma_collection_assignment_policy_impl",  # noqa
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
+    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
 }
 
 DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
+
 
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
@@ -100,6 +103,9 @@ class Settings(BaseSettings):  # type: ignore
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
 
+    chroma_quota_provider_impl: Optional[str] = None
+    chroma_rate_limiting_provider_impl: Optional[str] = None
+
     # Distributed architecture specific components
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
@@ -108,6 +114,9 @@ class Settings(BaseSettings):  # type: ignore
     )
     worker_memberlist_name: str = "worker-memberlist"
     chroma_coordinator_host = "localhost"
+
+    chroma_logservice_host = "localhost"
+    chroma_logservice_port = 50052
 
     tenant_id: str = "default"
     topic_namespace: str = "default"
@@ -120,12 +129,12 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
-    chroma_server_http_port: Optional[str] = None
+    chroma_server_http_port: Optional[int] = None
     chroma_server_ssl_enabled: Optional[bool] = False
     # the below config value is only applicable to Chroma HTTP clients
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
     chroma_server_api_default_path: Optional[str] = "/api/v1"
-    chroma_server_grpc_port: Optional[str] = None
+    chroma_server_grpc_port: Optional[int] = None
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
@@ -138,8 +147,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_nofile: Optional[int] = None
 
     pulsar_broker_url: Optional[str] = None
-    pulsar_admin_port: Optional[str] = "8080"
-    pulsar_broker_port: Optional[str] = "6650"
+    pulsar_admin_port: Optional[int] = 8080
+    pulsar_broker_port: Optional[int] = 6650
 
     chroma_server_auth_provider: Optional[str] = None
 
@@ -317,7 +326,10 @@ class System(Component):
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
 
-        if settings["chroma_segment_cache_policy"] is not None and settings["chroma_segment_cache_policy"] != "LRU":
+        if (
+            settings["chroma_segment_cache_policy"] is not None
+            and settings["chroma_segment_cache_policy"] != "LRU"
+        ):
             logger.error(
                 f"Failed to set chroma_segment_cache_policy: Only LRU is available."
             )
