@@ -65,6 +65,7 @@ k8s_resource(
 
 # Production Chroma
 k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"])
+k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["infrastructure"])
 k8s_resource('pulsar', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
 k8s_resource('migration', resource_deps=['postgres'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['migration'], labels=["chroma"], port_forwards='50052:50051')
@@ -75,6 +76,7 @@ k8s_resource('worker', resource_deps=['coordinator'],labels=["chroma"])
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
   'k8s/test/coordinator_service.yaml',
+  'k8s/test/jaeger_service.yaml',
   'k8s/test/logservice_service.yaml',
   'k8s/test/minio.yaml',
   'k8s/test/pulsar_service.yaml',
@@ -91,6 +93,7 @@ k8s_resource(
   resource_deps=['worker'],
   labels=["debug"],
 )
+
 
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=9000)
