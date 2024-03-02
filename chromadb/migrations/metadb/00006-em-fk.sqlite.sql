@@ -1,6 +1,3 @@
--- Disable foreign key constraints to us to update the segments table
-PRAGMA foreign_keys = OFF;
-
 CREATE TABLE embedding_metadata_temp (
                                     id INTEGER REFERENCES embeddings(id) ON DELETE CASCADE NOT NULL,
                                     key TEXT NOT NULL,
@@ -18,5 +15,3 @@ FROM embedding_metadata;
 DROP TABLE embedding_metadata;
 
 ALTER TABLE embedding_metadata_temp RENAME TO embedding_metadata;
-
-PRAGMA foreign_keys = ON;
