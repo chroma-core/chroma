@@ -1,4 +1,4 @@
-# CIP-02152024: Optimize Action
+# CIP-02152024: Optimization Actions
 
 ## Status
 
@@ -17,6 +17,15 @@ Through extensive experimentation we have determined the following to be true:
 We see a significant benefit for Chroma users if we can automate these tasks. This CIP proposes to automation of tasks 1
 and 2, while we suggest that task 3 is a separate CIP.
 
+Community issues associated with slow performance:
+
+- https://github.com/chroma-core/chroma/issues/1043
+- https://github.com/chroma-core/chroma/issues/1394
+- https://github.com/chroma-core/chroma/issues/1755
+- https://discord.com/channels/1073293645303795742/1210414333717254144
+- https://discord.com/channels/1073293645303795742/1202226062587875438
+- https://discord.com/channels/1073293645303795742/1168605029532434444
+
 ## Public Interfaces
 
 This CIP proposes the following changes to the public interfaces:
@@ -32,14 +41,44 @@ The changes impact several parts of the system:
 - Clients and APIs - the proposed changes will impact - the Python and JavaScript clients, as well as the HTTP API.
 - SegmentAPI - We suggest that the implementation is carried out in `chromadb.api.segment.SegmentAPI`.
 
-The sequence of actions will be as follows:
+### Actions
+
+We propose the following optimization actions:
 
 - Clean up the WAL - the change is introduced at `Producer`
-- Run `VAUCUM`
-- Run `ANALYZE`
+- Run `VAUCUM` - Changes introduced at SysDB level
+- Run `ANALYZE` - Changes introduced at SysDB level
 
 While the optimize operation is going to be safe to run on a live system, we suggest that users use it on off-peak
 hours, as it will impact performance.
+
+### Dry Run
+
+By default, optimize will execute in a dry-run mode, just providing the user with feedback on what it would do (
+intuition: Query Planner EXPLAIN). The user can then decide to run the operation with the `dry_run` flag set to `False`.
+
+These are the steps performed by each action in dry-run mode:
+
+- Clean WAL - The operation will provide the user with an estimate how many entries will be purged from the WAL, per
+  collection summary of WAL purged. A heuristic will be implemented to provide the user with an estimate of how much
+  space will be cleaned up (after VACUUM is also executed)
+- VACUUM - The operation will provide the user with an estimate of how much space will be cleaned up. SQLite does not
+  provide direct info about used storage, therefore we'll rely on page-related heuristics to provide the user with an
+  estimate of how much space will be cleaned up (after VACUUM is also executed)
+- ANALYZE - The operation will not provide feedback as SQLIte does not provide utilities to estimate the impacts
+  of `ANALYZE`. This operation will not provide feedback on the dry-run mode.
+
+### Data Structures
+
+We propose that the operation takes in the following request object:
+
+```python
+class OptimizationRequest(TypedDict):
+    dry_run: bool  # defaults to True
+    vacuum: bool  # defaults to True
+    analyze: bool  # defaults to True
+    wal_cleanup: bool  # defaults to True
+```
 
 We propose that the `optimize()` operation return a bare minimum stats on what it has achieved. Our initial suggestion
 is the following:
@@ -64,7 +103,7 @@ drwxr-xr-x@  7 user  staff   224B Feb 15 18:29 6cdc4d45-3977-46ef-8c4b-123c303e0
 -rw-r--r--@  1 user  staff    11G Feb 15 19:07 chroma.sqlite3
 drwxr-xr-x@  4 user  staff   128B Feb 15 19:07 .
 (venv) % du -h optimize-test/
-5.9G    optimize-test//6cdc4d45-3977-46ef-8c4b-123c303e0519
+5.9G    optimize-test/6cdc4d45-3977-46ef-8c4b-123c303e0519
 17G    optimize-test/
 ```
 
@@ -127,7 +166,7 @@ drwxr-xr-x@  4 user  staff   128B Feb 15 19:14 .
 -rw-r--r--@  1 user  staff   1.9G Feb 15 19:14 chroma.sqlite3
 drwxr-xr-x  54 user  staff   1.7K Feb 15 19:14 ..
 (venv) % du -h optimize-test/
-5.9G    optimize-test//6cdc4d45-3977-46ef-8c4b-123c303e0519
+5.9G    optimize-test/6cdc4d45-3977-46ef-8c4b-123c303e0519
 7.9G    optimize-test/
 (venv) % sqlite3 optimize-test/chroma.sqlite3 'select count(*) from embeddings_queue;'
 1
