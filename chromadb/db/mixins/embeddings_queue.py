@@ -289,7 +289,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .where(t.seq_id > ParameterValue(subscription.start))
             .where(t.seq_id <= ParameterValue(subscription.end))
             .select(
-                t.seq_id, t.operation, t.id, t.vector, t.encoding, t.metadata, t.topic
+                t.seq_id, t.operation, t.id, t.vector, t.encoding, t.metadata
             )
             .orderby(t.seq_id)
         )
