@@ -3,7 +3,7 @@ package notification
 import (
 	"context"
 
-	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma-core/chroma/go/internal/model"
 )
 
 type NotificationStore interface {

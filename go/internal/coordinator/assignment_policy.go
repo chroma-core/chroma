@@ -3,8 +3,8 @@ package coordinator
 import (
 	"fmt"
 
-	"github.com/chroma/chroma-coordinator/internal/types"
-	"github.com/chroma/chroma-coordinator/internal/utils"
+	"github.com/chroma-core/chroma/go/internal/types"
+	"github.com/chroma-core/chroma/go/internal/utils"
 )
 
 type CollectionAssignmentPolicy interface {

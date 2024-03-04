@@ -3,8 +3,8 @@ package dao
 import (
 	"context"
 
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbcore"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
 )
 
 type metaDomain struct{}

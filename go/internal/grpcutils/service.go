@@ -3,7 +3,7 @@ package grpcutils
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"github.com/chroma/chroma-coordinator/internal/otel"
+	"github.com/chroma-core/chroma/go/shared/otel"
 	"io"
 	"net"
 	"os"

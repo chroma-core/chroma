@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chroma/chroma-coordinator/internal/utils"
+	"github.com/chroma-core/chroma/go/internal/utils"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

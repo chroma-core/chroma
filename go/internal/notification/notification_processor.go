@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma-core/chroma/go/internal/common"
+	"github.com/chroma-core/chroma/go/internal/model"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )

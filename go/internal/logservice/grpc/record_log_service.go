@@ -2,11 +2,11 @@ package grpc
 
 import (
 	"context"
-	"github.com/chroma/chroma-coordinator/internal/grpcutils"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
-	"github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/grpcutils"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/internal/proto/logservicepb"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"

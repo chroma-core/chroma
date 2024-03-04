@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel/mocks"
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/common"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel/mocks"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

@@ -3,9 +3,9 @@ package grpc
 import (
 	"context"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/internal/common"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/proto/coordinatorpb"
 )
 
 func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDatabaseRequest) (*coordinatorpb.CreateDatabaseResponse, error) {

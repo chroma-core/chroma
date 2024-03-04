@@ -2,12 +2,12 @@ package grpc
 
 import (
 	"context"
-	"github.com/chroma/chroma-coordinator/internal/grpcutils"
+	"github.com/chroma-core/chroma/go/internal/grpcutils"
 	"testing"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/internal/common"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbcore"
+	"github.com/chroma-core/chroma/go/internal/proto/coordinatorpb"
 	"pgregory.net/rapid"
 )
 

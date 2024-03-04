@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma-core/chroma/go/internal/model"
 )
 
 type MemoryNotificationStore struct {

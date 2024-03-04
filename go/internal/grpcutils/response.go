@@ -1,7 +1,7 @@
 package grpcutils
 
 import (
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"

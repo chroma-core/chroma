@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chroma/chroma-coordinator/internal/metastore/coordinator"
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/metastore/coordinator"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"pgregory.net/rapid"
 )
 

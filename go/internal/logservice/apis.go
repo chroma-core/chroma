@@ -2,9 +2,9 @@ package logservice
 
 import (
 	"context"
-	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/common"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/types"
 )
 
 type (

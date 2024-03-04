@@ -1,7 +1,7 @@
 package dao
 
 import (
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/gorm"

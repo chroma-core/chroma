@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/chroma-core/chroma/go/internal/common"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"

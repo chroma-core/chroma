@@ -3,8 +3,8 @@ package metastore
 import (
 	"context"
 
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/types"
 )
 
 // Catalog defines methods for system catalog

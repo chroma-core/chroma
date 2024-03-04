@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma-core/chroma/go/internal/model"
 )
 
 func TestMemoryNotificationStore_GetAllPendingNotifications(t *testing.T) {

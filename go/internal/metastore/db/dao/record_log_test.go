@@ -1,10 +1,10 @@
 package dao
 
 import (
-	"github.com/chroma/chroma-coordinator/internal/logservice/testutils"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/logservice/testutils"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbcore"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/notification"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/notification"
+	"github.com/chroma-core/chroma/go/internal/types"
 )
 
 const (

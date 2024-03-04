@@ -4,12 +4,12 @@ import (
 	"context"
 	"log"
 
-	"github.com/chroma/chroma-coordinator/internal/metastore"
-	"github.com/chroma/chroma-coordinator/internal/metastore/coordinator"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
-	"github.com/chroma/chroma-coordinator/internal/notification"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/metastore"
+	"github.com/chroma-core/chroma/go/internal/metastore/coordinator"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dao"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbcore"
+	"github.com/chroma-core/chroma/go/internal/notification"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"gorm.io/gorm"
 )
 

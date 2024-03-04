@@ -1,6 +1,6 @@
 package model
 
-import "github.com/chroma/chroma-coordinator/internal/types"
+import "github.com/chroma-core/chroma/go/internal/types"
 
 type Tenant struct {
 	Name string

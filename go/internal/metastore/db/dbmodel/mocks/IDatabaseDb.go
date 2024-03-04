@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	dbmodel "github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
+	dbmodel "github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
 	mock "github.com/stretchr/testify/mock"
 )
 

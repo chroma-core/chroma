@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/types"
 )
 
 type Segment struct {

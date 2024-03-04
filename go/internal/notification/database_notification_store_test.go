@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel/mocks"
-	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel/mocks"
+	"github.com/chroma-core/chroma/go/internal/model"
 	"github.com/stretchr/testify/mock"
 )
 

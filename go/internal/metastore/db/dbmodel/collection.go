@@ -3,7 +3,7 @@ package dbmodel
 import (
 	"time"
 
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/types"
 )
 
 type Collection struct {

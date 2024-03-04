@@ -1,7 +1,7 @@
 package dbmodel
 
 import (
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/types"
 )
 
 type RecordLog struct {

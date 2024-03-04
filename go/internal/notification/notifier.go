@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"

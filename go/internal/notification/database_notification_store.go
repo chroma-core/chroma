@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/model"
 )
 
 type DatabaseNotificationStore struct {

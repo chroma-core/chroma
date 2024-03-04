@@ -6,11 +6,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"sync"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
-	"github.com/chroma/chroma-coordinator/internal/metastore"
-	"github.com/chroma/chroma-coordinator/internal/model"
-	"github.com/chroma/chroma-coordinator/internal/notification"
-	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/chroma-core/chroma/go/internal/common"
+	"github.com/chroma-core/chroma/go/internal/metastore"
+	"github.com/chroma-core/chroma/go/internal/model"
+	"github.com/chroma-core/chroma/go/internal/notification"
+	"github.com/chroma-core/chroma/go/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )

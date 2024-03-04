@@ -2,8 +2,8 @@ package logservice
 
 import (
 	"context"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dao"
+	"github.com/chroma-core/chroma/go/internal/metastore/db/dbmodel"
 	"github.com/pingcap/log"
 )
 
