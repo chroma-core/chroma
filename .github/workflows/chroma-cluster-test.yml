@@ -66,4 +66,4 @@ jobs:
     - name: Start Tilt
       run: tilt ci
     - name: Test
-      run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/internal/memberlist_manager'
+      run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
