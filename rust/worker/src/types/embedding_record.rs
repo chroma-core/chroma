@@ -105,7 +105,11 @@ impl TryFrom<RecordLog> for EmbeddingRecord {
     type Error = EmbeddingRecordConversionError;
 
     fn try_from(record_log: RecordLog) -> Result<Self, Self::Error> {
-        let proto_submit = record_log.record.unwrap();
+        let proto_submit = record_log
+            .record
+            .ok_or(EmbeddingRecordConversionError::DecodeError(
+                ConversionError::DecodeError,
+            ))?;
 
         let seq_id = BigInt::from(record_log.log_id);
         let op = match proto_submit.operation.try_into() {

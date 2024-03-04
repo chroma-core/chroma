@@ -10,6 +10,8 @@ use crate::types::EmbeddingRecordConversionError;
 use async_trait::async_trait;
 use thiserror::Error;
 
+// CollectionInfo is a struct that contains information about a collection for the
+// compacting process. It contains information about the
 pub(crate) struct CollectionInfo {
     pub(crate) collection_id: String,
     pub(crate) first_log_id: i64,
@@ -21,11 +23,13 @@ pub(crate) trait Log: Send + Sync + LogClone {
     async fn read(
         &mut self,
         collection_id: String,
-        index: i64,
+        offset: i64,
         batch_size: i32,
-    ) -> Vec<Box<EmbeddingRecord>>;
+    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError>;
 
-    async fn get_collections(&mut self) -> Vec<CollectionInfo>;
+    async fn get_collections_with_new_data(
+        &mut self,
+    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError>;
 }
 
 pub(crate) trait LogClone {
@@ -79,6 +83,7 @@ impl Configurable for GrpcLog {
             LogConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;
+                // TODO: switch to logging when logging is implemented
                 println!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
                 let client = LogServiceClient::connect(connection_string).await;
@@ -100,12 +105,12 @@ impl Log for GrpcLog {
     async fn read(
         &mut self,
         collection_id: String,
-        index: i64,
+        offset: i64,
         batch_size: i32,
-    ) -> Vec<Box<EmbeddingRecord>> {
+    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
             collection_id: collection_id,
-            start_from_id: index,
+            start_from_id: offset,
             batch_size: batch_size,
         });
         let response = request.await;
@@ -121,22 +126,23 @@ impl Log for GrpcLog {
                             result.push(Box::new(embedding_record));
                         }
                         Err(err) => {
-                            println!("Failed to convert log to embedding record: {}", err);
-                            // TODO: error handling
-                            return Vec::new();
+                            return Err(PullLogsError::ConversionError(err));
                         }
                     }
                 }
-                result
+                Ok(result)
             }
             Err(e) => {
+                // TODO: switch to logging when logging is implemented
                 println!("Failed to pull logs: {}", e);
-                Vec::new()
+                Err(PullLogsError::FailedToPullLogs(e))
             }
         }
     }
 
-    async fn get_collections(&mut self) -> Vec<CollectionInfo> {
+    async fn get_collections_with_new_data(
+        &mut self,
+    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         let request = self.client.get_all_collection_info_to_compact(
             chroma_proto::GetAllCollectionInfoToCompactRequest {},
         );
@@ -153,12 +159,45 @@ impl Log for GrpcLog {
                         first_log_id_ts: collection.first_log_id_ts,
                     });
                 }
-                result
+                Ok(result)
             }
             Err(e) => {
+                // TODO: switch to logging when logging is implemented
                 println!("Failed to get collections: {}", e);
-                // TODO: error handling
-                Vec::new()
+                Err(GetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(e))
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum PullLogsError {
+    #[error("Failed to fetch")]
+    FailedToPullLogs(#[from] tonic::Status),
+    #[error("Failed to convert proto segment")]
+    ConversionError(#[from] EmbeddingRecordConversionError),
+}
+
+impl ChromaError for PullLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PullLogsError::FailedToPullLogs(_) => ErrorCodes::Internal,
+            PullLogsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum GetCollectionsWithNewDataError {
+    #[error("Failed to fetch")]
+    FailedGetCollectionsWithNewData(#[from] tonic::Status),
+}
+
+impl ChromaError for GetCollectionsWithNewDataError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(_) => {
+                ErrorCodes::Internal
             }
         }
     }
