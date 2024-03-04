@@ -31,7 +31,7 @@ spec:
           imagePullPolicy: IfNotPresent
           name: coordinator
           ports:
-            - containerPort: 50001
+            - containerPort: 50051
               name: grpc
 
 ---
@@ -44,7 +44,7 @@ metadata:
 spec:
   ports:
     - name: grpc
-      port: 50001
+      port: 50051
       targetPort: grpc
   selector:
     app: coordinator

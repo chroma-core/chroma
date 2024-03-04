@@ -13,6 +13,7 @@ spec:
       labels:
         app: logservice
     spec:
+      serviceAccountName: logservice-serviceaccount
       containers:
         - command:
             - "logservice"
@@ -37,3 +38,13 @@ spec:
   selector:
     app: logservice
   type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: logservice-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
