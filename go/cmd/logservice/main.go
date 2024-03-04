@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chroma-core/chroma/go/internal/utils"
+	"github.com/chroma-core/chroma/go/pkg/utils"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"go.uber.org/automaxprocs/maxprocs"

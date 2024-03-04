@@ -1,13 +1,13 @@
 package main
 
 import (
-	"github.com/chroma-core/chroma/go/internal/coordinator/grpc"
-	"github.com/chroma-core/chroma/go/internal/grpcutils"
+	"github.com/chroma-core/chroma/go/pkg/coordinator/grpc"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"io"
 	"time"
 
 	"github.com/chroma-core/chroma/go/cmd/flag"
-	"github.com/chroma-core/chroma/go/internal/utils"
+	"github.com/chroma-core/chroma/go/pkg/utils"
 	"github.com/spf13/cobra"
 )
 

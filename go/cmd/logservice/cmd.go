@@ -2,9 +2,9 @@ package main
 
 import (
 	"github.com/chroma-core/chroma/go/cmd/flag"
-	"github.com/chroma-core/chroma/go/internal/grpcutils"
-	"github.com/chroma-core/chroma/go/internal/logservice/grpc"
-	"github.com/chroma-core/chroma/go/internal/utils"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
+	"github.com/chroma-core/chroma/go/pkg/logservice/grpc"
+	"github.com/chroma-core/chroma/go/pkg/utils"
 	"github.com/spf13/cobra"
 	"io"
 )

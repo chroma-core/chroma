@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package chroma;
 
-option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+option go_package = "github.com//chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 message Status {
   string reason = 1;
