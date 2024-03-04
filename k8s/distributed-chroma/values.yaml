@@ -1,6 +1,46 @@
 # Default values for distributed-chroma.
+# Strongly prefer single quotes.
 
-namespace: "chroma"
+namespace: 'chroma'
+
+frontend:
+  image: 'server'
+
+  # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
+  # populated from secrets or configMaps. So we let consumers fill these directly.
+  # TODO we could maybe have mutually exclusive pieces of config, e.g. isPersistentValue
+  # and isPersistentFromConfigMap or something.
+  isPersistent: 'value: "TRUE"'
+  producerImpl: 'value: "chromadb.ingest.impl.pulsar.PulsarProducer"'
+  consumerImpl: 'value: "chromadb.ingest.impl.pulsar.PulsarConsumer"'
+  segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
+  pulsarBrokerUrl: 'value: "pulsar.chroma"'
+  pulsarBrokerPort: 'value: "6650"'
+  pulsarAdminPort: 'value: "8080"'
+  allowReset: 'value: "TRUE"'
+  sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
+  serverGrpcPort: 'value: "50051"'
+  cuoordinatorHost: 'value: "coordinator.chroma"'
+  authProvider: 'value: ""'
+  authCredentialsProvider: 'value: ""'
+  authzProvider: 'value: ""'
+  authzConfigProvider: 'value: ""'
+  otherEnvConfig: ''
 
 coordinator:
+  image: 'coordinator'
   replicaCount: 1
+  env:
+  flags:
+    pulsar-admin-url: "http://pulsar.chroma:8080"
+    pulsar-url: "pulsar://pulsar.chroma:6650"
+    notifier-provider: "pulsar"
+
+logService:
+  image: 'coordinator'
+
+worker:
+  image: 'worker'
+
+sysdbMigration:
+  image: 'migration'

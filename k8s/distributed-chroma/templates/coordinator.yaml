@@ -18,10 +18,16 @@ spec:
         - command:
             - "coordinator"
             - "coordinator"
-            - "--pulsar-admin-url=http://pulsar.chroma:8080"
-            - "--pulsar-url=pulsar://pulsar.chroma:6650"
-            - "--notifier-provider=pulsar"
-          image: coordinator
+            {{ range $k, $v := .Values.coordinator.flags }}
+            - "--{{ $k }}={{ $v }}"
+            {{ end }}
+          env:
+            {{ range .Values.coordinator.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+              {{ .value }}
+            {{ end }}
+          image: {{ .Values.coordinator.image }}
           imagePullPolicy: IfNotPresent
           name: coordinator
           ports:

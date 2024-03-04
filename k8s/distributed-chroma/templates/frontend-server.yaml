@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend-server
-          image: server
+          image: {{ .Values.frontend.image }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -24,32 +24,42 @@ spec:
               mountPath: /test
           env:
             - name: IS_PERSISTENT
-              value: "TRUE"
+              {{ .Values.frontend.isPersistent }}
             - name: CHROMA_PRODUCER_IMPL
-              value: "chromadb.ingest.impl.pulsar.PulsarProducer"
+              {{ .Values.frontend.producerImpl }}
             - name: CHROMA_CONSUMER_IMPL
-              value: "chromadb.ingest.impl.pulsar.PulsarConsumer"
+              {{ .Values.frontend.consumerImpl }}
             - name: CHROMA_SEGMENT_MANAGER_IMPL
-              value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
+              {{ .Values.frontend.segmentManagerImpl }}
             - name: PULSAR_BROKER_URL
-              value: "pulsar.chroma"
+              {{ .Values.frontend.pulsarBrokerUrl }}
             - name: PULSAR_BROKER_PORT
-              value: "6650"
+              {{ .Values.frontend.pulsarBrokerPort }}
             - name: PULSAR_ADMIN_PORT
-              value: "8080"
+              {{ .Values.frontend.pulsarAdminPort }}
             - name: ALLOW_RESET
-              value: "TRUE"
+              {{ .Values.frontend.allowReset }}
             - name: CHROMA_SYSDB_IMPL
-              value: "chromadb.db.impl.grpc.client.GrpcSysDB"
+              {{ .Values.frontend.sysdbImpl }}
             - name: CHROMA_SERVER_GRPC_PORT
-              value: "50051"
+              {{ .Values.frontend.serverGrpcPort }}
             - name: CHROMA_COORDINATOR_HOST
-              value: "coordinator.chroma"
+              {{ .Values.frontend.coordinatorHost }}
+            - name: CHROMA_SERVER_AUTH_PROVIDER
+              {{ .Values.frontend.serverAuthProvider }}
+            - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
+              {{ .Values.frontend.serverAuthCredentialsProvider }}
+            - name: CHROMA_SERVER_AUTHZ_PROVIDER
+              {{ .Values.frontend.serverAuthzProvider }}
+            - name: CHROMA_SERVER_AUTHZ_CONFIG_PROVIDER
+              {{ .Values.frontend.serverAuthzConfigProvider }}
+              {{ .Values.frontend.otherEnvConfig }}
       volumes:
         - name: chroma
           emptyDir: {}
 
 ---
+
 apiVersion: v1
 kind: Service
 metadata:
