@@ -21,4 +21,4 @@ steps:
   #     resourceGroup: '$(RESOURCE_GROUP)'
   #     imageToDeploy: '$(ACR_NAME)/$(imageName)'
 - publish: '$(System.DefaultWorkingDirectory)'
-  artifact: chroma      
+  artifact: chroma 
