@@ -161,6 +161,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
                 "#,
             );
             let config = RootConfig::load();
@@ -205,6 +209,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
 
                 "#,
             );
@@ -265,7 +273,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
-
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
                 "#,
             );
             let config = RootConfig::load();
@@ -306,6 +317,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
                 "#,
             );
             let config = RootConfig::load();

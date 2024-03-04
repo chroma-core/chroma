@@ -122,6 +122,7 @@ impl Log for GrpcLog {
                         }
                         Err(err) => {
                             println!("Failed to convert log to embedding record: {}", err);
+                            // TODO: error handling
                             return Vec::new();
                         }
                     }
@@ -156,6 +157,7 @@ impl Log for GrpcLog {
             }
             Err(e) => {
                 println!("Failed to get collections: {}", e);
+                // TODO: error handling
                 Vec::new()
             }
         }
