@@ -626,6 +626,7 @@ operator_records = {
 }
 
 
+
 def test_where_lt(api):
     api.reset()
     collection = api.create_collection("test_where_lt")
@@ -680,13 +681,55 @@ def test_where_like_string(api):
     api.reset()
     collection = api.create_collection("test_where_like")
     collection.add(**operator_records)
+    #Exact match.
+    items = collection.get(where={"string_value": {"$like": "one"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "two"}})
+    assert len(items["metadatas"]) == 1
+    #partial matches
+    items = collection.get(where={"string_value": {"$like": "%"}})
+    assert len(items["metadatas"]) == 2
     items = collection.get(where={"string_value": {"$like": "%wo%"}})
     assert len(items["metadatas"]) == 1
     items = collection.get(where={"string_value": {"$like": "%o%"}})
     assert len(items["metadatas"]) == 2
+    items = collection.get(where={"string_value": {"$like": "on_"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "t_o"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "%o"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "o%"}})
+    assert len(items["metadatas"]) == 1
     items = collection.get(where={"float_value": {"$like": "%o%"}})
     assert len(items["metadatas"]) == 0
     items = collection.get(where={"string_value": {"$nlike": "%o%"}})
+    assert len(items["metadatas"]) == 0
+
+    items = collection.get(where={"string_value": {"$like": r"o\%"}}) 
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$like": r"o\__"}}) 
+    assert len(items["metadatas"]) == 0
+
+def test_where_like_string_case_sensitive(api):
+    api.reset()
+    collection = api.create_collection("test_where_like")
+    
+    collection.add(**operator_records)
+    #Exact match.
+    items = collection.get(where={"string_value": {"$like": "one"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "two"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "One"}})
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$like": "Two"}})
+    assert len(items["metadatas"]) == 0
+    #partial matches
+
+    items = collection.get(where={"string_value": {"$like": "%o"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "O%"}})
     assert len(items["metadatas"]) == 0
 
 
@@ -709,13 +752,13 @@ def test_where_valid_operators_like(api):
     collection = api.create_collection("test_where_valid_like_operators")
     collection.add(**operator_records)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError,match=r".* operand value to be an string for operator \$like.*"):
         collection.get(where={"b": {"$like": 4}})  # invalid
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError,match=r".* operand value to be an string for operator \$like.*"):
         collection.get(
             where={
                 "$or": [
-                    {"a": {"$like": "first"}},  # invalid
+                    {"a": {"$like": "first"}},  # valid
                     {"b": {"$like": 4}},  # invalid
                     {"$like": "second"},  # valid
                 ]

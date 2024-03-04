@@ -556,25 +556,6 @@ def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
         return st.from_type(type(value)).filter(lambda x: x != value)
 
 
-def opposite_like_value(value: LiteralValue) -> SearchStrategy[Any]:
-    """
-    Returns a strategy that will generate all valid values except the input value - testing of $like
-    """
-    if isinstance(value, float):
-        return st.floats(allow_nan=False, allow_infinity=False).filter(
-            lambda x: x != value
-        )
-    elif isinstance(value, str):
-        return safe_text.filter(lambda x: x != value)
-    elif isinstance(value, bool):
-        return st.booleans().filter(lambda x: x != value)
-    elif isinstance(value, int):
-        return st.integers(min_value=-(2**31), max_value=2**31 - 1).filter(
-            lambda x: x != value
-        )
-    else:
-        return st.from_type(type(value)).filter(lambda x: x != value)
-
 
 @st.composite
 def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
