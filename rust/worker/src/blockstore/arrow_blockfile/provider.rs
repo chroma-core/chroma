@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::super::provider::BlockfileProvider;
 use crate::blockstore::arrow_blockfile::block::Block;
 use crate::blockstore::arrow_blockfile::blockfile::ArrowBlockfile;
-use crate::blockstore::types::Blockfile;
+use crate::blockstore::types::{Blockfile, KeyType, ValueType};
 
 pub(super) struct ArrowBlockfileProvider {
     block_provider: ArrowBlockProvider,
@@ -56,9 +56,12 @@ impl ArrowBlockProvider {
         }
     }
 
-    pub(super) fn create_block(&self) -> Arc<Block> {
-        let block = Arc::new(Block::new(Uuid::new_v4()));
-        self.inner.write().blocks.insert(block.id, block.clone());
+    pub(super) fn create_block(&self, key_type: KeyType, value_type: ValueType) -> Arc<Block> {
+        let block = Arc::new(Block::new(Uuid::new_v4(), key_type, value_type));
+        self.inner
+            .write()
+            .blocks
+            .insert(block.get_id(), block.clone());
         block
     }
 

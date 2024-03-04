@@ -1,66 +1,73 @@
 use crate::blockstore::types::Key;
 use crate::blockstore::types::{Blockfile, BlockfileKey};
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Debug;
 use uuid::Uuid;
 
 // A sentinel blockfilekey wrapper to represent the start blocks range
 #[derive(Clone, Debug)]
-pub enum SparseIndexEntry {
+pub(super) enum SparseIndexDelimiter {
     Start,
     Key(BlockfileKey),
 }
 
-impl PartialEq for SparseIndexEntry {
+impl PartialEq for SparseIndexDelimiter {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (SparseIndexEntry::Start, SparseIndexEntry::Start) => true,
-            (SparseIndexEntry::Key(k1), SparseIndexEntry::Key(k2)) => k1 == k2,
+            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Start) => true,
+            (SparseIndexDelimiter::Key(k1), SparseIndexDelimiter::Key(k2)) => k1 == k2,
             _ => false,
         }
     }
 }
 
-impl Eq for SparseIndexEntry {}
+impl Eq for SparseIndexDelimiter {}
 
-impl PartialOrd for SparseIndexEntry {
+impl PartialOrd for SparseIndexDelimiter {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (SparseIndexEntry::Start, SparseIndexEntry::Start) => Some(std::cmp::Ordering::Equal),
-            (SparseIndexEntry::Start, SparseIndexEntry::Key(_)) => Some(std::cmp::Ordering::Less),
-            (SparseIndexEntry::Key(_), SparseIndexEntry::Start) => {
+            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Start) => {
+                Some(std::cmp::Ordering::Equal)
+            }
+            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Key(_)) => {
+                Some(std::cmp::Ordering::Less)
+            }
+            (SparseIndexDelimiter::Key(_), SparseIndexDelimiter::Start) => {
                 Some(std::cmp::Ordering::Greater)
             }
-            (SparseIndexEntry::Key(k1), SparseIndexEntry::Key(k2)) => k1.partial_cmp(k2),
+            (SparseIndexDelimiter::Key(k1), SparseIndexDelimiter::Key(k2)) => k1.partial_cmp(k2),
         }
     }
 }
 
-impl Ord for SparseIndexEntry {
+impl Ord for SparseIndexDelimiter {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (SparseIndexEntry::Start, SparseIndexEntry::Start) => std::cmp::Ordering::Equal,
-            (SparseIndexEntry::Start, SparseIndexEntry::Key(_)) => std::cmp::Ordering::Less,
-            (SparseIndexEntry::Key(_), SparseIndexEntry::Start) => std::cmp::Ordering::Greater,
-            (SparseIndexEntry::Key(k1), SparseIndexEntry::Key(k2)) => k1.cmp(k2),
+            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Start) => std::cmp::Ordering::Equal,
+            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Key(_)) => std::cmp::Ordering::Less,
+            (SparseIndexDelimiter::Key(_), SparseIndexDelimiter::Start) => {
+                std::cmp::Ordering::Greater
+            }
+            (SparseIndexDelimiter::Key(k1), SparseIndexDelimiter::Key(k2)) => k1.cmp(k2),
         }
     }
 }
 
 pub(super) struct SparseIndex {
-    forward: BTreeMap<SparseIndexEntry, Uuid>,
-    reverse: HashMap<Uuid, SparseIndexEntry>,
+    forward: BTreeMap<SparseIndexDelimiter, Uuid>,
+    reverse: HashMap<Uuid, SparseIndexDelimiter>,
 }
 
 impl SparseIndex {
     pub(super) fn new(initial_block_id: Uuid) -> Self {
         let mut forward = BTreeMap::new();
-        forward.insert(SparseIndexEntry::Start, initial_block_id);
+        forward.insert(SparseIndexDelimiter::Start, initial_block_id);
         let mut reverse = HashMap::new();
-        reverse.insert(initial_block_id, SparseIndexEntry::Start);
+        reverse.insert(initial_block_id, SparseIndexDelimiter::Start);
         Self { forward, reverse }
     }
 
-    pub(super) fn from(old_sparse_index: SparseIndex) -> Self {
+    pub(super) fn from(old_sparse_index: &SparseIndex) -> Self {
         Self {
             forward: old_sparse_index.forward.clone(),
             reverse: old_sparse_index.reverse.clone(),
@@ -70,7 +77,7 @@ impl SparseIndex {
     pub(super) fn get_target_block_id(&self, search_key: &BlockfileKey) -> Uuid {
         let mut iter_curr = self.forward.iter();
         let mut iter_next = self.forward.iter().skip(1);
-        let search_key = SparseIndexEntry::Key(search_key.clone());
+        let search_key = SparseIndexDelimiter::Key(search_key.clone());
         while let Some((curr_key, curr_block_id)) = iter_curr.next() {
             if let Some((next_key, _)) = iter_next.next() {
                 if search_key >= *curr_key && search_key < *next_key {
@@ -85,13 +92,61 @@ impl SparseIndex {
 
     pub(super) fn add_block(&mut self, start_key: BlockfileKey, block_id: Uuid) {
         self.forward
-            .insert(SparseIndexEntry::Key(start_key.clone()), block_id);
+            .insert(SparseIndexDelimiter::Key(start_key.clone()), block_id);
         self.reverse
-            .insert(block_id, SparseIndexEntry::Key(start_key));
+            .insert(block_id, SparseIndexDelimiter::Key(start_key));
     }
 
-    pub(super) fn get_size(&self) -> usize {
+    pub(super) fn replace_block(
+        &mut self,
+        old_block_id: Uuid,
+        new_block_id: Uuid,
+        new_start_key: BlockfileKey,
+    ) {
+        if let Some(old_start_key) = self.reverse.remove(&old_block_id) {
+            self.forward.remove(&old_start_key);
+            if old_start_key == SparseIndexDelimiter::Start {
+                self.forward
+                    .insert(SparseIndexDelimiter::Start, new_block_id);
+            } else {
+                self.forward
+                    .insert(SparseIndexDelimiter::Key(new_start_key), new_block_id);
+            }
+        }
+    }
+
+    pub(super) fn len(&self) -> usize {
         self.forward.len()
+    }
+
+    pub(super) fn is_valid(&self) -> bool {
+        let mut first = true;
+        let mut iter_curr = self.forward.iter();
+        let mut iter_next = self.forward.iter().skip(1);
+        while let Some((curr_key, _)) = iter_curr.next() {
+            if first {
+                if curr_key != &SparseIndexDelimiter::Start {
+                    return false;
+                }
+                first = false;
+            }
+            if let Some((next_key, _)) = iter_next.next() {
+                if curr_key >= next_key {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+impl Debug for SparseIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SparseIndex {{")?;
+        for (k, v) in self.forward.iter() {
+            write!(f, "\n  {:?} -> {:?}", k, v)?;
+        }
+        write!(f, "\n}}")
     }
 }
 

@@ -4,12 +4,12 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
-use super::block::Block;
+use super::block::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder, BlockState};
+use super::delta::BlockDelta;
 use super::provider::ArrowBlockProvider;
 use super::sparse_index::SparseIndex;
-use super::utils::{get_key_size, get_value_size};
 
-const MAX_BLOCK_SIZE: usize = 1024;
+pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
 pub(crate) struct ArrowBlockfile {
     sparse_index: SparseIndex,
@@ -20,7 +20,7 @@ pub(crate) struct ArrowBlockfile {
 }
 
 struct TransactionState {
-    block_delta: Vec<Arc<BlockDelta>>,
+    block_delta: Vec<BlockDelta>,
     new_sparse_index: Option<SparseIndex>,
 }
 
@@ -32,167 +32,32 @@ impl TransactionState {
         }
     }
 
-    fn add_delta(&mut self, delta: Arc<BlockDelta>) {
+    fn add_delta(&mut self, delta: BlockDelta) {
         self.block_delta.push(delta);
     }
 
-    fn get_delta_for_block(&self, search_id: &Uuid) -> Option<Arc<BlockDelta>> {
+    fn get_delta_for_block(&self, search_id: &Uuid) -> Option<BlockDelta> {
         for delta in &self.block_delta {
-            match delta.source_block {
-                None => continue,
-                Some(ref source_block) => {
-                    if source_block.id == *search_id {
-                        return Some(delta.clone());
-                    }
-                }
+            if delta.source_block.get_id() == *search_id {
+                return Some(delta.clone());
             }
         }
         None
     }
 }
 
-struct BlockDeltaInner {
-    adds: BTreeMap<BlockfileKey, Value>,
-    deletes: Vec<BlockfileKey>,
-    split_into: Option<Vec<BlockDelta>>,
-}
-
-impl BlockDeltaInner {
-    fn add(&mut self, key: BlockfileKey, value: Value) {
-        if self.deletes.contains(&key) {
-            self.deletes.retain(|x| x != &key);
-        }
-        self.adds.insert(key, value);
-    }
-
-    fn delete(&mut self, key: BlockfileKey) {
-        if self.adds.contains_key(&key) {
-            self.adds.remove(&key);
-        }
-        self.deletes.push(key);
-    }
-
-    fn can_add(&self, curr_data_size: usize, bytes: usize) -> bool {
-        let curr_adds_size = self.adds.iter().fold(0, |acc, (key, value)| {
-            acc + get_key_size(key) + get_value_size(value)
-        });
-        println!("Current adds size: {}", curr_adds_size);
-        let curr_deletes_size = self
-            .deletes
-            .iter()
-            .fold(0, |acc, key| acc + get_key_size(key));
-        let total_size = curr_data_size + curr_adds_size - curr_deletes_size;
-        total_size + bytes <= MAX_BLOCK_SIZE
-    }
-}
-
-#[derive(Clone)]
-struct BlockDelta {
-    source_block: Option<Arc<Block>>,
-    inner: Arc<RwLock<BlockDeltaInner>>,
-}
-
-impl BlockDelta {
-    fn new() -> Self {
-        Self {
-            source_block: None,
-            inner: Arc::new(RwLock::new(BlockDeltaInner {
-                adds: BTreeMap::new(),
-                deletes: Vec::new(),
-                split_into: None,
-            })),
-        }
-    }
-
-    fn from(block: Arc<Block>) -> Self {
-        Self {
-            source_block: Some(block),
-            inner: Arc::new(RwLock::new(BlockDeltaInner {
-                adds: BTreeMap::new(),
-                deletes: Vec::new(),
-                split_into: None,
-            })),
-        }
-    }
-
-    fn is_new(&self) -> bool {
-        self.source_block.is_none()
-    }
-
-    fn was_split(&self) -> bool {
-        self.inner.read().split_into.is_some()
-    }
-
-    fn can_add(&self, bytes: usize) -> bool {
-        // TODO: this should perform the rounding and padding to estimate the correct block size
-        // TODO: the source block size includes the padding and rounding, but we want the actual data size so we can compute
-        // what writing out a new block would look like
-        let curr_data_size = match &self.source_block {
-            None => 0,
-            Some(block) => block.get_size(),
-        };
-
-        let inner = self.inner.read();
-        inner.can_add(curr_data_size, bytes)
-    }
-
-    fn add(&self, key: BlockfileKey, value: Value) {
-        let mut inner = self.inner.write();
-        inner.add(key, value);
-    }
-
-    fn delete(&self, key: BlockfileKey) {
-        let mut inner = self.inner.write();
-        inner.delete(key);
-    }
-}
-
 impl Blockfile for ArrowBlockfile {
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn crate::errors::ChromaError>> {
-        // match &self.root {
-        //     None => {
-        //         // TODO: error instead
-        //         panic!("Blockfile is empty");
-        //     }
-        //     Some(RootBlock::BlockData(block_data)) => {
-        //         // TODO: don't unwrap
-        //         // TODO: handle match on key type
-        //         // TODO: binary search instead of scanning
-        //         let prefixes = block_data.data.column_by_name("prefix").unwrap();
-        //         let prefixes = prefixes.as_any().downcast_ref::<StringArray>().unwrap();
-        //         let target_prefix_index = prefixes.iter().position(|x| x == Some(&key.prefix));
-        //         let keys = block_data.data.column_by_name("key").unwrap();
-        //         let keys = keys.as_any().downcast_ref::<StringArray>().unwrap();
-        //         // Start at the index of the prefix and scan until we find the key
-        //         let mut index = target_prefix_index.unwrap();
-        //         while prefixes.value(index) == &key.prefix && index < keys.len() {
-        //             match &key.key {
-        //                 Key::String(key) => {
-        //                     if keys.value(index) == key {
-        //                         let values = block_data.data.column_by_name("value").unwrap();
-        //                         let values = values.as_any().downcast_ref::<ListArray>().unwrap();
-        //                         let value = values
-        //                             .value(index)
-        //                             .as_any()
-        //                             .downcast_ref::<Int32Array>()
-        //                             .unwrap()
-        //                             .clone();
-        //                         return Ok(Value::Int32ArrayValue(value));
-        //                     } else {
-        //                         index += 1;
-        //                     }
-        //                 }
-        //                 _ => panic!("Unsupported key type"),
-        //             }
-        //         }
-
-        //         unimplemented!("Need to implement get for block data");
-        //     }
-        //     Some(RootBlock::SparseIndex(sparse_index)) => {
-        //         unimplemented!("Need to implement get for sparse index");
-        //     }
-        // }
-        unimplemented!();
+        let target_block_id = self.sparse_index.get_target_block_id(&key);
+        let target_block = match self.block_provider.get_block(&target_block_id) {
+            None => panic!("Block not found"), // TODO: This should not panic tbh
+            Some(block) => block,
+        };
+        let value = target_block.get(&key);
+        match value {
+            None => panic!("Key not found"), // TODO: This should not panic tbh
+            Some(value) => Ok(value),
+        }
     }
 
     fn get_by_prefix(
@@ -239,8 +104,48 @@ impl Blockfile for ArrowBlockfile {
         key: BlockfileKey,
         value: Value,
     ) -> Result<(), Box<dyn crate::errors::ChromaError>> {
+        // TODO: value must be smaller than the block size except for position lists, which are a special case
+        // where we split the value across multiple blocks
         if !self.in_transaction() {
             panic!("Transaction not in progress");
+        }
+
+        // Validate key type
+        match key.key {
+            Key::String(_) => {
+                if self.key_type != KeyType::String {
+                    panic!("Invalid key type");
+                }
+            }
+            Key::Float(_) => {
+                if self.key_type != KeyType::Float {
+                    panic!("Invalid key type");
+                }
+            }
+        }
+
+        // Validate value type
+        match value {
+            Value::Int32ArrayValue(_) => {
+                if self.value_type != ValueType::Int32Array {
+                    panic!("Invalid value type");
+                }
+            }
+            Value::StringValue(_) => {
+                if self.value_type != ValueType::String {
+                    panic!("Invalid value type");
+                }
+            }
+            Value::PositionalPostingListValue(_) => {
+                if self.value_type != ValueType::PositionalPostingList {
+                    panic!("Invalid value type");
+                }
+            }
+            Value::RoaringBitmapValue(_) => {
+                if self.value_type != ValueType::RoaringBitmap {
+                    panic!("Invalid value type");
+                }
+            }
         }
 
         let transaction_state = match self.transaction_state {
@@ -248,8 +153,13 @@ impl Blockfile for ArrowBlockfile {
             Some(ref mut state) => state,
         };
 
-        let entry_size = get_key_size(&key) + get_value_size(&value);
-        let target_block_id = self.sparse_index.get_target_block_id(&key);
+        let target_block_id = match transaction_state.new_sparse_index {
+            None => self.sparse_index.get_target_block_id(&key),
+            Some(ref index) => index.get_target_block_id(&key),
+        };
+
+        // for debugging
+        let target_block_id_string = target_block_id.to_string();
 
         let delta = match transaction_state.get_delta_for_block(&target_block_id) {
             None => {
@@ -258,20 +168,31 @@ impl Blockfile for ArrowBlockfile {
                     None => panic!("Block not found"), // TODO: This should not panic tbh
                     Some(block) => block,
                 };
-                let delta = Arc::new(BlockDelta::from(target_block));
+                let delta = BlockDelta::from(target_block);
+                println!("New delta has size: {}", delta.get_size());
                 transaction_state.add_delta(delta.clone());
                 delta
             }
             Some(delta) => delta,
         };
 
-        if delta.can_add(entry_size) {
-            println!("Adding to existing block");
+        if delta.can_add(&key, &value) {
             delta.add(key, value);
         } else {
-            println!("Splitting block");
+            let (split_key, new_delta) = delta.split(&self.block_provider);
+            match transaction_state.new_sparse_index {
+                None => {
+                    let mut new_sparse_index = SparseIndex::from(&self.sparse_index);
+                    new_sparse_index.add_block(split_key, new_delta.source_block.get_id());
+                    transaction_state.new_sparse_index = Some(new_sparse_index);
+                }
+                Some(ref mut index) => {
+                    index.add_block(split_key, new_delta.source_block.get_id());
+                }
+            }
+            transaction_state.add_delta(new_delta);
+            self.set(key, value)?
         }
-
         Ok(())
     }
 
@@ -285,7 +206,90 @@ impl Blockfile for ArrowBlockfile {
     }
 
     fn commit_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
-        // First determine the root block type
+        if !self.in_transaction() {
+            panic!("Transaction not in progress");
+        }
+
+        let transaction_state = match self.transaction_state {
+            None => panic!("Transaction not in progress"), // TODO: make error
+            Some(ref mut state) => state,
+        };
+
+        for delta in &transaction_state.block_delta {
+            // build a new block and replace the blockdata in the block
+            // TOOO: the data capacities need to include the offsets and padding, not just the raw data size
+            let new_block_data = BlockData::from(delta);
+
+            // TODO: thinking about an edge case here: someone could register while we are in a transaction, and then we would have to handle that
+            // in that case, update_data() can fail, since the block is registered, and we would have to create a new block and update the sparse index
+
+            // Blocks are WORM, so if the block is uninitialized or initialized we can update it directly, if its registered, meaning the broader system is aware of it,
+            // we need to create a new block and update the sparse index to point to the new block
+
+            match delta.source_block.get_state() {
+                BlockState::Uninitialized => {
+                    delta.source_block.update_data(new_block_data);
+                    delta.source_block.commit();
+                    println!(
+                        "Size of commited block in bytes: {} with len {}",
+                        delta.source_block.get_size(),
+                        delta.source_block.len()
+                    );
+                }
+                BlockState::Initialized => {
+                    delta.source_block.update_data(new_block_data);
+                    delta.source_block.commit();
+                    println!(
+                        "Size of commited block in bytes: {} with len {}",
+                        delta.source_block.get_size(),
+                        delta.source_block.len()
+                    );
+                }
+                BlockState::Commited | BlockState::Registered => {
+                    // If the block is commited or registered, we need to create a new block and update the sparse index
+                    let new_block = self
+                        .block_provider
+                        .create_block(self.key_type, self.value_type);
+                    new_block.update_data(new_block_data);
+                    let new_min_key = match delta.get_min_key() {
+                        None => panic!("No start key"),
+                        Some(key) => key,
+                    };
+                    match transaction_state.new_sparse_index {
+                        None => {
+                            let mut new_sparse_index = SparseIndex::from(&self.sparse_index);
+                            new_sparse_index.replace_block(
+                                delta.source_block.get_id(),
+                                new_block.get_id(),
+                                new_min_key,
+                            );
+                            transaction_state.new_sparse_index = Some(new_sparse_index);
+                        }
+                        Some(ref mut index) => {
+                            index.replace_block(
+                                delta.source_block.get_id(),
+                                new_block.get_id(),
+                                new_min_key,
+                            );
+                        }
+                    }
+                    new_block.commit();
+                    println!(
+                        "Size of commited block in bytes: {} with len {}",
+                        new_block.get_size(),
+                        new_block.len()
+                    );
+                }
+            }
+        }
+
+        // update the sparse index
+        if transaction_state.new_sparse_index.is_some() {
+            self.sparse_index = transaction_state.new_sparse_index.take().unwrap();
+            // unwrap is safe because we just checked it
+        }
+        println!("New sparse index after commit: {:?}", self.sparse_index);
+
         self.transaction_state = None;
         Ok(())
     }
@@ -297,9 +301,9 @@ impl ArrowBlockfile {
         value_type: ValueType,
         block_provider: ArrowBlockProvider,
     ) -> Self {
-        let initial_block = block_provider.create_block();
+        let initial_block = block_provider.create_block(key_type.clone(), value_type.clone());
         Self {
-            sparse_index: SparseIndex::new(initial_block.id),
+            sparse_index: SparseIndex::new(initial_block.get_id()),
             transaction_state: None,
             block_provider,
             key_type,
@@ -319,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_blockfile() {
-        let mut block_provider = ArrowBlockProvider::new();
+        let block_provider = ArrowBlockProvider::new();
         let mut blockfile =
             ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
 
@@ -341,7 +345,6 @@ mod tests {
         blockfile.commit_transaction().unwrap();
 
         let value = blockfile.get(key1).unwrap();
-        println!("GOT VALUE {:?}", value);
         match value {
             Value::Int32ArrayValue(array) => {
                 assert_eq!(array.values(), &[1, 2, 3]);
@@ -352,32 +355,61 @@ mod tests {
 
     #[test]
     fn test_splitting() {
-        let mut block_provider = ArrowBlockProvider::new();
+        let block_provider = ArrowBlockProvider::new();
         let mut blockfile =
             ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
 
-        // Add one block worth of data
         blockfile.begin_transaction().unwrap();
-        let n = 200;
+        let n = 1200;
         for i in 0..n {
-            let key = BlockfileKey::new("key".to_string(), Key::String(i.to_string()));
+            let string_key = format!("{:04}", i);
+            let key = BlockfileKey::new("key".to_string(), Key::String(string_key));
             blockfile
                 .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
                 .unwrap();
         }
-        // blockfile.commit_transaction().unwrap();
+        blockfile.commit_transaction().unwrap();
 
-        // blockfile.begin_transaction().unwrap();
-        // let bytes_per_entry = 8;
-        // let start_i = n;
-        // let entries_per_block = 1024 / bytes_per_entry;
-        // println!("Entries per block: {}", entries_per_block);
-        // for i in start_i..entries_per_block * 2 {
-        //     let key = BlockfileKey::new("key".to_string(), Key::String(i.to_string()));
-        //     blockfile
-        //         .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
-        //         .unwrap();
-        // }
-        // blockfile.commit_transaction().unwrap();
+        for i in 0..n {
+            let string_key = format!("{:04}", i);
+            let key = BlockfileKey::new("key".to_string(), Key::String(string_key));
+            let res = blockfile.get(key).unwrap();
+            match res {
+                Value::Int32ArrayValue(array) => {
+                    assert_eq!(array.values(), &[i]);
+                }
+                _ => panic!("Unexpected value type"),
+            }
+        }
+
+        // Sparse index should have 3 blocks
+        assert_eq!(blockfile.sparse_index.len(), 3);
+        assert!(blockfile.sparse_index.is_valid());
+
+        // Add 5 new entries to the first block
+        blockfile.begin_transaction().unwrap();
+        for i in 0..5 {
+            let new_key = format! {"{:05}", i};
+            let key = BlockfileKey::new("key".to_string(), Key::String(new_key));
+            blockfile
+                .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
+                .unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
+
+        // Sparse index should still have 3 blocks
+        assert_eq!(blockfile.sparse_index.len(), 3);
+        assert!(blockfile.sparse_index.is_valid());
+
+        // Add 1200 more entries, causing splits
+        blockfile.begin_transaction().unwrap();
+        for i in n..n * 2 {
+            let new_key = format! {"{:04}", i};
+            let key = BlockfileKey::new("key".to_string(), Key::String(new_key));
+            blockfile
+                .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
+                .unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
     }
 }

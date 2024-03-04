@@ -1,14 +1,34 @@
 use super::positional_posting_list_value::PositionalPostingList;
 use crate::errors::ChromaError;
-use arrow::array::Int32Array;
+use arrow::array::{Array, Int32Array};
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
+
 // ===== Key Types =====
 #[derive(Clone)]
 pub(crate) struct BlockfileKey {
     pub(crate) prefix: String,
     pub(crate) key: Key,
+}
+
+impl Key {
+    pub(crate) fn get_size(&self) -> usize {
+        match self {
+            Key::String(s) => s.len(),
+            Key::Float(_) => 4,
+        }
+    }
+}
+
+impl BlockfileKey {
+    pub(super) fn get_size(&self) -> usize {
+        self.get_prefix_size() + self.key.get_size()
+    }
+
+    pub(super) fn get_prefix_size(&self) -> usize {
+        self.prefix.len()
+    }
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
@@ -17,7 +37,7 @@ pub(crate) enum Key {
     Float(f32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum KeyType {
     String,
     Float,
@@ -96,7 +116,7 @@ impl Ord for BlockfileKey {
 
 // ===== Value Types =====
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum Value {
     Int32ArrayValue(Int32Array),
     PositionalPostingListValue(PositionalPostingList),
@@ -104,7 +124,49 @@ pub(crate) enum Value {
     RoaringBitmapValue(RoaringBitmap),
 }
 
-#[derive(Debug, Clone)]
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        // TODO: make this correct for all types
+        match self {
+            Value::Int32ArrayValue(arr) => {
+                // An arrow array, if nested in a larger structure, when cloned may clone the entire larger buffer.
+                // This leads to a large memory overhead and also breaks our sizing assumptions. In order to work around this,
+                // we have to manuallly create a new array and copy the data over.
+
+                // Note that we use a vector here to avoid the overhead of the builder. The from() method for primitive
+                // types uses unsafe code to wrap the vecs underlying buffer in an arrow array.
+
+                // There are more performant ways to do this, but this is the most straightforward.
+                let mut new_vec = Vec::with_capacity(arr.len());
+                for i in 0..arr.len() {
+                    new_vec.push(arr.value(i));
+                }
+                let new_arr = Int32Array::from(new_vec);
+                Value::Int32ArrayValue(new_arr)
+            }
+            Value::PositionalPostingListValue(list) => {
+                Value::PositionalPostingListValue(list.clone())
+            }
+            Value::StringValue(s) => Value::StringValue(s.clone()),
+            Value::RoaringBitmapValue(bitmap) => Value::RoaringBitmapValue(bitmap.clone()),
+        }
+    }
+}
+
+impl Value {
+    pub(crate) fn get_size(&self) -> usize {
+        match self {
+            Value::Int32ArrayValue(arr) => arr.get_buffer_memory_size(),
+            Value::PositionalPostingListValue(list) => {
+                unimplemented!("Size of positional posting list")
+            }
+            Value::StringValue(s) => unimplemented!("Size of string"),
+            Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ValueType {
     Int32Array,
     PositionalPostingList,
