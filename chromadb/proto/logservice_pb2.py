@@ -16,7 +16,7 @@ from chromadb.proto import chroma_pb2 as chromadb_dot_proto_dot_chroma__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x1f\x63hromadb/proto/logservice.proto\x12\x06\x63hroma\x1a\x1b\x63hromadb/proto/chroma.proto"X\n\x0fPushLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12.\n\x07records\x18\x02 \x03(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"(\n\x10PushLogsResponse\x12\x14\n\x0crecord_count\x18\x01 \x01(\x05"S\n\x0fPullLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x15\n\rstart_from_id\x18\x02 \x01(\x03\x12\x12\n\nbatch_size\x18\x03 \x01(\x05"B\n\x10PullLogsResponse\x12.\n\x07records\x18\x01 \x03(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"V\n\x0e\x43ollectionInfo\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x14\n\x0c\x66irst_log_id\x18\x02 \x01(\x03\x12\x17\n\x0f\x66irst_log_id_ts\x18\x03 \x01(\x03"&\n$GetAllCollectionInfoToCompactRequest"\\\n%GetAllCollectionInfoToCompactResponse\x12\x33\n\x13\x61ll_collection_info\x18\x01 \x03(\x0b\x32\x16.chroma.CollectionInfo2\x8e\x02\n\nLogService\x12?\n\x08PushLogs\x12\x17.chroma.PushLogsRequest\x1a\x18.chroma.PushLogsResponse"\x00\x12?\n\x08PullLogs\x12\x17.chroma.PullLogsRequest\x1a\x18.chroma.PullLogsResponse"\x00\x12~\n\x1dGetAllCollectionInfoToCompact\x12,.chroma.GetAllCollectionInfoToCompactRequest\x1a-.chroma.GetAllCollectionInfoToCompactResponse"\x00\x42\x42Z@github.com/chroma/chroma-coordinator/internal/proto/logservicepbb\x06proto3'
+    b'\n\x1f\x63hromadb/proto/logservice.proto\x12\x06\x63hroma\x1a\x1b\x63hromadb/proto/chroma.proto"X\n\x0fPushLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12.\n\x07records\x18\x02 \x03(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"(\n\x10PushLogsResponse\x12\x14\n\x0crecord_count\x18\x01 \x01(\x05"S\n\x0fPullLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x15\n\rstart_from_id\x18\x02 \x01(\x03\x12\x12\n\nbatch_size\x18\x03 \x01(\x05"J\n\tRecordLog\x12\x0e\n\x06log_id\x18\x01 \x01(\x03\x12-\n\x06record\x18\x02 \x01(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"6\n\x10PullLogsResponse\x12"\n\x07records\x18\x01 \x03(\x0b\x32\x11.chroma.RecordLog"V\n\x0e\x43ollectionInfo\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x14\n\x0c\x66irst_log_id\x18\x02 \x01(\x03\x12\x17\n\x0f\x66irst_log_id_ts\x18\x03 \x01(\x03"&\n$GetAllCollectionInfoToCompactRequest"\\\n%GetAllCollectionInfoToCompactResponse\x12\x33\n\x13\x61ll_collection_info\x18\x01 \x03(\x0b\x32\x16.chroma.CollectionInfo2\x8e\x02\n\nLogService\x12?\n\x08PushLogs\x12\x17.chroma.PushLogsRequest\x1a\x18.chroma.PushLogsResponse"\x00\x12?\n\x08PullLogs\x12\x17.chroma.PullLogsRequest\x1a\x18.chroma.PullLogsResponse"\x00\x12~\n\x1dGetAllCollectionInfoToCompact\x12,.chroma.GetAllCollectionInfoToCompactRequest\x1a-.chroma.GetAllCollectionInfoToCompactResponse"\x00\x42\x42Z@github.com/chroma/chroma-coordinator/internal/proto/logservicepbb\x06proto3'
 )
 
 _globals = globals()
@@ -35,14 +35,16 @@ if _descriptor._USE_C_DESCRIPTORS == False:
     _globals["_PUSHLOGSRESPONSE"]._serialized_end = 202
     _globals["_PULLLOGSREQUEST"]._serialized_start = 204
     _globals["_PULLLOGSREQUEST"]._serialized_end = 287
-    _globals["_PULLLOGSRESPONSE"]._serialized_start = 289
-    _globals["_PULLLOGSRESPONSE"]._serialized_end = 355
-    _globals["_COLLECTIONINFO"]._serialized_start = 357
-    _globals["_COLLECTIONINFO"]._serialized_end = 443
-    _globals["_GETALLCOLLECTIONINFOTOCOMPACTREQUEST"]._serialized_start = 445
-    _globals["_GETALLCOLLECTIONINFOTOCOMPACTREQUEST"]._serialized_end = 483
-    _globals["_GETALLCOLLECTIONINFOTOCOMPACTRESPONSE"]._serialized_start = 485
-    _globals["_GETALLCOLLECTIONINFOTOCOMPACTRESPONSE"]._serialized_end = 577
-    _globals["_LOGSERVICE"]._serialized_start = 580
-    _globals["_LOGSERVICE"]._serialized_end = 850
+    _globals["_RECORDLOG"]._serialized_start = 289
+    _globals["_RECORDLOG"]._serialized_end = 363
+    _globals["_PULLLOGSRESPONSE"]._serialized_start = 365
+    _globals["_PULLLOGSRESPONSE"]._serialized_end = 419
+    _globals["_COLLECTIONINFO"]._serialized_start = 421
+    _globals["_COLLECTIONINFO"]._serialized_end = 507
+    _globals["_GETALLCOLLECTIONINFOTOCOMPACTREQUEST"]._serialized_start = 509
+    _globals["_GETALLCOLLECTIONINFOTOCOMPACTREQUEST"]._serialized_end = 547
+    _globals["_GETALLCOLLECTIONINFOTOCOMPACTRESPONSE"]._serialized_start = 549
+    _globals["_GETALLCOLLECTIONINFOTOCOMPACTRESPONSE"]._serialized_end = 641
+    _globals["_LOGSERVICE"]._serialized_start = 644
+    _globals["_LOGSERVICE"]._serialized_end = 914
 # @@protoc_insertion_point(module_scope)

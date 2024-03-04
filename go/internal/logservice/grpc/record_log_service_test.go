@@ -143,13 +143,14 @@ func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 	assert.Nil(suite.t, err)
 	assert.Len(suite.t, pullResponse.Records, 3)
 	for index := range pullResponse.Records {
-		assert.Equal(suite.t, recordsToSubmit[index].Id, pullResponse.Records[index].Id)
-		assert.Equal(suite.t, recordsToSubmit[index].Operation, pullResponse.Records[index].Operation)
-		assert.Equal(suite.t, recordsToSubmit[index].CollectionId, "")
-		assert.Equal(suite.t, recordsToSubmit[index].Metadata, pullResponse.Records[index].Metadata)
-		assert.Equal(suite.t, recordsToSubmit[index].Vector.Dimension, pullResponse.Records[index].Vector.Dimension)
-		assert.Equal(suite.t, recordsToSubmit[index].Vector.Encoding, pullResponse.Records[index].Vector.Encoding)
-		assert.Equal(suite.t, recordsToSubmit[index].Vector.Vector, pullResponse.Records[index].Vector.Vector)
+		assert.Equal(suite.t, int64(index+1), pullResponse.Records[index].LogId)
+		assert.Equal(suite.t, recordsToSubmit[index].Id, pullResponse.Records[index].Record.Id)
+		assert.Equal(suite.t, recordsToSubmit[index].Operation, pullResponse.Records[index].Record.Operation)
+		assert.Equal(suite.t, recordsToSubmit[index].CollectionId, pullResponse.Records[index].Record.CollectionId)
+		assert.Equal(suite.t, recordsToSubmit[index].Metadata, pullResponse.Records[index].Record.Metadata)
+		assert.Equal(suite.t, recordsToSubmit[index].Vector.Dimension, pullResponse.Records[index].Record.Vector.Dimension)
+		assert.Equal(suite.t, recordsToSubmit[index].Vector.Encoding, pullResponse.Records[index].Record.Vector.Encoding)
+		assert.Equal(suite.t, recordsToSubmit[index].Vector.Vector, pullResponse.Records[index].Record.Vector.Vector)
 	}
 }
 
