@@ -3,6 +3,7 @@ package grpcutils
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"github.com/chroma/chroma-coordinator/internal/otel"
 	"io"
 	"net"
 	"os"
@@ -70,6 +71,7 @@ func newDefaultGrpcProvider(name string, grpcConfig *GrpcConfig, registerFunc fu
 
 		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
 	}
+	opts = append(opts, grpc.UnaryInterceptor(otel.ServerGrpcInterceptor))
 
 	c := &defaultGrpcServer{
 		server: grpc.NewServer(opts...),
