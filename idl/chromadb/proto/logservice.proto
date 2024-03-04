@@ -20,8 +20,13 @@ message PullLogsRequest {
   int32 batch_size = 3;
 }
 
+message RecordLog {
+  int64 log_id = 1;
+  SubmitEmbeddingRecord record = 2;
+}
+
 message PullLogsResponse {
-  repeated SubmitEmbeddingRecord records = 1;
+  repeated RecordLog records = 1;
 }
 
 message CollectionInfo {

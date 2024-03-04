@@ -56,7 +56,7 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	if err != nil {
 		return nil, err
 	}
-	records := make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
+	records := make([]*logservicepb.RecordLog, 0)
 	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
@@ -72,7 +72,11 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
-		records = append(records, record)
+		recordLog := &logservicepb.RecordLog{
+			LogId:  recordLogs[index].ID,
+			Record: record,
+		}
+		records = append(records, recordLog)
 	}
 	res.Records = records
 	log.Info("PullLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", len(records)))
