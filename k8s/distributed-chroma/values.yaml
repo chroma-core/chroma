@@ -11,8 +11,8 @@ frontend:
   # TODO we could maybe have mutually exclusive pieces of config, e.g. isPersistentValue
   # and isPersistentFromConfigMap or something.
   isPersistent: 'value: "TRUE"'
-  producerImpl: 'value: "chromadb.ingest.impl.pulsar.PulsarProducer"'
-  consumerImpl: 'value: "chromadb.ingest.impl.pulsar.PulsarConsumer"'
+  producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
   pulsarBrokerUrl: 'value: "pulsar.chroma"'
   pulsarBrokerPort: 'value: "6650"'
@@ -25,6 +25,9 @@ frontend:
   authCredentialsProvider: 'value: ""'
   authzProvider: 'value: ""'
   authzConfigProvider: 'value: ""'
+  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"'
+  logServiceHost: 'value: "logservice.chroma"'
+  logServicePort: 'value: "50051"'
   otherEnvConfig: ''
 
 coordinator:

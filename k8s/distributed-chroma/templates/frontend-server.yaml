@@ -26,9 +26,9 @@ spec:
             - name: IS_PERSISTENT
               {{ .Values.frontend.isPersistent }}
             - name: CHROMA_PRODUCER_IMPL
-              value: "chromadb.logservice.logservice.LogService"
+              {{ .Values.frontend.producerImpl }}
             - name: CHROMA_CONSUMER_IMPL
-              value: "chromadb.logservice.logservice.LogService"
+              {{ .Values.frontend.consumerImpl }}
             - name: CHROMA_SEGMENT_MANAGER_IMPL
               {{ .Values.frontend.segmentManagerImpl }}
             - name: PULSAR_BROKER_URL
@@ -55,11 +55,11 @@ spec:
               {{ .Values.frontend.serverAuthzConfigProvider }}
               {{ .Values.frontend.otherEnvConfig }}
             - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
-              value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"
+              {{ .Values.frontend.memberlistProviderImpl }}
             - name: CHROMA_LOGSERVICE_HOST
-              value: "logservice.chroma"
+              {{ .Values.frontend.logServiceHost }}
             - name: CHROMA_LOGSERVICE_PORT
-              value: "50051"
+              {{ .Values.frontend.logServicePort }}
       volumes:
         - name: chroma
           emptyDir: {}
