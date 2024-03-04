@@ -68,12 +68,12 @@ k8s_yaml([
   'k8s/test/postgres.yaml',
 ])
 k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"])
-k8s_resource('pulsar', resource_deps=['k8s_setup'], labels=["infrastructure"])
+k8s_resource('pulsar', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
 k8s_resource('migration', resource_deps=['postgres'], labels=["infrastructure"])
-k8s_resource('logservice', resource_deps=['migration'], labels=["chroma"])
-k8s_resource('coordinator', resource_deps=['pulsar', 'migration'], labels=["chroma"])
-k8s_resource('frontend-server', resource_deps=['pulsar', 'coordinator', 'logservice'],labels=["chroma"])
-k8s_resource('worker', resource_deps=['coordinator', 'pulsar'],labels=["chroma"])
+k8s_resource('logservice', resource_deps=['migration'], labels=["chroma"], port_forwards='50052:50051')
+k8s_resource('coordinator', resource_deps=['pulsar', 'migration'], labels=["chroma"], port_forwards='50051:50051')
+k8s_resource('frontend-server', resource_deps=['pulsar', 'coordinator', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
+k8s_resource('worker', resource_deps=['coordinator', 'pulsar'], labels=["chroma"])
 
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
@@ -96,4 +96,4 @@ k8s_resource(
 )
 
 # Local S3
-k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=9000)
+k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards='9000:9000')
