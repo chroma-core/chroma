@@ -16,6 +16,8 @@ spec:
       serviceAccountName: coordinator-serviceaccount
       containers:
         - command:
+            - "/bin/sh"
+            - "-c"
             - "coordinator"
             - "coordinator"
             {{ range $k, $v := .Values.coordinator.flags }}
