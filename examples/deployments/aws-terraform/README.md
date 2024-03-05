@@ -30,6 +30,7 @@ aws ec2 describe-images \
 ```
 
 ### 2. Init your terraform state
+
 ```bash
 terraform init
 ```
@@ -71,6 +72,7 @@ export TF_VAR_chroma_data_restore_from_snapshot_id=""
 export TF_VAR_chroma_data_volume_snapshot_before_destroy="true"
 terraform apply -auto-approve
 ```
+
 > Note: Basic Auth is supported by Chroma v0.4.7+
 
 ### 4. Check your public IP and that Chroma is running
@@ -91,6 +93,7 @@ curl -v http://$instance_public_ip:8000/api/v1/heartbeat
 #### 4.1 Checking Auth
 
 ##### Token
+
 When token auth is enabled you can check the get the credentials from Terraform state by running:
 
 ```bash
@@ -116,6 +119,7 @@ curl -v http://$instance_public_ip:8000/api/v1/collections -H "Authorization: Be
 ```
 
 ##### Basic
+
 When basic auth is enabled you can check the get the credentials from Terraform state by running:
 
 ```bash
@@ -144,7 +148,6 @@ curl -v http://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
 
 #### 4.2 Connect (ssh) to your instance
 
-
 To SSH to your instance:
 
 ```bash
@@ -167,4 +170,4 @@ You can visualize your infrastructure with:
 terraform graph | dot -Tsvg > graph.svg
 ```
 
->Note: You will need graphviz installed for this to work
+> Note: You will need graphviz installed for this to work

@@ -2,8 +2,8 @@ name: Python Vulnerability Scan
 on:
   push:
     branches:
-      - '*'
-      - '*/**'
+      - "*"
+      - "*/**"
     paths:
       - chromadb/**
       - clients/python/**
@@ -16,10 +16,10 @@ jobs:
         uses: actions/checkout@v3
       - uses: ./.github/actions/bandit-scan/
         with:
-          input-dir: '.'
-          format: 'json'
-          bandit-config: 'bandit.yaml'
-          output-file: 'bandit-report.json'
+          input-dir: "."
+          format: "json"
+          bandit-config: "bandit.yaml"
+          output-file: "bandit-report.json"
       - name: Upload Bandit Report
         uses: actions/upload-artifact@v3
         with:

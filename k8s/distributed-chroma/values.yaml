@@ -1,10 +1,10 @@
 # Default values for distributed-chroma.
 # Strongly prefer single quotes.
 
-namespace: 'chroma'
+namespace: "chroma"
 
 frontend:
-  image: 'server'
+  image: "server"
 
   # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
   # populated from secrets or configMaps. So we let consumers fill these directly.
@@ -28,10 +28,10 @@ frontend:
   memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"'
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
-  otherEnvConfig: ''
+  otherEnvConfig: ""
 
 coordinator:
-  image: 'coordinator'
+  image: "coordinator"
   replicaCount: 1
   env:
   flags:
@@ -40,10 +40,10 @@ coordinator:
     notifier-provider: "pulsar"
 
 logService:
-  image: 'coordinator'
+  image: "coordinator"
 
 worker:
-  image: 'worker'
+  image: "worker"
 
 sysdbMigration:
-  image: 'migration'
+  image: "migration"

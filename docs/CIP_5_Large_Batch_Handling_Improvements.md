@@ -38,7 +38,7 @@ We propose the following changes:
   add more checks in the future. The pre-flight checks will be only fetched once per client and cached for the duration
   of the client's lifetime.
 - Updated `_add`, `_update` and `_upsert` method on `chromadb.api.segment.SegmentAPI` to validate batch size.
-- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.fastapi.FastAPI`  to validate batch size (client-side
+- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.fastapi.FastAPI` to validate batch size (client-side
   validation)
 - New utility library `batch_utils.py` will contain the logic for splitting batches into smaller ones.
 

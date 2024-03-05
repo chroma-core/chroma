@@ -1,0 +1,6 @@
+# These are template yaml files so fail to format
+k8s/distributed-chroma/templates/*.yaml
+
+dist/
+node_modules/
+generated/

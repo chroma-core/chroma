@@ -22,7 +22,6 @@
   </a>
 </p>
 
-
 <p align="center">
   <a href="https://github.com/chroma-core/chroma/actions/workflows/chroma-integration-test.yml" target="_blank">
     <img src="https://github.com/chroma-core/chroma/actions/workflows/chroma-integration-test.yml/badge.svg?branch=main" alt="Integration Tests">
@@ -65,15 +64,17 @@ results = collection.query(
 ```
 
 ## Features
-- __Simple__: Fully-typed, fully-tested, fully-documented == happiness
-- __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
-- __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
-- __Feature-rich__: Queries, filtering, density estimation and more
-- __Free & Open Source__: Apache 2.0 Licensed
 
-## Use case: ChatGPT for ______
+- **Simple**: Fully-typed, fully-tested, fully-documented == happiness
+- **Integrations**: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
+- **Dev, Test, Prod**: the same API that runs in your python notebook, scales to your cluster
+- **Feature-rich**: Queries, filtering, density estimation and more
+- **Free & Open Source**: Apache 2.0 Licensed
+
+## Use case: ChatGPT for **\_\_**
 
 For example, the `"Chat your data"` use case:
+
 1. Add documents to your database. You can pass in your own embeddings, embedding function, or let Chroma embed them for you.
 2. Query relevant documents with natural language.
 3. Compose documents into the context window of an LLM like `GPT3` for additional summarization or analysis.
@@ -83,16 +84,17 @@ For example, the `"Chat your data"` use case:
 What are embeddings?
 
 - [Read the guide from OpenAI](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings)
-- __Literal__: Embedding something turns it from image/text/audio into a list of numbers. 🖼️ or 📄 => `[1.2, 2.1, ....]`. This process makes documents "understandable" to a machine learning model.
-- __By analogy__: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find.
-- __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer.
-- __A small example__: If you search your photos for "famous bridge in San Francisco". By embedding this query and comparing it to the embeddings of your photos and their metadata - it should return photos of the Golden Gate Bridge.
+- **Literal**: Embedding something turns it from image/text/audio into a list of numbers. 🖼️ or 📄 => `[1.2, 2.1, ....]`. This process makes documents "understandable" to a machine learning model.
+- **By analogy**: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find.
+- **Technical**: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer.
+- **A small example**: If you search your photos for "famous bridge in San Francisco". By embedding this query and comparing it to the embeddings of your photos and their metadata - it should return photos of the Golden Gate Bridge.
 
 Embeddings databases (also known as **vector databases**) store embeddings and allow you to search by nearest neighbors rather than by substrings like a traditional database. By default, Chroma uses [Sentence Transformers](https://docs.trychroma.com/embeddings#sentence-transformers) to embed for you but you can also use OpenAI embeddings, Cohere (multilingual) embeddings, or your own.
 
 ## Get involved
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
+
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x) - `#contributing` channel
 - [Review the 🛣️ Roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues) - [`Good first issue tag`](https://github.com/chroma-core/chroma/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)

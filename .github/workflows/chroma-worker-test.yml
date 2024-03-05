@@ -7,7 +7,7 @@ on:
   pull_request:
     branches:
       - main
-      - '**'
+      - "**"
   workflow_dispatch:
 
 jobs:
@@ -17,20 +17,20 @@ jobs:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Checkout chroma-hnswlib
-      uses: actions/checkout@v3
-      with:
-        repository: chroma-core/hnswlib
-        path: hnswlib
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        path: chroma
-    - name: Install Protoc
-      uses: arduino/setup-protoc@v2
-    - name: Build
-      run: cargo build --verbose
-      working-directory: chroma
-    - name: Test
-      run: cargo test --verbose
-      working-directory: chroma
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v3
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: chroma
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+      - name: Build
+        run: cargo build --verbose
+        working-directory: chroma
+      - name: Test
+        run: cargo test --verbose
+        working-directory: chroma

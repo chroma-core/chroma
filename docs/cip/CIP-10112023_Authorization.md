@@ -82,7 +82,7 @@ Authorization response provides authorization provider evaluation response. It r
 
 ##### ChromaAuthzMiddleware
 
-The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At the time of writing we only support FastAPI. The  middleware interface supports several methods:
+The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At the time of writing we only support FastAPI. The middleware interface supports several methods:
 
 - `authorize` - authorizes the request against the authorization provider.
 - `ignore_operation` - determines whether or not the operation should be ignored by the middleware
@@ -102,12 +102,11 @@ The AuthorizationContext is composed of three components as defined in #Basic Au
 - Resource
 - Action
 
-
 ```json
 {
-"user": {"id": "API Token or User Id"},
-"resource": {"namespace": "*", "id": "collection_id","type": "database"},
-"action": {"id":"get_or_create"},
+  "user": { "id": "API Token or User Id" },
+  "resource": { "namespace": "*", "id": "collection_id", "type": "database" },
+  "action": { "id": "get_or_create" }
 }
 ```
 
@@ -283,7 +282,6 @@ users:
     tokens:
       - token: my_api_token
         secret: my_api_secret
-
 ```
 
 ## **Compatibility, Deprecation, and Migration Plan**

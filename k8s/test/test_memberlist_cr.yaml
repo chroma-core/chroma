@@ -12,28 +12,26 @@ spec:
   members:
 
 ---
-
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: test-memberlist-reader
 rules:
-- apiGroups:
-  - chroma.cluster
-  resources:
-  - memberlists
-  verbs:
-  - get
-  - list
-  - watch
-  # TODO: FIX THIS LEAKY PERMISSION
-  - create
-  - update
-  - patch
-  - delete
+  - apiGroups:
+      - chroma.cluster
+    resources:
+      - memberlists
+    verbs:
+      - get
+      - list
+      - watch
+      # TODO: FIX THIS LEAKY PERMISSION
+      - create
+      - update
+      - patch
+      - delete
 
 ---
-
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -43,6 +41,6 @@ roleRef:
   kind: ClusterRole
   name: test-memberlist-reader
 subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: chroma
+  - kind: ServiceAccount
+    name: default
+    namespace: chroma

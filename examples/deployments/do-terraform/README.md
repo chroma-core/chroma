@@ -18,10 +18,9 @@ This deployment will do the following:
 ## Deployment with terraform
 
 This deployment uses Ubuntu 22 as foundation, but you'd like to use a different image for your Droplet (
-see  https://slugs.do-api.dev/ for a list of available images)
+see https://slugs.do-api.dev/ for a list of available images)
 
 ### Configuration Options
-
 
 ### 1. Init your terraform state
 

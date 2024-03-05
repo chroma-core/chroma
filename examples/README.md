@@ -4,11 +4,12 @@
 
 This folder will contain an ever-growing set of examples.
 
-The key with examples is that they should *always* work. The failure mode of examples folders is that they get quickly deprecated.
+The key with examples is that they should _always_ work. The failure mode of examples folders is that they get quickly deprecated.
 
 Examples are:
+
 - Easy to maintain
-- Easy to maintain examples are __simple__
+- Easy to maintain examples are **simple**
 - Use case examples are fine, technology is better
 
 ```
@@ -23,11 +24,13 @@ folder structure
 > 💡 Feel free to open a PR with an example you would like to see
 
 ### Basic Functionality
+
 - [x] Examples of using different embedding models
 - [x] Local persistance demo
 - [x] Where filtering demo
 
 ### Advanced Functionality
+
 - [ ] Clustering
 - [ ] Projections
 - [ ] Fine tuning
@@ -35,11 +38,13 @@ folder structure
 ### Use With
 
 #### LLM Application Code
+
 - [ ] Langchain
 - [ ] LlamaIndex
 - [ ] Semantic Kernal
 
 #### App Frameworks
+
 - [ ] Streamlit
 - [ ] Gradio
 - [ ] Nextjs
@@ -47,18 +52,21 @@ folder structure
 - [ ] FastAPI
 
 #### Inference Services
+
 - [ ] Brev.dev
 - [ ] Banana.dev
 - [ ] Modal
 
 ### LLM providers/services
+
 - [ ] OpenAI
 - [ ] Anthropic
 - [ ] Cohere
 - [ ] Google PaLM
 - [ ] Hugging Face
 
-***
+---
 
 ### Inspiration
+
 - The [OpenAI Cookbook](https://github.com/openai/openai-cookbook) gets a lot of things right

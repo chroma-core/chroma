@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 networks:
   net:
 
@@ -16,7 +16,7 @@ services:
     volumes:
       - ${PWD}/examples/observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
-      - "4317:4317"  # OTLP
+      - "4317:4317" # OTLP
       - "55681:55681" # Legacy
     networks:
       - net

@@ -38,4 +38,4 @@ Observability logic and output will be tested on both single-node and distribute
 
 ### Prometheus metrics
 
-Prometheus metrics offer similar OSS functionality to OTel. However the Prometheus standard is older and belongs to a single open-source project; OTel is designed for long-term cross-compatibility between *all* observability backends. As such, OTel output can easily be ingested by Prometheus users so there is no loss of functionality or compatibility.
+Prometheus metrics offer similar OSS functionality to OTel. However the Prometheus standard is older and belongs to a single open-source project; OTel is designed for long-term cross-compatibility between _all_ observability backends. As such, OTel output can easily be ingested by Prometheus users so there is no loss of functionality or compatibility.

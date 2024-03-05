@@ -121,8 +121,6 @@ TBD
 
 #### Client-side
 
-
-
 ### Reasoning
 
 - Server-side abstraction - it is very useful as the intention is to support a variety of auth providers.

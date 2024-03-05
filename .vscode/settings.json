@@ -1,8 +1,6 @@
 {
   "git.ignoreLimitWarning": true,
-  "editor.rulers": [
-    88
-  ],
+  "editor.rulers": [88],
   "editor.formatOnSave": true,
   "python.formatting.provider": "black",
   "files.exclude": {
@@ -20,9 +18,7 @@
     "--extend-ignore=E503",
     "--max-line-length=88"
   ],
-  "python.testing.pytestArgs": [
-    "."
-  ],
+  "python.testing.pytestArgs": ["."],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
   "editor.formatOnPaste": true,
@@ -37,9 +33,7 @@
     "--disable-error-code=type-abstract"
   ],
   "protoc": {
-    "options": [
-      "--proto_path=idl/",
-    ]
+    "options": ["--proto_path=idl/"]
   },
   "rust-analyzer.cargo.buildScripts.enable": true,
   "files.associations": {
@@ -127,5 +121,5 @@
     "typeinfo": "cpp",
     "unordered_set": "cpp",
     "algorithm": "cpp"
-  },
+  }
 }

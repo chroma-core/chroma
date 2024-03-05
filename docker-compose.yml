@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 networks:
   net:
@@ -34,7 +34,7 @@ services:
       - "8000:8000"
     healthcheck:
       # Adjust below to match your container port
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 30s
       timeout: 10s
       retries: 3
