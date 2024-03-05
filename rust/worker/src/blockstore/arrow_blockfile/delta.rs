@@ -16,9 +16,6 @@ pub(super) struct BlockDelta {
 
 impl BlockDelta {
     pub(super) fn can_add(&self, key: &BlockfileKey, value: &Value) -> bool {
-        // TODO: the source block size includes the padding and rounding, but we want the actual data size so we can compute
-        // what writing out a new block would look like
-
         let inner = self.inner.read();
         inner.can_add(key, value)
     }
@@ -329,11 +326,6 @@ mod test {
 
         let size = delta.get_size();
         let block_data = BlockData::from(&delta);
-        println!(
-            "Predicted size: {}: Actual size: {}",
-            size,
-            block_data.get_size()
-        );
         assert_eq!(size, block_data.get_size());
     }
 }
