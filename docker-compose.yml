@@ -11,7 +11,7 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./:/chroma
+      #- ./:/chroma
       - /home/azureuser/chroma/backup:/chroma
       # Be aware that indexed data are located in "/chroma/chroma/"
       # Default configuration for persist_directory in chromadb/config.py
