@@ -20,6 +20,16 @@ import (
 
 var tracer trace.Tracer
 
+// encodeTraceID encodes a TraceID to a hexadecimal string.
+func encodeTraceID(t trace.TraceID) string {
+	return hex.EncodeToString(t[:])
+}
+
+// encodeSpanID encodes a SpanID to a hexadecimal string.
+func encodeSpanID(s trace.SpanID) string {
+	return hex.EncodeToString(s[:])
+}
+
 func decodeTraceID(encodedSpanID string) (t trace.TraceID, err error) {
 	var spanBytes []byte
 	spanBytes, err = hex.DecodeString(encodedSpanID)
@@ -84,6 +94,46 @@ func ServerGrpcInterceptor(ctx context.Context, req interface{}, info *grpc.Unar
 	span.SetAttributes(attribute.String("rpc.method", info.FullMethod))
 
 	return h, nil
+}
+
+// How to use it:
+// conn, err := grpc.Dial("your_grpc_server_address", grpc.WithUnaryInterceptor(unaryClientInterceptor()))
+func ClientGrpcInterceptor() grpc.UnaryClientInterceptor {
+	return func(
+		ctx context.Context,
+		method string,
+		req, reply interface{},
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		var span trace.Span
+		ctx, span = tracer.Start(ctx, "RPC "+method)
+		span.SetAttributes(attribute.String("rpc.method", method))
+
+		defer span.End()
+		traceID := span.SpanContext().TraceID()
+		spanID := span.SpanContext().SpanID()
+		md := metadata.New(map[string]string{
+			"chroma-traceid": encodeTraceID(traceID),
+			"chroma-spanid":  encodeSpanID(spanID),
+		})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+
+		// Proceed with the invocation with the new context.
+		err := invoker(ctx, method, req, reply, cc, opts...)
+
+		// Extract status code from the error.
+		st, ok := status.FromError(err)
+		span.SetAttributes(attribute.String("rpc.status_code", st.Code().String()))
+		span.SetAttributes(attribute.String("rpc.message", st.Message()))
+		if !ok {
+			span.SetStatus(otelCode.Error, st.Code().String())
+		} else {
+			span.SetStatus(otelCode.Ok, "ok")
+		}
+		return err
+	}
 }
 
 // handleError logs and annotates the span with details of the encountered error.
