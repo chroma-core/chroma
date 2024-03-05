@@ -119,11 +119,13 @@ impl Log for GrpcLog {
                 let logs = response.into_inner().records;
                 let mut result = Vec::new();
                 for log in logs {
-                    let embedding_record: Result<EmbeddingRecord, EmbeddingRecordConversionError> =
-                        log.try_into();
+                    let embedding_record: Result<
+                        Box<EmbeddingRecord>,
+                        EmbeddingRecordConversionError,
+                    > = log.try_into();
                     match embedding_record {
                         Ok(embedding_record) => {
-                            result.push(Box::new(embedding_record));
+                            result.push(embedding_record);
                         }
                         Err(err) => {
                             return Err(PullLogsError::ConversionError(err));
