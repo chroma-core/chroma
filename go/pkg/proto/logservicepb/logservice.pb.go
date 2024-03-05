@@ -7,7 +7,7 @@
 package logservicepb
 
 import (
-	coordinatorpb "github.com//chroma-core/chroma/go/pkg/proto/coordinatorpb"
+	coordinatorpb "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"

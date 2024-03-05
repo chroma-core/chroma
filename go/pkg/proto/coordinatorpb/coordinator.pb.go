@@ -7,7 +7,6 @@
 package coordinatorpb
 
 import (
-	coordinatorpb "github.com//chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -90,7 +89,7 @@ type CreateDatabaseResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *CreateDatabaseResponse) Reset() {
@@ -125,7 +124,7 @@ func (*CreateDatabaseResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *CreateDatabaseResponse) GetStatus() *coordinatorpb.Status {
+func (x *CreateDatabaseResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -192,8 +191,8 @@ type GetDatabaseResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Database *coordinatorpb.Database `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
-	Status   *coordinatorpb.Status   `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Database *Database `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
+	Status   *Status   `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *GetDatabaseResponse) Reset() {
@@ -228,14 +227,14 @@ func (*GetDatabaseResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *GetDatabaseResponse) GetDatabase() *coordinatorpb.Database {
+func (x *GetDatabaseResponse) GetDatabase() *Database {
 	if x != nil {
 		return x.Database
 	}
 	return nil
 }
 
-func (x *GetDatabaseResponse) GetStatus() *coordinatorpb.Status {
+func (x *GetDatabaseResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -294,7 +293,7 @@ type CreateTenantResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *CreateTenantResponse) Reset() {
@@ -329,7 +328,7 @@ func (*CreateTenantResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *CreateTenantResponse) GetStatus() *coordinatorpb.Status {
+func (x *CreateTenantResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -388,8 +387,8 @@ type GetTenantResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Tenant *coordinatorpb.Tenant `protobuf:"bytes,1,opt,name=tenant,proto3" json:"tenant,omitempty"`
-	Status *coordinatorpb.Status `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Tenant *Tenant `protobuf:"bytes,1,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	Status *Status `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *GetTenantResponse) Reset() {
@@ -424,14 +423,14 @@ func (*GetTenantResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *GetTenantResponse) GetTenant() *coordinatorpb.Tenant {
+func (x *GetTenantResponse) GetTenant() *Tenant {
 	if x != nil {
 		return x.Tenant
 	}
 	return nil
 }
 
-func (x *GetTenantResponse) GetStatus() *coordinatorpb.Status {
+func (x *GetTenantResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -443,7 +442,7 @@ type CreateSegmentRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Segment *coordinatorpb.Segment `protobuf:"bytes,1,opt,name=segment,proto3" json:"segment,omitempty"`
+	Segment *Segment `protobuf:"bytes,1,opt,name=segment,proto3" json:"segment,omitempty"`
 }
 
 func (x *CreateSegmentRequest) Reset() {
@@ -478,7 +477,7 @@ func (*CreateSegmentRequest) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *CreateSegmentRequest) GetSegment() *coordinatorpb.Segment {
+func (x *CreateSegmentRequest) GetSegment() *Segment {
 	if x != nil {
 		return x.Segment
 	}
@@ -490,7 +489,7 @@ type CreateSegmentResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *CreateSegmentResponse) Reset() {
@@ -525,7 +524,7 @@ func (*CreateSegmentResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *CreateSegmentResponse) GetStatus() *coordinatorpb.Status {
+func (x *CreateSegmentResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -584,7 +583,7 @@ type DeleteSegmentResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *DeleteSegmentResponse) Reset() {
@@ -619,7 +618,7 @@ func (*DeleteSegmentResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *DeleteSegmentResponse) GetStatus() *coordinatorpb.Status {
+func (x *DeleteSegmentResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -631,11 +630,11 @@ type GetSegmentsRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id         *string                     `protobuf:"bytes,1,opt,name=id,proto3,oneof" json:"id,omitempty"`
-	Type       *string                     `protobuf:"bytes,2,opt,name=type,proto3,oneof" json:"type,omitempty"`
-	Scope      *coordinatorpb.SegmentScope `protobuf:"varint,3,opt,name=scope,proto3,enum=chroma.SegmentScope,oneof" json:"scope,omitempty"`
-	Topic      *string                     `protobuf:"bytes,4,opt,name=topic,proto3,oneof" json:"topic,omitempty"`
-	Collection *string                     `protobuf:"bytes,5,opt,name=collection,proto3,oneof" json:"collection,omitempty"` // Collection ID
+	Id         *string       `protobuf:"bytes,1,opt,name=id,proto3,oneof" json:"id,omitempty"`
+	Type       *string       `protobuf:"bytes,2,opt,name=type,proto3,oneof" json:"type,omitempty"`
+	Scope      *SegmentScope `protobuf:"varint,3,opt,name=scope,proto3,enum=chroma.SegmentScope,oneof" json:"scope,omitempty"`
+	Topic      *string       `protobuf:"bytes,4,opt,name=topic,proto3,oneof" json:"topic,omitempty"`
+	Collection *string       `protobuf:"bytes,5,opt,name=collection,proto3,oneof" json:"collection,omitempty"` // Collection ID
 }
 
 func (x *GetSegmentsRequest) Reset() {
@@ -684,11 +683,11 @@ func (x *GetSegmentsRequest) GetType() string {
 	return ""
 }
 
-func (x *GetSegmentsRequest) GetScope() coordinatorpb.SegmentScope {
+func (x *GetSegmentsRequest) GetScope() SegmentScope {
 	if x != nil && x.Scope != nil {
 		return *x.Scope
 	}
-	return coordinatorpb.SegmentScope(0)
+	return SegmentScope_VECTOR
 }
 
 func (x *GetSegmentsRequest) GetTopic() string {
@@ -710,8 +709,8 @@ type GetSegmentsResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Segments []*coordinatorpb.Segment `protobuf:"bytes,1,rep,name=segments,proto3" json:"segments,omitempty"`
-	Status   *coordinatorpb.Status    `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Segments []*Segment `protobuf:"bytes,1,rep,name=segments,proto3" json:"segments,omitempty"`
+	Status   *Status    `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *GetSegmentsResponse) Reset() {
@@ -746,14 +745,14 @@ func (*GetSegmentsResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *GetSegmentsResponse) GetSegments() []*coordinatorpb.Segment {
+func (x *GetSegmentsResponse) GetSegments() []*Segment {
 	if x != nil {
 		return x.Segments
 	}
 	return nil
 }
 
-func (x *GetSegmentsResponse) GetStatus() *coordinatorpb.Status {
+func (x *GetSegmentsResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -871,7 +870,7 @@ func (m *UpdateSegmentRequest) GetMetadataUpdate() isUpdateSegmentRequest_Metada
 	return nil
 }
 
-func (x *UpdateSegmentRequest) GetMetadata() *coordinatorpb.UpdateMetadata {
+func (x *UpdateSegmentRequest) GetMetadata() *UpdateMetadata {
 	if x, ok := x.GetMetadataUpdate().(*UpdateSegmentRequest_Metadata); ok {
 		return x.Metadata
 	}
@@ -922,7 +921,7 @@ type isUpdateSegmentRequest_MetadataUpdate interface {
 }
 
 type UpdateSegmentRequest_Metadata struct {
-	Metadata *coordinatorpb.UpdateMetadata `protobuf:"bytes,6,opt,name=metadata,proto3,oneof"`
+	Metadata *UpdateMetadata `protobuf:"bytes,6,opt,name=metadata,proto3,oneof"`
 }
 
 type UpdateSegmentRequest_ResetMetadata struct {
@@ -938,7 +937,7 @@ type UpdateSegmentResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *UpdateSegmentResponse) Reset() {
@@ -973,7 +972,7 @@ func (*UpdateSegmentResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *UpdateSegmentResponse) GetStatus() *coordinatorpb.Status {
+func (x *UpdateSegmentResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -985,13 +984,13 @@ type CreateCollectionRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id          string                        `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name        string                        `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Metadata    *coordinatorpb.UpdateMetadata `protobuf:"bytes,3,opt,name=metadata,proto3,oneof" json:"metadata,omitempty"`
-	Dimension   *int32                        `protobuf:"varint,4,opt,name=dimension,proto3,oneof" json:"dimension,omitempty"`
-	GetOrCreate *bool                         `protobuf:"varint,5,opt,name=get_or_create,json=getOrCreate,proto3,oneof" json:"get_or_create,omitempty"`
-	Tenant      string                        `protobuf:"bytes,6,opt,name=tenant,proto3" json:"tenant,omitempty"`
-	Database    string                        `protobuf:"bytes,7,opt,name=database,proto3" json:"database,omitempty"`
+	Id          string          `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string          `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Metadata    *UpdateMetadata `protobuf:"bytes,3,opt,name=metadata,proto3,oneof" json:"metadata,omitempty"`
+	Dimension   *int32          `protobuf:"varint,4,opt,name=dimension,proto3,oneof" json:"dimension,omitempty"`
+	GetOrCreate *bool           `protobuf:"varint,5,opt,name=get_or_create,json=getOrCreate,proto3,oneof" json:"get_or_create,omitempty"`
+	Tenant      string          `protobuf:"bytes,6,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	Database    string          `protobuf:"bytes,7,opt,name=database,proto3" json:"database,omitempty"`
 }
 
 func (x *CreateCollectionRequest) Reset() {
@@ -1040,7 +1039,7 @@ func (x *CreateCollectionRequest) GetName() string {
 	return ""
 }
 
-func (x *CreateCollectionRequest) GetMetadata() *coordinatorpb.UpdateMetadata {
+func (x *CreateCollectionRequest) GetMetadata() *UpdateMetadata {
 	if x != nil {
 		return x.Metadata
 	}
@@ -1080,9 +1079,9 @@ type CreateCollectionResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Collection *coordinatorpb.Collection `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
-	Created    bool                      `protobuf:"varint,2,opt,name=created,proto3" json:"created,omitempty"`
-	Status     *coordinatorpb.Status     `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Collection *Collection `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
+	Created    bool        `protobuf:"varint,2,opt,name=created,proto3" json:"created,omitempty"`
+	Status     *Status     `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *CreateCollectionResponse) Reset() {
@@ -1117,7 +1116,7 @@ func (*CreateCollectionResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *CreateCollectionResponse) GetCollection() *coordinatorpb.Collection {
+func (x *CreateCollectionResponse) GetCollection() *Collection {
 	if x != nil {
 		return x.Collection
 	}
@@ -1131,7 +1130,7 @@ func (x *CreateCollectionResponse) GetCreated() bool {
 	return false
 }
 
-func (x *CreateCollectionResponse) GetStatus() *coordinatorpb.Status {
+func (x *CreateCollectionResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -1206,7 +1205,7 @@ type DeleteCollectionResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *DeleteCollectionResponse) Reset() {
@@ -1241,7 +1240,7 @@ func (*DeleteCollectionResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *DeleteCollectionResponse) GetStatus() *coordinatorpb.Status {
+func (x *DeleteCollectionResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -1332,8 +1331,8 @@ type GetCollectionsResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Collections []*coordinatorpb.Collection `protobuf:"bytes,1,rep,name=collections,proto3" json:"collections,omitempty"`
-	Status      *coordinatorpb.Status       `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Collections []*Collection `protobuf:"bytes,1,rep,name=collections,proto3" json:"collections,omitempty"`
+	Status      *Status       `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *GetCollectionsResponse) Reset() {
@@ -1368,14 +1367,14 @@ func (*GetCollectionsResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *GetCollectionsResponse) GetCollections() []*coordinatorpb.Collection {
+func (x *GetCollectionsResponse) GetCollections() []*Collection {
 	if x != nil {
 		return x.Collections
 	}
 	return nil
 }
 
-func (x *GetCollectionsResponse) GetStatus() *coordinatorpb.Status {
+func (x *GetCollectionsResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -1465,7 +1464,7 @@ func (m *UpdateCollectionRequest) GetMetadataUpdate() isUpdateCollectionRequest_
 	return nil
 }
 
-func (x *UpdateCollectionRequest) GetMetadata() *coordinatorpb.UpdateMetadata {
+func (x *UpdateCollectionRequest) GetMetadata() *UpdateMetadata {
 	if x, ok := x.GetMetadataUpdate().(*UpdateCollectionRequest_Metadata); ok {
 		return x.Metadata
 	}
@@ -1484,7 +1483,7 @@ type isUpdateCollectionRequest_MetadataUpdate interface {
 }
 
 type UpdateCollectionRequest_Metadata struct {
-	Metadata *coordinatorpb.UpdateMetadata `protobuf:"bytes,5,opt,name=metadata,proto3,oneof"`
+	Metadata *UpdateMetadata `protobuf:"bytes,5,opt,name=metadata,proto3,oneof"`
 }
 
 type UpdateCollectionRequest_ResetMetadata struct {
@@ -1500,7 +1499,7 @@ type UpdateCollectionResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *UpdateCollectionResponse) Reset() {
@@ -1535,7 +1534,7 @@ func (*UpdateCollectionResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *UpdateCollectionResponse) GetStatus() *coordinatorpb.Status {
+func (x *UpdateCollectionResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -1618,7 +1617,7 @@ type ResetStateResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status *coordinatorpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status *Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 }
 
 func (x *ResetStateResponse) Reset() {
@@ -1653,7 +1652,7 @@ func (*ResetStateResponse) Descriptor() ([]byte, []int) {
 	return file_chromadb_proto_coordinator_proto_rawDescGZIP(), []int{25}
 }
 
-func (x *ResetStateResponse) GetStatus() *coordinatorpb.Status {
+func (x *ResetStateResponse) GetStatus() *Status {
 	if x != nil {
 		return x.Status
 	}
@@ -1941,40 +1940,40 @@ func file_chromadb_proto_coordinator_proto_rawDescGZIP() []byte {
 
 var file_chromadb_proto_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_chromadb_proto_coordinator_proto_goTypes = []interface{}{
-	(*CreateDatabaseRequest)(nil),        // 0: chroma.CreateDatabaseRequest
-	(*CreateDatabaseResponse)(nil),       // 1: chroma.CreateDatabaseResponse
-	(*GetDatabaseRequest)(nil),           // 2: chroma.GetDatabaseRequest
-	(*GetDatabaseResponse)(nil),          // 3: chroma.GetDatabaseResponse
-	(*CreateTenantRequest)(nil),          // 4: chroma.CreateTenantRequest
-	(*CreateTenantResponse)(nil),         // 5: chroma.CreateTenantResponse
-	(*GetTenantRequest)(nil),             // 6: chroma.GetTenantRequest
-	(*GetTenantResponse)(nil),            // 7: chroma.GetTenantResponse
-	(*CreateSegmentRequest)(nil),         // 8: chroma.CreateSegmentRequest
-	(*CreateSegmentResponse)(nil),        // 9: chroma.CreateSegmentResponse
-	(*DeleteSegmentRequest)(nil),         // 10: chroma.DeleteSegmentRequest
-	(*DeleteSegmentResponse)(nil),        // 11: chroma.DeleteSegmentResponse
-	(*GetSegmentsRequest)(nil),           // 12: chroma.GetSegmentsRequest
-	(*GetSegmentsResponse)(nil),          // 13: chroma.GetSegmentsResponse
-	(*UpdateSegmentRequest)(nil),         // 14: chroma.UpdateSegmentRequest
-	(*UpdateSegmentResponse)(nil),        // 15: chroma.UpdateSegmentResponse
-	(*CreateCollectionRequest)(nil),      // 16: chroma.CreateCollectionRequest
-	(*CreateCollectionResponse)(nil),     // 17: chroma.CreateCollectionResponse
-	(*DeleteCollectionRequest)(nil),      // 18: chroma.DeleteCollectionRequest
-	(*DeleteCollectionResponse)(nil),     // 19: chroma.DeleteCollectionResponse
-	(*GetCollectionsRequest)(nil),        // 20: chroma.GetCollectionsRequest
-	(*GetCollectionsResponse)(nil),       // 21: chroma.GetCollectionsResponse
-	(*UpdateCollectionRequest)(nil),      // 22: chroma.UpdateCollectionRequest
-	(*UpdateCollectionResponse)(nil),     // 23: chroma.UpdateCollectionResponse
-	(*Notification)(nil),                 // 24: chroma.Notification
-	(*ResetStateResponse)(nil),           // 25: chroma.ResetStateResponse
-	(*coordinatorpb.Status)(nil),         // 26: chroma.Status
-	(*coordinatorpb.Database)(nil),       // 27: chroma.Database
-	(*coordinatorpb.Tenant)(nil),         // 28: chroma.Tenant
-	(*coordinatorpb.Segment)(nil),        // 29: chroma.Segment
-	(coordinatorpb.SegmentScope)(0),      // 30: chroma.SegmentScope
-	(*coordinatorpb.UpdateMetadata)(nil), // 31: chroma.UpdateMetadata
-	(*coordinatorpb.Collection)(nil),     // 32: chroma.Collection
-	(*emptypb.Empty)(nil),                // 33: google.protobuf.Empty
+	(*CreateDatabaseRequest)(nil),    // 0: chroma.CreateDatabaseRequest
+	(*CreateDatabaseResponse)(nil),   // 1: chroma.CreateDatabaseResponse
+	(*GetDatabaseRequest)(nil),       // 2: chroma.GetDatabaseRequest
+	(*GetDatabaseResponse)(nil),      // 3: chroma.GetDatabaseResponse
+	(*CreateTenantRequest)(nil),      // 4: chroma.CreateTenantRequest
+	(*CreateTenantResponse)(nil),     // 5: chroma.CreateTenantResponse
+	(*GetTenantRequest)(nil),         // 6: chroma.GetTenantRequest
+	(*GetTenantResponse)(nil),        // 7: chroma.GetTenantResponse
+	(*CreateSegmentRequest)(nil),     // 8: chroma.CreateSegmentRequest
+	(*CreateSegmentResponse)(nil),    // 9: chroma.CreateSegmentResponse
+	(*DeleteSegmentRequest)(nil),     // 10: chroma.DeleteSegmentRequest
+	(*DeleteSegmentResponse)(nil),    // 11: chroma.DeleteSegmentResponse
+	(*GetSegmentsRequest)(nil),       // 12: chroma.GetSegmentsRequest
+	(*GetSegmentsResponse)(nil),      // 13: chroma.GetSegmentsResponse
+	(*UpdateSegmentRequest)(nil),     // 14: chroma.UpdateSegmentRequest
+	(*UpdateSegmentResponse)(nil),    // 15: chroma.UpdateSegmentResponse
+	(*CreateCollectionRequest)(nil),  // 16: chroma.CreateCollectionRequest
+	(*CreateCollectionResponse)(nil), // 17: chroma.CreateCollectionResponse
+	(*DeleteCollectionRequest)(nil),  // 18: chroma.DeleteCollectionRequest
+	(*DeleteCollectionResponse)(nil), // 19: chroma.DeleteCollectionResponse
+	(*GetCollectionsRequest)(nil),    // 20: chroma.GetCollectionsRequest
+	(*GetCollectionsResponse)(nil),   // 21: chroma.GetCollectionsResponse
+	(*UpdateCollectionRequest)(nil),  // 22: chroma.UpdateCollectionRequest
+	(*UpdateCollectionResponse)(nil), // 23: chroma.UpdateCollectionResponse
+	(*Notification)(nil),             // 24: chroma.Notification
+	(*ResetStateResponse)(nil),       // 25: chroma.ResetStateResponse
+	(*Status)(nil),                   // 26: chroma.Status
+	(*Database)(nil),                 // 27: chroma.Database
+	(*Tenant)(nil),                   // 28: chroma.Tenant
+	(*Segment)(nil),                  // 29: chroma.Segment
+	(SegmentScope)(0),                // 30: chroma.SegmentScope
+	(*UpdateMetadata)(nil),           // 31: chroma.UpdateMetadata
+	(*Collection)(nil),               // 32: chroma.Collection
+	(*emptypb.Empty)(nil),            // 33: google.protobuf.Empty
 }
 var file_chromadb_proto_coordinator_proto_depIdxs = []int32{
 	26, // 0: chroma.CreateDatabaseResponse.status:type_name -> chroma.Status
@@ -2038,6 +2037,7 @@ func file_chromadb_proto_coordinator_proto_init() {
 	if File_chromadb_proto_coordinator_proto != nil {
 		return
 	}
+	file_chromadb_proto_chroma_proto_init()
 	if !protoimpl.UnsafeEnabled {
 		file_chromadb_proto_coordinator_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*CreateDatabaseRequest); i {
