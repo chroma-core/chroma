@@ -1,4 +1,4 @@
-module github.com/chroma/chroma-coordinator
+module github.com/chroma-core/chroma/go
 
 go 1.20
 
