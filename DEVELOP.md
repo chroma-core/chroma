@@ -22,7 +22,9 @@ You can also install `chromadb` the `pypi` package locally and in editable mode 
 ## Running Chroma
 
 Chroma can be run via 3 modes:
+
 1. Standalone and in-memory:
+
 ```python
 import chromadb
 api = chromadb.Client()
@@ -32,26 +34,34 @@ print(api.heartbeat())
 2. Standalone and in-memory with persistence:
 
 This by default saves your db and your indexes to a `.chroma` directory and can also load from them.
+
 ```python
 import chromadb
 api = chromadb.PersistentClient(path="/path/to/persist/directory")
 print(api.heartbeat())
 ```
 
-
 3. With a persistent backend and a small frontend client
 
 Run `chroma run --path /chroma_db_path`
+
 ```python
 import chromadb
 api = chromadb.HttpClient(host="localhost", port="8000")
 
 print(api.heartbeat())
 ```
+
 ## Local dev setup for distributed chroma
-We use tilt for providing local dev setup. Tilt is an open source project
-##### Requirement
-- Docker
+
+We use [Tilt](https://docs.tilt.dev/) for providing local dev setup. Tilt is an open source project
+
+##### Requirements
+
+- [Docker](https://docs.docker.com/get-docker/)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [Helm](https://helm.sh/docs/intro/install/)
+  - Mac OS: `brew install helm`
 - Local Kubernetes cluster (Recommended: [OrbStack](https://orbstack.dev/) for mac, [Kind](https://kind.sigs.k8s.io/) for linux)
 - [Tilt](https://docs.tilt.dev/)
 
