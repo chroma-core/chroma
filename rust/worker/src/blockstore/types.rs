@@ -160,7 +160,7 @@ impl Value {
             Value::PositionalPostingListValue(list) => {
                 unimplemented!("Size of positional posting list")
             }
-            Value::StringValue(s) => unimplemented!("Size of string"),
+            Value::StringValue(s) => s.len(),
             Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
         }
     }

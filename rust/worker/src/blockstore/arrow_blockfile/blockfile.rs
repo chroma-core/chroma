@@ -1,13 +1,9 @@
-use parking_lot::RwLock;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use uuid::Uuid;
-
 use super::super::types::{Blockfile, BlockfileKey, Key, KeyType, Value, ValueType};
-use super::block::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder, BlockState};
-use super::delta::BlockDelta;
+use super::block::BlockState;
 use super::provider::ArrowBlockProvider;
 use super::sparse_index::SparseIndex;
+use crate::blockstore::arrow_blockfile::block::delta::BlockDelta;
+use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
@@ -218,7 +214,7 @@ impl Blockfile for ArrowBlockfile {
         for delta in &transaction_state.block_delta {
             // build a new block and replace the blockdata in the block
             // TOOO: the data capacities need to include the offsets and padding, not just the raw data size
-            let new_block_data = BlockData::from(delta);
+            // let new_block_data = BlockData::from(delta);
 
             // TODO: thinking about an edge case here: someone could register while we are in a transaction, and then we would have to handle that
             // in that case, update_data() can fail, since the block is registered, and we would have to create a new block and update the sparse index
@@ -228,7 +224,7 @@ impl Blockfile for ArrowBlockfile {
 
             match delta.source_block.get_state() {
                 BlockState::Uninitialized => {
-                    delta.source_block.update_data(new_block_data);
+                    delta.source_block.apply_delta(delta);
                     delta.source_block.commit();
                     println!(
                         "Size of commited block in bytes: {} with len {}",
@@ -237,7 +233,7 @@ impl Blockfile for ArrowBlockfile {
                     );
                 }
                 BlockState::Initialized => {
-                    delta.source_block.update_data(new_block_data);
+                    delta.source_block.apply_delta(delta);
                     delta.source_block.commit();
                     println!(
                         "Size of commited block in bytes: {} with len {}",
@@ -250,7 +246,7 @@ impl Blockfile for ArrowBlockfile {
                     let new_block = self
                         .block_provider
                         .create_block(self.key_type, self.value_type);
-                    new_block.update_data(new_block_data);
+                    new_block.apply_delta(delta);
                     let new_min_key = match delta.get_min_key() {
                         None => panic!("No start key"),
                         Some(key) => key,
@@ -411,5 +407,62 @@ mod tests {
                 .unwrap();
         }
         blockfile.commit_transaction().unwrap();
+    }
+
+    #[test]
+    fn test_string_value() {
+        let block_provider = ArrowBlockProvider::new();
+        let mut blockfile = ArrowBlockfile::new(KeyType::String, ValueType::String, block_provider);
+
+        blockfile.begin_transaction().unwrap();
+        let n = 2000;
+
+        for i in 0..n {
+            let string_key = format!("{:04}", i);
+            let key = BlockfileKey::new("key".to_string(), Key::String(string_key.clone()));
+            blockfile
+                .set(key, Value::StringValue(string_key.clone()))
+                .unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
+
+        for i in 0..n {
+            let string_key = format!("{:04}", i);
+            let key = BlockfileKey::new("key".to_string(), Key::String(string_key.clone()));
+            let res = blockfile.get(key).unwrap();
+            match res {
+                Value::StringValue(string) => {
+                    assert_eq!(string, string_key);
+                }
+                _ => panic!("Unexpected value type"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_int_key() {
+        let block_provider = ArrowBlockProvider::new();
+        let mut blockfile = ArrowBlockfile::new(KeyType::Float, ValueType::String, block_provider);
+
+        blockfile.begin_transaction().unwrap();
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::Float(i as f32));
+            blockfile
+                .set(key, Value::StringValue(format!("{:04}", i)))
+                .unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
+
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::Float(i as f32));
+            let res = blockfile.get(key).unwrap();
+            match res {
+                Value::StringValue(string) => {
+                    assert_eq!(string, format!("{:04}", i));
+                }
+                _ => panic!("Unexpected value type"),
+            }
+        }
     }
 }
