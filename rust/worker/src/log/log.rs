@@ -11,7 +11,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 // CollectionInfo is a struct that contains information about a collection for the
-// compacting process. It contains information about the
+// compacting process. It contains information about the collection id, the first log id,
+// and the first log id timestamp since last compaction.
 pub(crate) struct CollectionInfo {
     pub(crate) collection_id: String,
     pub(crate) first_log_id: i64,
@@ -119,11 +120,10 @@ impl Log for GrpcLog {
                 let logs = response.into_inner().records;
                 let mut result = Vec::new();
                 for log in logs {
-                    let embedding_record: Result<EmbeddingRecord, EmbeddingRecordConversionError> =
-                        log.try_into();
+                    let embedding_record = log.try_into();
                     match embedding_record {
                         Ok(embedding_record) => {
-                            result.push(Box::new(embedding_record));
+                            result.push(embedding_record);
                         }
                         Err(err) => {
                             return Err(PullLogsError::ConversionError(err));
