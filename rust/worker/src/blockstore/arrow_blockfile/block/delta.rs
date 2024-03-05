@@ -1,36 +1,36 @@
-use super::{
-    block::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder},
-    blockfile::MAX_BLOCK_SIZE,
-    provider::ArrowBlockProvider,
+use crate::blockstore::{
+    arrow_blockfile::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockProvider},
+    types::{BlockfileKey, KeyType, Value, ValueType},
 };
-use crate::blockstore::types::{BlockfileKey, KeyType, Value, ValueType};
 use arrow::util::bit_util;
 use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
 
+use super::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder};
+
 #[derive(Clone)]
-pub(super) struct BlockDelta {
-    pub(super) source_block: Arc<Block>,
+pub struct BlockDelta {
+    pub source_block: Arc<Block>,
     inner: Arc<RwLock<BlockDeltaInner>>,
 }
 
 impl BlockDelta {
-    pub(super) fn can_add(&self, key: &BlockfileKey, value: &Value) -> bool {
+    pub fn can_add(&self, key: &BlockfileKey, value: &Value) -> bool {
         let inner = self.inner.read();
         inner.can_add(key, value)
     }
 
-    pub(super) fn add(&self, key: BlockfileKey, value: Value) {
+    pub fn add(&self, key: BlockfileKey, value: Value) {
         let mut inner = self.inner.write();
         inner.add(key, value);
     }
 
-    pub(super) fn delete(&self, key: BlockfileKey) {
+    pub fn delete(&self, key: BlockfileKey) {
         let mut inner = self.inner.write();
         inner.delete(key);
     }
 
-    pub(super) fn get_min_key(&self) -> Option<BlockfileKey> {
+    pub fn get_min_key(&self) -> Option<BlockfileKey> {
         let inner = self.inner.read();
         let first_key = inner.new_data.keys().next();
         first_key.cloned()
@@ -56,7 +56,7 @@ impl BlockDelta {
         inner.get_value_count()
     }
 
-    pub(super) fn get_size(&self) -> usize {
+    pub fn get_size(&self) -> usize {
         let inner = self.inner.read();
         inner.get_size(
             self.source_block.get_key_type(),
@@ -64,12 +64,12 @@ impl BlockDelta {
         )
     }
 
-    pub(super) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         let inner = self.inner.read();
         inner.new_data.len()
     }
 
-    pub(super) fn split(&self, provider: &ArrowBlockProvider) -> (BlockfileKey, BlockDelta) {
+    pub fn split(&self, provider: &ArrowBlockProvider) -> (BlockfileKey, BlockDelta) {
         let new_block = provider.create_block(
             self.source_block.get_key_type(),
             self.source_block.get_value_type(),
@@ -120,7 +120,7 @@ impl BlockDeltaInner {
         let key_total_bytes = bit_util::round_upto_multiple_of_64(key_size);
         let key_offset_bytes = match key_type {
             KeyType::String => bit_util::round_upto_multiple_of_64((item_count + 1) * 4),
-            KeyType::Float => bit_util::round_upto_multiple_of_64(item_count * 4),
+            KeyType::Float => 0,
         };
 
         let value_total_bytes = bit_util::round_upto_multiple_of_64(value_size);
@@ -130,19 +130,6 @@ impl BlockDeltaInner {
             }
             _ => unimplemented!("Value type not implemented"),
         };
-
-        println!(
-            "Predicted prefix bytes: {}",
-            prefix_total_bytes + prefix_offset_bytes
-        );
-        println!(
-            "Predicted key bytes: {}",
-            key_total_bytes + key_offset_bytes
-        );
-        println!(
-            "Predicted value bytes: {}",
-            value_total_bytes + value_offset_bytes
-        );
 
         prefix_total_bytes
             + prefix_offset_bytes
@@ -202,9 +189,6 @@ impl BlockDeltaInner {
         let prefix_data_size = self.get_prefix_size() + additional_prefix_size;
         let key_data_size = self.get_key_size() + additional_key_size;
         let value_data_size = self.get_value_size() + additional_value_size;
-        if value_data_size > MAX_BLOCK_SIZE {
-            println!("Can add, value data size: {}", value_data_size);
-        }
         // TODO: use the same offset matching as in get_block_size
         let prefix_offset_size = (self.new_data.len() + 1) * 4;
         let key_offset_size = (self.new_data.len() + 1) * 4;
@@ -272,6 +256,7 @@ impl From<&BlockDelta> for BlockData {
                 delta.get_prefix_size(),
                 delta.get_key_size(),
                 delta.get_value_count(),
+                delta.get_value_size(),
             )),
         );
         for (key, value) in delta.inner.read().new_data.iter() {
@@ -308,7 +293,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_sizing() {
+    fn test_sizing_int_arr_val() {
         let block_provider = ArrowBlockProvider::new();
         let block = block_provider.create_block(KeyType::String, ValueType::Int32Array);
         let delta = BlockDelta::from(block.clone());
@@ -322,6 +307,41 @@ mod test {
                 new_vec.push(random::<i32>());
             }
             delta.add(key, Value::Int32ArrayValue(Int32Array::from(new_vec)));
+        }
+
+        let size = delta.get_size();
+        let block_data = BlockData::from(&delta);
+        assert_eq!(size, block_data.get_size());
+    }
+
+    #[test]
+    fn test_sizing_string_val() {
+        let block_provider = ArrowBlockProvider::new();
+        let block = block_provider.create_block(KeyType::String, ValueType::String);
+        let delta = BlockDelta::from(block.clone());
+
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("prefix".to_string(), Key::String(format!("key{}", i)));
+            let value = Value::StringValue(format!("value{}", i));
+            delta.add(key, value);
+        }
+        let size = delta.get_size();
+        let block_data = BlockData::from(&delta);
+        assert_eq!(size, block_data.get_size());
+    }
+
+    #[test]
+    fn test_sizing_int_key() {
+        let block_provider = ArrowBlockProvider::new();
+        let block = block_provider.create_block(KeyType::Float, ValueType::String);
+        let delta = BlockDelta::from(block.clone());
+
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("prefix".to_string(), Key::Float(i as f32));
+            let value = Value::StringValue(format!("value{}", i));
+            delta.add(key, value);
         }
 
         let size = delta.get_size();
