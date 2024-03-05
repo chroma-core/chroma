@@ -815,6 +815,61 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         )
 
 
+class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
+    """
+    This class is used to get embeddings for a list of texts using the HuggingFace Embedding server (https://github.com/huggingface/text-embeddings-inference).
+    The embedding model is configured in the server.
+    """
+
+    def __init__(self, url: str, model_name: str):
+        """
+        Initialize the HuggingFaceEmbeddingServer.
+
+        Args:
+            url (str): The URL of the HuggingFace Embedding Server.
+            model_name (str): The name of the model to use for text embeddings. E.g. "llama2"
+        """
+        try:
+            import requests
+        except ImportError:
+            raise ValueError(
+                "The requests python package is not installed. Please install it with `pip install requests`"
+            )
+        self._api_url = f"{url}"
+        self._model_name = model_name
+        self._session = requests.Session()
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            input (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> ollama_ef = OllamaEmbeddingFunction(url="http://localhost:11434/api/embeddings", model_name="llama2")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = ollama_ef(texts)
+        """
+        # Call Ollama Server API for each document
+        texts = input if isinstance(input, list) else [input]
+        embeddings = [
+            self._session.post(
+                self._api_url, json={"model": self._model_name, "prompt": text}
+            ).json()
+            for text in texts
+        ]
+        return cast(
+            Embeddings,
+            [
+                embedding["embedding"] for embedding in embeddings if "embedding" in embedding
+            ],
+        )
+
+
 # List of all classes in this module
 _classes = [
     name
