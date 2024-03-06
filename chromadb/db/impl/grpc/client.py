@@ -58,8 +58,7 @@ class GrpcSysDB(SysDB):
         self._coordinator_url = system.settings.require("chroma_coordinator_host")
         # TODO: break out coordinator_port into a separate setting?
         self._coordinator_port = system.settings.require("chroma_server_grpc_port")
-        self._opentelemetry_client = system.require(OpenTelemetryClient)
-        super().__init__(system)
+        return super().__init__(system)
 
     @overrides
     def start(self) -> None:

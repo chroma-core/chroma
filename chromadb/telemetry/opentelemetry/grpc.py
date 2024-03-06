@@ -32,8 +32,6 @@ class OtelInterceptor(
     grpc.StreamStreamClientInterceptor
 ):
     def _intercept_call(self, continuation, client_call_details, request_or_iterator):
-        if tracer is None:
-            return continuation(client_call_details, request_or_iterator)
         with tracer.start_as_current_span(f"RPC {client_call_details.method}", kind=SpanKind.CLIENT) as span:
             # Prepare metadata for propagation
             metadata = client_call_details.metadata[:] if client_call_details.metadata else []

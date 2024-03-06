@@ -111,8 +111,7 @@ class SegmentAPI(ServerAPI):
     @override
     def heartbeat(self) -> int:
         return int(time.time_ns())
-    
-    @trace_method("SegmentAPI.create_database", OpenTelemetryGranularity.OPERATION)
+
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         if len(name) < 3:
