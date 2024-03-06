@@ -53,6 +53,8 @@ impl Ord for SparseIndexDelimiter {
     }
 }
 
+// TODO: remove clone here
+#[derive(Clone)]
 pub(super) struct SparseIndex {
     forward: BTreeMap<SparseIndexDelimiter, Uuid>,
     reverse: HashMap<Uuid, SparseIndexDelimiter>,

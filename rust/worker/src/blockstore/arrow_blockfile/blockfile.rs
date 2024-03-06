@@ -7,6 +7,8 @@ use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
+// TODO: Think about the clone here
+#[derive(Clone)]
 pub(crate) struct ArrowBlockfile {
     sparse_index: SparseIndex,
     key_type: KeyType,
@@ -15,6 +17,8 @@ pub(crate) struct ArrowBlockfile {
     block_provider: ArrowBlockProvider,
 }
 
+// TODO: Remove this clone
+#[derive(Clone)]
 struct TransactionState {
     block_delta: Vec<BlockDelta>,
     new_sparse_index: Option<SparseIndex>,

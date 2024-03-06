@@ -7,34 +7,47 @@ use uuid::Uuid;
 use super::super::provider::BlockfileProvider;
 use crate::blockstore::arrow_blockfile::block::Block;
 use crate::blockstore::arrow_blockfile::blockfile::ArrowBlockfile;
+use crate::blockstore::provider::{CreateError, OpenError};
 use crate::blockstore::types::{Blockfile, KeyType, ValueType};
 
 pub(super) struct ArrowBlockfileProvider {
     block_provider: ArrowBlockProvider,
+    files: HashMap<String, Box<dyn Blockfile>>,
 }
 
 impl BlockfileProvider for ArrowBlockfileProvider {
     fn new() -> Self {
         Self {
             block_provider: ArrowBlockProvider::new(),
+            files: HashMap::new(),
         }
     }
 
-    fn open(self, path: &str) -> Result<Box<dyn Blockfile>, Box<dyn crate::errors::ChromaError>> {
-        unimplemented!();
+    fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>> {
+        match self.files.get(path) {
+            Some(file) => Ok(file.clone()),
+            None => Err(Box::new(OpenError::NotFound)),
+        }
     }
 
     fn create(
         &mut self,
         path: &str,
-        key_type: crate::blockstore::types::KeyType,
-        value_type: crate::blockstore::types::ValueType,
-    ) -> Result<Box<dyn Blockfile>, Box<dyn crate::errors::ChromaError>> {
-        Ok(Box::new(ArrowBlockfile::new(
-            key_type,
-            value_type,
-            self.block_provider.clone(),
-        )))
+        key_type: KeyType,
+        value_type: ValueType,
+    ) -> Result<Box<dyn Blockfile>, Box<CreateError>> {
+        match self.files.get(path) {
+            Some(_) => Err(Box::new(CreateError::AlreadyExists)),
+            None => {
+                let blockfile = Box::new(ArrowBlockfile::new(
+                    key_type,
+                    value_type,
+                    self.block_provider.clone(),
+                ));
+                self.files.insert(path.to_string(), blockfile);
+                Ok(self.files.get(path).unwrap().clone())
+            }
+        }
     }
 }
 
