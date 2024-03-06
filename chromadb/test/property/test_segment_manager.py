@@ -17,9 +17,7 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 from typing import Dict
-from chromadb.segment import (
-    VectorReader
-)
+from chromadb.segment import VectorReader
 from chromadb.segment import SegmentManager
 
 from chromadb.segment.impl.manager.local import LocalSegmentManager
@@ -29,6 +27,7 @@ from chromadb.config import System, get_class
 
 # Memory limit use for testing
 memory_limit = 100
+
 
 # Helper class to keep tract of the last use id
 class LastUse:
@@ -72,7 +71,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         index = 0
         for id in reversed(self.last_use.store):
             cache_sum += self.collection_size_store[id]
-            if cache_sum >= memory_limit and index is not 0:
+            if cache_sum >= memory_limit and index != 0:
                 break
             assert id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache
             index += 1
@@ -80,7 +79,10 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     @invariant()
     @precondition(lambda self: self.system.settings.is_persistent is True)
     def cache_should_not_be_bigger_than_settings(self):
-        segment_sizes = {id: self.collection_size_store[id] for id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache}
+        segment_sizes = {
+            id: self.collection_size_store[id]
+            for id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache
+        }
         total_size = sum(segment_sizes.values())
         if len(segment_sizes) != 1:
             assert total_size <= memory_limit
@@ -95,8 +97,12 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     @rule(target=collections, coll=strategies.collections())
     @precondition(lambda self: self.collection_created_counter <= 50)
     def create_segment(
-            self, coll: strategies.Collection
+        self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
+        coll.name = f"{coll.name}_{uuid.uuid4()}"
+        self.sysdb.create_collection(
+            name=coll.name, id=coll.id, metadata=coll.metadata, dimension=coll.dimension
+        )
         segments = self.segment_manager.create_segments(asdict(coll))
         for segment in segments:
             self.sysdb.create_segment(segment)
@@ -107,22 +113,27 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
 
     @rule(coll=collections)
     def get_segment(self, coll: strategies.Collection) -> None:
-        segment = self.segment_manager.get_segment(collection_id=coll.id, type=VectorReader)
+        segment = self.segment_manager.get_segment(
+            collection_id=coll.id, type=VectorReader
+        )
         self.last_use.add(coll.id)
         assert segment is not None
-
 
     @staticmethod
     def mock_directory_size(directory: str):
         path_id = directory.split("/").pop()
-        collection_id = SegmentManagerStateMachine.segment_collection[uuid.UUID(path_id)]
+        collection_id = SegmentManagerStateMachine.segment_collection[
+            uuid.UUID(path_id)
+        ]
         return SegmentManagerStateMachine.collection_size_store[collection_id]
 
 
-@patch('chromadb.segment.impl.manager.local.get_directory_size', SegmentManagerStateMachine.mock_directory_size)
+@patch(
+    "chromadb.segment.impl.manager.local.get_directory_size",
+    SegmentManagerStateMachine.mock_directory_size,
+)
 def test_segment_manager(caplog: pytest.LogCaptureFixture, system: System) -> None:
     system.settings.chroma_memory_limit_bytes = memory_limit
     system.settings.chroma_segment_cache_policy = "LRU"
 
-    run_state_machine_as_test(
-        lambda: SegmentManagerStateMachine(system=system))
+    run_state_machine_as_test(lambda: SegmentManagerStateMachine(system=system))
