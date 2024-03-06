@@ -13,11 +13,12 @@ spec:
       labels:
         app: logservice
     spec:
+      serviceAccountName: logservice-serviceaccount
       containers:
         - command:
             - "logservice"
             - "logservice"
-          image: coordinator
+          image: {{ .Values.logService.image }}
           imagePullPolicy: IfNotPresent
           name: logservice
           ports:
@@ -37,3 +38,13 @@ spec:
   selector:
     app: logservice
   type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: logservice-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

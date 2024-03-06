@@ -76,7 +76,7 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
-    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl"
+    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
 }
 
 DEFAULT_TENANT = "default_tenant"
@@ -102,8 +102,10 @@ class Settings(BaseSettings):  # type: ignore
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
-    chroma_quota_provider_impl:Optional[str] = None
-    chroma_rate_limiting_provider_impl:Optional[str] = None
+
+    chroma_quota_provider_impl: Optional[str] = None
+    chroma_rate_limiting_provider_impl: Optional[str] = None
+
     # Distributed architecture specific components
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
@@ -112,6 +114,9 @@ class Settings(BaseSettings):  # type: ignore
     )
     worker_memberlist_name: str = "worker-memberlist"
     chroma_coordinator_host = "localhost"
+
+    chroma_logservice_host = "localhost"
+    chroma_logservice_port = 50052
 
     tenant_id: str = "default"
     topic_namespace: str = "default"

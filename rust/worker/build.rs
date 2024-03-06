@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[
             "../../idl/chromadb/proto/chroma.proto",
             "../../idl/chromadb/proto/coordinator.proto",
+            "../../idl/chromadb/proto/logservice.proto",
         ],
         &["../../idl/"],
     )?;

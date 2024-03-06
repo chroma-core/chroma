@@ -3,7 +3,8 @@ from functools import cached_property
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
-from chromadb.quota import QuotaEnforcer
+from chromadb.quota import QuotaEnforcer, Resource
+from chromadb.rate_limiting import rate_limit
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
@@ -349,6 +350,7 @@ class SegmentAPI(ServerAPI):
             raise ValueError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.ADD_PER_MINUTE)
     @override
     def _add(
         self,
@@ -471,6 +473,7 @@ class SegmentAPI(ServerAPI):
         return True
 
     @trace_method("SegmentAPI._get", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.GET_PER_MINUTE)
     @override
     def _get(
         self,
@@ -649,6 +652,7 @@ class SegmentAPI(ServerAPI):
         return metadata_segment.count()
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
     @override
     def _query(
         self,

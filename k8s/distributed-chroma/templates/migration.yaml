@@ -16,7 +16,7 @@ spec:
             - 'apply'
             - '--url'
             - 'postgres://chroma:chroma@postgres:5432/chroma?sslmode=disable'
-          image: migration
+          image: {{ .Values.sysdbMigration.image }}
           imagePullPolicy: IfNotPresent
           name: migration
 ---

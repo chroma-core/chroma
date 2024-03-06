@@ -29,17 +29,18 @@ class RateLimitingProvider(Component):
 
 def rate_limit(
     subject: str,
-    resource: str
+    resource: Resource
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         args_name = inspect.getfullargspec(f)[0]
         if subject not in args_name:
             raise Exception(f'rate_limit decorator have unknown subject "{subject}", available {args_name}')
         key_index = args_name.index(subject)
-
         @wraps(f)
         def wrapper(self, *args: Any, **kwargs: Dict[Any, Any]) -> Any:
             # If not rate limiting provider is present, just run and return the function.
+
             if self._system.settings.chroma_rate_limiting_provider_impl is None:
                 return f(self, *args, **kwargs)
 
@@ -49,14 +50,16 @@ def rate_limit(
                 if len(args) < key_index:
                     return f(self, *args, **kwargs)
                 subject_value = args[key_index-1]
-            key_value = resource + "-" + subject_value
+            key_value = resource.value + "-" + str(subject_value)
             self._system.settings.chroma_rate_limiting_provider_impl
             quota_provider = self._system.require(QuotaProvider)
             rate_limiter = self._system.require(RateLimitingProvider)
-            quota = quota_provider.get_for_subject(resource=resource,subject=subject)
+            quota = quota_provider.get_for_subject(resource=resource,subject=str(subject_value))
+            if quota is None:
+                return f(self, *args, **kwargs)
             is_allowed = rate_limiter.is_allowed(key_value, quota)
             if is_allowed is False:
-                raise RateLimitError(resource=resource, quota=quota)
+                raise RateLimitError(resource=resource.value, quota=quota)
             return f(self, *args, **kwargs)
         return wrapper
 

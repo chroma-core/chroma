@@ -45,6 +45,17 @@ test("it should get embedding with matching documents", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
+test("it should get records not matching", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  const results2 = await collection.get({ whereDocument: { $not_contains: "This is another" } });
+  expect(results2).toBeDefined();
+  expect(results2).toBeInstanceOf(Object);
+  expect(results2.ids.length).toBe(2);
+  expect(["test1","test3"]).toEqual(expect.arrayContaining(results2.ids));
+});
+
 test("test gt, lt, in a simple small way", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });

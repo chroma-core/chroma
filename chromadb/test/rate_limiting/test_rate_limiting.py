@@ -13,7 +13,7 @@ class RateLimitingGym(Component):
         super().__init__(system)
         self.system = system
 
-    @rate_limit(subject="bar", resource="FAKE_RESOURCE")
+    @rate_limit(subject="bar", resource=Resource.DOCUMENT_SIZE)
     def bench(self, foo: str, bar: str) -> str:
         return foo
 
@@ -37,7 +37,7 @@ def rate_limiting_gym() -> QuotaEnforcer:
 def test_rate_limiting_should_raise(rate_limiting_gym: RateLimitingGym):
     with pytest.raises(Exception) as exc_info:
         rate_limiting_gym.bench("foo", "bar")
-    assert "FAKE_RESOURCE" in str(exc_info.value.resource)
+    assert Resource.DOCUMENT_SIZE.value in str(exc_info.value.resource)
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
 @patch('chromadb.rate_limiting.test_provider.RateLimitingTestProvider.is_allowed', lambda self, key, quota, point=1: True)

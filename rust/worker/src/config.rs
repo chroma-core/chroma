@@ -109,6 +109,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) segment_manager: crate::segment::config::SegmentManagerConfig,
     pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) log: crate::log::config::LogConfig,
 }
 
 /// # Description
@@ -160,6 +161,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
                 "#,
             );
             let config = RootConfig::load();
@@ -204,6 +209,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
 
                 "#,
             );
@@ -264,7 +273,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
-
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
                 "#,
             );
             let config = RootConfig::load();
@@ -305,6 +317,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50052
                 "#,
             );
             let config = RootConfig::load();
