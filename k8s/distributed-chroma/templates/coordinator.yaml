@@ -25,7 +25,7 @@ spec:
             {{ range .Values.coordinator.env }}
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
-              {{ .value }}
+{{ .value | nindent 14 }}
             {{ end }}
           image: {{ .Values.coordinator.image }}
           imagePullPolicy: IfNotPresent
