@@ -4,6 +4,7 @@
 
 use std::error::Error;
 
+#[derive(PartialEq, Debug)]
 pub(crate) enum ErrorCodes {
     // OK is returned on success, we use "Success" since Ok is a keyword in Rust.
     Success = 0,
