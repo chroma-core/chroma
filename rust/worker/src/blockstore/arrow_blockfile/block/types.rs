@@ -507,6 +507,12 @@ mod test {
                 )
                 .unwrap();
         }
+
+        // Basic sanity check
+        let block_data = block_builder.build().unwrap();
+        assert_eq!(block_data.data.column(0).len(), num_entries);
+        assert_eq!(block_data.data.column(1).len(), num_entries);
+        assert_eq!(block_data.data.column(2).len(), num_entries);
     }
 
     #[test]
