@@ -18,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("-DHAVE_CXX0X")
         .flag("-fpic")
         .flag("-ftree-vectorize")
+        .flag("-w")
         .compile("bindings");
 
     // Set a compile flag based on an environment variable that tells us if we should
