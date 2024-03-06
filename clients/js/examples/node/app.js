@@ -11,13 +11,15 @@ if (!process.env.GOOGLE_API_KEY) {
   process.exit(0);
 }
 
+const googleApiKey = process.env.GOOGLE_API_KEY;
+
 var app = express();
 app.get("/", async (req, res) => {
   const cc = new chroma.ChromaClient({ path: "http://localhost:8000" });
   await cc.reset();
 
   const google = new chroma.GoogleGenerativeAiEmbeddingFunction({
-    googleApiKey: process.env.GOOGLE_API_KEY,
+    googleApiKey,
   });
 
   const collection = await cc.createCollection({
@@ -34,7 +36,7 @@ app.get("/", async (req, res) => {
   console.log("count", count);
 
   const googleQuery = new chroma.GoogleGenerativeAiEmbeddingFunction({
-    googleApiKey: "<APIKEY>",
+    googleApiKey,
     taskType: "RETRIEVAL_QUERY",
   });
 
