@@ -1,4 +1,5 @@
 name: Chroma Release
+name: Chroma Release
 
 on:
   push:
