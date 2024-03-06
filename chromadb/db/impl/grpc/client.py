@@ -66,8 +66,8 @@ class GrpcSysDB(SysDB):
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}"
         )
-        # interceptors = [OtelInterceptor()]
-        # self._channel = grpc.intercept_channel(self._channel, *interceptors)
+        interceptors = [OtelInterceptor()]
+        self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._sys_db_stub = SysDBStub(self._channel)  # type: ignore
         return super().start()
 
