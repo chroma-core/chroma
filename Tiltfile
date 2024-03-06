@@ -1,25 +1,25 @@
 update_settings(max_parallel_updates=6)
 
 docker_build(
-  'migration',
+  'local:migration',
   context='.',
   dockerfile='./go/Dockerfile.migration'
 )
 
 docker_build(
-  'coordinator',
+  'local:coordinator',
   context='.',
   dockerfile='./go/Dockerfile'
 )
 
 docker_build(
-  'server',
+  'local:frontend-server',
   context='.',
   dockerfile='./Dockerfile',
 )
 
 docker_build(
-  'worker',
+  'local:worker',
   context='.',
   dockerfile='./rust/worker/Dockerfile'
 )

@@ -16,7 +16,7 @@ spec:
             - 'apply'
             - '--url'
             - 'postgres://chroma:chroma@postgres:5432/chroma?sslmode=disable'
-          image: {{ .Values.sysdbMigration.image }}
+          image: "{{ .Values.sysdbMigration.image.repository }}:{{ .Values.sysdbMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration
 ---

@@ -4,7 +4,9 @@
 namespace: 'chroma'
 
 frontend:
-  image: 'server'
+  image:
+    repository: 'local'
+    tag: 'frontend-server'
 
   # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
   # populated from secrets or configMaps. So we let consumers fill these directly.
@@ -31,7 +33,9 @@ frontend:
   otherEnvConfig: ''
 
 coordinator:
-  image: 'coordinator'
+  image:
+    repository: 'local'
+    tag: 'coordinator'
   replicaCount: 1
   env:
   flags:
@@ -40,10 +44,16 @@ coordinator:
     notifier-provider: "pulsar"
 
 logService:
-  image: 'coordinator'
+  image:
+    repository: 'local'
+    tag: 'logservice'
 
 worker:
-  image: 'worker'
+  image:
+    repository: 'local'
+    tag: 'worker'
 
 sysdbMigration:
-  image: 'migration'
+  image:
+    repository: 'local'
+    tag: 'migration'

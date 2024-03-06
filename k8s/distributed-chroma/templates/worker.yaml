@@ -36,7 +36,7 @@ spec:
       serviceAccountName: worker-serviceaccount
       containers:
         - name: worker
-          image: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
           imagePullPolicy: IfNotPresent
           command: ["cargo", "run"]
           ports:
