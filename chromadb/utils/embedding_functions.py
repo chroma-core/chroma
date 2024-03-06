@@ -50,6 +50,44 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
     return sha256_hash.hexdigest() == expected_sha256
 
 
+class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
+    # Together AI Embeddings Quick Start Reference
+    # https://docs.together.ai/docs/embeddings-rest
+    # Models List
+    # https://docs.together.ai/docs/embedding-models
+    
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "togethercomputer/m2-bert-80M-8k-retrieval",
+    ):
+        self._api_url = "https://api.together.xyz/v1/embeddings"
+        self._model_name = model_name
+        self._session = requests.Session()
+        self._session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        })
+
+    def __call__(self, input: Documents) -> Embeddings:
+        embeddings = []
+        for text in input:
+            response = self._session.post(
+                self._api_url,
+                json={
+                    "input": text,
+                    "model": self._model_name
+                }
+            )
+
+            if response.status_code == 200:
+                response_data = response.json()
+                embedding = response_data.get("data", [])[0].get("embedding", [])
+                embeddings.append(embedding)
+
+        return embeddings
+
+
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
