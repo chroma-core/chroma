@@ -3,22 +3,15 @@ trigger:
 
 pool:
   vmImage: 'Ubuntu 20.04'
-# variables:
-#   - group: stg
-#   - name: imageName
-#     value: 'staging-chromadb:$(Build.BuildId)'
 steps:
-  # - script: docker build --build-arg STORAGEKEY=$(STORAGEKEY) --build-arg STORAGEACCT=$(STORAGEACCT) -t $(ACR_NAME)/$(imageName) .
-  #   displayName: 'docker build'
-  # - script: docker login -u $(dockerId) -p $(dockerPassword) $(ACR_NAME)
-  #   displayName: 'docker login'
-  # - script: docker push $(ACR_NAME)/$(imageName)
-  #   displayName: 'docker push'
-  # - task: AzureContainerApps@1
-  #   inputs:
-  #     azureSubscription: '$(SERVICE_CONNECTION)'
-  #     containerAppName: 'staging-alfredgpt'
-  #     resourceGroup: '$(RESOURCE_GROUP)'
-  #     imageToDeploy: '$(ACR_NAME)/$(imageName)'
-- publish: '$(System.DefaultWorkingDirectory)'
-  artifact: chroma 
+- ${{ if eq(variables['Build.SourceBranchName'], 'develop') }}:
+  - publish: '$(System.DefaultWorkingDirectory)'
+    artifact: chromastg
+
+- ${{ if eq(variables['Build.SourceBranchName'], 'test') }}:
+  - publish: '$(System.DefaultWorkingDirectory)'
+    artifact: chromatest
+
+- ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+  - publish: '$(System.DefaultWorkingDirectory)'
+    artifact: chromaprd 
