@@ -1,3 +1,4 @@
+use super::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder};
 use crate::blockstore::{
     arrow_blockfile::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockProvider},
     types::{BlockfileKey, KeyType, Value, ValueType},
@@ -5,8 +6,6 @@ use crate::blockstore::{
 use arrow::util::bit_util;
 use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
-
-use super::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder};
 
 #[derive(Clone)]
 pub struct BlockDelta {
@@ -247,8 +246,10 @@ impl BlockDeltaInner {
     }
 }
 
-impl From<&BlockDelta> for BlockData {
-    fn from(delta: &BlockDelta) -> Self {
+impl TryFrom<&BlockDelta> for BlockData {
+    type Error = super::BlockDataBuildError;
+
+    fn try_from(delta: &BlockDelta) -> Result<BlockData, Self::Error> {
         let mut builder = BlockDataBuilder::new(
             delta.source_block.get_key_type(),
             delta.source_block.get_value_type(),
@@ -311,7 +312,7 @@ mod test {
         }
 
         let size = delta.get_size();
-        let block_data = BlockData::from(&delta);
+        let block_data = BlockData::try_from(&delta).unwrap();
         assert_eq!(size, block_data.get_size());
     }
 
@@ -328,7 +329,7 @@ mod test {
             delta.add(key, value);
         }
         let size = delta.get_size();
-        let block_data = BlockData::from(&delta);
+        let block_data = BlockData::try_from(&delta).unwrap();
         assert_eq!(size, block_data.get_size());
     }
 
@@ -346,7 +347,7 @@ mod test {
         }
 
         let size = delta.get_size();
-        let block_data = BlockData::from(&delta);
+        let block_data = BlockData::try_from(&delta).unwrap();
         assert_eq!(size, block_data.get_size());
     }
 }

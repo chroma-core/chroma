@@ -11,6 +11,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::delta::BlockDelta;
 use super::iterator::BlockIterator;
 
 /// BlockState represents the state of a block in the blockstore. Conceptually, a block is immutable once the broarder system
@@ -58,12 +59,15 @@ pub struct Block {
 pub enum BlockError {
     #[error("Invalid state transition")]
     InvalidStateTransition,
+    #[error("Block data error")]
+    BlockDataError(#[from] BlockDataBuildError),
 }
 
 impl ChromaError for BlockError {
     fn code(&self) -> ErrorCodes {
         match self {
             BlockError::InvalidStateTransition => ErrorCodes::Internal,
+            BlockError::BlockDataError(e) => e.code(),
         }
     }
 }
@@ -194,6 +198,29 @@ impl Block {
             BlockState::Uninitialized => Ok(()),
             BlockState::Initialized => {
                 inner.state = BlockState::Commited;
+                Ok(())
+            }
+            BlockState::Commited | BlockState::Registered => {
+                Err(Box::new(BlockError::InvalidStateTransition))
+            }
+        }
+    }
+
+    pub fn apply_delta(&self, delta: &BlockDelta) -> Result<(), Box<BlockError>> {
+        let data = match BlockData::try_from(delta) {
+            Ok(data) => data,
+            Err(e) => return Err(Box::new(BlockError::BlockDataError(e))),
+        };
+        let mut inner = self.inner.write();
+        match inner.state {
+            BlockState::Uninitialized => {
+                inner.data = Some(data);
+                inner.state = BlockState::Initialized;
+                Ok(())
+            }
+            BlockState::Initialized => {
+                inner.data = Some(data);
+                inner.state = BlockState::Initialized;
                 Ok(())
             }
             BlockState::Commited | BlockState::Registered => {
