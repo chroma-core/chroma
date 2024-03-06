@@ -1,7 +1,12 @@
 package dao
 
 import (
+	"errors"
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -34,5 +39,22 @@ func (s *tenantDb) GetTenants(tenantID string) ([]*dbmodel.Tenant, error) {
 }
 
 func (s *tenantDb) Insert(tenant *dbmodel.Tenant) error {
-	return s.db.Create(tenant).Error
+	err := s.db.Create(tenant).Error
+	if err != nil {
+		log.Error("create tenant failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("tenant already exists")
+				return common.ErrTenantUniqueConstraintViolation
+			default:
+				return err
+			}
+		}
+		return err
+	}
+	return nil
 }

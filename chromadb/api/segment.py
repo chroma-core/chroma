@@ -175,10 +175,13 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
+        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
             segments = self._manager.create_segments(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
+        else:
+            logger.info(f"Collection {name} is not created.")
 
         # TODO: This event doesn't capture the get_or_create case appropriately
         self._product_telemetry_client.capture(
@@ -359,7 +362,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -402,7 +405,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -447,7 +450,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(

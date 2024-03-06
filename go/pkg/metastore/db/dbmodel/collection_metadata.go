@@ -23,7 +23,7 @@ func (v CollectionMetadata) TableName() string {
 
 //go:generate mockery --name=ICollectionMetadataDb
 type ICollectionMetadataDb interface {
-	DeleteByCollectionID(collectionID string) error
+	DeleteByCollectionID(collectionID string) (int, error)
 	Insert(in []*CollectionMetadata) error
 	DeleteAll() error
 }

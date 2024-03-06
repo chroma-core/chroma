@@ -280,7 +280,6 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			return err
 		}
 		result = convertCollectionToModel(collectionList)[0]
-		result.Created = true
 
 		notificationRecord := &dbmodel.Notification{
 			CollectionID: result.ID.String(),
@@ -313,14 +312,24 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
-		err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
+		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, nil, deleteCollection.TenantID, deleteCollection.DatabaseName)
 		if err != nil {
 			return err
 		}
-		err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
+		if len(collectionAndMetadata) == 0 {
+			return common.ErrCollectionDeleteNonExistingCollection
+		}
+
+		collectionDeletedCount, err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
 		if err != nil {
 			return err
 		}
+		collectionMetadataDeletedCount, err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
+		if err != nil {
+			return err
+		}
+		log.Info("collection deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
+
 		notificationRecord := &dbmodel.Notification{
 			CollectionID: collectionID.String(),
 			Type:         dbmodel.NotificationTypeDeleteCollection,
@@ -330,6 +339,7 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 		if err != nil {
 			return err
 		}
+
 		return nil
 	})
 }
@@ -360,14 +370,14 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 			if metadata != nil { // Case 2
 				return common.ErrInvalidMetadataUpdate
 			} else { // Case 1
-				err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
+				_, err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
 				if err != nil {
 					return err
 				}
 			}
 		} else {
 			if metadata != nil { // Case 3
-				err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
+				_, err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
 				if err != nil {
 					return err
 				}
@@ -385,6 +395,9 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, nil, tenantID, databaseName)
 		if err != nil {
 			return err
+		}
+		if collectionList == nil || len(collectionList) == 0 {
+			return common.ErrCollectionNotFound
 		}
 		result = convertCollectionToModel(collectionList)[0]
 		return nil
@@ -446,7 +459,7 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 	return result, nil
 }
 
-func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID, ts types.Timestamp) ([]*model.Segment, error) {
+func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error) {
 	segmentAndMetadataList, err := tc.metaDomain.SegmentDb(ctx).GetSegments(segmentID, segmentType, scope, topic, collectionID)
 	if err != nil {
 		return nil, err
@@ -474,7 +487,15 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		err := tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
+		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, nil, types.NilUniqueID())
+		if err != nil {
+			return err
+		}
+		if len(segment) == 0 {
+			return common.ErrSegmentDeleteNonExistingSegment
+		}
+
+		err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
 		if err != nil {
 			log.Error("error deleting segment", zap.Error(err))
 			return err

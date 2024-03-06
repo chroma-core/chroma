@@ -2,6 +2,10 @@ package dao
 
 import (
 	"database/sql"
+	"errors"
+	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/gorm/clause"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -29,9 +33,13 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.id")
 
-	query = query.Where("databases.name = ?", databaseName)
+	if databaseName != "" {
+		query = query.Where("databases.name = ?", databaseName)
+	}
 
-	query = query.Where("databases.tenant_id = ?", tenantID)
+	if tenantID != "" {
+		query = query.Where("databases.tenant_id = ?", tenantID)
+	}
 
 	if id != nil {
 		query = query.Where("collections.id = ?", *id)
@@ -132,12 +140,31 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 	return collections, nil
 }
 
-func (s *collectionDb) DeleteCollectionByID(collectionID string) error {
-	return s.db.Where("id = ?", collectionID).Delete(&dbmodel.Collection{}).Error
+func (s *collectionDb) DeleteCollectionByID(collectionID string) (int, error) {
+	var collections []dbmodel.Collection
+	err := s.db.Clauses(clause.Returning{}).Where("id = ?", collectionID).Delete(&collections).Error
+	return len(collections), err
 }
 
 func (s *collectionDb) Insert(in *dbmodel.Collection) error {
-	return s.db.Create(&in).Error
+	err := s.db.Create(&in).Error
+	if err != nil {
+		log.Error("create collection failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("collection already exists")
+				return common.ErrCollectionUniqueConstraintViolation
+			default:
+				return err
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]interface{} {

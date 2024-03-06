@@ -2,6 +2,9 @@ package dao
 
 import (
 	"database/sql"
+	"errors"
+	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -26,9 +29,22 @@ func (s *segmentDb) Insert(in *dbmodel.Segment) error {
 	err := s.db.Create(&in).Error
 
 	if err != nil {
-		log.Error("insert segment failed", zap.String("segmentID", in.ID), zap.Int64("ts", in.Ts), zap.Error(err))
+		log.Error("create segment failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("segment already exists")
+				return common.ErrSegmentUniqueConstraintViolation
+			default:
+				return err
+			}
+		}
 		return err
 	}
+	return nil
 
 	return nil
 }
