@@ -34,6 +34,7 @@ class OtelInterceptor(
     def _intercept_call(self, continuation, client_call_details, request_or_iterator):
         with tracer.start_as_current_span(f"RPC {client_call_details.method}", kind=SpanKind.CLIENT) as span:
             # Prepare metadata for propagation
+
             metadata = client_call_details.metadata[:] if client_call_details.metadata else []
             metadata.extend([
                 ("chroma-traceid", _encode_trace_id(span.get_span_context().trace_id)),
