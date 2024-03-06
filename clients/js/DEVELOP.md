@@ -6,11 +6,13 @@ This readme is helpful for local dev.
 
 - Make sure you have Java installed (for the generator). You can download it from [java.com](https://java.com)
 - Make sure you set ALLOW_RESET=True for your Docker Container. If you don't do this, tests won't pass.
+
 ```
 environment:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=True
 ```
+
 - Make sure you are running the docker backend at localhost:8000 (\*there is probably a way to stand up the fastapi server by itself and programmatically in the loop of generating this, but not prioritizing it for now. It may be important for the release)
 
 ### Generating
@@ -29,8 +31,9 @@ environment:
 #### Automatically
 
 ##### Increase the version number
+
 1. Create a new PR for the release that upgrades the version in code. Name it `js_release/A.B.C` for production releases and `js_release_alpha/A.B.C` for alpha releases. In the package.json update the version number to the new version. For production releases this is just the version number, for alpha
-releases this is the version number with '-alphaX' appended to it. For example, if the current version is 1.0.0, the alpha release would be 1.0.0-alpha1 for the first alpha release, 1.0.0-alpha2 for the second alpha release, etc.
+   releases this is the version number with '-alphaX' appended to it. For example, if the current version is 1.0.0, the alpha release would be 1.0.0-alpha1 for the first alpha release, 1.0.0-alpha2 for the second alpha release, etc.
 2. Add the "release" label to this PR
 3. Once the PR is merged, tag your commit SHA with the release version
 
@@ -45,6 +48,7 @@ git tag js_release_alpha_A.B.C <SHA>
 4. You need to then wait for the github action for main for `chroma js release` to complete on main.
 
 ##### Perform the release
+
 1. Push your tag to origin to create the release
 
 ```bash
@@ -55,12 +59,12 @@ git push origin js_release_A.B.C
 
 git push origin js_release_alpha_A.B.C
 ```
+
 2. This will trigger a Github action which performs the release
 
 #### Manually
+
 `npm run release` pushes the `package.json` defined packaged to the package manager for authenticated users. It will build, test, and then publish the new version.
-
-
 
 ### Useful links
 
