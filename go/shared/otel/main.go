@@ -44,7 +44,10 @@ func decodeSpanID(encodedSpanID string) (s trace.SpanID, err error) {
 
 // ServerGrpcInterceptor is a gRPC server interceptor for tracing and optional metadata-based context enhancement.
 func ServerGrpcInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-    tracer := otel.GetTracerProvider().Tracer("")
+	// Init with a default tracer if not already set. (Unit test)
+	if tracer == nil {
+		tracer = otel.GetTracerProvider().Tracer("LOCAL")
+	}
 	// Attempt to retrieve metadata, but proceed normally if not present.
 	md, _ := metadata.FromIncomingContext(ctx)
 
