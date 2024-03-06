@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use roaring::RoaringBitmap;
 use std::{
     collections::HashMap,
+    marker::PhantomData,
     ops::{BitOrAssign, SubAssign}
 };
 
@@ -64,9 +65,7 @@ pub(crate) trait MetadataIndex<T: MetadataIndexValue> {
 }
 
 struct BlockfileMetadataIndex<T> {
-    // TODO this is a hack to make this struct generic, which makes types
-    // much easier to read when using it.
-    unused: Option<T>,
+    metadata_value_type: PhantomData<T>,
     blockfile: Box<dyn Blockfile>,
     in_transaction: bool,
     uncommitted_rbms: HashMap<BlockfileKey, RoaringBitmap>,
@@ -75,7 +74,7 @@ struct BlockfileMetadataIndex<T> {
 impl<T> BlockfileMetadataIndex<T> {
     pub fn new() -> Self {
         BlockfileMetadataIndex {
-            unused: None,
+            metadata_value_type: PhantomData,
             blockfile: Box::new(HashMapBlockfile::open(&"in-memory").unwrap()),
             in_transaction: false,
             uncommitted_rbms: HashMap::new(),
@@ -298,6 +297,25 @@ mod test {
     use rand::prelude::{IteratorRandom, SliceRandom};
     use std::rc::Rc;
 
+    // Utility function to check if a Vec<u32> and RoaringBitmap contain equivalent
+    // sets.
+    fn vec_rbm_eq(a: &Vec<u32>, b: &RoaringBitmap) -> bool {
+        if a.len() != b.len() as usize {
+            return false;
+        }
+        for offset in a {
+            if !b.contains(*offset) {
+                return false;
+            }
+        }
+        for offset in b {
+            if !a.contains(&offset) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     pub(crate) trait PropTestValue: MetadataIndexValue +
                                     PartialEq +
                                     Eq +
@@ -393,27 +411,8 @@ mod test {
         }
     }
 
-    // Reference state stores a Vec<u32>, SUT stores a RoaringBitmap. So we
-    // need to compare them manually.
-    fn vec_rbm_eq(a: &Vec<u32>, b: &RoaringBitmap) -> bool {
-        if a.len() != b.len() as usize {
-            return false;
-        }
-        for offset in a {
-            if !b.contains(*offset) {
-                return false;
-            }
-        }
-        for offset in b {
-            if !a.contains(&offset) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     pub(crate) struct ReferenceStateMachineImpl<T: PropTestValue> {
-        unused: Option<T>,
+        value_type: PhantomData<T>,
     }
 
     impl<T: PropTestValue + 'static> ReferenceStateMachine for ReferenceStateMachineImpl<T> {
@@ -539,7 +538,10 @@ mod test {
                     if !state.in_transaction {
                         return state;
                     }
-                    let entry = state.data.entry(k.clone()).or_insert(HashMap::new());
+                    if !state.data.contains_key(k) {
+                        return state;
+                    }
+                    let entry = state.data.get_mut(k).unwrap();
                     if let Some(offsets) = entry.get_mut(v) {
                         offsets.retain(|x| *x != *oid);
                     }
@@ -611,12 +613,12 @@ mod test {
                     let res = state.get(&k, v.clone());
                     if in_transaction {
                         assert!(res.is_err());
-                    } else {
-                        let rbm = res.unwrap();
-                        assert!(
-                            ref_state.kv_rbm_eq(&rbm, &k, &v)
-                        );
+                        return state;
                     }
+                    let rbm = res.unwrap();
+                    assert!(
+                        ref_state.kv_rbm_eq(&rbm, &k, &v)
+                    );
                 },
             }
             state
@@ -627,14 +629,17 @@ mod test {
             if state.in_transaction() {
                 return;
             }
-            for (k, v) in &ref_state.data {
-                for (kk, ref_data) in v {
+            for (metadata_key, metadata_values_hm) in &ref_state.data {
+                for (metadata_value, ref_offset_ids) in metadata_values_hm {
                     assert!(vec_rbm_eq(
-                        ref_data,
-                        &state.get(k, kk.clone()).unwrap()
+                        ref_offset_ids,
+                        &state.get(metadata_key, metadata_value.clone()).unwrap()
                     ));
                 }
             }
+            // TODO once we have a way to iterate over all state in the blockfile,
+            // add a similar check here to make sure that blockfile data is a
+            // subset of reference state data.
         }
     }
 
