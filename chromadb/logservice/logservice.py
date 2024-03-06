@@ -51,8 +51,8 @@ class LogService(Producer, Consumer):
         self._channel = grpc.insecure_channel(
             f"{self._log_service_url}:{self._log_service_port}"
         )
-        interceptors = [OtelInterceptor()]
-        self._channel = grpc.intercept_channel(self._channel, *interceptors)
+        # interceptors = [OtelInterceptor()]
+        # self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
         super().start()
 
