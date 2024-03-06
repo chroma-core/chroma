@@ -191,8 +191,8 @@ test("wrong code returns an error", async () => {
   ];
   const metadatas = [{ test: "test1" }, { test: "test2" }, { test: "test3" }];
   await collection.add({ ids, embeddings, metadatas });
-  // @ts-ignore - supposed to fail
   const results = await collection.get({
+    // @ts-ignore - supposed to fail
     where: { test: { $contains: "hello" } },
   });
   expect(results.error).toBeDefined();
