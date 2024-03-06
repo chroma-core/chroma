@@ -44,7 +44,7 @@ type LogicalWhere = {
 
 export type Where = BaseWhere | LogicalWhere;
 
-type WhereDocumentOperator = "$contains" | LogicalOperator;
+type WhereDocumentOperator = "$contains" | "$not_contains" | LogicalOperator;
 
 export type WhereDocument = {
   [key in WhereDocumentOperator]?: LiteralValue | LiteralNumber | WhereDocument[];
