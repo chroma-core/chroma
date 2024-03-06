@@ -9,7 +9,7 @@ test("it fails with a nice error", async () => {
   } catch (e) {
     expect(e instanceof Error).toBe(true);
     expect((e as Error).message).toMatchInlineSnapshot(
-      `"Error: Failed to connect to chromadb. Make sure your server is running and try again."`
+      `"Failed to connect to chromadb. Make sure your server is running and try again."`
     );
   }
 });
