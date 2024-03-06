@@ -1,3 +1,4 @@
+mod iterator;
 mod types;
 
 // Re-export types at the arrow_blockfile module level
