@@ -46,7 +46,7 @@ coordinator:
 logService:
   image:
     repository: 'local'
-    tag: 'logservice'
+    tag: 'coordinator'
 
 worker:
   image:
