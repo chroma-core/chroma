@@ -36,25 +36,6 @@ export function repack(value: unknown): any {
   }
 }
 
-export async function handleError(error: unknown) {
-  if (error instanceof Response) {
-    try {
-      const res = await (error as Response).json();
-      if ("error" in res) {
-        return { error: res.error };
-      }
-    } catch (e: unknown) {
-      return {
-        error:
-          e && typeof e === "object" && "message" in e
-            ? e.message
-            : "unknown error",
-      };
-    }
-  }
-  return { error };
-}
-
 export async function handleSuccess(
   response: Response | string | Count200Response
 ) {
@@ -83,17 +64,24 @@ export async function importOptionalModule(moduleName: string) {
   return Function(`return import("${moduleName}")`)();
 }
 
+export async function validateTenantDatabase(
+  adminClient: AdminClient,
+  tenant: string,
+  database: string
+): Promise<void> {
+  try {
+    await adminClient.getTenant({ name: tenant });
+  } catch (error) {
+    throw new Error(
+      `Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`
+    );
+  }
 
-export async function validateTenantDatabase(adminClient: AdminClient, tenant: string, database: string): Promise<void> {
-    try {
-        await adminClient.getTenant({name: tenant});
-    } catch (error) {
-        throw new Error(`Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`);
-    }
-
-    try {
-        await adminClient.getDatabase({name: database, tenantName: tenant});
-    } catch (error) {
-        throw new Error(`Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`);
-    }
+  try {
+    await adminClient.getDatabase({ name: database, tenantName: tenant });
+  } catch (error) {
+    throw new Error(
+      `Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`
+    );
+  }
 }
