@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/model"
@@ -87,7 +88,6 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		return res, nil
 	}
 	res.Collection = convertCollectionToProto(collection)
-	res.Created = collection.Created
 	res.Status = setResponseStatus(successCode)
 	return res, nil
 }
@@ -140,10 +140,11 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	}
 	err = s.coordinator.DeleteCollection(ctx, deleteCollection)
 	if err != nil {
-		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
-		if err == common.ErrCollectionDeleteNonExistingCollection {
+		if errors.Is(err, common.ErrCollectionDeleteNonExistingCollection) {
+			log.Error("ErrCollectionDeleteNonExistingCollection", zap.String("collectionpd.id", collectionID))
 			res.Status = failResponseWithError(err, 404)
 		} else {
+			log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
 			res.Status = failResponseWithError(err, errorCode)
 		}
 		return res, nil

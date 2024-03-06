@@ -1,7 +1,8 @@
+import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from chromadb.db.system import SysDB
 from chromadb.proto.convert import (
@@ -225,10 +226,13 @@ class GrpcSysDB(SysDB):
             database=database,
         )
         response = self._sys_db_stub.CreateCollection(request)
+        # TODO: this needs to be changed to try, catch instead of checking the status code
+        if response.status.code != 200:
+            logger.info(f"failed to create collection, response: {response}")
         if response.status.code == 409:
             raise UniqueConstraintError()
         collection = from_proto_collection(response.collection)
-        return collection, response.created
+        return collection, response.status.code == 200
 
     @overrides
     def delete_collection(
@@ -240,6 +244,7 @@ class GrpcSysDB(SysDB):
             database=database,
         )
         response = self._sys_db_stub.DeleteCollection(request)
+        logging.debug(f"delete_collection response: {response}")
         if response.status.code == 404:
             raise NotFoundError()
 

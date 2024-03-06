@@ -13,6 +13,11 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+const (
+	defaultTenant   = "default_tenant"
+	defaultDatabase = "default_database"
+)
+
 func TestCatalog_CreateCollection(t *testing.T) {
 	// create a mock transaction implementation
 	mockTxImpl := &mocks.ITransaction{}

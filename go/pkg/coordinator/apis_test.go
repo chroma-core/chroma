@@ -176,7 +176,6 @@ func SampleCollections(t *testing.T, tenantID string, databaseName string) []*mo
 			Topic:        "test_topic_1",
 			Metadata:     metadata1,
 			Dimension:    &dimension,
-			Created:      true,
 			TenantID:     tenantID,
 			DatabaseName: databaseName,
 		},
@@ -186,7 +185,6 @@ func SampleCollections(t *testing.T, tenantID string, databaseName string) []*mo
 			Topic:        "test_topic_2",
 			Metadata:     metadata2,
 			Dimension:    nil,
-			Created:      true,
 			TenantID:     tenantID,
 			DatabaseName: databaseName,
 		},
@@ -196,7 +194,6 @@ func SampleCollections(t *testing.T, tenantID string, databaseName string) []*mo
 			Topic:        "test_topic_3",
 			Metadata:     metadata3,
 			Dimension:    nil,
-			Created:      true,
 			TenantID:     tenantID,
 			DatabaseName: databaseName,
 		},
@@ -345,7 +342,6 @@ func TestUpdateCollections(t *testing.T) {
 		Topic:        sampleCollections[0].Topic,
 		Metadata:     sampleCollections[0].Metadata,
 		Dimension:    sampleCollections[0].Dimension,
-		Created:      false,
 		TenantID:     sampleCollections[0].TenantID,
 		DatabaseName: sampleCollections[0].DatabaseName,
 	}
@@ -596,7 +592,7 @@ func TestCreateDatabaseWithTenants(t *testing.T) {
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned
 	result, err = c.GetCollections(ctx, types.NilUniqueID(), nil, nil, "tenant1", common.DefaultDatabase)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 }
 
