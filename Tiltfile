@@ -68,7 +68,6 @@ k8s_yaml([
   'k8s/test/postgres.yaml',
 ])
 k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"])
-k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["infrastructure"])
 k8s_resource('pulsar', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
 k8s_resource('migration', resource_deps=['postgres'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['migration'], labels=["chroma"], port_forwards='50052:50051')
