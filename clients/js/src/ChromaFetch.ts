@@ -18,13 +18,9 @@ function isOfflineError(error: any): boolean {
   );
 }
 
-function parseServerError(error: string | undefined): Error | undefined {
-  if (!error) {
-    return undefined;
-  }
-
+function parseServerError(error: string | undefined): Error {
   const regex = /(\w+)\('(.+)'\)/;
-  const match = error.match(regex);
+  const match = error?.match(regex);
   if (match) {
     const [, name, message] = match;
     switch (name) {
@@ -34,7 +30,9 @@ function parseServerError(error: string | undefined): Error | undefined {
         return new ChromaError(name, message);
     }
   }
-  return undefined;
+  return new ChromaServerError(
+    "The server encountered an error while handling the request."
+  );
 }
 
 /** This utility allows a single entrypoint for custom error handling logic
@@ -68,9 +66,7 @@ export const chromaFetch: FetchAPI = async (
             `The requested resource could not be found: ${input}`
           );
         case 500:
-          throw parseServerError() new ChromaServerError(
-            `The server encountered an error while handling the request: ${input}`
-          );
+          throw parseServerError(respBody?.error);
         case 502:
         case 503:
         case 504:
@@ -83,8 +79,8 @@ export const chromaFetch: FetchAPI = async (
       );
     }
 
-    if (respBody.error) {
-      throw new ChromaServerError(respBody.error);
+    if (respBody?.error) {
+      throw parseServerError(respBody.error);
     }
 
     return resp;
