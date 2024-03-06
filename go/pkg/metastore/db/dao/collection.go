@@ -3,7 +3,7 @@ package dao
 import (
 	"database/sql"
 	"errors"
-	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
 
