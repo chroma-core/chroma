@@ -27,6 +27,8 @@ from chromadb.proto.coordinator_pb2 import (
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
     Database,
@@ -56,7 +58,8 @@ class GrpcSysDB(SysDB):
         self._coordinator_url = system.settings.require("chroma_coordinator_host")
         # TODO: break out coordinator_port into a separate setting?
         self._coordinator_port = system.settings.require("chroma_server_grpc_port")
-        return super().__init__(system)
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
+        super().__init__(system)
 
     @overrides
     def start(self) -> None:
@@ -64,6 +67,8 @@ class GrpcSysDB(SysDB):
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}"
         )
+        interceptors = [OtelInterceptor()]
+        self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._sys_db_stub = SysDBStub(self._channel)  # type: ignore
         return super().start()
 
