@@ -1,6 +1,5 @@
 use super::scheduler::Scheduler;
 use async_trait::async_trait;
-use bytes::buf::Chain;
 use futures::Stream;
 use std::fmt::Debug;
 
@@ -141,10 +140,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::stream;
-    use std::sync::Arc;
-    use std::time::Duration;
-
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[derive(Debug)]
     struct TestComponent {
@@ -152,15 +149,8 @@ mod tests {
         counter: Arc<AtomicUsize>,
     }
 
-    #[derive(Clone, Debug)]
-    struct ScheduleMessage {}
-
     impl TestComponent {
-        fn new(
-            queue_size: usize,
-            counter: Arc<AtomicUsize>,
-            scheduled_counter: Arc<AtomicUsize>,
-        ) -> Self {
+        fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
             TestComponent {
                 queue_size,
                 counter,
@@ -191,8 +181,7 @@ mod tests {
     async fn it_can_work() {
         let mut system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
-        let scheduled_counter = Arc::new(AtomicUsize::new(0));
-        let component = TestComponent::new(10, counter.clone(), scheduled_counter.clone());
+        let component = TestComponent::new(10, counter.clone());
         let mut handle = system.start_component(component);
         handle.sender.send(1).await.unwrap();
         handle.sender.send(2).await.unwrap();
