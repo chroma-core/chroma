@@ -199,7 +199,7 @@ impl Value {
                 unimplemented!("Size of positional posting list")
             }
             Value::StringValue(s) => s.len(),
-            Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
+            Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
             Value::Int32Value(_) => 4,
         }
     }

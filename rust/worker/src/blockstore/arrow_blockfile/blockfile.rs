@@ -173,13 +173,11 @@ impl Blockfile for ArrowBlockfile {
 
         let delta = match transaction_state.get_delta_for_block(&target_block_id) {
             None => {
-                println!("Creating new block delta");
                 let target_block = match self.block_provider.get_block(&target_block_id) {
                     None => panic!("Block not found"), // TODO: This should not panic tbh
                     Some(block) => block,
                 };
                 let delta = BlockDelta::from(target_block);
-                println!("New delta has size: {}", delta.get_size());
                 transaction_state.add_delta(delta.clone());
                 delta
             }
@@ -474,6 +472,51 @@ mod tests {
             match res {
                 Value::StringValue(string) => {
                     assert_eq!(string, format!("{:04}", i));
+                }
+                _ => panic!("Unexpected value type"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_roaring_bitmap_value() {
+        let block_provider = ArrowBlockProvider::new();
+        let mut blockfile =
+            ArrowBlockfile::new(KeyType::String, ValueType::RoaringBitmap, block_provider);
+
+        blockfile.begin_transaction().unwrap();
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::String(format!("{:04}", i)));
+            blockfile
+                .set(
+                    key,
+                    Value::RoaringBitmapValue(roaring::RoaringBitmap::from_iter(
+                        (0..i).map(|x| x as u32),
+                    )),
+                )
+                .unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
+
+        // Print size of each block
+        for block_id in blockfile.sparse_index.block_ids() {
+            let block = blockfile.block_provider.get_block(block_id).unwrap();
+            println!(
+                "Size of block {} in bytes: {} with len {}",
+                block_id,
+                block.get_size(),
+                block.len()
+            );
+        }
+
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::String(format!("{:04}", i)));
+            let res = blockfile.get(key).unwrap();
+            match res {
+                Value::RoaringBitmapValue(bitmap) => {
+                    assert_eq!(bitmap.len(), i as u64);
+                    // TODO: check it contains the right values
                 }
                 _ => panic!("Unexpected value type"),
             }

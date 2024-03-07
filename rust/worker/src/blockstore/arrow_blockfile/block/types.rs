@@ -1,12 +1,16 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::errors::{ChromaError, ErrorCodes};
-use arrow::array::{BooleanArray, BooleanBuilder, Float32Array, Float32Builder};
+use arrow::array::{
+    BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
+    GenericByteBuilder,
+};
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
 use parking_lot::RwLock;
+use std::io::Error;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -147,6 +151,21 @@ impl Block {
                                             .to_string(),
                                     ))
                                 }
+                                ValueType::RoaringBitmap => {
+                                    let bytes = value
+                                        .as_any()
+                                        .downcast_ref::<BinaryArray>()
+                                        .unwrap()
+                                        .value(i);
+                                    let bitmap = roaring::RoaringBitmap::deserialize_from(bytes);
+                                    match bitmap {
+                                        Ok(bitmap) => {
+                                            return Some(Value::RoaringBitmapValue(bitmap))
+                                        }
+                                        // TODO: log error
+                                        Err(_) => return None,
+                                    }
+                                }
                                 // TODO: Add support for other types
                                 _ => unimplemented!(),
                             }
@@ -271,6 +290,7 @@ enum KeyBuilder {
 enum ValueBuilder {
     Int32ArrayValueBuilder(ListBuilder<Int32Builder>),
     StringValueBuilder(StringBuilder),
+    RoaringBitmapBuilder(BinaryBuilder),
 }
 
 /// BlockDataBuilder is used to build a block. It is used to add data to a block and then build the BlockData once all data has been added.
@@ -359,6 +379,9 @@ impl BlockDataBuilder {
                 options.item_count,
                 options.total_value_capacity,
             )),
+            ValueType::RoaringBitmap => ValueBuilder::RoaringBitmapBuilder(
+                BinaryBuilder::with_capacity(options.item_count, options.total_value_capacity),
+            ),
             // TODO: Implement the other value types
             _ => unimplemented!(),
         };
@@ -420,6 +443,18 @@ impl BlockDataBuilder {
                 }
                 _ => unreachable!("Invalid value type for block"),
             },
+            ValueBuilder::RoaringBitmapBuilder(ref mut builder) => match value {
+                Value::RoaringBitmapValue(bitmap) => {
+                    let mut bytes = Vec::with_capacity(bitmap.serialized_size());
+                    match bitmap.serialize_into(&mut bytes) {
+                        Ok(_) => builder.append_value(&bytes),
+                        Err(e) => {
+                            return Err(Box::new(BlockDataAddError::RoaringBitmapError(e)));
+                        }
+                    }
+                }
+                _ => unreachable!("Invalid value type for block"),
+            },
         }
 
         Ok(())
@@ -464,6 +499,11 @@ impl BlockDataBuilder {
                 let arr = builder.finish();
                 (&arr as &dyn Array).slice(0, arr.len())
             }
+            ValueBuilder::RoaringBitmapBuilder(ref mut builder) => {
+                value_field = Field::new("value", DataType::Binary, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
         };
 
         let schema = Arc::new(arrow::datatypes::Schema::new(vec![
@@ -484,12 +524,15 @@ impl BlockDataBuilder {
 pub enum BlockDataAddError {
     #[error("Blockfile key not in order")]
     KeyNotInOrder,
+    #[error("Roaring bitmap error")]
+    RoaringBitmapError(#[from] Error),
 }
 
 impl ChromaError for BlockDataAddError {
     fn code(&self) -> ErrorCodes {
         match self {
             BlockDataAddError::KeyNotInOrder => ErrorCodes::InvalidArgument,
+            BlockDataAddError::RoaringBitmapError(_) => ErrorCodes::Internal,
         }
     }
 }
