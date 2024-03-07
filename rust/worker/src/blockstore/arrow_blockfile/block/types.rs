@@ -251,6 +251,9 @@ pub(super) struct BlockDataBuilder {
 /// - key_data_capacity: The required capacity for the key data. This will be rounded to the nearest 64 byte alignment by arrow.
 /// - total_value_count: The total number of values in the block
 /// - total_value_capacity: The required capacity for the value data. This will be rounded to the nearest 64 byte alignment by arrow.
+/// # Note
+/// The capacities are the size of the initially allocated buffers. The builder will not enforce these limits and will grow the buffers as needed.
+/// When in use in a blockfile, maintaining the block size is accomplished at the blockfile level.
 pub(super) struct BlockBuilderOptions {
     pub(super) item_count: usize,
     pub(super) prefix_data_capacity: usize,
