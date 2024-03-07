@@ -286,29 +286,29 @@ mod tests {
         let pl_blockfile = provider
             .create("pl", KeyType::String, ValueType::PositionalPostingList)
             .unwrap();
-        // let freq_blockfile = provider
-        //     .create("freq", KeyType::String, ValueType::Int32)
-        //     .unwrap();
-        // let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
-        //     NgramTokenizer::new(1, 1, false).unwrap(),
-        // )));
-        // let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
-        // index.begin_transaction().unwrap();
-        // index.add_document("hello world", 1).unwrap();
-        // index.add_document("hello chroma", 2).unwrap();
-        // index.add_document("chroma world", 3).unwrap();
-        // index.commit_transaction().unwrap();
+        let freq_blockfile = provider
+            .create("freq", KeyType::String, ValueType::Int32)
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
+        let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
+        index.begin_transaction().unwrap();
+        index.add_document("hello world", 1).unwrap();
+        index.add_document("hello chroma", 2).unwrap();
+        index.add_document("chroma world", 3).unwrap();
+        index.commit_transaction().unwrap();
 
-        // let res = index.search("hello").unwrap();
-        // assert!(res.contains(&1));
-        // assert!(res.contains(&2));
+        let res = index.search("hello").unwrap();
+        assert!(res.contains(&1));
+        assert!(res.contains(&2));
 
-        // let res = index.search("world").unwrap();
-        // assert!(res.contains(&1));
-        // assert!(res.contains(&3));
+        let res = index.search("world").unwrap();
+        assert!(res.contains(&1));
+        assert!(res.contains(&3));
 
-        // let res = index.search("llo chro").unwrap();
-        // assert!(res.contains(&2));
+        let res = index.search("llo chro").unwrap();
+        assert!(res.contains(&2));
     }
 
     #[test]
