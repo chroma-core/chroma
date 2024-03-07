@@ -47,6 +47,8 @@ logService:
   image:
     repository: 'local'
     tag: 'coordinator'
+  env:
+  flags:
 
 worker:
   image:
