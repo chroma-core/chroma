@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend-server
-          image: {{ .Values.frontend.image }}
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -46,20 +46,20 @@ spec:
             - name: CHROMA_COORDINATOR_HOST
               {{ .Values.frontend.coordinatorHost }}
             - name: CHROMA_SERVER_AUTH_PROVIDER
-              {{ .Values.frontend.serverAuthProvider }}
+              {{ .Values.frontend.authProvider }}
             - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
-              {{ .Values.frontend.serverAuthCredentialsProvider }}
+              {{ .Values.frontend.authCredentialsProvider }}
             - name: CHROMA_SERVER_AUTHZ_PROVIDER
-              {{ .Values.frontend.serverAuthzProvider }}
+              {{ .Values.frontend.authzProvider }}
             - name: CHROMA_SERVER_AUTHZ_CONFIG_PROVIDER
-              {{ .Values.frontend.serverAuthzConfigProvider }}
-              {{ .Values.frontend.otherEnvConfig }}
+              {{ .Values.frontend.authzConfigProvider }}
             - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
               {{ .Values.frontend.memberlistProviderImpl }}
             - name: CHROMA_LOGSERVICE_HOST
               {{ .Values.frontend.logServiceHost }}
             - name: CHROMA_LOGSERVICE_PORT
               {{ .Values.frontend.logServicePort }}
+{{ .Values.frontend.otherEnvConfig | nindent 12 }}
       volumes:
         - name: chroma
           emptyDir: {}

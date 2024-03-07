@@ -10,6 +10,7 @@ from chromadb.ingest import (
 from chromadb.proto.convert import to_proto_submit
 from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, RecordLog
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
+from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     SubmitEmbeddingRecord,
     SeqId,
@@ -50,6 +51,8 @@ class LogService(Producer, Consumer):
         self._channel = grpc.insecure_channel(
             f"{self._log_service_url}:{self._log_service_port}"
         )
+        interceptors = [OtelInterceptor()]
+        self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
         super().start()
 

@@ -17,7 +17,7 @@ type Catalog interface {
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
 	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error)
 	CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error)
-	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID, ts types.Timestamp) ([]*model.Segment, error)
+	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error)
 	DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
 	UpdateSegment(ctx context.Context, segmentInfo *model.UpdateSegment, ts types.Timestamp) (*model.Segment, error)
 	CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase, ts types.Timestamp) (*model.Database, error)

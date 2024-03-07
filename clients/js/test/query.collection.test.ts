@@ -64,6 +64,25 @@ test("it should get embedding with matching documents", async () => {
 });
 
 
+test("it should exclude documents matching - not_contains", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+
+  const results = await collection.query({
+    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    nResults: 3,
+    whereDocument: { $not_contains: "This is a test" }
+  });
+
+  // it should only return doc1
+  expect(results).toBeDefined();
+  expect(results).toBeInstanceOf(Object);
+  expect(results.ids.length).toBe(1);
+  expect(["test2","test3"]).toEqual(expect.arrayContaining(results.ids[0]));
+});
+
+
 // test queryTexts
 test("it should query a collection with text", async () => {
   await chroma.reset();
