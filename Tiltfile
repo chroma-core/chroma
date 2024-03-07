@@ -27,6 +27,7 @@ docker_build(
 k8s_yaml(
   helm(
     'k8s/distributed-chroma',
+    namespace='chroma',
     values=[
       'k8s/distributed-chroma/values.yaml'
     ]
