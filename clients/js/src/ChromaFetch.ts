@@ -12,9 +12,9 @@ import { FetchAPI } from "./generated";
 
 function isOfflineError(error: any): boolean {
   return Boolean(
-    error &&
-      error.name === "TypeError" &&
-      error.message?.includes("fetch failed")
+    error?.name === "TypeError" &&
+      (error.message?.includes("fetch failed") ||
+        error.message?.includes("Failed to fetch"))
   );
 }
 
@@ -87,7 +87,7 @@ export const chromaFetch: FetchAPI = async (
   } catch (error) {
     if (isOfflineError(error)) {
       throw new ChromaConnectionError(
-        "Failed to connect to chromadb. Make sure your server is running and try again.",
+        "Failed to connect to chromadb. Make sure your server is running and try again. If you are running from a browser, make sure that your chromadb instance is configured to allow requests from the current origin using the CHROMA_SERVER_CORS_ALLOW_ORIGINS environment variable.",
         error
       );
     }
