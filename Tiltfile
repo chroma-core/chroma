@@ -92,5 +92,9 @@ k8s_resource('coordinator', resource_deps=['pulsar', 'migration'], labels=["chro
 k8s_resource('frontend-server', resource_deps=['pulsar', 'coordinator', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('worker', resource_deps=['coordinator', 'pulsar'], labels=["chroma"])
 
+# I have no idea why these need their own lines but the others don't.
+k8s_resource(objects=['worker:service'], new_name='worker_service', resource_deps=['worker'], labels=["chroma"])
+k8s_resource(objects=['jaeger-lb:Service'], new_name='jaeger_service', resource_deps=['k8s_setup'], labels=["debug"])
+
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards='9000:9000')
