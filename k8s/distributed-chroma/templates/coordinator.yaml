@@ -18,11 +18,8 @@ spec:
         - command:
             - "/bin/sh"
             - "-c"
-            - "coordinator"
-            - "coordinator"
-            {{ range $k, $v := .Values.coordinator.flags }}
-            - "--{{ $k }}={{ $v }}"
-            {{ end }}
+            # This has to be one line to be passed into the `exec` env correctly. I truly could not tell you why.
+            - coordinator coordinator {{ range $k, $v := .Values.coordinator.flags }} --{{ $k }}={{ $v }} {{ end }}
           env:
             {{ range .Values.coordinator.env }}
             - name: {{ .name }}
