@@ -1,6 +1,6 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
-export class JinaEmbeddingFunction implements IEmbeddingFunction {
+export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
   private model_name: string;
   private api_url: string;
   private truncation?: boolean;
