@@ -1,5 +1,6 @@
 mod assignment;
 mod blockstore;
+mod compactor;
 mod config;
 mod errors;
 mod index;
