@@ -3,6 +3,8 @@ use super::block::BlockState;
 use super::provider::ArrowBlockProvider;
 use super::sparse_index::SparseIndex;
 use crate::blockstore::arrow_blockfile::block::delta::BlockDelta;
+use parking_lot::Mutex;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
@@ -10,34 +12,34 @@ pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 // TODO: Think about the clone here
 #[derive(Clone)]
 pub(crate) struct ArrowBlockfile {
-    sparse_index: SparseIndex,
     key_type: KeyType,
     value_type: ValueType,
-    transaction_state: Option<TransactionState>,
     block_provider: ArrowBlockProvider,
+    sparse_index: Arc<Mutex<SparseIndex>>,
+    transaction_state: Option<Arc<TransactionState>>,
 }
 
-// TODO: Remove this clone
-#[derive(Clone)]
 struct TransactionState {
-    block_delta: Vec<BlockDelta>,
-    new_sparse_index: Option<SparseIndex>,
+    block_delta: Mutex<Vec<BlockDelta>>,
+    new_sparse_index: Mutex<Option<Arc<Mutex<SparseIndex>>>>,
 }
 
 impl TransactionState {
     fn new() -> Self {
         Self {
-            block_delta: Vec::new(),
-            new_sparse_index: None,
+            block_delta: Mutex::new(Vec::new()),
+            new_sparse_index: Mutex::new(None),
         }
     }
 
-    fn add_delta(&mut self, delta: BlockDelta) {
-        self.block_delta.push(delta);
+    fn add_delta(&self, delta: BlockDelta) {
+        let mut block_delta = self.block_delta.lock();
+        block_delta.push(delta);
     }
 
     fn get_delta_for_block(&self, search_id: &Uuid) -> Option<BlockDelta> {
-        for delta in &self.block_delta {
+        let block_delta = self.block_delta.lock();
+        for delta in &*block_delta {
             if delta.source_block.get_id() == *search_id {
                 return Some(delta.clone());
             }
@@ -48,7 +50,7 @@ impl TransactionState {
 
 impl Blockfile for ArrowBlockfile {
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn crate::errors::ChromaError>> {
-        let target_block_id = self.sparse_index.get_target_block_id(&key);
+        let target_block_id = self.sparse_index.lock().get_target_block_id(&key);
         let target_block = match self.block_provider.get_block(&target_block_id) {
             None => panic!("Block not found"), // TODO: This should not panic tbh
             Some(block) => block,
@@ -158,18 +160,16 @@ impl Blockfile for ArrowBlockfile {
             }
         }
 
-        let transaction_state = match self.transaction_state {
+        let transaction_state = match &self.transaction_state {
             None => panic!("Transaction not in progress"),
-            Some(ref mut state) => state,
+            Some(transaction_state) => transaction_state,
         };
 
-        let target_block_id = match transaction_state.new_sparse_index {
-            None => self.sparse_index.get_target_block_id(&key),
-            Some(ref index) => index.get_target_block_id(&key),
+        let mut transaction_sparse_index = transaction_state.new_sparse_index.lock();
+        let target_block_id = match *transaction_sparse_index {
+            None => self.sparse_index.lock().get_target_block_id(&key),
+            Some(ref index) => index.lock().get_target_block_id(&key),
         };
-
-        // for debugging
-        let target_block_id_string = target_block_id.to_string();
 
         let delta = match transaction_state.get_delta_for_block(&target_block_id) {
             None => {
@@ -188,17 +188,23 @@ impl Blockfile for ArrowBlockfile {
             delta.add(key, value);
         } else {
             let (split_key, new_delta) = delta.split(&self.block_provider);
-            match transaction_state.new_sparse_index {
+            match *transaction_sparse_index {
                 None => {
-                    let mut new_sparse_index = SparseIndex::from(&self.sparse_index);
-                    new_sparse_index.add_block(split_key, new_delta.source_block.get_id());
-                    transaction_state.new_sparse_index = Some(new_sparse_index);
+                    let mut new_sparse_index =
+                        Arc::new(Mutex::new(SparseIndex::from(&self.sparse_index.lock())));
+                    new_sparse_index
+                        .lock()
+                        .add_block(split_key, new_delta.source_block.get_id());
+                    *transaction_sparse_index = Some(new_sparse_index);
                 }
-                Some(ref mut index) => {
-                    index.add_block(split_key, new_delta.source_block.get_id());
+                Some(ref index) => {
+                    index
+                        .lock()
+                        .add_block(split_key, new_delta.source_block.get_id());
                 }
             }
             transaction_state.add_delta(new_delta);
+            drop(transaction_sparse_index);
             self.set(key, value)?
         }
         Ok(())
@@ -209,7 +215,7 @@ impl Blockfile for ArrowBlockfile {
             // TODO: return error
             panic!("Transaction already in progress");
         }
-        self.transaction_state = Some(TransactionState::new());
+        self.transaction_state = Some(Arc::new(TransactionState::new()));
         Ok(())
     }
 
@@ -218,25 +224,18 @@ impl Blockfile for ArrowBlockfile {
             panic!("Transaction not in progress");
         }
 
-        let transaction_state = match self.transaction_state {
-            None => panic!("Transaction not in progress"), // TODO: make error
-            Some(ref mut state) => state,
+        let mut transaction_state = match self.transaction_state {
+            None => panic!("Transaction not in progress"),
+            Some(ref transaction_state) => transaction_state,
         };
 
-        for delta in &transaction_state.block_delta {
-            // build a new block and replace the blockdata in the block
-            // TOOO: the data capacities need to include the offsets and padding, not just the raw data size
-            // let new_block_data = BlockData::from(delta);
-
-            // TODO: thinking about an edge case here: someone could register while we are in a transaction, and then we would have to handle that
-            // in that case, update_data() can fail, since the block is registered, and we would have to create a new block and update the sparse index
-
+        for delta in &*transaction_state.block_delta.lock() {
             // Blocks are WORM, so if the block is uninitialized or initialized we can update it directly, if its registered, meaning the broader system is aware of it,
             // we need to create a new block and update the sparse index to point to the new block
 
             match delta.source_block.get_state() {
                 BlockState::Uninitialized => {
-                    delta.source_block.apply_delta(delta);
+                    delta.source_block.apply_delta(&delta);
                     delta.source_block.commit();
                     println!(
                         "Size of commited block in bytes: {} with len {}",
@@ -245,7 +244,7 @@ impl Blockfile for ArrowBlockfile {
                     );
                 }
                 BlockState::Initialized => {
-                    delta.source_block.apply_delta(delta);
+                    delta.source_block.apply_delta(&delta);
                     delta.source_block.commit();
                     println!(
                         "Size of commited block in bytes: {} with len {}",
@@ -258,23 +257,25 @@ impl Blockfile for ArrowBlockfile {
                     let new_block = self
                         .block_provider
                         .create_block(self.key_type, self.value_type);
-                    new_block.apply_delta(delta);
+                    new_block.apply_delta(&delta);
                     let new_min_key = match delta.get_min_key() {
                         None => panic!("No start key"),
                         Some(key) => key,
                     };
-                    match transaction_state.new_sparse_index {
+                    let mut transaction_sparse_index = transaction_state.new_sparse_index.lock();
+                    match *transaction_sparse_index {
                         None => {
-                            let mut new_sparse_index = SparseIndex::from(&self.sparse_index);
-                            new_sparse_index.replace_block(
+                            let mut new_sparse_index =
+                                Arc::new(Mutex::new(SparseIndex::from(&self.sparse_index.lock())));
+                            new_sparse_index.lock().replace_block(
                                 delta.source_block.get_id(),
                                 new_block.get_id(),
                                 new_min_key,
                             );
-                            transaction_state.new_sparse_index = Some(new_sparse_index);
+                            *transaction_sparse_index = Some(new_sparse_index);
                         }
-                        Some(ref mut index) => {
-                            index.replace_block(
+                        Some(ref index) => {
+                            index.lock().replace_block(
                                 delta.source_block.get_id(),
                                 new_block.get_id(),
                                 new_min_key,
@@ -292,12 +293,14 @@ impl Blockfile for ArrowBlockfile {
         }
 
         // update the sparse index
-        if transaction_state.new_sparse_index.is_some() {
-            self.sparse_index = transaction_state.new_sparse_index.take().unwrap();
+        let mut transaction_state_sparse_index = transaction_state.new_sparse_index.lock();
+        if transaction_state_sparse_index.is_some() {
+            self.sparse_index = transaction_state_sparse_index.take().unwrap();
             // unwrap is safe because we just checked it
         }
-        println!("New sparse index after commit: {:?}", self.sparse_index);
 
+        // Reset the transaction state
+        drop(transaction_state_sparse_index);
         self.transaction_state = None;
         Ok(())
     }
@@ -311,7 +314,7 @@ impl ArrowBlockfile {
     ) -> Self {
         let initial_block = block_provider.create_block(key_type.clone(), value_type.clone());
         Self {
-            sparse_index: SparseIndex::new(initial_block.get_id()),
+            sparse_index: Arc::new(Mutex::new(SparseIndex::new(initial_block.get_id()))),
             transaction_state: None,
             block_provider,
             key_type,
@@ -391,8 +394,8 @@ mod tests {
         }
 
         // Sparse index should have 3 blocks
-        assert_eq!(blockfile.sparse_index.len(), 3);
-        assert!(blockfile.sparse_index.is_valid());
+        assert_eq!(blockfile.sparse_index.lock().len(), 3);
+        assert!(blockfile.sparse_index.lock().is_valid());
 
         // Add 5 new entries to the first block
         blockfile.begin_transaction().unwrap();
@@ -406,8 +409,8 @@ mod tests {
         blockfile.commit_transaction().unwrap();
 
         // Sparse index should still have 3 blocks
-        assert_eq!(blockfile.sparse_index.len(), 3);
-        assert!(blockfile.sparse_index.is_valid());
+        assert_eq!(blockfile.sparse_index.lock().len(), 3);
+        assert!(blockfile.sparse_index.lock().is_valid());
 
         // Add 1200 more entries, causing splits
         blockfile.begin_transaction().unwrap();
@@ -500,7 +503,7 @@ mod tests {
         blockfile.commit_transaction().unwrap();
 
         // Print size of each block
-        for block_id in blockfile.sparse_index.block_ids() {
+        for block_id in blockfile.sparse_index.lock().block_ids() {
             let block = blockfile.block_provider.get_block(block_id).unwrap();
             println!(
                 "Size of block {} in bytes: {} with len {}",
