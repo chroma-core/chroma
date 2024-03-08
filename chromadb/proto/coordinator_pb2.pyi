@@ -240,3 +240,29 @@ class ResetStateResponse(_message.Message):
     STATUS_FIELD_NUMBER: _ClassVar[int]
     status: _chroma_pb2.Status
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+
+class GetLastCompactionTimeForTenantRequest(_message.Message):
+    __slots__ = ["tenant_id"]
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tenant_id: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class TenantLastCompactionTime(_message.Message):
+    __slots__ = ["tenant_id", "last_compaction_time"]
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    LAST_COMPACTION_TIME_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    last_compaction_time: int
+    def __init__(self, tenant_id: _Optional[str] = ..., last_compaction_time: _Optional[int] = ...) -> None: ...
+
+class GetLastCompactionTimeForTenantResponse(_message.Message):
+    __slots__ = ["tenant_last_compaction_time"]
+    TENANT_LAST_COMPACTION_TIME_FIELD_NUMBER: _ClassVar[int]
+    tenant_last_compaction_time: _containers.RepeatedCompositeFieldContainer[TenantLastCompactionTime]
+    def __init__(self, tenant_last_compaction_time: _Optional[_Iterable[_Union[TenantLastCompactionTime, _Mapping]]] = ...) -> None: ...
+
+class SetLastCompactionTimeForTenantRequest(_message.Message):
+    __slots__ = ["tenant_last_compaction_time"]
+    TENANT_LAST_COMPACTION_TIME_FIELD_NUMBER: _ClassVar[int]
+    tenant_last_compaction_time: TenantLastCompactionTime
+    def __init__(self, tenant_last_compaction_time: _Optional[_Union[TenantLastCompactionTime, _Mapping]] = ...) -> None: ...

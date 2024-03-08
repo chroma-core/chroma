@@ -58,3 +58,10 @@ func (s *tenantDb) Insert(tenant *dbmodel.Tenant) error {
 	}
 	return nil
 }
+
+func (s *tenantDb) GetTenantsLastCompactionTime(tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	var tenants []*dbmodel.Tenant
+
+	// TODO: implement this
+	return tenants, nil
+}

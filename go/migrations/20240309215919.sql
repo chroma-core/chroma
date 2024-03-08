@@ -87,5 +87,6 @@ CREATE TABLE "public"."tenants" (
   "is_deleted" boolean NULL DEFAULT false,
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "last_compaction_time" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("id")
 );

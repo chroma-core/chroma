@@ -159,6 +159,23 @@ message ResetStateResponse {
   Status status = 1;
 }
 
+message GetLastCompactionTimeForTenantRequest {
+  repeated string tenant_id = 1;
+}
+
+message TenantLastCompactionTime {
+  string tenant_id = 1;
+  int64 last_compaction_time = 2;
+}
+
+message GetLastCompactionTimeForTenantResponse {
+  repeated TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
+message SetLastCompactionTimeForTenantRequest {
+  TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -173,4 +190,6 @@ service SysDB {
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
+  rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
+  rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
 }
