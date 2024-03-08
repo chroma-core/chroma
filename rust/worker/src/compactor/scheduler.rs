@@ -1,4 +1,5 @@
-use crate::compactor::task::Task;
+use crate::compactor::scheduler_policy::SchedulerPolicy;
+use crate::compactor::types::Task;
 use crate::log::log::CollectionInfo;
 use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
@@ -17,7 +18,7 @@ use uuid::Uuid;
 pub(crate) struct Scheduler {
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
-    policy: SchedulerPolicy,
+    policy: Box<dyn SchedulerPolicy>,
     task_queue: Arc<Mutex<Vec<Task>>>,
     max_queue_size: usize,
     schedule_interval: Duration,
@@ -27,7 +28,7 @@ impl Scheduler {
     pub(crate) fn new(
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
-        policy: SchedulerPolicy,
+        policy: Box<dyn SchedulerPolicy>,
         max_queue_size: usize,
         schedule_interval: Duration,
     ) -> Scheduler {
@@ -87,7 +88,7 @@ impl Scheduler {
                         // TODO: get the last compaction time from the sysdb
                         last_compaction_time: 0,
                         first_record_time: collection_info.first_log_id_ts,
-                        cursor: collection_info.first_log_id,
+                        offset: collection_info.first_log_id,
                     });
                 }
                 Err(e) => {
@@ -145,6 +146,7 @@ impl Component for Scheduler {
     }
 
     fn queue_size(&self) -> usize {
+        // TODO: make this comfigurable
         1000
     }
 }
@@ -165,34 +167,10 @@ impl Handler<ScheduleMessage> for Scheduler {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct SchedulerPolicy {}
-
-impl SchedulerPolicy {
-    fn determine(&self, collections: Vec<CollectionRecord>, number_tasks: i32) -> Vec<Task> {
-        let mut collections = collections;
-        collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
-        let number_tasks = if number_tasks > collections.len() as i32 {
-            collections.len() as i32
-        } else {
-            number_tasks
-        };
-        let mut tasks = Vec::new();
-        for collection in &collections[0..number_tasks as usize] {
-            tasks.push(Task {
-                collection_id: collection.id.clone(),
-                tenant_id: collection.tenant_id.clone(),
-                cursor: collection.cursor,
-            });
-        }
-        tasks
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log::log::CollectionRecord;
+    use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
     use crate::log::log::LogRecord;
     use crate::sysdb::sysdb::GetCollectionsError;
@@ -206,6 +184,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
     use uuid::Uuid;
+
     #[derive(Clone)]
     pub(crate) struct TestSysDb {
         collections: HashMap<Uuid, Collection>,
@@ -355,7 +334,7 @@ mod tests {
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
-        let scheduler_policy = SchedulerPolicy {};
+        let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let mut scheduler =
             Scheduler::new(log, sysdb, scheduler_policy, 1000, Duration::from_secs(1));
 
@@ -364,34 +343,5 @@ mod tests {
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].collection_id, collection_id_1);
         assert_eq!(tasks[1].collection_id, collection_id_2);
-    }
-
-    #[test]
-    fn test_scheduler_policy() {
-        let scheduler_policy = SchedulerPolicy {};
-        let collections = vec![
-            CollectionRecord {
-                id: "test1".to_string(),
-                tenant_id: "test".to_string(),
-                last_compaction_time: 1,
-                first_record_time: 1,
-                cursor: 0,
-            },
-            CollectionRecord {
-                id: "test2".to_string(),
-                tenant_id: "test".to_string(),
-                last_compaction_time: 0,
-                first_record_time: 0,
-                cursor: 0,
-            },
-        ];
-        let tasks = scheduler_policy.determine(collections.clone(), 1);
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].collection_id, "test2");
-
-        let tasks = scheduler_policy.determine(collections.clone(), 2);
-        assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].collection_id, "test2");
-        assert_eq!(tasks[1].collection_id, "test1");
     }
 }

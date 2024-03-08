@@ -2,5 +2,5 @@
 pub(crate) struct Task {
     pub(crate) collection_id: String,
     pub(crate) tenant_id: String,
-    pub(crate) cursor: i64,
+    pub(crate) offset: i64,
 }

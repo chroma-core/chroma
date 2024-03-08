@@ -26,7 +26,7 @@ pub(crate) struct CollectionRecord {
     pub(crate) tenant_id: String,
     pub(crate) last_compaction_time: i64,
     pub(crate) first_record_time: i64,
-    pub(crate) cursor: i64,
+    pub(crate) offset: i64,
 }
 
 #[async_trait]
@@ -213,6 +213,7 @@ impl ChromaError for GetCollectionsWithNewDataError {
     }
 }
 
+// This is used for testing only
 #[derive(Clone)]
 pub(crate) struct LogRecord {
     pub(crate) collection_id: String,
@@ -221,6 +222,7 @@ pub(crate) struct LogRecord {
     pub(crate) record: Box<EmbeddingRecord>,
 }
 
+// This is used for testing only
 #[derive(Clone)]
 pub(crate) struct InMemoryLog {
     logs: HashMap<String, Vec<Box<LogRecord>>>,
