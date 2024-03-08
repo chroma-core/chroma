@@ -146,7 +146,7 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_nofile: Optional[int] = None
     # the number of maximum threads to handle synchronous tasks in the FastAPI server
-    chroma_server_thread_pool_size: Optional[int] = 40
+    chroma_server_thread_pool_size: int = 40
 
     pulsar_broker_url: Optional[str] = None
     pulsar_admin_port: Optional[int] = 8080

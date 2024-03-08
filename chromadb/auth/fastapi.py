@@ -215,6 +215,7 @@ def authz_context(
                     )
 
                     if _provider:
+                        # TODO this will block the event loop if it takes too long - refactor for async
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
