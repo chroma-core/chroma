@@ -11,6 +11,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::iterator::BlockIterator;
+
 /// BlockState represents the state of a block in the blockstore. Conceptually, a block is immutable once the broarder system
 /// has been made aware of its existence. New blocks may exist locally but are not considered part of the blockstore until they
 /// are registered.
@@ -198,6 +200,14 @@ impl Block {
                 Err(Box::new(BlockError::InvalidStateTransition))
             }
         }
+    }
+
+    pub(super) fn iter(&self) -> BlockIterator {
+        BlockIterator::new(
+            self.clone(),
+            self.inner.read().key_type,
+            self.inner.read().value_type,
+        )
     }
 }
 
