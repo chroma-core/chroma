@@ -6,7 +6,7 @@ use crate::{
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Collection {
     pub(crate) id: Uuid,
     pub(crate) name: String,

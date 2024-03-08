@@ -13,7 +13,7 @@ use num_bigint::BigInt;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct EmbeddingRecord {
     pub(crate) id: String,
     pub(crate) seq_id: SeqId,

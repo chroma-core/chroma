@@ -8,6 +8,7 @@ use crate::log::config::LogConfig;
 use crate::types::EmbeddingRecord;
 use crate::types::EmbeddingRecordConversionError;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use thiserror::Error;
 
 // CollectionInfo is a struct that contains information about a collection for the
@@ -17,6 +18,15 @@ pub(crate) struct CollectionInfo {
     pub(crate) collection_id: String,
     pub(crate) first_log_id: i64,
     pub(crate) first_log_id_ts: i64,
+}
+
+#[derive(Clone)]
+pub(crate) struct CollectionRecord {
+    pub(crate) id: String,
+    pub(crate) tenant_id: String,
+    pub(crate) last_compaction_time: i64,
+    pub(crate) first_record_time: i64,
+    pub(crate) offset: i64,
 }
 
 #[async_trait]
@@ -200,5 +210,72 @@ impl ChromaError for GetCollectionsWithNewDataError {
                 ErrorCodes::Internal
             }
         }
+    }
+}
+
+// This is used for testing only
+#[derive(Clone)]
+pub(crate) struct LogRecord {
+    pub(crate) collection_id: String,
+    pub(crate) log_id: i64,
+    pub(crate) log_id_ts: i64,
+    pub(crate) record: Box<EmbeddingRecord>,
+}
+
+// This is used for testing only
+#[derive(Clone)]
+pub(crate) struct InMemoryLog {
+    logs: HashMap<String, Vec<Box<LogRecord>>>,
+}
+
+impl InMemoryLog {
+    pub fn new() -> InMemoryLog {
+        InMemoryLog {
+            logs: HashMap::new(),
+        }
+    }
+
+    pub fn add_log(&mut self, collection_id: String, log: Box<LogRecord>) {
+        let logs = self.logs.entry(collection_id).or_insert(Vec::new());
+        logs.push(log);
+    }
+}
+
+#[async_trait]
+impl Log for InMemoryLog {
+    async fn read(
+        &mut self,
+        collection_id: String,
+        offset: i64,
+        batch_size: i32,
+    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+        let logs = self.logs.get(&collection_id).unwrap();
+        let mut result = Vec::new();
+        for i in offset..(offset + batch_size as i64) {
+            if i < logs.len() as i64 {
+                result.push(logs[i as usize].record.clone());
+            }
+        }
+        Ok(result)
+    }
+
+    async fn get_collections_with_new_data(
+        &mut self,
+    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+        let mut collections = Vec::new();
+        for (collection_id, log_record) in self.logs.iter() {
+            if log_record.is_empty() {
+                continue;
+            }
+            // sort the logs by log_id
+            let mut logs = log_record.clone();
+            logs.sort_by(|a, b| a.log_id.cmp(&b.log_id));
+            collections.push(CollectionInfo {
+                collection_id: collection_id.clone(),
+                first_log_id: logs[0].log_id,
+                first_log_id_ts: logs[0].log_id_ts,
+            });
+        }
+        Ok(collections)
     }
 }
