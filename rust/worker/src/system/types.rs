@@ -1,12 +1,9 @@
-use std::{fmt::Debug, sync::Arc};
-
+use super::scheduler::Scheduler;
 use async_trait::async_trait;
 use futures::Stream;
-use tokio::select;
+use std::fmt::Debug;
 
-use super::{
-    executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
-};
+use super::{sender::Sender, system::System, Receiver, ReceiverImpl};
 
 #[derive(Debug, PartialEq)]
 /// The state of a component
@@ -135,6 +132,7 @@ where
     pub(crate) system: System,
     pub(crate) sender: Sender<C>,
     pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
+    pub(crate) scheduler: Scheduler,
 }
 
 #[cfg(test)]
@@ -142,6 +140,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::stream;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -154,8 +154,8 @@ mod tests {
     impl TestComponent {
         fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
             TestComponent {
-                queue_size: queue_size,
-                counter: counter,
+                queue_size,
+                counter,
             }
         }
     }
@@ -166,12 +166,11 @@ mod tests {
             self.counter.fetch_add(message, Ordering::SeqCst);
         }
     }
-
     impl StreamHandler<usize> for TestComponent {}
 
     impl Component for TestComponent {
         fn queue_size(&self) -> usize {
-            return self.queue_size;
+            self.queue_size
         }
 
         fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
@@ -191,12 +190,13 @@ mod tests {
         handle.sender.send(3).await.unwrap();
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
+        // With the streaming data and the messages we should have 12
+        assert_eq!(counter.load(Ordering::SeqCst), 12);
         handle.stop();
         // Yield to allow the component to stop
         tokio::task::yield_now().await;
+        // Expect the component to be stopped
         assert_eq!(*handle.state(), ComponentState::Stopped);
-        // With the streaming data and the messages we should have 12
-        assert_eq!(counter.load(Ordering::SeqCst), 12);
         let res = handle.sender.send(4).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());

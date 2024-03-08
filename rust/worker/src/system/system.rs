@@ -8,22 +8,26 @@ use tokio::{pin, select};
 
 use super::ComponentRuntime;
 // use super::executor::StreamComponentExecutor;
+use super::scheduler::Scheduler;
 use super::sender::{self, Sender, Wrapper};
 use super::{executor, ComponentContext};
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
-use std::sync::Mutex;
 
 #[derive(Clone)]
 pub(crate) struct System {
-    inner: Arc<Mutex<Inner>>,
+    inner: Arc<Inner>,
 }
 
-struct Inner {}
+struct Inner {
+    scheduler: Scheduler,
+}
 
 impl System {
     pub(crate) fn new() -> System {
         System {
-            inner: Arc::new(Mutex::new(Inner {})),
+            inner: Arc::new(Inner {
+                scheduler: Scheduler::new(),
+            }),
         }
     }
 
@@ -34,16 +38,18 @@ impl System {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
         let sender = Sender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
-        let _ = component.on_start(&ComponentContext {
+        let _ = component.on_start(&mut ComponentContext {
             system: self.clone(),
             sender: sender.clone(),
             cancellation_token: cancel_token.clone(),
+            scheduler: self.inner.scheduler.clone(),
         });
         let mut executor = ComponentExecutor::new(
             sender.clone(),
             cancel_token.clone(),
             component,
             self.clone(),
+            self.inner.scheduler.clone(),
         );
 
         match C::runtime() {
@@ -74,8 +80,17 @@ impl System {
             system: self.clone(),
             sender: ctx.sender.clone(),
             cancellation_token: ctx.cancellation_token.clone(),
+            scheduler: ctx.scheduler.clone(),
         };
         tokio::spawn(async move { stream_loop(stream, &ctx).await });
+    }
+
+    pub(crate) async fn stop(&self) {
+        self.inner.scheduler.stop();
+    }
+
+    pub(crate) async fn join(&self) {
+        self.inner.scheduler.join().await;
     }
 }
 
