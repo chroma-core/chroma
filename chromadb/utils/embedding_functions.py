@@ -239,7 +239,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
             self,
             api_key: str,
-            model_name: str = "voyage-01",
+            model_name: str,
             embed_batch_size: Optional[int] = None,
             truncation: Optional[bool] = None,
             show_progress_bar: Optional[bool] = False,
