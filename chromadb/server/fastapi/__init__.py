@@ -8,7 +8,7 @@ from anyio import (
     CapacityLimiter,
 )  # this is used to transform sync code to async. By default, AnyIO uses 40 threads pool
 from fastapi import FastAPI as _FastAPI, Response, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
@@ -69,11 +69,6 @@ from chromadb.telemetry.opentelemetry import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class ORJSONResponse(JSONResponse):  # type: ignore
-    def render(self, content: Any) -> bytes:
-        return orjson.dumps(content)  # type: ignore
 
 
 def use_route_names_as_operation_ids(app: _FastAPI) -> None:
@@ -139,12 +134,14 @@ class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
+        # https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
         self._app = fastapi.FastAPI(debug=True, default_response_class=ORJSONResponse)
         self._system = System(settings)
         self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
-        self._thread_pool_size = settings.chroma_server_thread_pool_size
-        self._capacity_limiter = CapacityLimiter(self._thread_pool_size)
+        self._capacity_limiter = CapacityLimiter(
+            settings.chroma_server_thread_pool_size
+        )
         self._system.start()
 
         self._app.middleware("http")(check_http_version_middleware)
@@ -156,7 +153,9 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
         self._app.add_exception_handler(QuotaError, self.quota_exception_handler)
-        self._app.add_exception_handler(RateLimitError, self.rate_limit_exception_handler)
+        self._app.add_exception_handler(
+            RateLimitError, self.rate_limit_exception_handler
+        )
 
         self._app.on_event("shutdown")(self.shutdown)
 
@@ -308,9 +307,10 @@ class FastAPI(chromadb.server.Server):
     async def rate_limit_exception_handler(self, request: Request, exc: RateLimitError):
         return JSONResponse(
             status_code=429,
-            content={"message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"},
+            content={
+                "message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"
+            },
         )
-
 
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
@@ -318,7 +318,9 @@ class FastAPI(chromadb.server.Server):
     async def quota_exception_handler(self, request: Request, exc: QuotaError):
         return JSONResponse(
             status_code=429,
-            content={"message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"},
+            content={
+                "message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"
+            },
         )
 
     def heartbeat(self) -> Dict[str, int]:
@@ -492,19 +494,13 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    async def delete_collection(
+    def delete_collection(
         self,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.delete_collection,
-            collection_name,
-            tenant,
-            database,
-            limiter=self._capacity_limiter,
-        )
+        return self._api.delete_collection(collection_name, tenant, database)
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -517,16 +513,21 @@ class FastAPI(chromadb.server.Server):
     )
     async def add(self, request: Request, collection_id: str) -> None:
         try:
-            raw_body = await request.body()
-            add = AddEmbedding.model_validate(orjson.loads(raw_body))
+
+            def process_add(raw_body: bytes) -> bool:
+                add = AddEmbedding.model_validate(orjson.loads(raw_body))
+                return self._api._add(
+                    collection_id=_uuid(collection_id),
+                    ids=add.ids,
+                    embeddings=add.embeddings,  # type: ignore
+                    metadatas=add.metadatas,  # type: ignore
+                    documents=add.documents,  # type: ignore
+                    uris=add.uris,  # type: ignore
+                )
+
             result = await to_thread.run_sync(
-                self._api._add,
-                add.ids,
-                _uuid(collection_id),
-                add.embeddings,
-                add.metadatas,
-                add.documents,
-                add.uris,
+                process_add,
+                await request.body(),
                 limiter=self._capacity_limiter,
             )
         except InvalidDimensionException as e:
@@ -543,16 +544,20 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def update(self, request: Request, collection_id: str) -> None:
-        raw_body = await request.body()
-        add = UpdateEmbedding.model_validate(orjson.loads(raw_body))
+        def process_update(raw_body: bytes) -> bool:
+            update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
+            return self._api._update(
+                collection_id=_uuid(collection_id),
+                ids=update.ids,
+                embeddings=update.embeddings,
+                metadatas=update.metadatas,  # type: ignore
+                documents=update.documents,  # type: ignore
+                uris=update.uris,  # type: ignore
+            )
+
         await to_thread.run_sync(
-            self._api._update,
-            _uuid(collection_id),
-            add.ids,
-            add.embeddings,
-            add.metadatas,
-            add.documents,
-            add.uris,
+            process_update,
+            await request.body(),
             limiter=self._capacity_limiter,
         )
 
@@ -566,17 +571,20 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def upsert(self, request: Request, collection_id: str) -> None:
-        raw_body = await request.body()
-        collection_id = request.path_params.get("collection_id")
-        upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
+        def process_upsert(raw_body: bytes) -> bool:
+            upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
+            return self._api._upsert(
+                collection_id=_uuid(collection_id),
+                ids=upsert.ids,
+                embeddings=upsert.embeddings,  # type: ignore
+                metadatas=upsert.metadatas,  # type: ignore
+                documents=upsert.documents,  # type: ignore
+                uris=upsert.uris,  # type: ignore
+            )
+
         await to_thread.run_sync(
-            self._api._upsert,
-            _uuid(collection_id),
-            upsert.ids,
-            upsert.embeddings,
-            upsert.metadatas,
-            upsert.documents,
-            upsert.uris,
+            process_upsert,
+            await request.body(),
             limiter=self._capacity_limiter,
         )
 
@@ -589,21 +597,25 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    async def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
+    async def get(self, collection_id: str, request: Request) -> GetResult:
+        def process_get(raw_body: bytes) -> GetResult:
+            get = GetEmbedding.model_validate(orjson.loads(raw_body))
+            return self._api._get(
+                collection_id=_uuid(collection_id),
+                ids=get.ids,
+                where=get.where,
+                sort=get.sort,
+                limit=get.limit,
+                offset=get.offset,
+                where_document=get.where_document,
+                include=get.include,
+            )
+
         return cast(
             GetResult,
             await to_thread.run_sync(
-                self._api._get,
-                _uuid(collection_id),
-                get.ids,
-                get.where,
-                get.sort,
-                get.limit,
-                get.offset,
-                None,
-                None,
-                get.where_document,
-                get.include,
+                process_get,
+                await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
@@ -617,15 +629,23 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    async def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
+    async def delete(self, collection_id: str, request: Request) -> List[UUID]:
+        raw_body = await request.body()
+
+        def process_delete(raw_body: bytes) -> List[str]:
+            delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
+            return self._api._delete(
+                collection_id=_uuid(collection_id),
+                ids=delete.ids,
+                where=delete.where,
+                where_document=delete.where_document,
+            )
+
         return cast(
             List[UUID],
             await to_thread.run_sync(
-                self._api._delete,
-                _uuid(collection_id),
-                delete.ids,
-                delete.where,
-                delete.where_document,
+                process_delete,
+                raw_body,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -639,13 +659,8 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    async def count(self, collection_id: str) -> int:
-        return cast(
-            int,
-            await to_thread.run_sync(
-                self._api._count, _uuid(collection_id), limiter=self._capacity_limiter
-            ),
-        )
+    def count(self, collection_id: str) -> int:
+        return self._api._count(_uuid(collection_id))
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -668,18 +683,26 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def get_nearest_neighbors(
-        self, collection_id: str, query: QueryEmbedding
+        self, collection_id: str, request: Request
     ) -> QueryResult:
+        raw_body = await request.body()  # we don't block main thread here
+
+        def process_query(raw_body: bytes) -> QueryResult:
+            query = QueryEmbedding.model_validate(orjson.loads(raw_body))
+            return self._api._query(
+                collection_id=_uuid(collection_id),
+                query_embeddings=query.query_embeddings,
+                n_results=query.n_results,
+                where=query.where,  # type: ignore
+                where_document=query.where_document,  # type: ignore
+                include=query.include,
+            )
+
         nnresult = cast(
             QueryResult,
-            await to_thread.run_sync(
-                self._api._query,
-                _uuid(collection_id),
-                query.query_embeddings,
-                query.n_results,
-                query.where,
-                query.where_document,
-                query.include,
+            await to_thread.run_sync(  # we don't block main thread here
+                process_query,
+                raw_body,
                 limiter=self._capacity_limiter,
             ),
         )
