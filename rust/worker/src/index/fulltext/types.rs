@@ -6,6 +6,10 @@ use crate::blockstore::{Blockfile, BlockfileKey, Key, PositionalPostingListBuild
 use crate::index::fulltext::tokenizer::{ChromaTokenizer, ChromaTokenStream};
 use tantivy::tokenizer::Token;
 
+static MAX_DOC_SIZE: usize = 16000;
+static MIN_QUERY_SIZE: usize = 3;
+static MIN_DOC_SIZE: usize = 5;
+
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
     #[error("Already in a transaction")]
@@ -69,11 +73,11 @@ impl BlockfileFullTextIndex {
 
 impl BlockfileFullTextIndex {
     // Factored this way for testing.
-    fn search_immutable(&self, tokens: &Vec<Token>) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+    fn search_tokens(&self, tokens: &Vec<Token>) -> Result<Vec<i32>, Box<dyn ChromaError>> {
         if tokens.is_empty() {
             return Ok(vec![]);
         }
-        if tokens.iter().map(|t| t.position_length).sum::<usize>() < 3 {
+        if tokens.iter().map(|t| t.position_length).sum::<usize>() < MIN_QUERY_SIZE {
             return Err(Box::new(FullTextIndexError::QueryTooShort));
         }
         // Get query tokens sorted by frequency.
@@ -190,7 +194,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
         if !self.in_transaction {
             return Err(Box::new(FullTextIndexError::NotInTransaction));
         }
-        if document.len() < 5 as usize {
+        if document.len() < MIN_DOC_SIZE as usize {
             return Err(Box::new(FullTextIndexError::DocumentTooShort));
         }
         if offset_id < 0 {
@@ -220,12 +224,12 @@ impl FullTextIndex for BlockfileFullTextIndex {
         if self.in_transaction {
             return Err(Box::new(FullTextIndexError::InTransaction));
         }
-        if query.len() < 3 as usize {
+        if query.len() < MIN_QUERY_SIZE {
             return Err(Box::new(FullTextIndexError::QueryTooShort));
         }
         let binding = self.tokenizer.encode(query);
         let tokens = binding.get_tokens();
-        return self.search_immutable(tokens);
+        return self.search_tokens(tokens);
     }
 }
 
@@ -336,9 +340,6 @@ mod test {
     #[derive(Debug, Clone)]
     pub(crate) struct ReferenceState {
         in_transaction: bool,
-        // TODO use a real, tested, external index. This works for now but test
-        // time grows quadratically in # of steps, limiting how thorough we
-        // can be.
         state: HashMap<String, i32>,
     }
 
@@ -351,7 +352,7 @@ mod test {
         }
 
         fn search(&self, query: &str) -> Vec<i32> {
-            if query.len() < 3 {
+            if query.len() < MIN_QUERY_SIZE {
                 return vec![];
             }
             if self.in_transaction {
@@ -367,7 +368,7 @@ mod test {
         }
 
         fn add_document(&mut self, doc: String, id: i32) {
-            if doc.len() < 5 {
+            if doc.len() < MIN_DOC_SIZE {
                 return;
             }
             if id < 0 {
@@ -379,6 +380,10 @@ mod test {
             self.state.insert(doc, id);
         }
     }
+
+    static DOC_STRATEGY: &str = ".{4,16000}";
+    static ID_STRATEGY: &std::ops::Range<i32> = &((-5..999999));
+    static QUERY_STRATEGY: &str = ".{3,1000}";
 
     impl ReferenceStateMachine for ReferenceState {
         type State = ReferenceState;
@@ -394,28 +399,28 @@ mod test {
             if doc.is_none() {
                 return prop_oneof![
                     Just(Transition::BeginTransaction),
-                    (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
-                    ".*{3,1000}".prop_map(Transition::Search),
+                    (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                    QUERY_STRATEGY.prop_map(Transition::Search),
                 ].boxed();
             }
 
             let doc = doc.unwrap();
             let start = rand::thread_rng().gen_range(0..(doc.len() / 2));
-            let end = rand::thread_rng().gen_range((start + 5)..doc.len());
+            let end = rand::thread_rng().gen_range((start + MIN_DOC_SIZE)..doc.len());
             let doc = &doc.try_slice(start..end);
             if doc.is_none() {
                 return prop_oneof![
                     Just(Transition::BeginTransaction),
-                    (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
-                    ".*{3,1000}".prop_map(Transition::Search),
+                    (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                    QUERY_STRATEGY.prop_map(Transition::Search),
                 ].boxed();
             }
             let doc = doc.unwrap();
             prop_oneof![
                 Just(Transition::BeginTransaction),
                 Just(Transition::CommitTransaction),
-                (".{4,16000}", (-5..999999)).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
-                ".*{3,1000}".prop_map(Transition::Search),
+                (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                QUERY_STRATEGY.prop_map(Transition::Search),
                 Just(Transition::Search(doc.to_string())),
             ].boxed()
         }
@@ -432,7 +437,7 @@ mod test {
                     if !state.in_transaction {
                         return state;
                     }
-                    if doc.len() < 5 {
+                    if doc.len() < MIN_DOC_SIZE {
                         return state;
                     }
                     state.add_document(doc.clone(), *id);
@@ -483,7 +488,7 @@ mod test {
                 Transition::AddDocument(doc, id) => {
                     let in_transaction = state.in_transaction();
                     let res = state.add_document(&doc, id);
-                    if !in_transaction || doc.len() < 5 {
+                    if !in_transaction || doc.len() < MIN_DOC_SIZE {
                         assert!(res.is_err());
                     } else {
                         assert!(res.is_ok());
@@ -492,7 +497,7 @@ mod test {
                 Transition::Search(query) => {
                     let in_transaction = state.in_transaction();
                     let res = state.search(&query);
-                    if in_transaction || query.len() < 3 {
+                    if in_transaction || query.len() < MIN_QUERY_SIZE {
                         assert!(res.is_err());
                         return state;
                     }
@@ -520,7 +525,7 @@ mod test {
             let mut tokenizer = TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap()));
             for (doc, id) in &ref_state.state {
                 let tokens = tokenizer.encode(doc);
-                let res = state.search_immutable(&tokens.get_tokens());
+                let res = state.search_tokens(&tokens.get_tokens());
                 let res = res.unwrap();
                 assert!(res.contains(&id));
             }
