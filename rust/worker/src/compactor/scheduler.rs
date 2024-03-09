@@ -182,6 +182,7 @@ mod tests {
     use crate::types::SegmentScope;
     use num_bigint::BigInt;
     use std::collections::HashMap;
+    use std::str::FromStr;
     use std::time::Duration;
     use uuid::Uuid;
 
@@ -271,7 +272,7 @@ mod tests {
     async fn test_scheduler() {
         let mut log = Box::new(InMemoryLog::new());
 
-        let collection_uuid_1 = Uuid::new_v4();
+        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
             collection_id_1.clone(),
@@ -291,7 +292,7 @@ mod tests {
             }),
         );
 
-        let collection_uuid_2 = Uuid::new_v4();
+        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let collection_id_2 = collection_uuid_2.to_string();
         log.add_log(
             collection_id_2.clone(),
@@ -341,7 +342,12 @@ mod tests {
         scheduler.schedule().await;
         let tasks = scheduler.get_tasks();
         assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].collection_id, collection_id_1);
-        assert_eq!(tasks[1].collection_id, collection_id_2);
+        // TODO: 3/9 Tasks may be out of order since we have not yet implemented SysDB Get last compaction time. Use contains instead of equal.
+        let task_ids = tasks
+            .iter()
+            .map(|t| t.collection_id.clone())
+            .collect::<Vec<String>>();
+        assert!(task_ids.contains(&collection_id_1));
+        assert!(task_ids.contains(&collection_id_2));
     }
 }

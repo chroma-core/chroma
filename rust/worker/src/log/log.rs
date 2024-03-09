@@ -20,7 +20,7 @@ pub(crate) struct CollectionInfo {
     pub(crate) first_log_id_ts: i64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct CollectionRecord {
     pub(crate) id: String,
     pub(crate) tenant_id: String,
