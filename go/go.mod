@@ -2,8 +2,6 @@ module github.com/chroma-core/chroma/go
 
 go 1.21
 
-toolchain go1.22.0
-
 require (
 	ariga.io/atlas-provider-gorm v0.3.1
 	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
