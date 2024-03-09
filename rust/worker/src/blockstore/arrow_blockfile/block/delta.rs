@@ -235,7 +235,7 @@ impl BlockDeltaInner {
 
     fn offset_size_for_value_type(&self, item_count: usize, value_type: ValueType) -> usize {
         match value_type {
-            ValueType::Int32Array | ValueType::String => {
+            ValueType::Int32Array | ValueType::String | ValueType::RoaringBitmap => {
                 bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
             }
             _ => unimplemented!("Value type not implemented"),
