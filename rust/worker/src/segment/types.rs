@@ -7,6 +7,6 @@ trait SegmentImpl {
     fn rollback_transaction(&self);
 }
 
-trait OffsetIdAssigner {
+trait OffsetIdAssigner: SegmentImpl {
     fn assign_offset_ids(&self, records: Vec<Box<EmbeddingRecord>>) -> Vec<u32>;
 }
