@@ -154,16 +154,7 @@ impl BlockDeltaInner {
         let key_offset_bytes = self.offset_size_for_key_type(item_count, key_type);
 
         let value_total_bytes = bit_util::round_upto_multiple_of_64(value_size);
-<<<<<<< HEAD
         let value_offset_bytes = self.offset_size_for_value_type(item_count, value_type);
-=======
-        let value_offset_bytes = match value_type {
-            ValueType::Int32Array | ValueType::String | ValueType::RoaringBitmap => {
-                bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-            }
-            _ => unimplemented!("Value type not implemented"),
-        };
->>>>>>> 14c977d3 (split commits wip)
 
         prefix_total_bytes
             + prefix_offset_bytes
@@ -358,15 +349,6 @@ impl From<Arc<Block>> for BlockDelta {
 
 #[cfg(test)]
 mod test {
-<<<<<<< HEAD
-=======
-    use arrow::array::{Array, Int32Array};
-    use figment::value;
-    use rand::{random, Rng};
-
-    use crate::blockstore::types::{Key, KeyType, ValueType};
-
->>>>>>> 14c977d3 (split commits wip)
     use super::*;
     use crate::blockstore::types::{Key, KeyType, ValueType};
     use arrow::array::Int32Array;
@@ -449,6 +431,5 @@ mod test {
         assert_eq!(size, block_data.get_size());
 
         let (split_key, delta) = delta.split(&block_provider);
-        println!("Split key: {:?}", split_key);
     }
 }
