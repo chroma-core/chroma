@@ -70,8 +70,14 @@ class Producer(Component):
         to submit_embeddings."""
         pass
 
+    @abstractmethod
+    def optimize(self, topic: str) -> SeqId:
+        """Optimize the WAL be pruning unnecessary records and return the number of
+        records pruned. This operation may be slow and should be used sparingly."""
+        pass
 
-ConsumerCallbackFn = Callable[[Sequence[EmbeddingRecord]], None]
+
+ConsumerCallbackFn = Callable[[Sequence[EmbeddingRecord]], Optional[SeqId]]
 
 
 class Consumer(Component):

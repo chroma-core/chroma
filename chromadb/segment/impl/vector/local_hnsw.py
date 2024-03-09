@@ -283,7 +283,7 @@ class LocalHnswSegment(VectorReader):
             self._max_seq_id = batch.max_seq_id
 
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
-    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_records(self, records: Sequence[EmbeddingRecord]) -> int:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
@@ -321,6 +321,7 @@ class LocalHnswSegment(VectorReader):
                     batch.apply(record, label is not None)
 
             self._apply_batch(batch)
+            return self._max_seq_id
 
     @override
     def delete(self) -> None:

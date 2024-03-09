@@ -31,6 +31,7 @@ from chromadb.types import (
     Tenant,
     Unspecified,
     UpdateMetadata,
+    SystemOptimizationStats,
 )
 
 
@@ -456,7 +457,7 @@ class SqlSysDB(SqlDB, SysDB):
 
             # apply limit and offset
             if limit is not None:
-                collections = collections[offset:offset+limit]
+                collections = collections[offset : offset + limit]
             else:
                 collections = collections[offset:]
 
@@ -745,3 +746,12 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         if sql:
             cur.execute(sql, params)
+
+    @trace_method("SqlSysDB.optimize_system", OpenTelemetryGranularity.ALL)
+    @override
+    def optimize_system(self) -> SystemOptimizationStats:
+        """We don't to want to optimize the system at this level as we need a specific implementation (e.g. sqlite)"""
+        return SystemOptimizationStats(
+            db_size_before=-1,
+            db_size_after=-1,
+        )

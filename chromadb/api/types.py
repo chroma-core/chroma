@@ -19,7 +19,15 @@ from inspect import signature
 from tenacity import retry
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "OptimizationStats",
+    "GetResult",
+    "QueryResult",
+]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -178,6 +186,11 @@ class IndexMetadata(TypedDict):
     # Assume cannot overflow
     total_elements_added: int
     time_created: float
+
+
+class OptimizationStats(TypedDict):
+    storage_reduction: float
+    wal_entries_purged: int
 
 
 class EmbeddingFunction(Protocol[D]):

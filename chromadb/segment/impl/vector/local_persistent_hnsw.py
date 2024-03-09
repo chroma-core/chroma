@@ -32,7 +32,6 @@ import logging
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -222,7 +221,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         "PersistentLocalHnswSegment._write_records", OpenTelemetryGranularity.ALL
     )
     @override
-    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_records(self, records: Sequence[EmbeddingRecord]) -> SeqId:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
@@ -277,6 +276,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     self._apply_batch(self._curr_batch)
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()
+            return super().max_seqid()
 
     @override
     def count(self) -> int:

@@ -177,3 +177,10 @@ class Unspecified:
 
 T = TypeVar("T")
 OptionalArgument = Union[T, Unspecified]
+
+
+class SystemOptimizationStats(TypedDict):
+    """Stats for system optimization"""
+
+    db_size_before: int
+    db_size_after: int
