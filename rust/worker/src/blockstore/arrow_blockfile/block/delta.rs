@@ -354,9 +354,13 @@ impl From<Arc<Block>> for BlockDelta {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use super::*;
     use crate::blockstore::types::{Key, KeyType, ValueType};
+    use crate::types::{EmbeddingRecord, ScalarEncoding};
     use arrow::array::Int32Array;
+    use num_bigint::BigInt;
     use rand::{random, Rng};
 
     #[test]
@@ -446,6 +450,33 @@ mod test {
         for i in 0..n {
             let key = BlockfileKey::new("prefix".to_string(), Key::Uint(i as u32));
             let value = Value::UintValue(i as u32);
+            delta.add(key, value);
+        }
+
+        let size = delta.get_size();
+        let block_data = BlockData::try_from(&delta).unwrap();
+        assert_eq!(size, block_data.get_size());
+    }
+
+    #[test]
+    fn get_embedding_record_val() {
+        let block_provider = ArrowBlockProvider::new();
+        let block = block_provider.create_block(KeyType::Uint, ValueType::EmbeddingRecord);
+        let delta = BlockDelta::from(block.clone());
+
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("prefix".to_string(), Key::Uint(i as u32));
+            let value = Value::EmbeddingRecordValue(EmbeddingRecord {
+                seq_id: BigInt::from(0),
+                embedding: Some(vec![1.0, 2.0, 3.0]),
+                id: "test".to_string(),
+                encoding: Some(ScalarEncoding::FLOAT32),
+                metadata: None,
+                operation: crate::types::Operation::Add,
+                collection_id: uuid::Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                    .unwrap(),
+            });
             delta.add(key, value);
         }
 

@@ -1,8 +1,9 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::types::{MetadataValue, UpdateMetadataValue};
 use arrow::array::{
     BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
-    GenericByteBuilder, UInt32Array, UInt32Builder,
+    GenericByteBuilder, StructBuilder, UInt32Array, UInt32Builder,
 };
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
@@ -10,6 +11,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use parking_lot::RwLock;
+use rayon::vec;
 use std::io::Error;
 use std::sync::Arc;
 use thiserror::Error;
@@ -307,6 +309,7 @@ enum ValueBuilder {
     StringValueBuilder(StringBuilder),
     RoaringBitmapBuilder(BinaryBuilder),
     UintValueBuilder(UInt32Builder),
+    EmbeddingRecordBuilder(StructBuilder),
 }
 
 /// BlockDataBuilder is used to build a block. It is used to add data to a block and then build the BlockData once all data has been added.
@@ -404,6 +407,16 @@ impl BlockDataBuilder {
             ValueType::RoaringBitmap => ValueBuilder::RoaringBitmapBuilder(
                 BinaryBuilder::with_capacity(options.item_count, options.total_value_capacity),
             ),
+            ValueType::EmbeddingRecord => {
+                // TODO: how can we set capacity for the vector part of the struct?
+                let document_field = Field::new("document", DataType::Utf8, true);
+                let metadata_field = Field::new("metadata", DataType::Utf8, true);
+                let builder = StructBuilder::from_fields(
+                    vec![document_field, metadata_field],
+                    options.item_count,
+                );
+                ValueBuilder::EmbeddingRecordBuilder(builder)
+            }
             // TODO: Implement the other value types
             _ => unimplemented!(),
         };
@@ -484,6 +497,38 @@ impl BlockDataBuilder {
                         Ok(_) => builder.append_value(&bytes),
                         Err(e) => {
                             return Err(Box::new(BlockDataAddError::RoaringBitmapError(e)));
+                        }
+                    }
+                }
+                _ => unreachable!("Invalid value type for block"),
+            },
+            ValueBuilder::EmbeddingRecordBuilder(ref mut builder) => match value {
+                Value::EmbeddingRecordValue(embedding_record) => {
+                    // TODO: cleanup unwraps
+                    let document_builder = builder.field_builder::<StringBuilder>(0).unwrap();
+                    let metadata_builder = builder.field_builder::<StringBuilder>(1).unwrap();
+                    // If there is a document, it is stored with the special key "chroma:document"
+                    // TODO: clean this up a bit
+                    match embedding_record.metadata {
+                        Some(metadata) => {
+                            if let Some(document) = metadata.get("chroma:document") {
+                                match document {
+                                    UpdateMetadataValue::Str(document) => {
+                                        document_builder.append_value(document);
+                                    }
+                                    _ => {
+                                        // TODO: log error
+                                        // TODO: how to null??
+                                        // document_builder.append_value(None);
+                                    }
+                                }
+                            }
+                            // TODO: Turn metadata into json
+                            metadata_builder.append_value("HAS_METADATA");
+                            builder.append(true);
+                        }
+                        None => {
+                            // TODO: append nulls
                         }
                     }
                 }

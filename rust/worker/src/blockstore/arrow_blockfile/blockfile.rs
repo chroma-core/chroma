@@ -221,6 +221,11 @@ impl Blockfile for ArrowBlockfile {
                     return Err(Box::new(BlockfileError::InvalidValueType));
                 }
             }
+            Value::EmbeddingRecordValue(_) => {
+                if self.value_type != ValueType::EmbeddingRecord {
+                    return Err(Box::new(BlockfileError::InvalidValueType));
+                }
+            }
         }
 
         let transaction_state = match &self.transaction_state {

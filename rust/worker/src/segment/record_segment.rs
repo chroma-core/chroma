@@ -1,7 +1,7 @@
 use super::types::{OffsetIdAssigner, SegmentWriter};
 use crate::blockstore::{provider::BlockfileProvider, Blockfile};
 use crate::blockstore::{KeyType, ValueType};
-use crate::types::EmbeddingRecord;
+use crate::types::{EmbeddingRecord, Segment};
 use std::sync::atomic::AtomicU32;
 
 struct RecordSegment {
@@ -19,7 +19,7 @@ struct RecordSegment {
 }
 
 impl RecordSegment {
-    pub fn new(blockfile_provider: Box<dyn BlockfileProvider>) -> Self {
+    pub fn new(mut blockfile_provider: Box<dyn BlockfileProvider>) -> Self {
         // TODO: file naming etc should be better here (use segment prefix etc.)
         // TODO: move file names to consts
 
