@@ -23,7 +23,7 @@ impl RecordSegment {
         // TODO: file naming etc should be better here
 
         let user_id_to_id =
-            blockfile_provider.create("user_id_to_id", KeyType::String, ValueType::Int32);
+            blockfile_provider.create("user_id_to_id", KeyType::Uint, ValueType::Int32);
         let id_to_user_id =
             blockfile_provider.create("id_to_user_id", KeyType::Int32, ValueType::String);
         let records =
