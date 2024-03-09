@@ -36,19 +36,14 @@ var _ metastore.Catalog = (*Catalog)(nil)
 
 func (tc *Catalog) ResetState(ctx context.Context) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		err := tc.metaDomain.CollectionDb(txCtx).DeleteAll()
-		if err != nil {
-			log.Error("error reset collection db", zap.Error(err))
-			return err
-		}
-		err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteAll()
+		err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteAll()
 		if err != nil {
 			log.Error("error reest collection metadata db", zap.Error(err))
 			return err
 		}
-		err = tc.metaDomain.SegmentDb(txCtx).DeleteAll()
+		err = tc.metaDomain.CollectionDb(txCtx).DeleteAll()
 		if err != nil {
-			log.Error("error reset segment db", zap.Error(err))
+			log.Error("error reset collection db", zap.Error(err))
 			return err
 		}
 		err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteAll()
@@ -56,6 +51,12 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			log.Error("error reset segment metadata db", zap.Error(err))
 			return err
 		}
+		err = tc.metaDomain.SegmentDb(txCtx).DeleteAll()
+		if err != nil {
+			log.Error("error reset segment db", zap.Error(err))
+			return err
+		}
+
 		err = tc.metaDomain.DatabaseDb(txCtx).DeleteAll()
 		if err != nil {
 			log.Error("error reset database db", zap.Error(err))

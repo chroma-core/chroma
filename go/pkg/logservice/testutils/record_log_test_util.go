@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
@@ -10,12 +11,7 @@ import (
 )
 
 func SetupTest(db *gorm.DB, collectionIds ...types.UniqueID) {
-	db.Migrator().DropTable(&dbmodel.Segment{})
-	db.Migrator().CreateTable(&dbmodel.Segment{})
-	db.Migrator().DropTable(&dbmodel.Collection{})
-	db.Migrator().CreateTable(&dbmodel.Collection{})
-	db.Migrator().DropTable(&dbmodel.RecordLog{})
-	db.Migrator().CreateTable(&dbmodel.RecordLog{})
+	dbcore.CreateTestTables(db)
 
 	// create test collections
 	for index, collectionId := range collectionIds {
