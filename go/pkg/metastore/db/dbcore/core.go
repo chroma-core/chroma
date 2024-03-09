@@ -3,13 +3,13 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"github.com/chroma-core/chroma/go/pkg/types"
 	"os"
 	"reflect"
 	"strconv"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
-	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
@@ -117,39 +117,28 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
-func CreateTestTables(db *gorm.DB) {
-	// Setup tenant related tables
-	db.Migrator().DropTable(&dbmodel.Tenant{})
-	db.Migrator().CreateTable(&dbmodel.Tenant{})
+func ResetTestTables(db *gorm.DB) {
+	db.Exec("TRUNCATE TABLE tenants, databases, collection_metadata, collections, segment_metadata, segments, notifications")
+	CreateDefaultTenantAndDatabase(db)
+}
+
+func CreateDefaultTenantAndDatabase(db *gorm.DB) {
 	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
 		ID: common.DefaultTenant,
 	})
-
-	// Setup database related tables
-	db.Migrator().DropTable(&dbmodel.Database{})
-	db.Migrator().CreateTable(&dbmodel.Database{})
-
 	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
 		ID:       types.NilUniqueID().String(),
 		Name:     common.DefaultDatabase,
 		TenantID: common.DefaultTenant,
 	})
+}
 
-	// Setup collection related tables
-	db.Migrator().DropTable(&dbmodel.Collection{})
-	db.Migrator().DropTable(&dbmodel.CollectionMetadata{})
-	db.Migrator().CreateTable(&dbmodel.Collection{})
-	db.Migrator().CreateTable(&dbmodel.CollectionMetadata{})
+func CreateTestTables(db *gorm.DB) {
+	log.Info("CreateTestTables")
+	db.AutoMigrate(&dbmodel.Tenant{}, &dbmodel.Database{}, &dbmodel.CollectionMetadata{}, &dbmodel.Collection{}, &dbmodel.SegmentMetadata{}, &dbmodel.Segment{}, &dbmodel.Notification{})
 
-	// Setup segment related tables
-	db.Migrator().DropTable(&dbmodel.Segment{})
-	db.Migrator().DropTable(&dbmodel.SegmentMetadata{})
-	db.Migrator().CreateTable(&dbmodel.Segment{})
-	db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
-
-	// Setup notification related tables
-	db.Migrator().DropTable(&dbmodel.Notification{})
-	db.Migrator().CreateTable(&dbmodel.Notification{})
+	// create default tenant and database
+	CreateDefaultTenantAndDatabase(db)
 }
 
 func GetDBConfigForTesting() DBConfig {
