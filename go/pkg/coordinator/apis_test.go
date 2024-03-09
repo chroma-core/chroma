@@ -33,12 +33,12 @@ func (suite *APIsTestSuite) SetupSuite() {
 
 func (suite *APIsTestSuite) SetupTest() {
 	log.Info("setup test")
-	dbcore.ResetTables(suite.db)
+	dbcore.ResetTestTables(suite.db)
 }
 
 func (suite *APIsTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	dbcore.ResetTables(suite.db)
+	dbcore.ResetTestTables(suite.db)
 }
 
 // TODO: This is not complete yet. We need to add more tests for the other APIs.

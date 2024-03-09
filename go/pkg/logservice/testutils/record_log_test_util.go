@@ -11,7 +11,7 @@ import (
 )
 
 func SetupTest(db *gorm.DB, collectionIds ...types.UniqueID) {
-	dbcore.CreateTestTables(db)
+	dbcore.ResetTestTables(db)
 
 	// create test collections
 	for index, collectionId := range collectionIds {

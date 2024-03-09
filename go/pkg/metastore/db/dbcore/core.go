@@ -117,7 +117,7 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
-func ResetTables(db *gorm.DB) {
+func ResetTestTables(db *gorm.DB) {
 	db.Exec("TRUNCATE TABLE tenants, databases, collection_metadata, collections, segment_metadata, segments, notifications")
 	CreateDefaultTenantAndDatabase(db)
 }
