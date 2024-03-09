@@ -20,29 +20,31 @@ struct RecordSegment {
 
 impl RecordSegment {
     pub fn new(blockfile_provider: Box<dyn BlockfileProvider>) -> Self {
-        // TODO: file naming etc should be better here
+        // TODO: file naming etc should be better here (use segment prefix etc.)
+        // TODO: move file names to consts
 
         let user_id_to_id =
-            blockfile_provider.create("user_id_to_id", KeyType::Uint, ValueType::Int32);
+            blockfile_provider.create("user_id_to_offset_id", KeyType::String, ValueType::Uint);
         let id_to_user_id =
-            blockfile_provider.create("id_to_user_id", KeyType::Int32, ValueType::String);
+            blockfile_provider.create("offset_id_to_user_id", KeyType::Uint, ValueType::String);
+        // TODO: add embedding record as a value type
         let records =
-            blockfile_provider.create("record", KeyType::Int32, ValueType::EmbeddingRecord);
+            blockfile_provider.create("record", KeyType::Uint, ValueType::EmbeddingRecord);
 
-        RecordSegment {
-            user_id_to_id: blockfile_provider.create(
-                "user_id_to_id",
-                KeyType::String,
-                ValueType::Int32,
-            ),
-            id_to_user_id: blockfile_provider.create(
-                "id_to_user_id",
-                KeyType::Int32,
-                ValueType::String,
-            ),
-            record: blockfile_provider.create("record", KeyType::Int32, ValueType::EmbeddingRecord),
-            current_max_offset_id: AtomicU32::new(0),
+        match (user_id_to_id, id_to_user_id, records) {
+            (Ok(user_id_to_id), Ok(id_to_user_id), Ok(records)) => RecordSegment {
+                user_id_to_id,
+                id_to_user_id,
+                records,
+                current_max_offset_id: AtomicU32::new(0),
+            },
+            // TODO: prefer to error out here
+            _ => panic!("Failed to create blockfiles"),
         }
+    }
+
+    pub fn from_segment(segment: &Segment, blockfile_provider: Box<dyn BlockfileProvider>) -> Self {
+        todo!()
     }
 }
 
