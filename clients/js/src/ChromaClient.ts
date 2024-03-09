@@ -48,8 +48,10 @@ export class ChromaClient {
         this.tenant = tenant;
         this.database = database;
 
+        const basePath = path.replace(/\/+$/, '');
+
         const apiConfig: Configuration = new Configuration({
-            basePath: path,
+            basePath,
         });
 
         if (auth !== undefined) {
@@ -60,7 +62,7 @@ export class ChromaClient {
         }
 
         this._adminClient = new AdminClient({
-            path: path,
+            path: basePath,
             fetchOptions: fetchOptions,
             auth: auth,
             tenant: tenant,
