@@ -161,6 +161,11 @@ impl Blockfile for ArrowBlockfile {
                     return Err(Box::new(BlockfileError::InvalidKeyType));
                 }
             }
+            Key::Uint(_) => {
+                if self.key_type != KeyType::Uint {
+                    return Err(Box::new(BlockfileError::InvalidKeyType));
+                }
+            }
         }
 
         // Validate value type
@@ -175,8 +180,13 @@ impl Blockfile for ArrowBlockfile {
                     return Err(Box::new(BlockfileError::InvalidValueType));
                 }
             }
-            Value::Int32Value(_) => {
-                if self.value_type != ValueType::Int32 {
+            Value::IntValue(_) => {
+                if self.value_type != ValueType::Int {
+                    return Err(Box::new(BlockfileError::InvalidValueType));
+                }
+            }
+            Value::UintValue(_) => {
+                if self.value_type != ValueType::Uint {
                     return Err(Box::new(BlockfileError::InvalidValueType));
                 }
             }
@@ -565,6 +575,31 @@ mod tests {
                         bitmap.iter().collect::<Vec<u32>>(),
                         (0..i).collect::<Vec<u32>>()
                     );
+                }
+                _ => panic!("Unexpected value type"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_uint_key_val() {
+        let block_provider = ArrowBlockProvider::new();
+        let mut blockfile = ArrowBlockfile::new(KeyType::Uint, ValueType::Uint, block_provider);
+
+        blockfile.begin_transaction().unwrap();
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::Uint(i as u32));
+            blockfile.set(key, Value::UintValue(i as u32)).unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
+
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::Uint(i as u32));
+            let res = blockfile.get(key).unwrap();
+            match res {
+                Value::UintValue(val) => {
+                    assert_eq!(val, i as u32);
                 }
                 _ => panic!("Unexpected value type"),
             }

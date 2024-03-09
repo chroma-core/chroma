@@ -49,6 +49,7 @@ impl Key {
             Key::String(s) => s.len(),
             Key::Float(_) => 4,
             Key::Bool(_) => 1,
+            Key::Uint(_) => 4,
         }
     }
 }
@@ -69,6 +70,7 @@ impl From<&BlockfileKey> for KeyType {
             Key::String(_) => KeyType::String,
             Key::Float(_) => KeyType::Float,
             Key::Bool(_) => KeyType::Bool,
+            Key::Uint(_) => KeyType::Uint,
         }
     }
 }
@@ -78,6 +80,7 @@ pub(crate) enum Key {
     String(String),
     Float(f32),
     Bool(bool),
+    Uint(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,6 +88,7 @@ pub(crate) enum KeyType {
     String,
     Float,
     Bool,
+    Uint,
 }
 
 impl Display for Key {
@@ -93,6 +97,7 @@ impl Display for Key {
             Key::String(s) => write!(f, "{}", s),
             Key::Float(fl) => write!(f, "{}", fl),
             Key::Bool(b) => write!(f, "{}", b),
+            Key::Uint(u) => write!(f, "{}", u),
         }
     }
 }
@@ -146,15 +151,19 @@ impl Ord for BlockfileKey {
             match self.key {
                 Key::String(ref s1) => match &other.key {
                     Key::String(s2) => s1.cmp(s2),
-                    _ => panic!("Cannot compare string to float or bool"),
+                    _ => panic!("Cannot compare string to float, bool, or uint"),
                 },
                 Key::Float(f1) => match &other.key {
                     Key::Float(f2) => f1.partial_cmp(f2).unwrap(),
-                    _ => panic!("Cannot compare float to string or bool"),
+                    _ => panic!("Cannot compare float to string, bool, or uint"),
                 },
                 Key::Bool(b1) => match &other.key {
                     Key::Bool(b2) => b1.cmp(b2),
-                    _ => panic!("Cannot compare bool to string or float"),
+                    _ => panic!("Cannot compare bool to string, float, or uint"),
+                },
+                Key::Uint(u1) => match &other.key {
+                    Key::Uint(u2) => u1.cmp(u2),
+                    _ => panic!("Cannot compare uint to string, float, or bool"),
                 },
             }
         } else {
@@ -170,7 +179,8 @@ pub(crate) enum Value {
     Int32ArrayValue(Int32Array),
     PositionalPostingListValue(PositionalPostingList),
     StringValue(String),
-    Int32Value(i32),
+    IntValue(i32),
+    UintValue(u32),
     RoaringBitmapValue(RoaringBitmap),
 }
 
@@ -199,7 +209,8 @@ impl Clone for Value {
             }
             Value::StringValue(s) => Value::StringValue(s.clone()),
             Value::RoaringBitmapValue(bitmap) => Value::RoaringBitmapValue(bitmap.clone()),
-            Value::Int32Value(i) => Value::Int32Value(*i),
+            Value::IntValue(i) => Value::IntValue(*i),
+            Value::UintValue(u) => Value::UintValue(*u),
         }
     }
 }
@@ -213,7 +224,7 @@ impl Value {
             }
             Value::StringValue(s) => s.len(),
             Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
-            Value::Int32Value(_) => 4,
+            Value::IntValue(_) | Value::UintValue(_) => 4,
         }
     }
 }
@@ -225,7 +236,8 @@ impl From<&Value> for ValueType {
             Value::PositionalPostingListValue(_) => ValueType::PositionalPostingList,
             Value::RoaringBitmapValue(_) => ValueType::RoaringBitmap,
             Value::StringValue(_) => ValueType::String,
-            Value::Int32Value(_) => ValueType::Int32,
+            Value::IntValue(_) => ValueType::Int,
+            Value::UintValue(_) => ValueType::Uint,
         }
     }
 }
@@ -236,7 +248,8 @@ pub(crate) enum ValueType {
     PositionalPostingList,
     RoaringBitmap,
     String,
-    Int32,
+    Int,
+    Uint,
 }
 
 pub(crate) trait Blockfile: BlockfileClone {
