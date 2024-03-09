@@ -28,11 +28,14 @@ Community issues associated with slow performance:
 
 ## Public Interfaces
 
-This CIP proposes the following changes to the public interfaces:
+Upon further examination of possible approaches, we do not suggest any changes to the public interface, other than
+the following configuration options:
 
-- `client.otimize()` - a new Client method that will trigger optimization for the entire database. It is important to
-  keep in mind that this action will be applicable to single-node Chroma.
-- New API endpoint - `/api/v1/optimize` - a new API endpoint that will trigger optimization on a remote server.
+- `maintenance_clean_wal_at_startup` - a boolean flag that defaults to `False`
+- `maintenance_clean_wal_every_x_updates` - an integer indicating the number of WAL updates to trigger clean up. Defaults to `10` (optional)
+- `maintenance_clean_wal_every_x_seconds` - an integer indicating the number of seconds to trigger clean up. Defaults to `3600` (optional)
+- `maintenance_vacuum_at_startup` - a boolean flag that defaults to `False`
+- `maintenance_vacuum_every_x_seconds` - an integer indicating the number of seconds to trigger vacuum. Defaults to `3600`
 
 ## Proposed Changes
 
@@ -45,12 +48,74 @@ The changes impact several parts of the system:
 
 We propose the following optimization actions:
 
-- Clean up the WAL - the change is introduced at `Producer`
+- WAL Cleanup - the change is introduced in `EmbeddingQueue`
 - Run `VAUCUM` - Changes introduced at SysDB level
 - Run `ANALYZE` - Changes introduced at SysDB level
 
 While the optimize operation is going to be safe to run on a live system, we suggest that users use it on off-peak
 hours, as it will impact performance.
+
+#### WAL Cleanup
+
+Cleaning up the WAL is really a great way to reduce the storage requirements of Chroma and should be performed
+periodically, even without the user intervention. E.g. calling a maintenance task. A good DB should not have to force
+users into keeping track and maintaining it.
+
+For the aforementioned reason, we propose that WAL clean-up is implemented and performed implicitly via configuration.
+We propose the following two options:
+
+- At startup
+- Reactive - whenever the user is using the database.
+
+> Note: The above options are not mutually exclusive.
+
+The `At startup` options is great for when users are upgrading e.g. from previous to the release introducing the WAL
+clean up. This will help users reign in their storage the moment they upgrade. This is great, but we should acknowledge
+that WAL clean-ups, depending on the size of the WAL can be time-consuming, therefore we suggest that a warning message
+is displayed to the user to indicate that the WAL will be cleaned up, and they should expect a delay in the startup. We
+further propose that this option is configured via a new configuration option `clean_wal_at_startup` (or similar) which
+defaults to `False`.
+
+The `Reactive` option is great for ongoing maintenance for Chroma instances that are long-running. We propose that any
+update operation (e.g. `add()`, `update()`, `delete()`) will trigger a WAL clean-up, as a background task (
+see [FastAPI docs](https://fastapi.tiangolo.com/reference/background/)), that will not impact the user experience. We
+propose several heuristics to trigger the WAL clean-up:
+
+- Every `n` operations - where `n` is a configuration option that defaults to `10` (or something more sensible, based on
+  posthog stats)
+- Every `m` seconds - where `m` is a configuration option that defaults to `3600`
+
+> Note: Possibly better approach is to use scheduled maintenance where the cleanup is executed on a predefined
+> schedule (e.g. low-traffic hours). However, such scheduling requires a scheduler which is not available in Chroma at
+> the moment.
+
+Important factor about the WAL is that it is an excellent way to recover from a crash, corruption of the binary indices,
+or accidental deletes. Therefore, we suggest that requisite measures are put in place to ensure that users have the
+ability to back up their WAL prior to clean-up. We feel strongly about not, destroying a perfectly good source of
+recovery, so we propose that the WAL backup feature is part of this CIP.
+
+To keep things simple we suggest that WAL backups are snapshots of the WAL at a given point in time. We propose that the
+user specifies the location where backups are stored. Each backup is a dump of the WAL as a separate sqlite3 file, but
+archived and timestamped.
+
+#### VACUUM
+
+`VACUUM` is a blocking operation from sqlite3 perspective, and we suggest that our approach to it is similar to the WAL
+clean-up where, we carry out the operation outside of normal DB transactions or even the API.
+
+Similarly to the WAL clean-up, we propose that the VACUUM operation is performed implicitly via configuration and does
+not require active involvement from the user. We propose that VACUUM operation is carried at:
+
+- `Startup`
+- `Reactive` - whenever the user is actively using the database, and upon reaching a certain threshold of free pages in
+  the sqlite3 file.
+
+During startup, we propose that analogous to the WAL clean-up, a warning message is displayed to the user to indicate
+that the VACUUM will be performed, and they should expect a delay in the startup. We further propose that this option is
+configured via a new configuration option `vacuum_at_startup` (or similar) which defaults to `False`.
+
+The `Reactive`, will ticker as the `VACUUM` locks the sqlite3 db until it is complete. For highly-fragmented sqlite3
+this operation can take a long time, thus completely locking up Chroma.
 
 ### Dry Run
 
