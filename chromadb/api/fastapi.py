@@ -641,14 +641,14 @@ def raise_chroma_error(resp: requests.Response) -> None:
         if "error" in body:
             if body["error"] in errors.error_types:
                 chroma_error = errors.error_types[body["error"]](body["message"])
+            else:
+                chroma_error = errors.GenericError(resp.status_code, body["message"])
 
+    # TODO do we need to catch BaseException here?
     except BaseException:
         pass
 
     if chroma_error:
         raise chroma_error
 
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError:
-        raise (Exception(resp.text))
+    resp.raise_for_status()
