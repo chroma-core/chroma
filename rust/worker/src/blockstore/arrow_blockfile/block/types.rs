@@ -5,6 +5,7 @@ use arrow::array::{
     BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
     GenericByteBuilder, StructBuilder, UInt32Array, UInt32Builder,
 };
+use arrow::datatypes::Fields;
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
     datatypes::{DataType, Field},
@@ -506,11 +507,11 @@ impl BlockDataBuilder {
                 Value::EmbeddingRecordValue(embedding_record) => {
                     // TODO: cleanup unwraps
                     let document_builder = builder.field_builder::<StringBuilder>(0).unwrap();
-                    let metadata_builder = builder.field_builder::<StringBuilder>(1).unwrap();
                     // If there is a document, it is stored with the special key "chroma:document"
                     // TODO: clean this up a bit
                     match embedding_record.metadata {
                         Some(metadata) => {
+                            // If there is a document, add it
                             if let Some(document) = metadata.get("chroma:document") {
                                 match document {
                                     UpdateMetadataValue::Str(document) => {
@@ -524,6 +525,8 @@ impl BlockDataBuilder {
                                 }
                             }
                             // TODO: Turn metadata into json
+                            let metadata_builder =
+                                builder.field_builder::<StringBuilder>(1).unwrap();
                             metadata_builder.append_value("HAS_METADATA");
                             builder.append(true);
                         }
@@ -590,6 +593,18 @@ impl BlockDataBuilder {
             }
             ValueBuilder::RoaringBitmapBuilder(ref mut builder) => {
                 value_field = Field::new("value", DataType::Binary, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
+            ValueBuilder::EmbeddingRecordBuilder(ref mut builder) => {
+                value_field = Field::new(
+                    "value",
+                    DataType::Struct(Fields::from(vec![
+                        Field::new("document", DataType::Utf8, true),
+                        Field::new("metadata", DataType::Utf8, true),
+                    ])),
+                    true,
+                );
                 let arr = builder.finish();
                 (&arr as &dyn Array).slice(0, arr.len())
             }

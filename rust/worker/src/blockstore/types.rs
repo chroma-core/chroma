@@ -226,7 +226,16 @@ impl Value {
             Value::PositionalPostingListValue(list) => {
                 unimplemented!("Size of positional posting list")
             }
-            Value::EmbeddingRecordValue(record) => unimplemented!(),
+            Value::EmbeddingRecordValue(record) => {
+                let user_id_size = record.id.len();
+                let embedding_size = match &record.embedding {
+                    Some(embedding) => embedding.len(),
+                    None => 0,
+                };
+                let metadata_size = 0; // TODO: this should be json size
+                let document_size = 0; // TODO: this should be string size of document
+                user_id_size + embedding_size + metadata_size + document_size
+            }
             Value::StringValue(s) => s.len(),
             Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
             Value::IntValue(_) | Value::UintValue(_) => 4,
