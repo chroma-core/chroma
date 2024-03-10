@@ -1,10 +1,10 @@
 package dao
 
 import (
-	"testing"
-
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"testing"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -19,16 +19,7 @@ func TestCollectionDb_GetCollections(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = db.AutoMigrate(&dbmodel.Tenant{}, &dbmodel.Database{}, &dbmodel.Collection{}, &dbmodel.CollectionMetadata{})
-	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
-		ID: common.DefaultTenant,
-	})
-
-	databaseID := types.NilUniqueID().String()
-	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
-		ID:       databaseID,
-		Name:     common.DefaultDatabase,
-		TenantID: common.DefaultTenant,
-	})
+	databaseID := dbcore.CreateDefaultTenantAndDatabase(db)
 
 	assert.NoError(t, err)
 	name := "test_name"

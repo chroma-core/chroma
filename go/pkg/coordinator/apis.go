@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
@@ -27,6 +28,8 @@ type ICoordinator interface {
 	GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
 	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
+	SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error
+	GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error)
 }
 
 func (s *Coordinator) ResetState(ctx context.Context) error {
@@ -155,4 +158,12 @@ func verifySegmentMetadata(metadata *model.SegmentMetadata[model.SegmentMetadata
 		}
 	}
 	return nil
+}
+
+func (s *Coordinator) SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error {
+	return s.catalog.SetTenantLastCompactionTime(ctx, tenantID, lastCompactionTime)
+}
+
+func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	return s.catalog.GetTenantsLastCompactionTime(ctx, tenantIDs)
 }

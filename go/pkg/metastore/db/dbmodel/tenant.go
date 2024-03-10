@@ -12,7 +12,7 @@ type Tenant struct {
 	IsDeleted          bool            `gorm:"is_deleted;type:bool;default:false"`
 	CreatedAt          time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt          time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
-	LastCompactionTime time.Time       `gorm:"last_compaction_time;type:timestamp;not null;default:current_timestamp"`
+	LastCompactionTime int64           `gorm:"last_compaction_time;not null"`
 }
 
 func (v Tenant) TableName() string {
@@ -25,4 +25,6 @@ type ITenantDb interface {
 	GetTenants(tenantID string) ([]*Tenant, error)
 	Insert(in *Tenant) error
 	DeleteAll() error
+	UpdateTenantLastCompactionTime(tenantID string, lastCompactionTime int64) error
+	GetTenantsLastCompactionTime(tenantIDs []string) ([]*Tenant, error)
 }
