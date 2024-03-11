@@ -22,7 +22,6 @@ use thiserror::Error;
 /// let blockfile = provider.create("test", KeyType::String, ValueType::Int32Array);
 /// ```
 pub(crate) trait BlockfileProvider {
-    fn new() -> Self;
     fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>>;
     fn create(
         &mut self,
@@ -40,13 +39,15 @@ pub(crate) struct HashMapBlockfileProvider {
     files: Arc<RwLock<HashMap<String, Box<dyn Blockfile>>>>,
 }
 
-impl BlockfileProvider for HashMapBlockfileProvider {
-    fn new() -> Self {
+impl HashMapBlockfileProvider {
+    pub(crate) fn new() -> Self {
         Self {
             files: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+}
 
+impl BlockfileProvider for HashMapBlockfileProvider {
     fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>> {
         match self.files.read().get(path) {
             Some(file) => Ok(file.clone()),

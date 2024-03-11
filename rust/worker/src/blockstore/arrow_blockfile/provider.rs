@@ -14,14 +14,16 @@ pub(super) struct ArrowBlockfileProvider {
     files: HashMap<String, Box<dyn Blockfile>>,
 }
 
-impl BlockfileProvider for ArrowBlockfileProvider {
-    fn new() -> Self {
+impl ArrowBlockfileProvider {
+    pub(super) fn new() -> Self {
         Self {
             block_provider: ArrowBlockProvider::new(),
             files: HashMap::new(),
         }
     }
+}
 
+impl BlockfileProvider for ArrowBlockfileProvider {
     fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>> {
         match self.files.get(path) {
             Some(file) => Ok(file.clone()),
