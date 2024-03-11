@@ -1,4 +1,4 @@
 mod block;
 mod blockfile;
-mod provider;
+pub(crate) mod provider;
 mod sparse_index;

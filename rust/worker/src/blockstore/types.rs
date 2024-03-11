@@ -254,7 +254,7 @@ impl From<&Value> for ValueType {
             Value::Int32ArrayValue(_) => ValueType::Int32Array,
             Value::PositionalPostingListValue(_) => ValueType::PositionalPostingList,
             Value::RoaringBitmapValue(_) => ValueType::RoaringBitmap,
-            Value::EmbeddingRecordValue(_) => unimplemented!(),
+            Value::EmbeddingRecordValue(_) => ValueType::EmbeddingRecord,
             Value::StringValue(_) => ValueType::String,
             Value::IntValue(_) => ValueType::Int,
             Value::UintValue(_) => ValueType::Uint,

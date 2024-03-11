@@ -218,7 +218,11 @@ impl BlockDeltaInner {
     fn get_document_size(&self) -> usize {
         self.new_data.iter().fold(0, |acc, (_, value)| match value {
             Value::EmbeddingRecordValue(embedding_record) => {
-                acc + embedding_record.get_document().unwrap().len()
+                let len = match &embedding_record.get_document() {
+                    Some(document) => document.len(),
+                    None => 0,
+                };
+                acc + len
             }
             _ => 0,
         })

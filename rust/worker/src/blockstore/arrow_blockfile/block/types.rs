@@ -1,6 +1,6 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::errors::{ChromaError, ErrorCodes};
-use crate::types::{MetadataValue, UpdateMetadataValue};
+use crate::types::{EmbeddingRecord, MetadataValue, UpdateMetadataValue};
 use arrow::array::{
     ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
     Float32Builder, GenericByteBuilder, StructArray, StructBuilder, UInt32Array, UInt32Builder,
@@ -11,6 +11,7 @@ use arrow::{
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
+use num_bigint::BigInt;
 use parking_lot::RwLock;
 use prost_types::Struct;
 use rayon::vec;
@@ -183,6 +184,45 @@ impl Block {
                                             .unwrap()
                                             .value(i),
                                     ))
+                                }
+                                ValueType::EmbeddingRecord => {
+                                    let records =
+                                        value.as_any().downcast_ref::<StructArray>().unwrap();
+                                    let id = records
+                                        .column(0)
+                                        .as_any()
+                                        .downcast_ref::<StringArray>()
+                                        .unwrap()
+                                        .value(i)
+                                        .to_string();
+                                    let document = match records
+                                        .column(1)
+                                        .as_any()
+                                        .downcast_ref::<StringArray>()
+                                    {
+                                        Some(document) => Some(document.value(i).to_string()),
+                                        None => None,
+                                    };
+                                    let metadata = match records
+                                        .column(2)
+                                        .as_any()
+                                        .downcast_ref::<StringArray>()
+                                    {
+                                        Some(metadata) => Some(metadata.value(i).to_string()),
+                                        None => None,
+                                    };
+                                    return Some(Value::EmbeddingRecordValue(EmbeddingRecord {
+                                        id,
+                                        seq_id: BigInt::from(0), // TODO: THIS IS WRONG, WE NEED A NEW TYPE
+                                        operation: crate::types::Operation::Add, // TODO: THIS IS WRONG, WE NEED A NEW TYPE
+                                        embedding: Some(vec![1.0, 2.0, 3.0]), // TODO: populate this
+                                        encoding: None,                       // TODO: populate this
+                                        metadata: None,
+                                        collection_id: Uuid::parse_str(
+                                            "00000000-0000-0000-0000-000000000000",
+                                        )
+                                        .unwrap(),
+                                    }));
                                 }
                                 // TODO: Add support for other types
                                 _ => unimplemented!(),
@@ -592,23 +632,13 @@ impl BlockDataBuilder {
                     builder
                         .user_id_builder
                         .append_value(embedding_record.id.clone());
-                    match embedding_record.get_document() {
-                        Some(document) => {
-                            builder.document_builder.append_value(document);
-                        }
-                        None => {
-                            // TODO: append nulls
-                        }
-                    }
-                    match embedding_record.metadata {
-                        Some(metadata) => {
-                            // TODO: Turn metadata into json
-                            builder.metadata_builder.append_value("HAS");
-                        }
-                        None => {
-                            // TODO: append nulls
-                        }
-                    }
+                    builder
+                        .document_builder
+                        .append_option(embedding_record.get_document());
+                    // TODO: This is a placeholder for the metadata field once we have json + cache support
+                    builder
+                        .metadata_builder
+                        .append_option(Some("has".to_string()));
                 }
                 _ => unreachable!("Invalid value type for block"),
             },

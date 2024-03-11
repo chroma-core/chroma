@@ -7,6 +7,6 @@ pub(super) trait SegmentWriter {
     fn rollback_transaction(&self);
 }
 
-trait OffsetIdAssigner: SegmentWriter {
+pub(super) trait OffsetIdAssigner: SegmentWriter {
     fn assign_offset_ids(&self, records: Vec<Box<LogRecord>>) -> Vec<u32>;
 }
