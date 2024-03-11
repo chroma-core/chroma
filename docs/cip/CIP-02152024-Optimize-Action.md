@@ -1,4 +1,4 @@
-# CIP-02152024: Optimization Actions
+# CIP-02152024: Maintenance Tasks
 
 ## Status
 
@@ -32,32 +32,38 @@ Upon further examination of possible approaches, we do not suggest any changes t
 the following configuration options:
 
 - `maintenance_clean_wal_at_startup` - a boolean flag that defaults to `False`
-- `maintenance_clean_wal_every_x_updates` - an integer indicating the number of WAL updates to trigger clean up. Defaults to `10` (optional)
-- `maintenance_clean_wal_every_x_seconds` - an integer indicating the number of seconds to trigger clean up. Defaults to `3600` (optional)
+- `maintenance_clean_wal_every_x_updates` - an integer indicating the number of WAL updates to trigger clean up.
+  Defaults to `10` (optional)
+- `maintenance_clean_wal_every_x_seconds` - an integer indicating the number of seconds to trigger clean up. Defaults
+  to `3600` (optional)
 - `maintenance_vacuum_at_startup` - a boolean flag that defaults to `False`
-- `maintenance_vacuum_every_x_seconds` - an integer indicating the number of seconds to trigger vacuum. Defaults to `3600`
+- `maintenance_vacuum_every_x_seconds` - an integer indicating the number of seconds to trigger vacuum. Defaults
+  to `3600`
 
 ## Proposed Changes
 
-The changes impact several parts of the system:
+The proposed changes impact the persistent client and the server backend.
 
-- Clients and APIs - the proposed changes will impact - the Python and JavaScript clients, as well as the HTTP API.
-- SegmentAPI - We suggest that the implementation is carried out in `chromadb.api.segment.SegmentAPI`.
+The `PersistentClient` will support the suggested configuration option, allowing it to perform maintenance tasks on
+Chroma.
 
-### Actions
+The server backend will rely on the changes introduced in the `PersistentClient` to perform maintenance tasks on the
+database.
+
+### Operations
 
 We propose the following optimization actions:
 
-- WAL Cleanup - the change is introduced in `EmbeddingQueue`
-- Run `VAUCUM` - Changes introduced at SysDB level
-- Run `ANALYZE` - Changes introduced at SysDB level
-
-While the optimize operation is going to be safe to run on a live system, we suggest that users use it on off-peak
-hours, as it will impact performance.
+- WAL Cleanup - the change is introduced in `EmbeddingQueue`. The task executed upon component startup or upon
+  `submit_embeddings` calls
+- Run `VAUCUM` - Changes introduced at SysDB level. The task is executed upon SysDB startup or triggered by
+  SegmentAPI's `_add()`, `_upsert()`, `_update()`, or `_delete()` method calls.
+- Run `ANALYZE` - Changes introduced at SysDB level. The task is executed upon SysDB startup or triggered by
+  SegmentAPI's `_add()`, `_upsert()`, `_update()`, or `_delete()` method calls.
 
 #### WAL Cleanup
 
-Cleaning up the WAL is really a great way to reduce the storage requirements of Chroma and should be performed
+Cleaning up the WAL is a great way to reduce the storage requirements of Chroma and should be performed
 periodically, even without the user intervention. E.g. calling a maintenance task. A good DB should not have to force
 users into keeping track and maintaining it.
 
@@ -119,6 +125,8 @@ this operation can take a long time, thus completely locking up Chroma.
 
 ### Dry Run
 
+> Note: This section is obsolete with running tasks at startup or reactively.
+
 By default, optimize will execute in a dry-run mode, just providing the user with feedback on what it would do (
 intuition: Query Planner EXPLAIN). The user can then decide to run the operation with the `dry_run` flag set to `False`.
 
@@ -133,7 +141,16 @@ These are the steps performed by each action in dry-run mode:
 - ANALYZE - The operation will not provide feedback as SQLIte does not provide utilities to estimate the impacts
   of `ANALYZE`. This operation will not provide feedback on the dry-run mode.
 
+### Telemetry
+
+All maintenance tasks suggested above shall have telemetry events associated with them. Given the long-running nature of
+the tasks we suggest that two events are emitted for each task - a start event and a completion event. The start event
+will contain the configuration options used for the task, and the completion event will contain the stats of the
+operation.
+
 ### Data Structures
+
+> Note: This section is obsolete with running tasks at startup or reactively.
 
 We propose that the operation takes in the following request object:
 
