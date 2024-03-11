@@ -60,8 +60,9 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key: str,
         model_name: str = "togethercomputer/m2-bert-80M-8k-retrieval",
+        api_url = "https://api.together.xyz/v1/embeddings"
     ):
-        self._api_url = "https://api.together.xyz/v1/embeddings"
+        self._api_url = api_url
         self._model_name = model_name
         self._session = requests.Session()
         self._session.headers.update({
@@ -84,6 +85,8 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 response_data = response.json()
                 embedding = response_data.get("data", [])[0].get("embedding", [])
                 embeddings.append(embedding)
+            else:
+                raise ValueError(f"The API request to Together AI Endpoint failed with the status code : {response.status_code}. Refer https://docs.together.ai/reference/embeddings more details")
 
         return embeddings
 
