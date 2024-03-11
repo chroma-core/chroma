@@ -248,7 +248,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
             import voyageai
         except ImportError:
             raise ValueError(
-                "The cohere python package is not installed. Please install it with `pip install cohere`"
+                "The cohere python package is not installed. Please install it with `pip install -U voyageai`"
             )
 
         if embed_batch_size is None:
@@ -261,7 +261,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self._show_progress_bar = show_progress_bar
 
     def __call__(self, input: Documents) -> Embeddings:
-        # Call Cohere Embedding API for each document.
+        # Call VoyageAI Embedding API for each document.
         embeddings: List[List[float]] = []
 
         if self._show_progress_bar:
