@@ -2,6 +2,7 @@ package metastore
 
 import (
 	"context"
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -26,4 +27,6 @@ type Catalog interface {
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant, ts types.Timestamp) (*model.Tenant, error)
 	GetTenants(ctx context.Context, getTenant *model.GetTenant, ts types.Timestamp) (*model.Tenant, error)
 	GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*model.Tenant, error)
+	SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error
+	GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error)
 }

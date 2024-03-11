@@ -7,6 +7,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -122,15 +123,18 @@ func ResetTestTables(db *gorm.DB) {
 	CreateDefaultTenantAndDatabase(db)
 }
 
-func CreateDefaultTenantAndDatabase(db *gorm.DB) {
+func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
 	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
-		ID: common.DefaultTenant,
+		ID:                 common.DefaultTenant,
+		LastCompactionTime: time.Now().Unix(),
 	})
+	databaseId := types.NilUniqueID().String()
 	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
-		ID:       types.NilUniqueID().String(),
+		ID:       databaseId,
 		Name:     common.DefaultDatabase,
 		TenantID: common.DefaultTenant,
 	})
+	return databaseId
 }
 
 func CreateTestTables(db *gorm.DB) {

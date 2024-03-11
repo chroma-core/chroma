@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"time"
 )
 
 // The catalog backed by databases using GORM.
@@ -63,6 +64,7 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			return err
 		}
 
+		// TODO: default database and tenant should be pre-defined object
 		err = tc.metaDomain.DatabaseDb(txCtx).Insert(&dbmodel.Database{
 			ID:       types.NilUniqueID().String(),
 			Name:     common.DefaultDatabase,
@@ -79,7 +81,8 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			return err
 		}
 		err = tc.metaDomain.TenantDb(txCtx).Insert(&dbmodel.Tenant{
-			ID: common.DefaultTenant,
+			ID:                 common.DefaultTenant,
+			LastCompactionTime: time.Now().Unix(),
 		})
 		if err != nil {
 			log.Error("error inserting default tenant", zap.Error(err))
@@ -153,9 +156,11 @@ func (tc *Catalog) CreateTenant(ctx context.Context, createTenant *model.CreateT
 	var result *model.Tenant
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// TODO: createTenant has ts, don't need to pass in
 		dbTenant := &dbmodel.Tenant{
-			ID: createTenant.Name,
-			Ts: ts,
+			ID:                 createTenant.Name,
+			Ts:                 ts,
+			LastCompactionTime: time.Now().Unix(),
 		}
 		err := tc.metaDomain.TenantDb(txCtx).Insert(dbTenant)
 		if err != nil {
@@ -599,4 +604,13 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 	}
 	log.Debug("segment updated", zap.Any("segment", result))
 	return result, nil
+}
+
+func (tc *Catalog) SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error {
+	return tc.metaDomain.TenantDb(ctx).UpdateTenantLastCompactionTime(tenantID, lastCompactionTime)
+}
+
+func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenantsLastCompactionTime(tenantIDs)
+	return tenants, err
 }

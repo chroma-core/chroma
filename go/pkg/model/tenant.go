@@ -15,3 +15,8 @@ type GetTenant struct {
 	Name string
 	Ts   types.Timestamp
 }
+
+type TenantLastCompactionTime struct {
+	ID string
+	Ts types.Timestamp
+}
