@@ -117,6 +117,21 @@ impl BlockDelta {
         inner.get_value_count()
     }
 
+    fn get_document_size(&self) -> usize {
+        let inner = self.inner.read();
+        inner.get_document_size()
+    }
+
+    fn get_metadata_size(&self) -> usize {
+        let inner = self.inner.read();
+        inner.get_metadata_size()
+    }
+
+    fn get_user_id_size(&self) -> usize {
+        let inner = self.inner.read();
+        inner.get_user_id_size()
+    }
+
     fn len(&self) -> usize {
         let inner = self.inner.read();
         inner.new_data.len()
@@ -200,12 +215,41 @@ impl BlockDeltaInner {
             .fold(0, |acc, (_, value)| acc + value.get_size())
     }
 
+    fn get_document_size(&self) -> usize {
+        self.new_data.iter().fold(0, |acc, (_, value)| match value {
+            Value::EmbeddingRecordValue(embedding_record) => {
+                acc + embedding_record.get_document().unwrap().len()
+            }
+            _ => 0,
+        })
+    }
+
+    fn get_metadata_size(&self) -> usize {
+        self.new_data.iter().fold(0, |acc, (_, value)| match value {
+            Value::EmbeddingRecordValue(embedding_record) => {
+                // TODO: use real metadata length
+                acc + 3
+            }
+            _ => 0,
+        })
+    }
+
+    fn get_user_id_size(&self) -> usize {
+        self.new_data.iter().fold(0, |acc, (_, value)| match value {
+            Value::EmbeddingRecordValue(embedding_record) => acc + embedding_record.id.len(),
+            _ => 0,
+        })
+    }
+
     fn get_value_count(&self) -> usize {
         self.new_data.iter().fold(0, |acc, (_, value)| match value {
             Value::Int32ArrayValue(arr) => acc + arr.len(),
             Value::StringValue(s) => acc + s.len(),
             Value::RoaringBitmapValue(bitmap) => acc + bitmap.serialized_size(),
             Value::UintValue(_) => acc + 1,
+            // The embedding record is multiple fields and so this just returns the
+            // count of the records
+            Value::EmbeddingRecordValue(_) => acc + 1,
             _ => unimplemented!("Value type not implemented"),
         })
     }
@@ -244,7 +288,11 @@ impl BlockDeltaInner {
             }
             ValueType::Uint => 0,
             ValueType::EmbeddingRecord => {
-                // RESUME POINT!
+                // RESUME POINT
+                let user_id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+                let string_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+                let metadata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+                user_id_offset + string_offset + metadata_offset
             }
             _ => unimplemented!("Value type not implemented"),
         }
@@ -320,16 +368,32 @@ impl TryFrom<&BlockDelta> for BlockData {
     type Error = super::BlockDataBuildError;
 
     fn try_from(delta: &BlockDelta) -> Result<BlockData, Self::Error> {
-        let mut builder = BlockDataBuilder::new(
-            delta.source_block.get_key_type(),
-            delta.source_block.get_value_type(),
-            Some(BlockBuilderOptions::new(
+        let value_options = match delta.source_block.get_value_type() {
+            ValueType::Int32Array
+            | ValueType::String
+            | ValueType::RoaringBitmap
+            | ValueType::Uint => BlockBuilderOptions::new_flat_value(
                 delta.len(),
                 delta.get_prefix_size(),
                 delta.get_key_size(),
                 delta.get_value_count(),
                 delta.get_value_size(),
-            )),
+            ),
+            ValueType::EmbeddingRecord => BlockBuilderOptions::new_embedding_value(
+                delta.len(),
+                delta.get_prefix_size(),
+                delta.get_key_size(),
+                delta.get_user_id_size(),
+                delta.get_document_size(),
+                delta.get_metadata_size(),
+            ),
+            _ => unimplemented!("Value type not implemented"),
+        };
+
+        let mut builder = BlockDataBuilder::new(
+            delta.source_block.get_key_type(),
+            delta.source_block.get_value_type(),
+            value_options,
         );
         for (key, value) in delta.inner.read().new_data.iter() {
             builder.add(key.clone(), value.clone());
@@ -357,14 +421,14 @@ impl From<Arc<Block>> for BlockDelta {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use super::*;
     use crate::blockstore::types::{Key, KeyType, ValueType};
-    use crate::types::{EmbeddingRecord, ScalarEncoding};
+    use crate::types::{EmbeddingRecord, ScalarEncoding, UpdateMetadataValue};
     use arrow::array::Int32Array;
     use num_bigint::BigInt;
     use rand::{random, Rng};
+    use std::collections::HashMap;
+    use std::str::FromStr;
 
     #[test]
     fn test_sizing_int_arr_val() {
@@ -470,12 +534,17 @@ mod test {
         let n = 2000;
         for i in 0..n {
             let key = BlockfileKey::new("prefix".to_string(), Key::Uint(i as u32));
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "chroma:document".to_string(),
+                UpdateMetadataValue::Str("test".to_string()),
+            );
             let value = Value::EmbeddingRecordValue(EmbeddingRecord {
                 seq_id: BigInt::from(0),
                 embedding: Some(vec![1.0, 2.0, 3.0]),
                 id: "test".to_string(),
                 encoding: Some(ScalarEncoding::FLOAT32),
-                metadata: None,
+                metadata: Some(metadata),
                 operation: crate::types::Operation::Add,
                 collection_id: uuid::Uuid::from_str("00000000-0000-0000-0000-000000000000")
                     .unwrap(),

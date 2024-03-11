@@ -1,6 +1,7 @@
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
-    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValueConversionError,
+    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
+    UpdateMetadataValueConversionError,
 };
 use crate::{
     chroma_proto,
@@ -22,6 +23,21 @@ pub(crate) struct OperationRecord {
 pub(crate) struct LogRecord {
     pub(crate) log_offset: i64,
     pub(crate) record: OperationRecord,
+}
+impl LogRecord {
+    pub(crate) fn get_document(&self) -> Option<&str> {
+        // The document is stored in a metadata field with the key "chroma:document".
+        // This is not the most clear design, but it is an artifact of how the python code was written.
+        // We should consider changing this in the future. FOr now, we abstract out getting the document with a
+        // gettter method.
+        match &self.record.metadata {
+            Some(metadata) => match metadata.get("chroma:document") {
+                Some(UpdateMetadataValue::Str(document)) => Some(document),
+                _ => None,
+            },
+            None => None,
+        }
+    }
 }
 
 #[derive(Error, Debug)]

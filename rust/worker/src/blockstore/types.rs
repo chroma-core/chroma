@@ -232,9 +232,14 @@ impl Value {
                     Some(embedding) => embedding.len(),
                     None => 0,
                 };
-                let metadata_size = 0; // TODO: this should be json size
-                let document_size = 0; // TODO: this should be string size of document
-                user_id_size + embedding_size + metadata_size + document_size
+                let metadata_size = 3; // TODO: this should be json size
+                let document_size = match record.get_document() {
+                    Some(document) => document.len(),
+                    None => 0,
+                };
+                // user_id_size + embedding_size + metadata_size + document_size
+                // just uid metadata and document for now
+                user_id_size + metadata_size + document_size
             }
             Value::StringValue(s) => s.len(),
             Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
