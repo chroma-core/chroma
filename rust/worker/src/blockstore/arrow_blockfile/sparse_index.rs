@@ -4,6 +4,10 @@ use std::fmt::Debug;
 use uuid::Uuid;
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range
+/// # Note
+/// The start key is used to represent the first block in the sparse index, this makes
+/// it easier to handle the case where the first block is split into two and also makes
+/// determining the target block for a given key easier
 #[derive(Clone, Debug)]
 enum SparseIndexDelimiter {
     Start,
@@ -55,7 +59,7 @@ impl Ord for SparseIndexDelimiter {
 /// A sparse index is used by a Blockfile to map a range of keys to a block id
 /// # Methods
 /// - `new` - Create a new sparse index with a single block
-/// - `from` - Create a new sparse index from an existing one
+/// - `from` - Create a new sparse index from an existing sparse index
 /// - `get_target_block_id` - Get the block id for a given key
 /// - `add_block` - Add a new block to the sparse index
 /// - `replace_block` - Replace an existing block with a new one
@@ -127,18 +131,20 @@ impl SparseIndex {
         self.forward.len()
     }
 
+    /// Check if the sparse index is valid by ensuring that the keys are in order
     pub(super) fn is_valid(&self) -> bool {
         let mut first = true;
-        let mut iter_curr = self.forward.iter();
-        let mut iter_next = self.forward.iter().skip(1);
-        while let Some((curr_key, _)) = iter_curr.next() {
+        // Two pointer traversal to check if the keys are in order and that the start key is first
+        let mut iter_slow = self.forward.iter();
+        let mut iter_fast = self.forward.iter().skip(1);
+        while let Some((curr_key, _)) = iter_slow.next() {
             if first {
                 if curr_key != &SparseIndexDelimiter::Start {
                     return false;
                 }
                 first = false;
             }
-            if let Some((next_key, _)) = iter_next.next() {
+            if let Some((next_key, _)) = iter_fast.next() {
                 if curr_key >= next_key {
                     return false;
                 }
