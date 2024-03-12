@@ -327,7 +327,7 @@ mod test {
     use proptest::test_runner::Config;
     use rand::prelude::IteratorRandom;
     // https://tonsky.me/blog/unicode/
-    use stringslice::StringSlice;
+    use unicode_xid::UnicodeXID;
 
     #[derive(Debug, Clone)]
     pub(crate) enum Transition {
@@ -394,9 +394,8 @@ mod test {
         }
 
         fn transitions(state: &ReferenceState) -> BoxedStrategy<Transition> {
-            // Grab a random chunk of a random string in state
-            let doc = state.state.keys().choose(&mut rand::thread_rng());
-            if doc.is_none() {
+            if state.state.is_empty() {
+                // Nothing added yet.
                 return prop_oneof![
                     Just(Transition::BeginTransaction),
                     (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
@@ -404,24 +403,18 @@ mod test {
                 ].boxed();
             }
 
-            let doc = doc.unwrap();
-            let start = rand::thread_rng().gen_range(0..(doc.len() / 2));
-            let end = rand::thread_rng().gen_range((start + MIN_DOC_SIZE)..doc.len());
-            let doc = &doc.try_slice(start..end);
-            if doc.is_none() {
-                return prop_oneof![
-                    Just(Transition::BeginTransaction),
-                    (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
-                    QUERY_STRATEGY.prop_map(Transition::Search),
-                ].boxed();
-            }
-            let doc = doc.unwrap();
+            let s = state.state.clone();
             prop_oneof![
                 Just(Transition::BeginTransaction),
                 Just(Transition::CommitTransaction),
                 (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
                 QUERY_STRATEGY.prop_map(Transition::Search),
-                Just(Transition::Search(doc.to_string())),
+                (0..state.state.len()).prop_map(move |i| {
+                    let mut keys = s.keys().collect::<Vec<&String>>().clone();
+                    keys.sort();
+                    let doc = keys[i].clone();
+                    Transition::Search(doc.to_string())
+                }),
             ].boxed()
         }
 
@@ -529,19 +522,18 @@ mod test {
                 let res = res.unwrap();
                 assert!(res.contains(&id));
             }
+            // TODO once we have a way to iterate over values in the blockfile,
+            // make sure blockfile state is also a subset of ref state.
         }
     }
 
     prop_state_machine! {
         #![proptest_config(Config {
-            // Enable verbose mode to make the state machine test print the
-            // transitions for each case.
-            verbose: 0,
             cases: 10,
             .. Config::default()
         })]
 
         #[test]
-        fn proptest_fulltext_index(sequential 1..8 => BlockfileFullTextIndex);
+        fn proptest_fulltext_index(sequential 1..10 => BlockfileFullTextIndex);
     }
 }
