@@ -248,7 +248,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
             import voyageai
         except ImportError:
             raise ValueError(
-                "The cohere python package is not installed. Please install it with `pip install -U voyageai`"
+                "The voyageai python package is not installed. Please install it with `pip install -U voyageai`"
             )
 
         if embed_batch_size is None:
