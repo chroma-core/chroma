@@ -68,6 +68,15 @@ impl BlockDelta {
 
     /// Splits the block delta into two block deltas. The split point is the last key
     /// that pushes the block over the half size.
+    /// # Arguments
+    /// - provider: the arrow block provider to create the new block.
+    /// # Returns
+    /// A tuple containing the the key of the split point and the new block delta.
+    /// The new block delta contains all the key value pairs after, but not including the
+    /// split point.
+    /// # Panics
+    /// This function will panic if their is no split point found. This should never happen
+    /// as we should only call this function if can_add returns false.
     pub fn split(&self, provider: &ArrowBlockProvider) -> (BlockfileKey, BlockDelta) {
         let new_block = provider.create_block(
             self.source_block.get_key_type(),
@@ -236,6 +245,13 @@ impl BlockDeltaInner {
         }
     }
 
+    /// Splits the block delta into two block deltas. The split point is the last key
+    /// that pushes the block over the half size.
+    /// # Arguments
+    /// - key_type: the key type of the block.
+    /// - value_type: the value type of the block.
+    /// # Returns
+    ///
     fn split(
         &mut self,
         key_type: KeyType,
@@ -268,6 +284,10 @@ impl BlockDeltaInner {
         }
 
         match &split_key {
+            // Note: Consider returning a Result instead of panicking
+            // This should never happen as we should only call this
+            // function if can_add returns false. But it may be worth making
+            // this compile time safe.
             None => panic!("No split point found"),
             Some(split_key) => {
                 let split_after = self.new_data.split_off(split_key);
