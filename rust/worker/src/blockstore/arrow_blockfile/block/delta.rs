@@ -6,7 +6,10 @@ use crate::blockstore::{
 };
 use arrow::util::bit_util;
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 /// A block delta tracks a source block and represents the new state of a block. Blocks are
 /// immutable, so when a write is made to a block, a new block is created with the new state.
@@ -140,6 +143,10 @@ impl BlockDelta {
 
 struct BlockDeltaInner {
     new_data: BTreeMap<BlockfileKey, Value>,
+    // A cache of the metadata json size for each blockfile key. This is used to avoid
+    // reserializing the metadata json for each blockfile key. It may be heavy on memory
+    // but we can easily optimize this later.
+    metadata_json_cache: HashMap<BlockfileKey, usize>,
 }
 
 impl BlockDeltaInner {
@@ -231,6 +238,18 @@ impl BlockDeltaInner {
     fn get_metadata_size(&self) -> usize {
         self.new_data.iter().fold(0, |acc, (_, value)| match value {
             Value::EmbeddingRecordValue(embedding_record) => {
+                match &embedding_record.metadata {
+                    Some(metadata) => {
+                        // RESUME POINT
+                        let as_str = match serde_json::to_string(metadata) {
+                            Ok(s) => s
+                            Err(_) => // TODO: log error
+                        };
+                        let len = as_str.len();
+                        acc + len
+                    }
+                    None => 0,
+                }
                 // TODO: use real metadata length
                 acc + 3
             }

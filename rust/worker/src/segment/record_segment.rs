@@ -28,7 +28,6 @@ impl RecordSegment {
             blockfile_provider.create("user_id_to_offset_id", KeyType::String, ValueType::Uint);
         let id_to_user_id =
             blockfile_provider.create("offset_id_to_user_id", KeyType::Uint, ValueType::String);
-        // TODO: add embedding record as a value type
         let records =
             blockfile_provider.create("record", KeyType::Uint, ValueType::EmbeddingRecord);
 
