@@ -104,6 +104,11 @@ impl SegmentWriter for RecordSegment {
             // TODO: handle errors
             _ => panic!("Failed to commit transaction"),
         }
+        self.commited_max_offset_id.store(
+            self.current_max_offset_id
+                .load(std::sync::atomic::Ordering::SeqCst),
+            std::sync::atomic::Ordering::SeqCst,
+        );
     }
 
     fn rollback_transaction(&self) {
@@ -151,6 +156,8 @@ mod tests {
     use num_bigint::BigInt;
     use uuid::Uuid;
 
+    // RESUME POINT: STORE METADATA AS JSON AND ADD A RECORD TYPE FOR INTERNAL USE. THIS RECORD TYPE IS A OPERATION NOT A VALUE
+
     #[test]
     fn can_write_to_segment() {
         let blockfile_provider =
@@ -176,6 +183,7 @@ mod tests {
             .get(BlockfileKey::new("".to_string(), Key::Uint(0)));
         assert!(res.is_ok());
         let res = res.unwrap();
+        println!("{:?}", res);
         match res {
             Value::EmbeddingRecordValue(record) => {
                 assert_eq!(record.id, "test");
