@@ -1,3 +1,4 @@
+mod delta;
 mod iterator;
 mod types;
 

@@ -50,6 +50,16 @@ impl BlockfileKey {
     }
 }
 
+impl From<&BlockfileKey> for KeyType {
+    fn from(key: &BlockfileKey) -> Self {
+        match key.key {
+            Key::String(_) => KeyType::String,
+            Key::Float(_) => KeyType::Float,
+            Key::Bool(_) => KeyType::Bool,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub(crate) enum Key {
     String(String),
@@ -191,6 +201,18 @@ impl Value {
             Value::StringValue(s) => s.len(),
             Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
             Value::Int32Value(_) => 4,
+        }
+    }
+}
+
+impl From<&Value> for ValueType {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Int32ArrayValue(_) => ValueType::Int32Array,
+            Value::PositionalPostingListValue(_) => ValueType::PositionalPostingList,
+            Value::RoaringBitmapValue(_) => ValueType::RoaringBitmap,
+            Value::StringValue(_) => ValueType::String,
+            Value::Int32Value(_) => ValueType::Int32,
         }
     }
 }
