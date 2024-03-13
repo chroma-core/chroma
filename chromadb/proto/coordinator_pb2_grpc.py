@@ -90,6 +90,11 @@ class SysDBStub(object):
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.SetLastCompactionTimeForTenantRequest.SerializeToString,
             response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
         )
+        self.FlushCollectionCompaction = channel.unary_unary(
+            "/chroma.SysDB/FlushCollectionCompaction",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.FlushCollectionCompactionRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.FlushCollectionCompactionResponse.FromString,
+        )
 
 
 class SysDBServicer(object):
@@ -185,6 +190,12 @@ class SysDBServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def FlushCollectionCompaction(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_SysDBServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -262,6 +273,11 @@ def add_SysDBServicer_to_server(servicer, server):
             servicer.SetLastCompactionTimeForTenant,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.SetLastCompactionTimeForTenantRequest.FromString,
             response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+        ),
+        "FlushCollectionCompaction": grpc.unary_unary_rpc_method_handler(
+            servicer.FlushCollectionCompaction,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.FlushCollectionCompactionRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.FlushCollectionCompactionResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -699,6 +715,35 @@ class SysDB(object):
             "/chroma.SysDB/SetLastCompactionTimeForTenant",
             chromadb_dot_proto_dot_coordinator__pb2.SetLastCompactionTimeForTenantRequest.SerializeToString,
             google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
+
+    @staticmethod
+    def FlushCollectionCompaction(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/chroma.SysDB/FlushCollectionCompaction",
+            chromadb_dot_proto_dot_coordinator__pb2.FlushCollectionCompactionRequest.SerializeToString,
+            chromadb_dot_proto_dot_coordinator__pb2.FlushCollectionCompactionResponse.FromString,
             options,
             channel_credentials,
             insecure,

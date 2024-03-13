@@ -30,6 +30,7 @@ type ICoordinator interface {
 	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
 	SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error
 	GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error)
+	FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error)
 }
 
 func (s *Coordinator) ResetState(ctx context.Context) error {
@@ -69,12 +70,12 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 }
 
 func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error) {
+	log.Info("create collection", zap.Any("createCollection", createCollection))
 	collectionTopic, err := s.assignCollection(createCollection.ID)
 	if err != nil {
 		return nil, err
 	}
 	createCollection.Topic = collectionTopic
-	log.Info("apis create collection", zap.Any("collection", createCollection))
 	collection, err := s.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)
 	if err != nil {
 		return nil, err
@@ -166,4 +167,8 @@ func (s *Coordinator) SetTenantLastCompactionTime(ctx context.Context, tenantID 
 
 func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
 	return s.catalog.GetTenantsLastCompactionTime(ctx, tenantIDs)
+}
+
+func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }

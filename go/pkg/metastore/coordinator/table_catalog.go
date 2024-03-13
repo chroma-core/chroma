@@ -316,6 +316,7 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 }
 
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	log.Info("deleting collection", zap.Any("deleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
 		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, nil, deleteCollection.TenantID, deleteCollection.DatabaseName)
@@ -351,6 +352,7 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
+	log.Info("updating collection", zap.String("collectionId", updateCollection.ID.String()))
 	var result *model.Collection
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
@@ -411,7 +413,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	if err != nil {
 		return nil, err
 	}
-	log.Info("collection updated", zap.Any("collection", result))
+	log.Info("collection updated", zap.String("collectionID", result.ID.String()))
 	return result, nil
 }
 
@@ -613,4 +615,42 @@ func (tc *Catalog) SetTenantLastCompactionTime(ctx context.Context, tenantID str
 func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
 	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenantsLastCompactionTime(tenantIDs)
 	return tenants, err
+}
+
+func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	flushCollectionInfo := &model.FlushCollectionInfo{
+		ID: flushCollectionCompaction.ID.String(),
+	}
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// register files to Segment metadata
+		err := tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+		if err != nil {
+			return err
+		}
+
+		// update collection log position and version
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionAndVersion(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion)
+		if err != nil {
+			return err
+		}
+		flushCollectionInfo.CollectionVersion = collectionVersion
+
+		// update tenant last compaction time
+		// TODO: add a system configuration to disable
+		// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
+		lastCompactionTime := time.Now().Unix()
+		err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.ID.String(), lastCompactionTime)
+		if err != nil {
+			return err
+		}
+		flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
+
+		// return nil will commit the transaction
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return flushCollectionInfo, nil
 }

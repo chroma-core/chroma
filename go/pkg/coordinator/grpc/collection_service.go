@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/model"
@@ -208,6 +209,49 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	res.Status = setResponseStatus(successCode)
+	return res, nil
+}
+
+func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
+	if err != nil {
+		return nil, err
+	}
+	tenantID, err := types.ToUniqueID(&req.TenantId)
+	err = grpcutils.BuildErrorForUUID(tenantID, "tenant", err)
+	if err != nil {
+		return nil, err
+	}
+	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(req.SegmentCompactionInfo))
+	for _, flushSegmentCompaction := range req.SegmentCompactionInfo {
+		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
+		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
+		if err != nil {
+			return nil, err
+		}
+		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
+			ID:        segmentID,
+			FilePaths: &flushSegmentCompaction.FilePaths,
+		})
+	}
+	FlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       collectionID,
+		TenantID:                 tenantID,
+		LogPosition:              req.LogPosition,
+		CurrentCollectionVersion: req.CollectionVersion,
+		FlushSegmentCompactions:  segmentCompactionInfo,
+	}
+	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
+	if err != nil {
+		log.Error("error FlushCollectionCompaction", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error flushing collection compaction")
+	}
+	res := &coordinatorpb.FlushCollectionCompactionResponse{
+		CollectionId:       flushCollectionInfo.ID,
+		CollectionVersion:  flushCollectionInfo.CollectionVersion,
+		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
+	}
 	return res, nil
 }
 

@@ -31,10 +31,10 @@ func BuildInternalGrpcError(msg string) error {
 	return status.Error(codes.Internal, msg)
 }
 
-func BuildErrorForCollectionId(collectionID types.UniqueID, err error) error {
-	if err != nil || collectionID == types.NilUniqueID() {
-		log.Error("collection id format error", zap.String("collection.id", collectionID.String()))
-		grpcError, err := BuildInvalidArgumentGrpcError("collection_id", "wrong collection_id format")
+func BuildErrorForUUID(ID types.UniqueID, name string, err error) error {
+	if err != nil || ID == types.NilUniqueID() {
+		log.Error(name+"id format error", zap.String(name+".id", ID.String()))
+		grpcError, err := BuildInvalidArgumentGrpcError(name+"_id", "wrong "+name+"_id format")
 		if err != nil {
 			log.Error("error building grpc error", zap.Error(err))
 			return err

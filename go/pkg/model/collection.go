@@ -46,6 +46,20 @@ type UpdateCollection struct {
 	Ts            types.Timestamp
 }
 
+type FlushCollectionCompaction struct {
+	ID                       types.UniqueID
+	TenantID                 types.UniqueID
+	LogPosition              int64
+	CurrentCollectionVersion int32
+	FlushSegmentCompactions  []*FlushSegmentCompaction
+}
+
+type FlushCollectionInfo struct {
+	ID                       string
+	CollectionVersion        int32
+	TenantLastCompactionTime int64
+}
+
 func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string, collectionTopic *string) bool {
 	if collectionID != types.NilUniqueID() && collectionID != collection.ID {
 		return false

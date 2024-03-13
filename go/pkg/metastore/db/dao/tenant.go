@@ -21,6 +21,12 @@ func (s *tenantDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Tenant{}).Error
 }
 
+func (s *tenantDb) DeleteByID(tenantID string) (int, error) {
+	var tenants []dbmodel.Tenant
+	err := s.db.Clauses(clause.Returning{}).Where("id = ?", tenantID).Delete(&tenants).Error
+	return len(tenants), err
+}
+
 func (s *tenantDb) GetAllTenants() ([]*dbmodel.Tenant, error) {
 	var tenants []*dbmodel.Tenant
 

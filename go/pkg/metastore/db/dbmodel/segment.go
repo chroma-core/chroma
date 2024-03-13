@@ -1,6 +1,7 @@
 package dbmodel
 
 import (
+	"github.com/chroma-core/chroma/go/pkg/model"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -20,6 +21,7 @@ type Segment struct {
 	IsDeleted    bool            `gorm:"is_deleted;type:bool;default:false"`
 	CreatedAt    time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt    time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	FilePaths    []string        `gorm:"file_paths;serializer:json;default:'[]'"`
 }
 
 func (s Segment) TableName() string {
@@ -46,4 +48,5 @@ type ISegmentDb interface {
 	Insert(*Segment) error
 	Update(*UpdateSegment) error
 	DeleteAll() error
+	RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error
 }

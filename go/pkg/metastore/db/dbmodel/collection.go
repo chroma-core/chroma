@@ -17,6 +17,7 @@ type Collection struct {
 	CreatedAt   time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt   time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 	LogPosition int64           `gorm:"log_position;default:0"`
+	Version     int32           `gorm:"version;default:0"`
 }
 
 func (v Collection) TableName() string {
@@ -37,4 +38,5 @@ type ICollectionDb interface {
 	Insert(in *Collection) error
 	Update(in *Collection) error
 	DeleteAll() error
+	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
 }

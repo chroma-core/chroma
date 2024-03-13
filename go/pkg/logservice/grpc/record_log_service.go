@@ -21,7 +21,7 @@ type CollectionInfo struct {
 func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
 	res := &logservicepb.PushLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (*logservicepb.PullLogsResponse, error) {
 	res := &logservicepb.PullLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}

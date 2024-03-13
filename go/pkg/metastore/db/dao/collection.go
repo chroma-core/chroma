@@ -6,6 +6,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
+	"strings"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -25,31 +26,40 @@ func (s *collectionDb) DeleteAll() error {
 }
 
 func (s *collectionDb) GetCollections(id *string, name *string, topic *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
+	var getCollectionInput strings.Builder
+	getCollectionInput.WriteString("GetCollections input: ")
+
 	var collections []*dbmodel.CollectionAndMetadata
 
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.topic, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.topic, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.id")
 
 	if databaseName != "" {
 		query = query.Where("databases.name = ?", databaseName)
+		getCollectionInput.WriteString("databases.name: " + databaseName + ", ")
 	}
 
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
+		getCollectionInput.WriteString("databases.tenant_id: " + tenantID + ", ")
 	}
 
 	if id != nil {
 		query = query.Where("collections.id = ?", *id)
+		getCollectionInput.WriteString("collections.id: " + *id + ", ")
 	}
 	if topic != nil {
 		query = query.Where("collections.topic = ?", *topic)
+		getCollectionInput.WriteString("collections.topic: " + *topic + ", ")
 	}
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
+		getCollectionInput.WriteString("collections.name: " + *name + ", ")
 	}
+	log.Info(getCollectionInput.String())
 
 	rows, err := query.Rows()
 	if err != nil {
@@ -64,6 +74,8 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 	for rows.Next() {
 		var (
 			collectionID         string
+			logPosition          int64
+			version              int32
 			collectionName       string
 			collectionTopic      string
 			collectionDimension  sql.NullInt32
@@ -76,7 +88,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 			floatValue           sql.NullFloat64
 		)
 
-		err := rows.Scan(&collectionID, &collectionName, &collectionTopic, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionTopic, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
@@ -87,10 +99,12 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 
 			currentCollection = &dbmodel.CollectionAndMetadata{
 				Collection: &dbmodel.Collection{
-					ID:         collectionID,
-					Name:       &collectionName,
-					Topic:      &collectionTopic,
-					DatabaseID: collectionDatabaseID,
+					ID:          collectionID,
+					Name:        &collectionName,
+					Topic:       &collectionTopic,
+					DatabaseID:  collectionDatabaseID,
+					LogPosition: logPosition,
+					Version:     version,
 				},
 				CollectionMetadata: metadata,
 				TenantID:           databaseTenantID,
@@ -182,6 +196,33 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 }
 
 func (s *collectionDb) Update(in *dbmodel.Collection) error {
+	log.Info("update collection", zap.Any("collection", in))
 	updates := generateCollectionUpdatesWithoutID(in)
 	return s.db.Model(&dbmodel.Collection{}).Where("id = ?", in.ID).Updates(updates).Error
+}
+
+func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
+	log.Info("update log position and version", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion))
+	var collection dbmodel.Collection
+	err := s.db.Where("id = ?", collectionID).First(&collection).Error
+	if err != nil {
+		return 0, err
+	}
+	if collection.LogPosition > logPosition {
+		return 0, common.ErrCollectionLogPositionStale
+	}
+	if collection.Version > currentCollectionVersion {
+		return 0, common.ErrCollectionVersionStale
+	}
+	if collection.Version < currentCollectionVersion {
+		// this should not happen, potentially a bug
+		return 0, common.ErrCollectionVersionInvalid
+	}
+
+	version := currentCollectionVersion + 1
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version}).Error
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
 }
