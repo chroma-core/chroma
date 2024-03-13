@@ -1,6 +1,11 @@
 import pytest
-from typing import Generator, List, Callable, Iterator, Type, cast
+from typing import Generator, List, Callable, Iterator, Type, cast, Any, Dict, Optional
+
+from pypika import Table
+
 from chromadb.config import System, Settings
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.segment.impl.metadata.sqlite import _decode_seq_id
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     OperationRecord,
@@ -106,13 +111,18 @@ def vector_reader(request: FixtureRequest) -> Generator[Type[VectorReader], None
     yield request.param
 
 
-def create_random_segment_definition() -> Segment:
+def create_random_segment_definition(
+    extra_hnsw_config: Optional[Dict[str, Any]] = None
+) -> Segment:
+    _hnsw_config = test_hnsw_config.copy()
+    if extra_hnsw_config:
+        _hnsw_config.update(extra_hnsw_config)
     return Segment(
         id=uuid.uuid4(),
         type="test_type",
         scope=SegmentScope.VECTOR,
         collection=uuid.UUID(int=0),
-        metadata=test_hnsw_config,
+        metadata=_hnsw_config,
     )
 
 
@@ -163,6 +173,44 @@ def test_insert_and_count(
 
     sync(segment, max_id)
     assert segment.count() == 6
+
+
+def test_insert_with_db_max_seq_persist(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+
+    system.reset_state()
+    segment_definition = create_random_segment_definition(
+        extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
+    )
+    topic = str(segment_definition["topic"])
+
+    max_id = produce_fns(
+        producer=producer, topic=topic, n=5, embeddings=sample_embeddings
+    )[1][-1]
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    sync(segment, max_id)
+
+    assert segment.count() == 5
+    if isinstance(segment, PersistentLocalHnswSegment):
+        t = Table("max_seq_id")
+        q = (
+            segment._db.querybuilder()
+            .from_(t)
+            .select(t.seq_id)
+            .where(t.segment_id == ParameterValue(segment._db.uuid_to_db(segment._id)))
+        )
+        sql, params = get_sql(q)
+        with segment._db.tx() as cur:
+            result = cur.execute(sql, params).fetchone()
+            assert _decode_seq_id(result[0]) == 5
 
 
 def approx_equal(a: float, b: float, epsilon: float = 0.0001) -> bool:
