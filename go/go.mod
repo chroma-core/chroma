@@ -1,9 +1,9 @@
 module github.com/chroma-core/chroma/go
 
-go 1.20
+go 1.21
 
 require (
-	ariga.io/atlas-provider-gorm v0.1.1
+	ariga.io/atlas-provider-gorm v0.3.1
 	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
 	github.com/google/uuid v1.4.0
 	github.com/pingcap/log v1.1.0
@@ -20,7 +20,7 @@ require (
 	google.golang.org/grpc v1.61.1
 	google.golang.org/protobuf v1.32.0
 	gorm.io/driver/sqlite v1.5.4
-	gorm.io/gorm v1.25.5
+	gorm.io/gorm v1.25.7
 	k8s.io/apimachinery v0.28.3
 	k8s.io/client-go v0.28.3
 	pgregory.net/rapid v1.1.0
@@ -31,6 +31,7 @@ require (
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/AthenZ/athenz v1.10.39 // indirect
 	github.com/DataDog/zstd v1.5.0 // indirect
+	github.com/alecthomas/kong v0.7.1 // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.4.0 // indirect
@@ -41,12 +42,15 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/klauspost/compress v1.14.4 // indirect
 	github.com/linkedin/goavro/v2 v2.9.8 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/microsoft/go-mssqldb v1.6.0 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
 	github.com/pierrec/lz4 v2.0.5+incompatible // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect
@@ -57,13 +61,15 @@ require (
 	go.opentelemetry.io/otel/metric v1.24.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.1.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
-	golang.org/x/mod v0.11.0 // indirect
+	golang.org/x/mod v0.15.0 // indirect
+	golang.org/x/tools v0.17.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240102182953-50ed04b92917 // indirect
 	gorm.io/driver/mysql v1.5.2 // indirect
+	gorm.io/driver/sqlserver v1.5.2 // indirect
 )
 
 require (
-	ariga.io/atlas-go-sdk v0.1.1-0.20231001054405-7edfcfc14f1c // indirect
+	ariga.io/atlas-go-sdk v0.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
@@ -99,11 +105,11 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.5.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.16.0 // indirect
-	golang.org/x/net v0.19.0 // indirect
+	golang.org/x/crypto v0.18.0 // indirect
+	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/oauth2 v0.15.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
-	golang.org/x/term v0.15.0 // indirect
+	golang.org/x/term v0.16.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect

@@ -21,8 +21,8 @@ var _ ICoordinator = (*Coordinator)(nil)
 type Coordinator struct {
 	ctx                        context.Context
 	collectionAssignmentPolicy CollectionAssignmentPolicy
-	meta                       IMeta
 	notificationProcessor      notification.NotificationProcessor
+	catalog                    metastore.Catalog
 }
 
 func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPolicy, db *gorm.DB, notificationStore notification.NotificationStore, notifier notification.Notifier) (*Coordinator, error) {
@@ -32,24 +32,12 @@ func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPo
 	}
 
 	notificationProcessor := notification.NewSimpleNotificationProcessor(ctx, notificationStore, notifier)
-
-	var catalog metastore.Catalog
-	// TODO: move this to server.go
-	if db == nil {
-		catalog = coordinator.NewMemoryCatalogWithNotification(notificationStore)
-	} else {
-		txnImpl := dbcore.NewTxImpl()
-		metaDomain := dao.NewMetaDomain()
-		catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
-	}
-	meta, err := NewMetaTable(s.ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-	meta.SetNotificationProcessor(notificationProcessor)
-
-	s.meta = meta
 	s.notificationProcessor = notificationProcessor
+
+	// catalog
+	txnImpl := dbcore.NewTxImpl()
+	metaDomain := dao.NewMetaDomain()
+	s.catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
 
 	return s, nil
 }

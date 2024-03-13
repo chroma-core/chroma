@@ -14,8 +14,10 @@ func (s *collectionMetadataDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.CollectionMetadata{}).Error
 }
 
-func (s *collectionMetadataDb) DeleteByCollectionID(collectionID string) error {
-	return s.db.Where("collection_id = ?", collectionID).Delete(&dbmodel.CollectionMetadata{}).Error
+func (s *collectionMetadataDb) DeleteByCollectionID(collectionID string) (int, error) {
+	var metadata []dbmodel.CollectionMetadata
+	err := s.db.Clauses(clause.Returning{}).Where("collection_id = ?", collectionID).Delete(&metadata).Error
+	return len(metadata), err
 }
 
 func (s *collectionMetadataDb) Insert(in []*dbmodel.CollectionMetadata) error {

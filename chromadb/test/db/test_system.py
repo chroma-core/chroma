@@ -120,6 +120,7 @@ def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     system.start()
     client.reset_and_wait_for_ready()
     yield client
+    system.stop()
 
 
 def grpc_with_real_server() -> Generator[SysDB, None, None]:

@@ -1,10 +1,9 @@
-use crate::errors::{ChromaError, ErrorCodes};
-use thiserror::Error;
-
-use std::collections::HashMap;
 use crate::blockstore::{Blockfile, BlockfileKey, Key, PositionalPostingListBuilder, Value};
 use crate::index::fulltext::tokenizer::{ChromaTokenizer, ChromaTokenStream};
 use tantivy::tokenizer::Token;
+use std::collections::HashMap;
+use crate::errors::{ChromaError, ErrorCodes};
+use thiserror::Error;
 
 static MAX_DOC_SIZE: usize = 16000;
 static MIN_QUERY_SIZE: usize = 3;
@@ -59,7 +58,11 @@ pub(crate) struct BlockfileFullTextIndex {
 }
 
 impl BlockfileFullTextIndex {
-    pub(crate) fn new(posting_lists_blockfile: Box<dyn Blockfile>, frequencies_blockfile: Box<dyn Blockfile>, tokenizer: Box<dyn ChromaTokenizer>) -> Self {
+    pub(crate) fn new(
+        posting_lists_blockfile: Box<dyn Blockfile>,
+        frequencies_blockfile: Box<dyn Blockfile>,
+        tokenizer: Box<dyn ChromaTokenizer>,
+    ) -> Self {
         BlockfileFullTextIndex {
             posting_lists_blockfile,
             frequencies_blockfile,
@@ -83,12 +86,13 @@ impl BlockfileFullTextIndex {
         // Get query tokens sorted by frequency.
         let mut token_frequencies = vec![];
         for token in tokens {
-            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(token.text.to_string()));
+            let blockfilekey =
+                BlockfileKey::new("".to_string(), Key::String(token.text.to_string()));
             let value = self.frequencies_blockfile.get(blockfilekey);
             match value {
                 Ok(Value::Int32Value(frequency)) => {
                     token_frequencies.push((token.text.to_string(), frequency));
-                },
+                }
                 Ok(_) => {
                     return Ok(vec![]);
                 }
@@ -103,33 +107,47 @@ impl BlockfileFullTextIndex {
         // Populate initial candidates with the least-frequent token's posting list.
         // doc ID -> possible starting locations for the query.
         let mut candidates: HashMap<i32, Vec<i32>> = HashMap::new();
-        let blockfilekey = BlockfileKey::new("".to_string(), Key::String(tokens[0].text.to_string()));
-        let first_token_positional_posting_list = match self.posting_lists_blockfile.get(blockfilekey).unwrap() {
-            Value::PositionalPostingListValue(arr) => arr,
-            _ => panic!("Value is not an arrow struct array"),
-        };
+        let blockfilekey =
+            BlockfileKey::new("".to_string(), Key::String(tokens[0].text.to_string()));
+        let first_token_positional_posting_list =
+            match self.posting_lists_blockfile.get(blockfilekey).unwrap() {
+                Value::PositionalPostingListValue(arr) => arr,
+                _ => panic!("Value is not an arrow struct array"),
+            };
         let first_token_offset = tokens[0].offset_from as i32;
         for doc_id in first_token_positional_posting_list.get_doc_ids().values() {
-            let doc_id = *doc_id;
-            let positions = first_token_positional_posting_list.get_positions_for_doc_id(doc_id).unwrap();
-            let positions_vec = positions.values().iter().map(|x| x - first_token_offset).collect();
-            candidates.insert(doc_id, positions_vec);
+            let positions = first_token_positional_posting_list
+                .get_positions_for_doc_id(*doc_id)
+                .unwrap();
+            let positions_vec: Vec<i32> = positions
+                .values()
+                .iter()
+                .map(|x| *x - first_token_offset)
+                .collect();
+            candidates.insert(*doc_id, positions_vec);
         }
 
         // Iterate through the rest of the tokens, intersecting the posting lists with the candidates.
         for (token, _) in token_frequencies[1..].iter() {
             let blockfilekey = BlockfileKey::new("".to_string(), Key::String(token.to_string()));
-            let positional_posting_list = match self.posting_lists_blockfile.get(blockfilekey).unwrap() {
-                Value::PositionalPostingListValue(arr) => arr,
-                _ => panic!("Value is not an arrow struct array"),
-            };
-            let token_offset = tokens.iter().find(|t| t.text == *token).unwrap().offset_from as i32;
+            let positional_posting_list =
+                match self.posting_lists_blockfile.get(blockfilekey).unwrap() {
+                    Value::PositionalPostingListValue(arr) => arr,
+                    _ => panic!("Value is not an arrow struct array"),
+                };
+            let token_offset = tokens
+                .iter()
+                .find(|t| t.text == *token)
+                .unwrap()
+                .offset_from as i32;
             let mut new_candidates: HashMap<i32, Vec<i32>> = HashMap::new();
             for (doc_id, positions) in candidates.iter() {
                 let doc_id = *doc_id;
                 let mut new_positions = vec![];
                 for position in positions {
-                    if let Some(positions_for_doc_id) = positional_posting_list.get_positions_for_doc_id(doc_id) {
+                    if let Some(positions_for_doc_id) =
+                        positional_posting_list.get_positions_for_doc_id(doc_id)
+                    {
                         for position_for_doc_id in positions_for_doc_id.values() {
                             if *position_for_doc_id - token_offset == *position {
                                 new_positions.push(*position);
@@ -236,23 +254,38 @@ impl FullTextIndex for BlockfileFullTextIndex {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tantivy::tokenizer::NgramTokenizer;
-    use crate::blockstore::HashMapBlockfile;
+    use crate::blockstore::provider::{BlockfileProvider, HashMapBlockfileProvider};
+    use crate::blockstore::{HashMapBlockfile, KeyType, ValueType};
     use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
+    use tantivy::tokenizer::NgramTokenizer;
 
     #[test]
     fn test_new() {
-        let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
-        let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut provider = HashMapBlockfileProvider::new();
+        let pl_blockfile = provider
+            .create("pl", KeyType::String, ValueType::PositionalPostingList)
+            .unwrap();
+        let freq_blockfile = provider
+            .create("freq", KeyType::String, ValueType::Int32)
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
         let _index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
     }
 
     #[test]
     fn test_index_single_document() {
-        let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
-        let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut provider = HashMapBlockfileProvider::new();
+        let pl_blockfile = provider
+            .create("pl", KeyType::String, ValueType::PositionalPostingList)
+            .unwrap();
+        let freq_blockfile = provider
+            .create("freq", KeyType::String, ValueType::Int32)
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
         let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
         index.begin_transaction().unwrap();
         index.add_document("hello world", 1).unwrap();
@@ -264,9 +297,16 @@ mod test {
 
     #[test]
     fn test_search_absent_token() {
-        let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
-        let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut provider = HashMapBlockfileProvider::new();
+        let pl_blockfile = provider
+            .create("pl", KeyType::String, ValueType::PositionalPostingList)
+            .unwrap();
+        let freq_blockfile = provider
+            .create("freq", KeyType::String, ValueType::Int32)
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
         let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
         index.begin_transaction().unwrap();
         index.add_document("hello world", 1).unwrap();
@@ -278,9 +318,16 @@ mod test {
 
     #[test]
     fn test_index_and_search_multiple_documents() {
-        let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
-        let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut provider = HashMapBlockfileProvider::new();
+        let pl_blockfile = provider
+            .create("pl", KeyType::String, ValueType::PositionalPostingList)
+            .unwrap();
+        let freq_blockfile = provider
+            .create("freq", KeyType::String, ValueType::Int32)
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
         let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
         index.begin_transaction().unwrap();
         index.add_document("hello world", 1).unwrap();
@@ -302,9 +349,16 @@ mod test {
 
     #[test]
     fn test_special_characters_search() {
-        let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
-        let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+        let mut provider = HashMapBlockfileProvider::new();
+        let pl_blockfile = provider
+            .create("pl", KeyType::String, ValueType::PositionalPostingList)
+            .unwrap();
+        let freq_blockfile = provider
+            .create("freq", KeyType::String, ValueType::Int32)
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
         let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
         index.begin_transaction().unwrap();
         index.add_document("!!!!!!!!", 1).unwrap();
@@ -483,8 +537,14 @@ mod test {
         type Reference = ReferenceState;
 
         fn init_test(_ref_state: &ReferenceState) -> Self::SystemUnderTest {
-            let pl_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-pl").unwrap());
-            let freq_blockfile = Box::new(HashMapBlockfile::open(&"in-memory-freqs").unwrap());
+
+            let mut provider = HashMapBlockfileProvider::new();
+            let pl_blockfile = provider
+                .create("pl", KeyType::String, ValueType::PositionalPostingList)
+                .unwrap();
+            let freq_blockfile = provider
+                .create("freq", KeyType::String, ValueType::Int32)
+                .unwrap();
             let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
             BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer)
         }
