@@ -146,8 +146,7 @@ def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
 
 @pytest.fixture(scope="module", params=db_fixtures())
 def sysdb(request: FixtureRequest) -> Generator[SysDB, None, None]:
-    sysdb = request.param()
-    yield next(sysdb)
+    yield next(request.param())
 
 
 # region Collection tests
