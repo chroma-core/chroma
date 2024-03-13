@@ -388,11 +388,34 @@ mod test {
             }
         }
 
-        fn random_entry(self: &Self) -> Option<(String, T, u32)> {
-            let k = self.data.keys().choose(&mut rand::thread_rng())?;
-            let v = self.data.get(k)?.keys().choose(&mut rand::thread_rng())?;
-            let vv = self.data.get(k)?.get(v)?.choose(&mut rand::thread_rng())?;
-            Some((k.clone(), v.clone(), vv.clone()))
+        fn key_from_random_number(self: &Self, r1: usize) -> Option<String> {
+            let keys = self.data.keys().collect::<Vec<&String>>();
+            if keys.len() == 0 {
+                return None;
+            }
+            Some(keys[r1 % keys.len()].clone())
+        }
+
+        fn key_and_value_from_random_numbers(self: &Self, r1: usize, r2: usize) -> Option<(String, T)> {
+            let k = self.key_from_random_number(r1)?;
+
+            let values = self.data.get(&k)?.keys().collect::<Vec<&T>>();
+            if values.len() == 0 {
+                return None;
+            }
+            let v = values[r2 % values.len()];
+            Some((k.clone(), v.clone()))
+        }
+
+        fn key_and_value_and_entry_from_random_numbers(self: &Self, r1: usize, r2: usize, r3: usize) -> Option<(String, T, u32)> {
+            let (k, v) = self.key_and_value_from_random_numbers(r1, r2)?;
+
+            let vv = self.data.get(&k)?.get(&v)?;
+            if vv.len() == 0 {
+                return None;
+            }
+            let oid = vv[r3 % vv.len()];
+            Some((k.clone(), v.clone(), oid))
         }
 
         fn kv_rbm_eq(
@@ -424,23 +447,30 @@ mod test {
         }
 
         fn transitions(state: &ReferenceState<T>) -> BoxedStrategy<Transition<T>> {
-            let random_entry_from_ref = state.random_entry();
-            if random_entry_from_ref.is_none() {
+            let r = state.key_and_value_and_entry_from_random_numbers(0, 0, 0);
+            if r.is_none() {
+                // Nothing in the reference state yet.
                 return prop_oneof![
                     Just(Transition::BeginTransaction),
+                    Just(Transition::CommitTransaction),
+                    // Set, get, delete random values
                     (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
                         Transition::Set(k.to_string(), v, oid as u32)
+                    }),
+                    (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
+                        Transition::Delete(k.to_string(), v, oid as u32)
+                    }),
+                    (".{0,10}", T::strategy()).prop_map(move |(k, v)| {
+                        Transition::Get(k.to_string(), v)
                     }),
                 ].boxed();
             }
 
-            let random_entry_from_ref = random_entry_from_ref.unwrap();
-            let (rk, rv, roid) = random_entry_from_ref;
-            let rk = Rc::new(rk);
-            let rv = Rc::new(rv);
+            let state = Rc::new(state.clone());
             return prop_oneof![
                 Just(Transition::BeginTransaction),
                 Just(Transition::CommitTransaction),
+                // Set, get, delete random values
                 (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
                     Transition::Set(k.to_string(), v, oid as u32)
                 }),
@@ -451,66 +481,81 @@ mod test {
                     Transition::Get(k.to_string(), v)
                 }),
 
-                Just(Transition::Set((*rk).clone(), (*rv).clone(), roid)),
-                (".{1,10}").prop_map({
-                    let rv = Rc::clone(&rv);
-                    move |k| {
-                        Transition::Set(k.to_string(), (*rv).clone(), roid)
+                // Sets on values in the reference state
+                (0..usize::MAX, T::strategy(), 1..1000).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, v, oid)| {
+                        match state.key_from_random_number(r1) {
+                            Some(k) => Transition::Set(k, v, oid as u32),
+                            None => panic!("Error in the test harness: Setting on key from ref state")
+                        }
                     }
                 }),
-                (T::strategy()).prop_map({
-                    let rk = Rc::clone(&rk);
-                    move |v| {
-                        Transition::Set((*rk).clone(), v, roid)
+                (0..usize::MAX, 0..usize::MAX, 1..1000).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, r2, oid)| {
+                        match state.key_and_value_from_random_numbers(r1, r2) {
+                            Some((k, v)) => Transition::Set(k, v, oid as u32),
+                            None => panic!("Error in the test harness: Setting on key and value from ref state")
+                        }
                     }
                 }),
-                (1..1000).prop_map({
-                    let rk = Rc::clone(&rk);
-                    let rv = Rc::clone(&rv);
-                    move |oid| {
-                        Transition::Set((*rk).clone(), (*rv).clone(), oid as u32)
-                    }
-                }),
-
-                Just(Transition::Delete((*rk).clone(), (*rv).clone(), roid)),
-                (".{1,10}").prop_map({
-                    let rv = Rc::clone(&rv);
-                    move |k| {
-                        Transition::Delete(k.to_string(), (*rv).clone(), roid)
-                    }
-                }),
-                (T::strategy()).prop_map({
-                    let rk = Rc::clone(&rk);
-                    move |v| {
-                        Transition::Delete((*rk).clone(), v, roid)
-                    }
-                }),
-                (1..1000).prop_map({
-                    let rk = Rc::clone(&rk);
-                    let rv = Rc::clone(&rv);
-                    move |oid| {
-                        Transition::Delete((*rk).clone(), (*rv).clone(), oid as u32)
+                (0..usize::MAX, 0..usize::MAX, 0..usize::MAX).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, r2, r3)| {
+                        match state.key_and_value_and_entry_from_random_numbers(r1, r2, r3) {
+                            Some((k, v, oid)) => Transition::Set(k, v, oid),
+                            None => panic!("Error in the test harness: Setting on key, value, and entry from ref state")
+                        }
                     }
                 }),
 
-                Just(Transition::Get((*rk).clone(), (*rv).clone())),
-                (".{1,10}").prop_map({
-                    let rv = Rc::clone(&rv);
-                    move |k| {
-                        Transition::Get(k.to_string(), (*rv).clone())
+                // Gets on values in the reference state
+                (0..usize::MAX, T::strategy()).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, v)| {
+                        match state.key_from_random_number(r1) {
+                            Some(k) => Transition::Get(k, v),
+                            None => panic!("Error in the test harness: Getting on key from ref state")
+                        }
                     }
                 }),
-                (T::strategy()).prop_map({
-                    let rk = Rc::clone(&rk);
-                    move |v| {
-                        Transition::Get((*rk).clone(), v)
+                (0..usize::MAX, 0..usize::MAX).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, r2)| {
+                        match state.key_and_value_from_random_numbers(r1, r2) {
+                            Some((k, v)) => Transition::Get(k, v),
+                            None => panic!("Error in the test harness: Getting on key and value from ref state")
+                        }
                     }
                 }),
-                (1..1000).prop_map({
-                    let rk = Rc::clone(&rk);
-                    let rv = Rc::clone(&rv);
-                    move |oid| {
-                        Transition::Get((*rk).clone(), (*rv).clone())
+
+                // Deletes on values in the reference state
+                (0..usize::MAX, T::strategy(), 1..1000).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, v, oid)| {
+                        match state.key_from_random_number(r1) {
+                            Some(k) => Transition::Delete(k, v, oid as u32),
+                            None => panic!("Error in the test harness: Deleting on key from ref state")
+                        }
+                    }
+                }),
+                (0..usize::MAX, 0..usize::MAX, 1..1000).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, r2, oid)| {
+                        match state.key_and_value_from_random_numbers(r1, r2) {
+                            Some((k, v)) => Transition::Delete(k, v, oid as u32),
+                            None => panic!("Error in the test harness: Deleting on key and value from ref state")
+                        }
+                    }
+                }),
+                (0..usize::MAX, 0..usize::MAX, 0..usize::MAX).prop_map({
+                    let state = Rc::clone(&state);
+                    move |(r1, r2, r3)| {
+                        match state.key_and_value_and_entry_from_random_numbers(r1, r2, r3) {
+                            Some((k, v, oid)) => Transition::Delete(k, v, oid as u32),
+                            None => panic!("Error in the test harness: Deleting on key, value, and entry from ref state")
+                        }
                     }
                 }),
             ].boxed();
@@ -544,6 +589,17 @@ mod test {
                     let entry = state.data.get_mut(k).unwrap();
                     if let Some(offsets) = entry.get_mut(v) {
                         offsets.retain(|x| *x != *oid);
+                    }
+
+                    // Remove the offset ID list if it's empty.
+                    let offsets_count = entry.get(v).map(|x| x.len()).unwrap_or(0);
+                    if offsets_count == 0 {
+                        entry.remove(v);
+                    }
+
+                    // Remove the entire hashmap for the key if it's empty.
+                    if entry.is_empty() {
+                        state.data.remove(k);
                     }
                 },
                 Transition::Get(_, _) => {
