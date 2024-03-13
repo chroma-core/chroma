@@ -152,6 +152,11 @@ impl SparseIndex {
         }
         true
     }
+
+    /// An iterator over the block uuids in the sparse index
+    pub(super) fn block_ids(&self) -> impl Iterator<Item = &Uuid> {
+        self.forward.values()
+    }
 }
 
 impl Debug for SparseIndex {

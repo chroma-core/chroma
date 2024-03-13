@@ -13,12 +13,25 @@ use thiserror::Error;
 pub(crate) enum BlockfileError {
     #[error("Key not found")]
     NotFoundError,
+    #[error("Invalid Key Type")]
+    InvalidKeyType,
+    #[error("Invalid Value Type")]
+    InvalidValueType,
+    #[error("Transaction already in progress")]
+    TransactionInProgress,
+    #[error("Transaction not in progress")]
+    TransactionNotInProgress,
 }
 
 impl ChromaError for BlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
-            BlockfileError::NotFoundError => ErrorCodes::InvalidArgument,
+            BlockfileError::NotFoundError
+            | BlockfileError::InvalidKeyType
+            | BlockfileError::InvalidValueType => ErrorCodes::InvalidArgument,
+            BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
+                ErrorCodes::FailedPrecondition
+            }
         }
     }
 }
@@ -199,7 +212,7 @@ impl Value {
                 unimplemented!("Size of positional posting list")
             }
             Value::StringValue(s) => s.len(),
-            Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
+            Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
             Value::Int32Value(_) => 4,
         }
     }

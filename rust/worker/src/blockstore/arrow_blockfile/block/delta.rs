@@ -201,6 +201,7 @@ impl BlockDeltaInner {
         self.new_data.iter().fold(0, |acc, (_, value)| match value {
             Value::Int32ArrayValue(arr) => acc + arr.len(),
             Value::StringValue(s) => acc + s.len(),
+            Value::RoaringBitmapValue(bitmap) => acc + bitmap.serialized_size(),
             _ => unimplemented!("Value type not implemented"),
         })
     }
@@ -225,12 +226,16 @@ impl BlockDeltaInner {
             bit_util::round_upto_multiple_of_64(value_data_size) + value_offset_size;
         let total_future_size = prefix_total_bytes + key_total_bytes + value_total_bytes;
 
+        if total_future_size > MAX_BLOCK_SIZE {
+            return false;
+        }
+
         total_future_size <= MAX_BLOCK_SIZE
     }
 
     fn offset_size_for_value_type(&self, item_count: usize, value_type: ValueType) -> usize {
         match value_type {
-            ValueType::Int32Array | ValueType::String => {
+            ValueType::Int32Array | ValueType::String | ValueType::RoaringBitmap => {
                 bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
             }
             _ => unimplemented!("Value type not implemented"),
@@ -262,9 +267,11 @@ impl BlockDeltaInner {
         let mut running_key_size = 0;
         let mut running_value_size = 0;
         let mut running_count = 0;
-        let mut split_key = None;
+
         // The split key will be the last key that pushes the block over the half size. Not the first key that pushes it over
-        for (key, value) in self.new_data.iter() {
+        let mut split_key = None;
+        let mut iter = self.new_data.iter();
+        while let Some((key, value)) = iter.next() {
             running_prefix_size += key.get_prefix_size();
             running_key_size += key.key.get_size();
             running_value_size += value.get_size();
@@ -277,10 +284,14 @@ impl BlockDeltaInner {
                 key_type,
                 value_type,
             );
-            if half_size < current_size {
+            if current_size > half_size {
+                let next = iter.next();
+                match next {
+                    Some((next_key, _)) => split_key = Some(next_key.clone()),
+                    None => split_key = Some(key.clone()),
+                }
                 break;
             }
-            split_key = Some(key.clone());
         }
 
         match &split_key {
@@ -398,5 +409,27 @@ mod test {
         let size = delta.get_size();
         let block_data = BlockData::try_from(&delta).unwrap();
         assert_eq!(size, block_data.get_size());
+    }
+
+    #[test]
+    fn test_sizing_roaring_bitmap_val() {
+        let block_provider = ArrowBlockProvider::new();
+        let block = block_provider.create_block(KeyType::String, ValueType::RoaringBitmap);
+        let delta = BlockDelta::from(block.clone());
+
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::String(format!("{:04}", i)));
+            let value = Value::RoaringBitmapValue(roaring::RoaringBitmap::from_iter(
+                (0..i).map(|x| x as u32),
+            ));
+            delta.add(key, value);
+        }
+
+        let size = delta.get_size();
+        let block_data = BlockData::try_from(&delta).unwrap();
+        assert_eq!(size, block_data.get_size());
+
+        let (split_key, delta) = delta.split(&block_provider);
     }
 }
