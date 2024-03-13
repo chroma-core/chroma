@@ -67,6 +67,7 @@ func (s *tenantDb) Insert(tenant *dbmodel.Tenant) error {
 }
 
 func (s *tenantDb) UpdateTenantLastCompactionTime(tenantID string, lastCompactionTime int64) error {
+	log.Info("UpdateTenantLastCompactionTime", zap.String("tenantID", tenantID), zap.Int64("lastCompactionTime", lastCompactionTime))
 	var tenants []dbmodel.Tenant
 	result := s.db.Model(&tenants).
 		Clauses(clause.Returning{Columns: []clause.Column{{Name: "id"}}}).
@@ -84,6 +85,7 @@ func (s *tenantDb) UpdateTenantLastCompactionTime(tenantID string, lastCompactio
 }
 
 func (s *tenantDb) GetTenantsLastCompactionTime(tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	log.Info("GetTenantsLastCompactionTime", zap.Any("tenantIDs", tenantIDs))
 	var tenants []*dbmodel.Tenant
 
 	result := s.db.Select("id", "last_compaction_time").Find(&tenants, "id IN ?", tenantIDs)

@@ -43,6 +43,7 @@ message Segment {
     // collection and can be used to service queries (for it's given scope.)
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
+    repeated string filePaths = 7;
 }
 
 message Collection {
@@ -53,6 +54,8 @@ message Collection {
   optional int32 dimension = 5;
   string tenant = 6;
   string database = 7;
+  int64 logPosition = 8;
+  int32 version = 9;
 }
 
 message Database {

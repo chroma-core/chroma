@@ -50,23 +50,25 @@ class Vector(_message.Message):
     def __init__(self, dimension: _Optional[int] = ..., vector: _Optional[bytes] = ..., encoding: _Optional[_Union[ScalarEncoding, str]] = ...) -> None: ...
 
 class Segment(_message.Message):
-    __slots__ = ["id", "type", "scope", "topic", "collection", "metadata"]
+    __slots__ = ["id", "type", "scope", "topic", "collection", "metadata", "filePaths"]
     ID_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
     TOPIC_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
+    FILEPATHS_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
     scope: SegmentScope
     topic: str
     collection: str
     metadata: UpdateMetadata
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ...) -> None: ...
+    filePaths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., filePaths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Collection(_message.Message):
-    __slots__ = ["id", "name", "topic", "metadata", "dimension", "tenant", "database"]
+    __slots__ = ["id", "name", "topic", "metadata", "dimension", "tenant", "database", "logPosition", "version"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     TOPIC_FIELD_NUMBER: _ClassVar[int]
@@ -74,6 +76,8 @@ class Collection(_message.Message):
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
+    LOGPOSITION_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     topic: str
@@ -81,7 +85,9 @@ class Collection(_message.Message):
     dimension: int
     tenant: str
     database: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
+    logPosition: int
+    version: int
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., logPosition: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
 
 class Database(_message.Message):
     __slots__ = ["id", "name", "tenant"]

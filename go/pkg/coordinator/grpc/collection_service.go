@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -213,13 +214,13 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 }
 
 func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
-	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
+	blob, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	tenantID, err := types.ToUniqueID(&req.TenantId)
-	err = grpcutils.BuildErrorForUUID(tenantID, "tenant", err)
+	log.Info("flush collection compaction", zap.String("request", string(blob)))
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +238,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 	}
 	FlushCollectionCompaction := &model.FlushCollectionCompaction{
 		ID:                       collectionID,
-		TenantID:                 tenantID,
+		TenantID:                 req.TenantId,
 		LogPosition:              req.LogPosition,
 		CurrentCollectionVersion: req.CollectionVersion,
 		FlushSegmentCompactions:  segmentCompactionInfo,
@@ -245,7 +246,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
 		log.Error("error FlushCollectionCompaction", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error flushing collection compaction")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res := &coordinatorpb.FlushCollectionCompactionResponse{
 		CollectionId:       flushCollectionInfo.ID,

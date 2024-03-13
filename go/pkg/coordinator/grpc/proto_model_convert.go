@@ -38,12 +38,14 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 	}
 
 	collectionpb := &coordinatorpb.Collection{
-		Id:        collection.ID.String(),
-		Name:      collection.Name,
-		Topic:     collection.Topic,
-		Dimension: collection.Dimension,
-		Tenant:    collection.TenantID,
-		Database:  collection.DatabaseName,
+		Id:          collection.ID.String(),
+		Name:        collection.Name,
+		Topic:       collection.Topic,
+		Dimension:   collection.Dimension,
+		Tenant:      collection.TenantID,
+		Database:    collection.DatabaseName,
+		LogPosition: collection.LogPosition,
+		Version:     collection.Version,
 	}
 	if collection.Metadata == nil {
 		return collectionpb
@@ -152,6 +154,7 @@ func convertSegmentToProto(segment *model.Segment) *coordinatorpb.Segment {
 		Topic:      segment.Topic,
 		Collection: nil,
 		Metadata:   nil,
+		FilePaths:  *segment.FilePaths,
 	}
 
 	collectionID := segment.CollectionID

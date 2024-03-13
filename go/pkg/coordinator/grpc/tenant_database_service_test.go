@@ -2,13 +2,13 @@ package grpc
 
 import (
 	"context"
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
-	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -21,11 +21,9 @@ import (
 
 type TenantDatabaseServiceTestSuite struct {
 	suite.Suite
-	catalog      *coordinator.Catalog
-	db           *gorm.DB
-	s            *Server
-	t            *testing.T
-	collectionId types.UniqueID
+	catalog *coordinator.Catalog
+	db      *gorm.DB
+	s       *Server
 }
 
 func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
@@ -38,7 +36,7 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 		NotifierProvider:          "memory",
 		Testing:                   true}, grpcutils.Default, suite.db)
 	if err != nil {
-		suite.t.Fatalf("error creating server: %v", err)
+		suite.T().Fatalf("error creating server: %v", err)
 	}
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
@@ -66,7 +64,7 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 		},
 	}
 	_, err := suite.s.SetLastCompactionTimeForTenant(context.Background(), request)
-	suite.Equal(status.Error(codes.Code(code.Code_INTERNAL), "error SetTenantLastCompactionTime"), err)
+	suite.Equal(status.Error(codes.Code(code.Code_INTERNAL), common.ErrTenantNotFound.Error()), err)
 
 	// create tenant
 	_, err = suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
@@ -103,6 +101,5 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {
 	testSuite := new(TenantDatabaseServiceTestSuite)
-	testSuite.t = t
 	suite.Run(t, testSuite)
 }

@@ -13,6 +13,8 @@ type Collection struct {
 	TenantID     string
 	DatabaseName string
 	Ts           types.Timestamp
+	LogPosition  int64
+	Version      int32
 }
 
 type CreateCollection struct {
@@ -48,7 +50,7 @@ type UpdateCollection struct {
 
 type FlushCollectionCompaction struct {
 	ID                       types.UniqueID
-	TenantID                 types.UniqueID
+	TenantID                 string
 	LogPosition              int64
 	CurrentCollectionVersion int32
 	FlushSegmentCompactions  []*FlushSegmentCompaction

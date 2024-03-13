@@ -15,14 +15,12 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
 	"pgregory.net/rapid"
 )
 
 type APIsTestSuite struct {
 	suite.Suite
 	db                *gorm.DB
-	t                 *testing.T
 	collectionId1     types.UniqueID
 	collectionId2     types.UniqueID
 	records           [][]byte
@@ -45,7 +43,7 @@ func (suite *APIsTestSuite) SetupTest() {
 	DbId, err := dao.CreateTestTenantAndDatabase(suite.db, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.databaseId = DbId
-	suite.sampleCollections = SampleCollections(suite.t, suite.tenantName, suite.databaseName)
+	suite.sampleCollections = SampleCollections(suite.tenantName, suite.databaseName)
 	for index, collection := range suite.sampleCollections {
 		collection.ID = types.NewUniqueID()
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
@@ -54,7 +52,7 @@ func (suite *APIsTestSuite) SetupTest() {
 	ctx := context.Background()
 	c, err := NewCoordinator(ctx, assignmentPolicy, suite.db, nil, nil)
 	if err != nil {
-		suite.t.Fatalf("error creating coordinator: %v", err)
+		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
 	suite.coordinator = c
 	for _, collection := range suite.sampleCollections {
@@ -218,7 +216,7 @@ func TestAPIs(t *testing.T) {
 	// rapid.Check(t, testSegment)
 }
 
-func SampleCollections(t *testing.T, tenantID string, databaseName string) []*model.Collection {
+func SampleCollections(tenantID string, databaseName string) []*model.Collection {
 	dimension := int32(128)
 	metadata1 := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	metadata1.Add("test_str", &model.CollectionMetadataValueStringType{Value: "str1"})
@@ -288,13 +286,12 @@ func (m *MockAssignmentPolicy) AssignCollection(collectionID types.UniqueID) (st
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
 	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Name < results[j].Name
 	})
-
-	assert.Equal(suite.t, suite.sampleCollections, results)
+	suite.Equal(suite.sampleCollections, results)
 
 	// Duplicate create fails
 	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
@@ -303,42 +300,42 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 		TenantID:     suite.tenantName,
 		DatabaseName: suite.databaseName,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Find by name
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, nil, suite.tenantName, suite.databaseName)
-		assert.NoError(suite.t, err)
-		assert.Equal(suite.t, []*model.Collection{collection}, result)
+		suite.NoError(err)
+		suite.Equal([]*model.Collection{collection}, result)
 	}
 
 	// Find by topic
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, &collection.Topic, suite.tenantName, suite.databaseName)
-		assert.NoError(suite.t, err)
-		assert.Equal(suite.t, []*model.Collection{collection}, result)
+		suite.NoError(err)
+		suite.Equal([]*model.Collection{collection}, result)
 	}
 
 	// Find by id
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, nil, suite.tenantName, suite.databaseName)
-		assert.NoError(suite.t, err)
-		assert.Equal(suite.t, []*model.Collection{collection}, result)
+		suite.NoError(err)
+		suite.Equal([]*model.Collection{collection}, result)
 	}
 
 	// Find by id and topic (positive case)
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, &collection.Topic, suite.tenantName, suite.databaseName)
-		assert.NoError(suite.t, err)
-		assert.Equal(suite.t, []*model.Collection{collection}, result)
+		suite.NoError(err)
+		suite.Equal([]*model.Collection{collection}, result)
 	}
 
 	// find by id and topic (negative case)
 	for _, collection := range suite.sampleCollections {
 		otherTopic := "other topic"
 		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, &otherTopic, suite.tenantName, suite.databaseName)
-		assert.NoError(suite.t, err)
-		assert.Empty(suite.t, result)
+		suite.NoError(err)
+		suite.Empty(result)
 	}
 
 	// Delete
@@ -349,21 +346,21 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 		TenantID:     suite.tenantName,
 	}
 	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
-	assert.NotContains(suite.t, results, c1)
-	assert.Len(suite.t, results, len(suite.sampleCollections)-1)
-	assert.ElementsMatch(suite.t, results, suite.sampleCollections[1:])
+	suite.NotContains(results, c1)
+	suite.Len(results, len(suite.sampleCollections)-1)
+	suite.ElementsMatch(results, suite.sampleCollections[1:])
 	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Empty(suite.t, byIDResult)
+	suite.NoError(err)
+	suite.Empty(byIDResult)
 
 	// Duplicate delete throws an exception
 	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
-	assert.Error(suite.t, err)
+	suite.Error(err)
 }
 
 func (suite *APIsTestSuite) TestUpdateCollections() {
@@ -381,50 +378,50 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	// Update name
 	coll.Name = "new_name"
 	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, coll, result)
+	suite.NoError(err)
+	suite.Equal(coll, result)
 	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Collection{coll}, resultList)
+	suite.NoError(err)
+	suite.Equal([]*model.Collection{coll}, resultList)
 
 	// Update topic
 	coll.Topic = "new_topic"
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Topic: &coll.Topic})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, coll, result)
+	suite.NoError(err)
+	suite.Equal(coll, result)
 	resultList, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, &coll.Topic, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Collection{coll}, resultList)
+	suite.NoError(err)
+	suite.Equal([]*model.Collection{coll}, resultList)
 
 	// Update dimension
 	newDimension := int32(128)
 	coll.Dimension = &newDimension
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, coll, result)
+	suite.NoError(err)
+	suite.Equal(coll, result)
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Collection{coll}, resultList)
+	suite.NoError(err)
+	suite.Equal([]*model.Collection{coll}, resultList)
 
 	// Reset the metadata
 	newMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	newMetadata.Add("test_str2", &model.CollectionMetadataValueStringType{Value: "str2"})
 	coll.Metadata = newMetadata
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, coll, result)
+	suite.NoError(err)
+	suite.Equal(coll, result)
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Collection{coll}, resultList)
+	suite.NoError(err)
+	suite.Equal([]*model.Collection{coll}, resultList)
 
 	// Delete all metadata keys
 	coll.Metadata = nil
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, coll, result)
+	suite.NoError(err)
+	suite.Equal(coll, result)
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Collection{coll}, resultList)
+	suite.NoError(err)
+	suite.Equal([]*model.Collection{coll}, resultList)
 }
 
 func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
@@ -459,7 +456,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	result, err := suite.coordinator.GetCollections(ctx, suite.sampleCollections[1].ID, nil, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Len(result, 1)
-	assert.Equal(suite.t, newName1, result[0].Name)
+	suite.Equal(newName1, result[0].Name)
 
 	newName0 := "new_name_0"
 	_, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
@@ -471,7 +468,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	result, err = suite.coordinator.GetCollections(ctx, suite.sampleCollections[0].ID, nil, nil, suite.tenantName, newDatabaseName)
 	suite.NoError(err)
 	suite.Len(result, 1)
-	assert.Equal(suite.t, newName0, result[0].Name)
+	suite.Equal(newName0, result[0].Name)
 
 	// clean up
 	err = dao.CleanUpTestDatabase(suite.db, suite.tenantName, newDatabaseName)
@@ -488,7 +485,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		Name:   newDatabaseName,
 		Tenant: suite.tenantName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	for index, collection := range suite.sampleCollections {
 		collection.ID = types.NewUniqueID()
@@ -508,16 +505,16 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		suite.sampleCollections[index] = collection
 	}
 	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, newDatabaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, len(suite.sampleCollections), len(result))
+	suite.NoError(err)
+	suite.Equal(len(suite.sampleCollections), len(result))
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
-	assert.Equal(suite.t, suite.sampleCollections, result)
+	suite.Equal(suite.sampleCollections, result)
 
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, 3, len(result))
+	suite.NoError(err)
+	suite.Equal(len(suite.sampleCollections), len(result))
 
 	// clean up
 	err = dao.CleanUpTestDatabase(suite.db, suite.tenantName, newDatabaseName)
@@ -532,19 +529,19 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	_, err := suite.coordinator.CreateTenant(ctx, &model.CreateTenant{
 		Name: newTenantName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	// Create tenant that already exits and expect an error
 	_, err = suite.coordinator.CreateTenant(ctx, &model.CreateTenant{
 		Name: newTenantName,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Create tenant that already exits and expect an error
 	_, err = suite.coordinator.CreateTenant(ctx, &model.CreateTenant{
 		Name: suite.tenantName,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Create a new database within this tenant and also in the default tenant
 	newDatabaseName := "test_apis_CreateDatabaseWithTenants"
@@ -553,14 +550,14 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 		Name:   newDatabaseName,
 		Tenant: newTenantName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	_, err = suite.coordinator.CreateDatabase(ctx, &model.CreateDatabase{
 		ID:     types.MustParse("44444444-d7d7-413b-92e1-731098a6e492").String(),
 		Name:   newDatabaseName,
 		Tenant: suite.tenantName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	// Create a new collection in the new tenant
 	suite.sampleCollections[0].ID = types.NewUniqueID()
@@ -574,7 +571,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 		TenantID:     newTenantName,
 		DatabaseName: newDatabaseName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	// Create a new collection in the default tenant
 	suite.sampleCollections[1].ID = types.NewUniqueID()
@@ -595,23 +592,23 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected[0].TenantID = newTenantName
 	expected[0].DatabaseName = newDatabaseName
 	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, newTenantName, newDatabaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, 1, len(result))
-	assert.Equal(suite.t, expected[0], result[0])
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal(expected[0], result[0])
 
 	expected = []*model.Collection{suite.sampleCollections[1]}
 	expected[0].TenantID = suite.tenantName
 	expected[0].DatabaseName = newDatabaseName
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, newDatabaseName)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, 1, len(result))
-	assert.Equal(suite.t, expected[0], result[0])
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal(expected[0], result[0])
 
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, newTenantName, suite.databaseName)
-	assert.NoError(suite.t, err)
-	assert.Nil(suite.t, result)
+	suite.NoError(err)
+	suite.Nil(result)
 
 	// clean up
 	err = dao.CleanUpTestTenant(suite.db, newTenantName)
@@ -628,28 +625,28 @@ func (suite *APIsTestSuite) TestCreateGetDeleteTenants() {
 	_, err := suite.coordinator.CreateTenant(ctx, &model.CreateTenant{
 		Name: newTenantName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	// Create tenant that already exits and expect an error
 	_, err = suite.coordinator.CreateTenant(ctx, &model.CreateTenant{
 		Name: newTenantName,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Create tenant that already exits and expect an error
 	_, err = suite.coordinator.CreateTenant(ctx, &model.CreateTenant{
 		Name: suite.tenantName,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Get the tenant and check that it exists
 	result, err := suite.coordinator.GetTenant(ctx, &model.GetTenant{Name: newTenantName})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, newTenantName, result.Name)
+	suite.NoError(err)
+	suite.Equal(newTenantName, result.Name)
 
 	// Get a tenant that does not exist and expect an error
 	_, err = suite.coordinator.GetTenant(ctx, &model.GetTenant{Name: "tenant2"})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Create a new database within this tenant
 	newDatabaseName := "test_apis_CreateGetDeleteTenants"
@@ -658,23 +655,23 @@ func (suite *APIsTestSuite) TestCreateGetDeleteTenants() {
 		Name:   newDatabaseName,
 		Tenant: newTenantName,
 	})
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	// Get the database and check that it exists
 	databaseResult, err := suite.coordinator.GetDatabase(ctx, &model.GetDatabase{
 		Name:   newDatabaseName,
 		Tenant: newTenantName,
 	})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, newDatabaseName, databaseResult.Name)
-	assert.Equal(suite.t, newTenantName, databaseResult.Tenant)
+	suite.NoError(err)
+	suite.Equal(newDatabaseName, databaseResult.Name)
+	suite.Equal(newTenantName, databaseResult.Tenant)
 
 	// Get a database that does not exist in a tenant that does exist and expect an error
 	_, err = suite.coordinator.GetDatabase(ctx, &model.GetDatabase{
 		Name:   "new_database1",
 		Tenant: newTenantName,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Get a database that does not exist in a tenant that does not exist and expect an
 	// error
@@ -682,7 +679,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteTenants() {
 		Name:   "new_database1",
 		Tenant: "tenant2",
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// clean up
 	err = dao.CleanUpTestTenant(suite.db, newTenantName)
@@ -691,7 +688,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteTenants() {
 	suite.NoError(err)
 }
 
-func SampleSegments(t *testing.T, sampleCollections []*model.Collection) []*model.Segment {
+func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 	metadata1 := model.NewSegmentMetadata[model.SegmentMetadataValueType]()
 	metadata1.Set("test_str", &model.SegmentMetadataValueStringType{Value: "str1"})
 	metadata1.Set("test_int", &model.SegmentMetadataValueInt64Type{Value: 1})
@@ -717,6 +714,7 @@ func SampleSegments(t *testing.T, sampleCollections []*model.Collection) []*mode
 			Scope:        "VECTOR",
 			CollectionID: sampleCollections[0].ID,
 			Metadata:     metadata1,
+			FilePaths:    &[]string{},
 		},
 		{
 			ID:           types.MustParse("11111111-d7d7-413b-92e1-731098a6e492"),
@@ -725,6 +723,7 @@ func SampleSegments(t *testing.T, sampleCollections []*model.Collection) []*mode
 			Scope:        "VECTOR",
 			CollectionID: sampleCollections[1].ID,
 			Metadata:     metadata2,
+			FilePaths:    &[]string{},
 		},
 		{
 			ID:           types.MustParse("22222222-d7d7-413b-92e1-731098a6e492"),
@@ -733,6 +732,7 @@ func SampleSegments(t *testing.T, sampleCollections []*model.Collection) []*mode
 			Scope:        "METADATA",
 			CollectionID: types.NilUniqueID(),
 			Metadata:     metadata3, // This segment is not assigned to any collection
+			FilePaths:    &[]string{},
 		},
 	}
 	return sampleSegments
@@ -742,7 +742,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	ctx := context.Background()
 	c := suite.coordinator
 
-	sampleSegments := SampleSegments(suite.t, suite.sampleCollections)
+	sampleSegments := SampleSegments(suite.sampleCollections)
 	for _, segment := range sampleSegments {
 		errSegmentCreation := c.CreateSegment(ctx, &model.CreateSegment{
 			ID:           segment.ID,
@@ -759,8 +759,8 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].ID.String() < results[j].ID.String()
 	})
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, sampleSegments, results)
+	suite.NoError(err)
+	suite.Equal(sampleSegments, results)
 
 	// Duplicate create fails
 	err = c.CreateSegment(ctx, &model.CreateSegment{
@@ -771,55 +771,55 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 		CollectionID: sampleSegments[0].CollectionID,
 		Metadata:     sampleSegments[0].Metadata,
 	})
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// Find by id
 	for _, segment := range sampleSegments {
 		result, err := c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-		assert.NoError(suite.t, err)
-		assert.Equal(suite.t, []*model.Segment{segment}, result)
+		suite.NoError(err)
+		suite.Equal([]*model.Segment{segment}, result)
 	}
 
 	// Find by type
 	testTypeA := "test_type_a"
 	result, err := c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, sampleSegments[:1], result)
+	suite.NoError(err)
+	suite.Equal(sampleSegments[:1], result)
 
 	testTypeB := "test_type_b"
 	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.ElementsMatch(suite.t, result, sampleSegments[1:])
+	suite.NoError(err)
+	suite.ElementsMatch(sampleSegments[1:], result)
 
 	// Find by collection ID
 	result, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, nil, suite.sampleCollections[0].ID)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, sampleSegments[:1], result)
+	suite.NoError(err)
+	suite.Equal(sampleSegments[:1], result)
 
 	// Find by type and collection ID (positive case)
 	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, nil, suite.sampleCollections[0].ID)
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, sampleSegments[:1], result)
+	suite.NoError(err)
+	suite.Equal(sampleSegments[:1], result)
 
 	// Find by type and collection ID (negative case)
 	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, nil, suite.sampleCollections[0].ID)
-	assert.NoError(suite.t, err)
-	assert.Empty(suite.t, result)
+	suite.NoError(err)
+	suite.Empty(result)
 
 	// Delete
 	s1 := sampleSegments[0]
 	err = c.DeleteSegment(ctx, s1.ID)
-	assert.NoError(suite.t, err)
+	suite.NoError(err)
 
 	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.NotContains(suite.t, results, s1)
-	assert.Len(suite.t, results, len(sampleSegments)-1)
-	assert.ElementsMatch(suite.t, results, sampleSegments[1:])
+	suite.NoError(err)
+	suite.NotContains(results, s1)
+	suite.Len(results, len(sampleSegments)-1)
+	suite.ElementsMatch(results, sampleSegments[1:])
 
 	// Duplicate delete throws an exception
 	err = c.DeleteSegment(ctx, s1.ID)
-	assert.Error(suite.t, err)
+	suite.Error(err)
 
 	// clean up segments
 	for _, segment := range sampleSegments {
@@ -842,6 +842,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		Topic:        &testTopic,
 		CollectionID: suite.sampleCollections[0].ID,
 		Metadata:     metadata,
+		FilePaths:    &[]string{},
 	}
 
 	ctx := context.Background()
@@ -866,8 +867,8 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	})
 	suite.NoError(err)
 	result, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Segment{segment}, result)
+	suite.NoError(err)
+	suite.Equal([]*model.Segment{segment}, result)
 
 	// Update topic to None
 	segment.Topic = nil
@@ -879,8 +880,8 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	})
 	suite.NoError(err)
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Segment{segment}, result)
+	suite.NoError(err)
+	suite.Equal([]*model.Segment{segment}, result)
 
 	// TODO: revisit why we need this
 	// Update collection to new value
@@ -913,8 +914,8 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		Metadata:   segment.Metadata})
 	suite.NoError(err)
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Segment{segment}, result)
+	suite.NoError(err)
+	suite.Equal([]*model.Segment{segment}, result)
 
 	// Update a metadata key
 	segment.Metadata.Set("test_str", &model.SegmentMetadataValueStringType{Value: "str3"})
@@ -924,8 +925,8 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		Metadata:   segment.Metadata})
 	suite.NoError(err)
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Segment{segment}, result)
+	suite.NoError(err)
+	suite.Equal([]*model.Segment{segment}, result)
 
 	// Delete a metadata key
 	segment.Metadata.Remove("test_str")
@@ -937,8 +938,8 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		Metadata:   newMetadata})
 	suite.NoError(err)
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Segment{segment}, result)
+	suite.NoError(err)
+	suite.Equal([]*model.Segment{segment}, result)
 
 	// Delete all metadata keys
 	segment.Metadata = nil
@@ -950,12 +951,11 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	)
 	suite.NoError(err)
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	assert.NoError(suite.t, err)
-	assert.Equal(suite.t, []*model.Segment{segment}, result)
+	suite.NoError(err)
+	suite.Equal([]*model.Segment{segment}, result)
 }
 
 func TestAPIsTestSuite(t *testing.T) {
 	testSuite := new(APIsTestSuite)
-	testSuite.t = t
 	suite.Run(t, testSuite)
 }

@@ -42,7 +42,7 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	recordCount, err := s.logService.PushLogs(ctx, collectionID, recordsContent)
 	if err != nil {
 		log.Error("error pushing logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pushing logs")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.RecordCount = int32(recordCount)
 	log.Info("PushLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", recordCount))
@@ -60,7 +60,7 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for index := range recordLogs {
 		record := &coordinatorpb.SubmitEmbeddingRecord{}
@@ -90,7 +90,7 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 	recordLogs, err := s.logService.GetAllCollectionIDsToCompact()
 	if err != nil {
 		log.Error("error getting collection info", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error getting collection info")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for _, recordLog := range recordLogs {
 		collectionInfo := &logservicepb.CollectionInfo{

@@ -475,11 +475,12 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	segments := make([]*model.Segment, 0, len(segmentAndMetadataList))
 	for _, segmentAndMetadata := range segmentAndMetadataList {
 		segment := &model.Segment{
-			ID:    types.MustParse(segmentAndMetadata.Segment.ID),
-			Type:  segmentAndMetadata.Segment.Type,
-			Scope: segmentAndMetadata.Segment.Scope,
-			Topic: segmentAndMetadata.Segment.Topic,
-			Ts:    segmentAndMetadata.Segment.Ts,
+			ID:        types.MustParse(segmentAndMetadata.Segment.ID),
+			Type:      segmentAndMetadata.Segment.Type,
+			Scope:     segmentAndMetadata.Segment.Scope,
+			Topic:     segmentAndMetadata.Segment.Topic,
+			Ts:        segmentAndMetadata.Segment.Ts,
+			FilePaths: &segmentAndMetadata.Segment.FilePaths,
 		}
 
 		if segmentAndMetadata.Segment.CollectionID != nil {
@@ -640,7 +641,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		// TODO: add a system configuration to disable
 		// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
 		lastCompactionTime := time.Now().Unix()
-		err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.ID.String(), lastCompactionTime)
+		err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
 		if err != nil {
 			return err
 		}
