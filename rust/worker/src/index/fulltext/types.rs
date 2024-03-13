@@ -326,8 +326,7 @@ mod test {
     use proptest_state_machine::{prop_state_machine, ReferenceStateMachine, StateMachineTest};
     use proptest::test_runner::Config;
     use rand::prelude::IteratorRandom;
-    // https://tonsky.me/blog/unicode/
-    use unicode_xid::UnicodeXID;
+    use std::rc::Rc;
 
     #[derive(Debug, Clone)]
     pub(crate) enum Transition {
@@ -403,17 +402,53 @@ mod test {
                 ].boxed();
             }
 
-            let s = state.state.clone();
+            // TODO if we add another strategy here we should refactor as described
+            // in https://stackoverflow.com/questions/69483902/is-there-a-simple-way-to-move-clone-of-rc-into-closure
+            let s = Rc::new(state.state.clone());
+            let s2 = Rc::clone(&s);
+            let s_len = s.len();
+            let maximum_document_length = s.keys().max_by_key(|k| k.len()).unwrap().len();
             prop_oneof![
                 Just(Transition::BeginTransaction),
                 Just(Transition::CommitTransaction),
                 (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
                 QUERY_STRATEGY.prop_map(Transition::Search),
-                (0..state.state.len()).prop_map(move |i| {
+                (0..s_len).prop_map(move |i| {
+                    // Search for a random entire document in the index.
                     let mut keys = s.keys().collect::<Vec<&String>>().clone();
                     keys.sort();
                     let doc = keys[i].clone();
                     Transition::Search(doc.to_string())
+                }),
+                (0..s_len, 0..(maximum_document_length), 0..maximum_document_length).prop_map(move |(i, start, end)| {
+                    // Search for a random substring of a random document in the index.
+                    let mut keys = s2.keys().collect::<Vec<&String>>().clone();
+                    keys.sort();
+
+                    let doc = keys[i].clone();
+
+                    // Unicooooode. We're cutting on codepoints but our strategy
+                    // is on Unicode scalar values (chars/bytes). So we have some work to do.
+                    // It's fine for all of this to be inefficient -- it only runs in tests.
+                    // https://tonsky.me/blog/unicode/
+                    //
+                    // We take the start strategy and map it to a legal starting byte:
+                    // - We need it to be < doc.len() - MIN_QUERY_SIZE, so we do % (doc.len() - MIN_QUERY_SIZE)
+                    let maximum_start_byte = start % (doc.len() - MIN_QUERY_SIZE);
+                    // Now we find the last unicode character which starts before
+                    // maximum_start_byte. This is the start of our search substring.
+                    let start_byte = doc.char_indices().filter(|(i, _)| *i <= maximum_start_byte).last().unwrap().0;
+                    // We take the end strategy and map it to a legal ending byte:
+                    // - We need it to be in the range [start_byte + MIN_QUERY_SIZE, doc.len()]
+                    // - We do % (doc.len() - start_byte - MIN_QUERY_SIZE) to get a byte in that range.
+                    // - We add start_byte + MIN_QUERY_SIZE to put it into the proper place.
+                    let minimum_end_byte = (end % (doc.len() - start_byte - MIN_QUERY_SIZE)) + start_byte + MIN_QUERY_SIZE;
+                    // Now we find the first unicode character which starts after
+                    // minimum_end_byte. This is the end of our search substring.
+                    // If we can't find one, we use the end of the string.
+                    let end_byte = doc.char_indices().filter(|(i, _)| *i >= minimum_end_byte).next().map(|(i, _)| i).unwrap_or(doc.len());
+                    let query = &doc[start_byte..end_byte];
+                    Transition::Search(query.to_string())
                 }),
             ].boxed()
         }
@@ -529,6 +564,7 @@ mod test {
 
     prop_state_machine! {
         #![proptest_config(Config {
+            verbose: 0,
             cases: 10,
             .. Config::default()
         })]

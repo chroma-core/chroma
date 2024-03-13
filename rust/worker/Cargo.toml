@@ -42,8 +42,6 @@ tantivy = "0.21.1"
 [dev-dependencies]
 proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
-stringslice = "0.2.0"
-unicode-xid = "0.2.4"
 
 [build-dependencies]
 tonic-build = "0.10"
