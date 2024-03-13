@@ -79,7 +79,7 @@ CREATE TABLE "public"."segments" (
   "is_deleted" boolean NULL DEFAULT false,
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "file_paths" text NULL DEFAULT '[]',
+  "file_paths" text NULL DEFAULT '{}',
   PRIMARY KEY ("collection_id", "id")
 );
 -- Create "tenants" table

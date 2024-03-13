@@ -46,7 +46,7 @@ type GetSegments struct {
 
 type FlushSegmentCompaction struct {
 	ID        types.UniqueID
-	FilePaths *[]string
+	FilePaths map[string][]string
 }
 
 func FilterSegments(segment *Segment, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) bool {

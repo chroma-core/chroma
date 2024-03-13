@@ -108,7 +108,7 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 			currentSegmentID = segmentID
 			metadata = nil
 
-			var filePaths []string
+			var filePaths map[string][]string
 			err := json.Unmarshal([]byte(filePathsJson), &filePaths)
 			if err != nil {
 				return nil, err
@@ -214,7 +214,7 @@ func (s *segmentDb) Update(in *dbmodel.UpdateSegment) error {
 func (s *segmentDb) RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error {
 	log.Info("register file paths", zap.Any("flushSegmentCompactions", flushSegmentCompactions))
 	for _, flushSegmentCompaction := range flushSegmentCompactions {
-		filePaths, err := json.Marshal(*flushSegmentCompaction.FilePaths)
+		filePaths, err := json.Marshal(flushSegmentCompaction.FilePaths)
 		if err != nil {
 			log.Error("marshal file paths failed", zap.Error(err))
 			return err

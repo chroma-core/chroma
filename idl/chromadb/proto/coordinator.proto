@@ -176,9 +176,19 @@ message SetLastCompactionTimeForTenantRequest {
   TenantLastCompactionTime tenant_last_compaction_time = 1;
 }
 
+enum FilePathType {
+  FILE_TYPE_METADATA = 0;
+  FILE_TYPE_VECTOR = 1;
+}
+
+message FilePaths {
+  FilePathType type = 1;
+  repeated string paths = 2;
+}
+
 message FlushSegmentCompactionInfo {
   string segment_id = 1;
-  repeated string file_paths = 2;
+  repeated FilePaths file_paths = 2;
 }
 
 message FlushCollectionCompactionRequest {

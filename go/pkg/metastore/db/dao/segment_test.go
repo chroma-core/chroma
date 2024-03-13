@@ -113,18 +113,26 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_RegisterFilePath() {
 	suite.NoError(err)
 
 	// create entries to flush
-	segmentsFilePaths := make(map[string][]string)
+	testFilePathTypes := []string{
+		"TypeA", "TypeB", "TypeC", "TypeD",
+	}
+	segmentsFilePaths := make(map[string]map[string][]string)
 	flushSegmentCompactions := make([]*model.FlushSegmentCompaction, 0)
 	for _, segment := range segments {
-		filePaths := make([]string, 0)
-		for i := 0; i < rand.Intn(5); i++ {
-			filePaths = append(filePaths, "test_file_path_"+strconv.Itoa(i+1))
-		}
 		segmentID := segment.Segment.ID
-		segmentsFilePaths[segmentID] = filePaths
+		segmentsFilePaths[segmentID] = make(map[string][]string)
+		for i := 0; i < rand.Intn(len(testFilePathTypes)); i++ {
+			filePaths := make([]string, 0)
+			for j := 0; j < rand.Intn(5); j++ {
+				filePaths = append(filePaths, "test_file_path_"+strconv.Itoa(j+1))
+			}
+			filePathTypeI := rand.Intn(len(testFilePathTypes))
+			filePathType := testFilePathTypes[filePathTypeI]
+			segmentsFilePaths[segmentID][filePathType] = filePaths
+		}
 		flushSegmentCompaction := &model.FlushSegmentCompaction{
 			ID:        types.MustParse(segmentID),
-			FilePaths: &filePaths,
+			FilePaths: segmentsFilePaths[segmentID],
 		}
 		flushSegmentCompactions = append(flushSegmentCompactions, flushSegmentCompaction)
 	}

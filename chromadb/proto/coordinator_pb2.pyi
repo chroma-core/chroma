@@ -1,11 +1,19 @@
 from chromadb.proto import chroma_pb2 as _chroma_pb2
 from google.protobuf import empty_pb2 as _empty_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class FilePathType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = []
+    FILE_TYPE_METADATA: _ClassVar[FilePathType]
+    FILE_TYPE_VECTOR: _ClassVar[FilePathType]
+FILE_TYPE_METADATA: FilePathType
+FILE_TYPE_VECTOR: FilePathType
 
 class CreateDatabaseRequest(_message.Message):
     __slots__ = ["id", "name", "tenant"]
@@ -267,13 +275,21 @@ class SetLastCompactionTimeForTenantRequest(_message.Message):
     tenant_last_compaction_time: TenantLastCompactionTime
     def __init__(self, tenant_last_compaction_time: _Optional[_Union[TenantLastCompactionTime, _Mapping]] = ...) -> None: ...
 
+class FilePaths(_message.Message):
+    __slots__ = ["type", "paths"]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    type: FilePathType
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, type: _Optional[_Union[FilePathType, str]] = ..., paths: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class FlushSegmentCompactionInfo(_message.Message):
     __slots__ = ["segment_id", "file_paths"]
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     FILE_PATHS_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
-    file_paths: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, segment_id: _Optional[str] = ..., file_paths: _Optional[_Iterable[str]] = ...) -> None: ...
+    file_paths: _containers.RepeatedCompositeFieldContainer[FilePaths]
+    def __init__(self, segment_id: _Optional[str] = ..., file_paths: _Optional[_Iterable[_Union[FilePaths, _Mapping]]] = ...) -> None: ...
 
 class FlushCollectionCompactionRequest(_message.Message):
     __slots__ = ["tenant_id", "collection_id", "log_position", "collection_version", "segment_compaction_info"]

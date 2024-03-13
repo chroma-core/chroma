@@ -231,9 +231,13 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		if err != nil {
 			return nil, err
 		}
+		filePaths := make(map[string][]string)
+		for _, filePath := range flushSegmentCompaction.FilePaths {
+			filePaths[filePath.Type.String()] = filePath.Paths
+		}
 		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
 			ID:        segmentID,
-			FilePaths: &flushSegmentCompaction.FilePaths,
+			FilePaths: filePaths,
 		})
 	}
 	FlushCollectionCompaction := &model.FlushCollectionCompaction{
