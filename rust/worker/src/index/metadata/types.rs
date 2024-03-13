@@ -410,11 +410,11 @@ mod test {
         fn key_and_value_and_entry_from_random_numbers(self: &Self, r1: usize, r2: usize, r3: usize) -> Option<(String, T, u32)> {
             let (k, v) = self.key_and_value_from_random_numbers(r1, r2)?;
 
-            let vv = self.data.get(&k)?.get(&v)?;
-            if vv.len() == 0 {
+            let offsets = self.data.get(&k)?.get(&v)?;
+            if offsets.len() == 0 {
                 return None;
             }
-            let oid = vv[r3 % vv.len()];
+            let oid = offsets[r3 % offsets.len()];
             Some((k.clone(), v.clone(), oid))
         }
 
