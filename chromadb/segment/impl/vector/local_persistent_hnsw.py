@@ -3,7 +3,12 @@ import shutil
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
+
+from pypika import Table
+
 from chromadb.config import System
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.segment.impl.metadata.sqlite import _encode_seq_id, _decode_seq_id
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
@@ -206,6 +211,37 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
 
+        with self._db.tx() as cur:
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(_encode_seq_id(self._max_seq_id)),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
+
+    @override
+    def max_seqid(self) -> SeqId:
+        t = Table("max_seq_id")
+        q = (
+            self._db.querybuilder()
+            .from_(t)
+            .select(t.seq_id)
+            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+        )
+        sql, params = get_sql(q)
+        with self._db.tx() as cur:
+            result = cur.execute(sql, params).fetchone()
+            if result is None:
+                return self._max_seq_id
+            else:
+                return _decode_seq_id(result[0])
+
     @trace_method(
         "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
     )
@@ -226,6 +262,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
+
         with WriteRWLock(self._lock):
             for record in records:
                 if record["operation_record"]["embedding"] is not None:

@@ -1,6 +1,8 @@
 from overrides import override
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
+
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
@@ -57,6 +59,7 @@ class LocalHnswSegment(VectorReader):
     _opentelemtry_client: OpenTelemetryClient
 
     def __init__(self, system: System, segment: Segment):
+        self._db = system.instance(SqliteDB)
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
         self._collection = segment["collection"]
@@ -317,7 +320,6 @@ class LocalHnswSegment(VectorReader):
                         logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
                     batch.apply(record, label is not None)
-
             self._apply_batch(batch)
 
     @override
