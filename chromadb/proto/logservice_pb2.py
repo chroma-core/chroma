@@ -16,7 +16,7 @@ from chromadb.proto import chroma_pb2 as chromadb_dot_proto_dot_chroma__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x1f\x63hromadb/proto/logservice.proto\x12\x06\x63hroma\x1a\x1b\x63hromadb/proto/chroma.proto"X\n\x0fPushLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12.\n\x07records\x18\x02 \x03(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"(\n\x10PushLogsResponse\x12\x14\n\x0crecord_count\x18\x01 \x01(\x05"S\n\x0fPullLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x15\n\rstart_from_id\x18\x02 \x01(\x03\x12\x12\n\nbatch_size\x18\x03 \x01(\x05"J\n\tRecordLog\x12\x0e\n\x06log_id\x18\x01 \x01(\x03\x12-\n\x06record\x18\x02 \x01(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"6\n\x10PullLogsResponse\x12"\n\x07records\x18\x01 \x03(\x0b\x32\x11.chroma.RecordLog"V\n\x0e\x43ollectionInfo\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x14\n\x0c\x66irst_log_id\x18\x02 \x01(\x03\x12\x17\n\x0f\x66irst_log_id_ts\x18\x03 \x01(\x03"&\n$GetAllCollectionInfoToCompactRequest"\\\n%GetAllCollectionInfoToCompactResponse\x12\x33\n\x13\x61ll_collection_info\x18\x01 \x03(\x0b\x32\x16.chroma.CollectionInfo2\x8e\x02\n\nLogService\x12?\n\x08PushLogs\x12\x17.chroma.PushLogsRequest\x1a\x18.chroma.PushLogsResponse"\x00\x12?\n\x08PullLogs\x12\x17.chroma.PullLogsRequest\x1a\x18.chroma.PullLogsResponse"\x00\x12~\n\x1dGetAllCollectionInfoToCompact\x12,.chroma.GetAllCollectionInfoToCompactRequest\x1a-.chroma.GetAllCollectionInfoToCompactResponse"\x00\x42\x42Z@github.com/chroma/chroma-coordinator/internal/proto/logservicepbb\x06proto3'
+    b'\n\x1f\x63hromadb/proto/logservice.proto\x12\x06\x63hroma\x1a\x1b\x63hromadb/proto/chroma.proto"X\n\x0fPushLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12.\n\x07records\x18\x02 \x03(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"(\n\x10PushLogsResponse\x12\x14\n\x0crecord_count\x18\x01 \x01(\x05"S\n\x0fPullLogsRequest\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x15\n\rstart_from_id\x18\x02 \x01(\x03\x12\x12\n\nbatch_size\x18\x03 \x01(\x05"J\n\tRecordLog\x12\x0e\n\x06log_id\x18\x01 \x01(\x03\x12-\n\x06record\x18\x02 \x01(\x0b\x32\x1d.chroma.SubmitEmbeddingRecord"6\n\x10PullLogsResponse\x12"\n\x07records\x18\x01 \x03(\x0b\x32\x11.chroma.RecordLog"V\n\x0e\x43ollectionInfo\x12\x15\n\rcollection_id\x18\x01 \x01(\t\x12\x14\n\x0c\x66irst_log_id\x18\x02 \x01(\x03\x12\x17\n\x0f\x66irst_log_id_ts\x18\x03 \x01(\x03"&\n$GetAllCollectionInfoToCompactRequest"\\\n%GetAllCollectionInfoToCompactResponse\x12\x33\n\x13\x61ll_collection_info\x18\x01 \x03(\x0b\x32\x16.chroma.CollectionInfo2\x8e\x02\n\nLogService\x12?\n\x08PushLogs\x12\x17.chroma.PushLogsRequest\x1a\x18.chroma.PushLogsResponse"\x00\x12?\n\x08PullLogs\x12\x17.chroma.PullLogsRequest\x1a\x18.chroma.PullLogsResponse"\x00\x12~\n\x1dGetAllCollectionInfoToCompact\x12,.chroma.GetAllCollectionInfoToCompactRequest\x1a-.chroma.GetAllCollectionInfoToCompactResponse"\x00\x42\x39Z7github.com/chroma-core/chroma/go/pkg/proto/logservicepbb\x06proto3'
 )
 
 _globals = globals()
@@ -27,7 +27,7 @@ _builder.BuildTopDescriptorsAndMessages(
 if _descriptor._USE_C_DESCRIPTORS == False:
     DESCRIPTOR._options = None
     DESCRIPTOR._serialized_options = (
-        b"Z@github.com/chroma/chroma-coordinator/internal/proto/logservicepb"
+        b"Z7github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
     )
     _globals["_PUSHLOGSREQUEST"]._serialized_start = 72
     _globals["_PUSHLOGSREQUEST"]._serialized_end = 160

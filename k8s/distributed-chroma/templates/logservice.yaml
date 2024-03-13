@@ -16,9 +16,17 @@ spec:
       serviceAccountName: logservice-serviceaccount
       containers:
         - command:
-            - "logservice"
-            - "logservice"
-          image: {{ .Values.logService.image }}
+            - "/bin/sh"
+            - "-c"
+            # This has to be one line to be passed into the `exec` env correctly. I truly could not tell you why.
+            - logservice logservice {{ range $k, $v := .Values.logService.flags }} --{{ $k }}={{ $v }} {{ end }}
+          env:
+            {{ range .Values.logService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+          image: "{{ .Values.logService.image.repository }}:{{ .Values.logService.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: logservice
           ports:

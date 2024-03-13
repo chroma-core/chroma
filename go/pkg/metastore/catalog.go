@@ -2,6 +2,7 @@ package metastore
 
 import (
 	"context"
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -17,7 +18,7 @@ type Catalog interface {
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
 	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error)
 	CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error)
-	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID, ts types.Timestamp) ([]*model.Segment, error)
+	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error)
 	DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
 	UpdateSegment(ctx context.Context, segmentInfo *model.UpdateSegment, ts types.Timestamp) (*model.Segment, error)
 	CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase, ts types.Timestamp) (*model.Database, error)
@@ -26,4 +27,6 @@ type Catalog interface {
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant, ts types.Timestamp) (*model.Tenant, error)
 	GetTenants(ctx context.Context, getTenant *model.GetTenant, ts types.Timestamp) (*model.Tenant, error)
 	GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*model.Tenant, error)
+	SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error
+	GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error)
 }

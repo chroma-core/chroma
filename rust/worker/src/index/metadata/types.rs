@@ -1,8 +1,6 @@
-use crate::errors::{ChromaError, ErrorCodes};
-use thiserror::Error;
-
+use crate::blockstore::provider::BlockfileProvider;
 use crate::blockstore::{Blockfile, BlockfileKey, HashMapBlockfile, Key, Value};
-
+use crate::errors::{ChromaError, ErrorCodes};
 use async_trait::async_trait;
 use roaring::RoaringBitmap;
 use std::{
@@ -10,6 +8,7 @@ use std::{
     marker::PhantomData,
     ops::{BitOrAssign, SubAssign}
 };
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum MetadataIndexError {
@@ -72,25 +71,28 @@ struct BlockfileMetadataIndex<T> {
 }
 
 impl<T> BlockfileMetadataIndex<T> {
-    pub fn new() -> Self {
+    pub fn new(init_blockfile: Box<dyn Blockfile>) -> Self {
         BlockfileMetadataIndex {
             metadata_value_type: PhantomData,
-            blockfile: Box::new(HashMapBlockfile::open(&"in-memory").unwrap()),
+            blockfile: init_blockfile,
             in_transaction: false,
             uncommitted_rbms: HashMap::new(),
         }
     }
 
-    fn look_up_key_and_populate_uncommitted_rbms(&mut self, key: &BlockfileKey) -> Result<(), Box<dyn ChromaError>> {
+    fn look_up_key_and_populate_uncommitted_rbms(
+        &mut self,
+        key: &BlockfileKey,
+    ) -> Result<(), Box<dyn ChromaError>> {
         if !self.uncommitted_rbms.contains_key(&key) {
             match self.blockfile.get(key.clone()) {
                 Ok(Value::RoaringBitmapValue(rbm)) => {
                     self.uncommitted_rbms.insert(key.clone(), rbm);
-                },
+                }
                 _ => {
                     let rbm = RoaringBitmap::new();
                     self.uncommitted_rbms.insert(key.clone(), rbm);
-                },
+                }
             };
         }
         Ok(())
@@ -112,7 +114,8 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
             return Err(Box::new(MetadataIndexError::NotInTransaction));
         }
         for (key, rbm) in self.uncommitted_rbms.drain() {
-            self.blockfile.set(key.clone(), Value::RoaringBitmapValue(rbm.clone()));
+            self.blockfile
+                .set(key.clone(), Value::RoaringBitmapValue(rbm.clone()));
         }
         self.blockfile.commit_transaction()?;
         self.in_transaction = false;
@@ -161,13 +164,19 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::blockstore::provider::HashMapBlockfileProvider;
+    use crate::blockstore::{KeyType, ValueType};
 
     #[test]
     fn test_string_value_metadata_index_error_when_not_in_transaction() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
-        let result = index.set("key", "value".to_string(), 1);
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::new(blockfile);
+        let result = index.set("key", ("value".to_string()), 1);
         assert_eq!(result.is_err(), true);
-        let result = index.delete("key", "value".to_string(), 1);
+        let result = index.delete("key", ("value".to_string()), 1);
         assert_eq!(result.is_err(), true);
         let result = index.commit_transaction();
         assert_eq!(result.is_err(), true);
@@ -175,119 +184,195 @@ mod test {
 
     #[test]
     fn test_string_value_metadata_index_empty_transaction() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
         index.commit_transaction().unwrap();
     }
 
     #[test]
     fn test_string_value_metadata_index_set_get() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", "value".to_string(), 1).unwrap();
+        index
+            .set("key", ("value".to_string()), 1)
+            .unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", "value".to_string()).unwrap();
+        let bitmap = index
+            .get("key", ("value".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
 
     #[test]
     fn test_float_value_metadata_index_set_get() {
-        let mut index = BlockfileMetadataIndex::<f32>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<f32>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", 1.0, 1).unwrap();
+        index.set("key", (1.0), 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", 1.0).unwrap();
+        let bitmap = index.get("key", (1.0)).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
 
     #[test]
     fn test_bool_value_metadata_index_set_get() {
-        let mut index = BlockfileMetadataIndex::<bool>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<bool>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", true, 1).unwrap();
+        index.set("key", (true), 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", true).unwrap();
+        let bitmap = index.get("key", (true)).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
 
     #[test]
     fn test_string_value_metadata_index_set_delete_get() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", "value".to_string(), 1).unwrap();
-        index.delete("key", "value".to_string(), 1).unwrap();
+        index
+            .set("key", ("value".to_string()), 1)
+            .unwrap();
+        index
+            .delete("key", ("value".to_string()), 1)
+            .unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", "value".to_string()).unwrap();
+        let bitmap = index
+            .get("key", ("value".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 0);
     }
 
     #[test]
     fn test_string_value_metadata_index_set_delete_set_get() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", "value".to_string(), 1).unwrap();
-        index.delete("key", "value".to_string(), 1).unwrap();
-        index.set("key", "value".to_string(), 1).unwrap();
+        index
+            .set("key", ("value".to_string()), 1)
+            .unwrap();
+        index
+            .delete("key", ("value".to_string()), 1)
+            .unwrap();
+        index
+            .set("key", ("value".to_string()), 1)
+            .unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", "value".to_string()).unwrap();
+        let bitmap = index
+            .get("key", ("value".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
 
     #[test]
     fn test_string_value_metadata_index_multiple_keys() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key1", "value".to_string(), 1).unwrap();
-        index.set("key2", "value".to_string(), 2).unwrap();
+        index
+            .set("key1", ("value".to_string()), 1)
+            .unwrap();
+        index
+            .set("key2", ("value".to_string()), 2)
+            .unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key1", "value".to_string()).unwrap();
+        let bitmap = index
+            .get("key1", ("value".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
 
-        let bitmap = index.get("key2", "value".to_string()).unwrap();
+        let bitmap = index
+            .get("key2", ("value".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(2), true);
     }
 
     #[test]
     fn test_string_value_metadata_index_multiple_values() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", "value1".to_string(), 1).unwrap();
-        index.set("key", "value2".to_string(), 2).unwrap();
+        index
+            .set("key", ("value1".to_string()), 1)
+            .unwrap();
+        index
+            .set("key", ("value2".to_string()), 2)
+            .unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", "value1".to_string()).unwrap();
+        let bitmap = index
+            .get("key", ("value1".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
 
-        let bitmap = index.get("key", "value2".to_string()).unwrap();
+        let bitmap = index
+            .get("key", ("value2".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(2), true);
     }
 
     #[test]
     fn test_string_value_metadata_index_delete_in_standalone_transaction() {
-        let mut index = BlockfileMetadataIndex::<String>::new();
+        let mut provider = HashMapBlockfileProvider::new();
+        let blockfile = provider
+            .create("test", KeyType::String, ValueType::RoaringBitmap)
+            .unwrap();
+        let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", "value".to_string(), 1).unwrap();
+        index
+            .set("key", ("value".to_string()), 1)
+            .unwrap();
         index.commit_transaction().unwrap();
 
         index.begin_transaction().unwrap();
-        index.delete("key", "value".to_string(), 1).unwrap();
+        index
+            .delete("key", ("value".to_string()), 1)
+            .unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", "value".to_string()).unwrap();
+        let bitmap = index
+            .get("key", ("value".to_string()))
+            .unwrap();
         assert_eq!(bitmap.len(), 0);
     }
 
@@ -617,7 +702,11 @@ mod test {
         fn init_test(_ref_state: &ReferenceState<T>) -> Self::SystemUnderTest {
             // We don't need to set up on _ref_state since we always initialize
             // ref_state to empty.
-            return BlockfileMetadataIndex::<T>::new();
+            let mut provider = HashMapBlockfileProvider::new();
+            let blockfile = provider
+                .create("test", KeyType::String, ValueType::RoaringBitmap)
+                .unwrap();
+            return BlockfileMetadataIndex::<T>::new(blockfile);
         }
 
         fn apply(

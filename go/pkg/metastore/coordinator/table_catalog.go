@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"time"
 )
 
 // The catalog backed by databases using GORM.
@@ -36,19 +37,14 @@ var _ metastore.Catalog = (*Catalog)(nil)
 
 func (tc *Catalog) ResetState(ctx context.Context) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		err := tc.metaDomain.CollectionDb(txCtx).DeleteAll()
-		if err != nil {
-			log.Error("error reset collection db", zap.Error(err))
-			return err
-		}
-		err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteAll()
+		err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteAll()
 		if err != nil {
 			log.Error("error reest collection metadata db", zap.Error(err))
 			return err
 		}
-		err = tc.metaDomain.SegmentDb(txCtx).DeleteAll()
+		err = tc.metaDomain.CollectionDb(txCtx).DeleteAll()
 		if err != nil {
-			log.Error("error reset segment db", zap.Error(err))
+			log.Error("error reset collection db", zap.Error(err))
 			return err
 		}
 		err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteAll()
@@ -56,12 +52,19 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			log.Error("error reset segment metadata db", zap.Error(err))
 			return err
 		}
+		err = tc.metaDomain.SegmentDb(txCtx).DeleteAll()
+		if err != nil {
+			log.Error("error reset segment db", zap.Error(err))
+			return err
+		}
+
 		err = tc.metaDomain.DatabaseDb(txCtx).DeleteAll()
 		if err != nil {
 			log.Error("error reset database db", zap.Error(err))
 			return err
 		}
 
+		// TODO: default database and tenant should be pre-defined object
 		err = tc.metaDomain.DatabaseDb(txCtx).Insert(&dbmodel.Database{
 			ID:       types.NilUniqueID().String(),
 			Name:     common.DefaultDatabase,
@@ -78,7 +81,8 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			return err
 		}
 		err = tc.metaDomain.TenantDb(txCtx).Insert(&dbmodel.Tenant{
-			ID: common.DefaultTenant,
+			ID:                 common.DefaultTenant,
+			LastCompactionTime: time.Now().Unix(),
 		})
 		if err != nil {
 			log.Error("error inserting default tenant", zap.Error(err))
@@ -152,9 +156,11 @@ func (tc *Catalog) CreateTenant(ctx context.Context, createTenant *model.CreateT
 	var result *model.Tenant
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// TODO: createTenant has ts, don't need to pass in
 		dbTenant := &dbmodel.Tenant{
-			ID: createTenant.Name,
-			Ts: ts,
+			ID:                 createTenant.Name,
+			Ts:                 ts,
+			LastCompactionTime: time.Now().Unix(),
 		}
 		err := tc.metaDomain.TenantDb(txCtx).Insert(dbTenant)
 		if err != nil {
@@ -280,7 +286,6 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			return err
 		}
 		result = convertCollectionToModel(collectionList)[0]
-		result.Created = true
 
 		notificationRecord := &dbmodel.Notification{
 			CollectionID: result.ID.String(),
@@ -313,14 +318,24 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
-		err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
+		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, nil, deleteCollection.TenantID, deleteCollection.DatabaseName)
 		if err != nil {
 			return err
 		}
-		err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
+		if len(collectionAndMetadata) == 0 {
+			return common.ErrCollectionDeleteNonExistingCollection
+		}
+
+		collectionDeletedCount, err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
 		if err != nil {
 			return err
 		}
+		collectionMetadataDeletedCount, err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
+		if err != nil {
+			return err
+		}
+		log.Info("collection deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
+
 		notificationRecord := &dbmodel.Notification{
 			CollectionID: collectionID.String(),
 			Type:         dbmodel.NotificationTypeDeleteCollection,
@@ -330,6 +345,7 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 		if err != nil {
 			return err
 		}
+
 		return nil
 	})
 }
@@ -360,14 +376,14 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 			if metadata != nil { // Case 2
 				return common.ErrInvalidMetadataUpdate
 			} else { // Case 1
-				err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
+				_, err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
 				if err != nil {
 					return err
 				}
 			}
 		} else {
 			if metadata != nil { // Case 3
-				err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
+				_, err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
 				if err != nil {
 					return err
 				}
@@ -385,6 +401,9 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, nil, tenantID, databaseName)
 		if err != nil {
 			return err
+		}
+		if collectionList == nil || len(collectionList) == 0 {
+			return common.ErrCollectionNotFound
 		}
 		result = convertCollectionToModel(collectionList)[0]
 		return nil
@@ -446,7 +465,7 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 	return result, nil
 }
 
-func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID, ts types.Timestamp) ([]*model.Segment, error) {
+func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error) {
 	segmentAndMetadataList, err := tc.metaDomain.SegmentDb(ctx).GetSegments(segmentID, segmentType, scope, topic, collectionID)
 	if err != nil {
 		return nil, err
@@ -474,7 +493,15 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		err := tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
+		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, nil, types.NilUniqueID())
+		if err != nil {
+			return err
+		}
+		if len(segment) == 0 {
+			return common.ErrSegmentDeleteNonExistingSegment
+		}
+
+		err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
 		if err != nil {
 			log.Error("error deleting segment", zap.Error(err))
 			return err
@@ -577,4 +604,13 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 	}
 	log.Debug("segment updated", zap.Any("segment", result))
 	return result, nil
+}
+
+func (tc *Catalog) SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error {
+	return tc.metaDomain.TenantDb(ctx).UpdateTenantLastCompactionTime(tenantID, lastCompactionTime)
+}
+
+func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenantsLastCompactionTime(tenantIDs)
+	return tenants, err
 }

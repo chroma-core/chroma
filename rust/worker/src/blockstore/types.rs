@@ -1,11 +1,14 @@
 use super::positional_posting_list_value::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
-use thiserror::Error;
-use arrow::array::Int32Array;
+use arrow::array::{Array, Int32Array};
+use parking_lot::RwLock;
 use roaring::RoaringBitmap;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-                
+use std::sync::Arc;
+use thiserror::Error;
+
 #[derive(Debug, Error)]
 pub(crate) enum BlockfileError {
     #[error("Key not found")]
@@ -27,6 +30,36 @@ pub(crate) struct BlockfileKey {
     pub(crate) key: Key,
 }
 
+impl Key {
+    pub(crate) fn get_size(&self) -> usize {
+        match self {
+            Key::String(s) => s.len(),
+            Key::Float(_) => 4,
+            Key::Bool(_) => 1,
+        }
+    }
+}
+
+impl BlockfileKey {
+    pub(super) fn get_size(&self) -> usize {
+        self.get_prefix_size() + self.key.get_size()
+    }
+
+    pub(super) fn get_prefix_size(&self) -> usize {
+        self.prefix.len()
+    }
+}
+
+impl From<&BlockfileKey> for KeyType {
+    fn from(key: &BlockfileKey) -> Self {
+        match key.key {
+            Key::String(_) => KeyType::String,
+            Key::Float(_) => KeyType::Float,
+            Key::Bool(_) => KeyType::Bool,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub(crate) enum Key {
     String(String),
@@ -34,7 +67,7 @@ pub(crate) enum Key {
     Bool(bool),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum KeyType {
     String,
     Float,
@@ -119,36 +152,81 @@ impl Ord for BlockfileKey {
 
 // ===== Value Types =====
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum Value {
-    Int32Value(i32),
     Int32ArrayValue(Int32Array),
     PositionalPostingListValue(PositionalPostingList),
     StringValue(String),
+    Int32Value(i32),
     RoaringBitmapValue(RoaringBitmap),
 }
 
-#[derive(Debug, Clone)]
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        // TODO: make this correct for all types
+        match self {
+            Value::Int32ArrayValue(arr) => {
+                // An arrow array, if nested in a larger structure, when cloned may clone the entire larger buffer.
+                // This leads to a large memory overhead and also breaks our sizing assumptions. In order to work around this,
+                // we have to manuallly create a new array and copy the data over.
+
+                // Note that we use a vector here to avoid the overhead of the builder. The from() method for primitive
+                // types uses unsafe code to wrap the vecs underlying buffer in an arrow array.
+
+                // There are more performant ways to do this, but this is the most straightforward.
+                let mut new_vec = Vec::with_capacity(arr.len());
+                for i in 0..arr.len() {
+                    new_vec.push(arr.value(i));
+                }
+                let new_arr = Int32Array::from(new_vec);
+                Value::Int32ArrayValue(new_arr)
+            }
+            Value::PositionalPostingListValue(list) => {
+                Value::PositionalPostingListValue(list.clone())
+            }
+            Value::StringValue(s) => Value::StringValue(s.clone()),
+            Value::RoaringBitmapValue(bitmap) => Value::RoaringBitmapValue(bitmap.clone()),
+            Value::Int32Value(i) => Value::Int32Value(*i),
+        }
+    }
+}
+
+impl Value {
+    pub(crate) fn get_size(&self) -> usize {
+        match self {
+            Value::Int32ArrayValue(arr) => arr.get_buffer_memory_size(),
+            Value::PositionalPostingListValue(list) => {
+                unimplemented!("Size of positional posting list")
+            }
+            Value::StringValue(s) => s.len(),
+            Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
+            Value::Int32Value(_) => 4,
+        }
+    }
+}
+
+impl From<&Value> for ValueType {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Int32ArrayValue(_) => ValueType::Int32Array,
+            Value::PositionalPostingListValue(_) => ValueType::PositionalPostingList,
+            Value::RoaringBitmapValue(_) => ValueType::RoaringBitmap,
+            Value::StringValue(_) => ValueType::String,
+            Value::Int32Value(_) => ValueType::Int32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ValueType {
     Int32Array,
     PositionalPostingList,
     RoaringBitmap,
     String,
+    Int32,
 }
 
-pub(crate) trait Blockfile {
-    // ===== Lifecycle methods =====
-    fn open(path: &str) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
-    fn create(
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
-
+pub(crate) trait Blockfile: BlockfileClone {
     // ===== Transaction methods =====
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
 
@@ -188,31 +266,41 @@ pub(crate) trait Blockfile {
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 }
 
+pub(crate) trait BlockfileClone {
+    fn clone_box(&self) -> Box<dyn Blockfile>;
+}
+
+impl<T> BlockfileClone for T
+where
+    T: 'static + Blockfile + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Blockfile> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn Blockfile> {
+    fn clone(&self) -> Box<dyn Blockfile> {
+        self.clone_box()
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct HashMapBlockfile {
-    map: std::collections::HashMap<BlockfileKey, Value>,
+    map: Arc<RwLock<HashMap<BlockfileKey, Value>>>,
+}
+
+impl HashMapBlockfile {
+    pub(super) fn new() -> Self {
+        Self {
+            map: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
 }
 
 impl Blockfile for HashMapBlockfile {
-    // TODO: change this to respect path instead of ignoring it and creating a new thing
-    fn open(_path: &str) -> Result<Self, Box<dyn ChromaError>> {
-        Ok(HashMapBlockfile {
-            map: std::collections::HashMap::new(),
-        })
-    }
-    fn create(
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized,
-    {
-        Ok(HashMapBlockfile {
-            map: std::collections::HashMap::new(),
-        })
-    }
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
-        match self.map.get(&key) {
+        match self.map.read().get(&key) {
             Some(value) => Ok(value.clone()),
             None => Err(Box::new(BlockfileError::NotFoundError)),
         }
@@ -223,7 +311,7 @@ impl Blockfile for HashMapBlockfile {
         prefix: String,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
-        for (key, value) in self.map.iter() {
+        for (key, value) in self.map.read().iter() {
             if key.prefix == prefix {
                 result.push((key.clone(), value.clone()));
             }
@@ -232,7 +320,7 @@ impl Blockfile for HashMapBlockfile {
     }
 
     fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>> {
-        self.map.insert(key, value);
+        self.map.write().insert(key, value);
         Ok(())
     }
 
@@ -242,7 +330,7 @@ impl Blockfile for HashMapBlockfile {
         key: Key,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
-        for (k, v) in self.map.iter() {
+        for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key > key {
                 result.push((k.clone(), v.clone()));
             }
@@ -256,7 +344,7 @@ impl Blockfile for HashMapBlockfile {
         key: Key,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
-        for (k, v) in self.map.iter() {
+        for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key >= key {
                 result.push((k.clone(), v.clone()));
             }
@@ -270,7 +358,7 @@ impl Blockfile for HashMapBlockfile {
         key: Key,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
-        for (k, v) in self.map.iter() {
+        for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key < key {
                 result.push((k.clone(), v.clone()));
             }
@@ -284,7 +372,7 @@ impl Blockfile for HashMapBlockfile {
         key: Key,
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
         let mut result = Vec::new();
-        for (k, v) in self.map.iter() {
+        for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key <= key {
                 result.push((k.clone(), v.clone()));
             }
@@ -309,8 +397,7 @@ mod tests {
 
     #[test]
     fn test_blockfile_set_get() {
-        let mut blockfile =
-            HashMapBlockfile::create("test", KeyType::String, ValueType::Int32Array).unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -331,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_blockfile_get_by_prefix() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key1 = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -371,12 +458,15 @@ mod tests {
 
     #[test]
     fn test_bool_key() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::Bool(true),
         };
-        let _res = blockfile.set(key.clone(), Value::Int32ArrayValue(Int32Array::from(vec![1])));
+        let _res = blockfile.set(
+            key.clone(),
+            Value::Int32ArrayValue(Int32Array::from(vec![1])),
+        );
         let value = blockfile.get(key).unwrap();
         match value {
             Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1])),
@@ -386,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_storing_arrow_in_blockfile() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -402,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_blockfile_get_gt() {
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key1 = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("key1".to_string()),
@@ -450,7 +540,7 @@ mod tests {
         let list_term_1 = builder.build();
 
         // Example of how to use the struct array, which is one value for a term
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
             key: Key::String("term1".to_string()),
@@ -491,7 +581,7 @@ mod tests {
         bitmap.insert(1);
         bitmap.insert(2);
         bitmap.insert(3);
-        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let mut blockfile = HashMapBlockfile::new();
         let key = BlockfileKey::new(
             "text_prefix".to_string(),
             Key::String("bitmap1".to_string()),

@@ -1,8 +1,14 @@
 package dao
 
 import (
+	"errors"
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type tenantDb struct {
@@ -34,5 +40,51 @@ func (s *tenantDb) GetTenants(tenantID string) ([]*dbmodel.Tenant, error) {
 }
 
 func (s *tenantDb) Insert(tenant *dbmodel.Tenant) error {
-	return s.db.Create(tenant).Error
+	err := s.db.Create(tenant).Error
+	if err != nil {
+		log.Error("create tenant failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("tenant already exists")
+				return common.ErrTenantUniqueConstraintViolation
+			default:
+				return err
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *tenantDb) UpdateTenantLastCompactionTime(tenantID string, lastCompactionTime int64) error {
+	var tenants []dbmodel.Tenant
+	result := s.db.Model(&tenants).
+		Clauses(clause.Returning{Columns: []clause.Column{{Name: "id"}}}).
+		Where("id = ?", tenantID).
+		Update("last_compaction_time", lastCompactionTime)
+
+	if result.Error != nil {
+		log.Error("UpdateTenantLastCompactionTime error", zap.Error(result.Error))
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.ErrTenantNotFound
+	}
+	return nil
+}
+
+func (s *tenantDb) GetTenantsLastCompactionTime(tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	var tenants []*dbmodel.Tenant
+
+	result := s.db.Select("id", "last_compaction_time").Find(&tenants, "id IN ?", tenantIDs)
+	if result.Error != nil {
+		log.Error("GetTenantsLastCompactionTime error", zap.Error(result.Error))
+		return nil, result.Error
+	}
+
+	return tenants, nil
 }

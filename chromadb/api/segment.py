@@ -112,6 +112,7 @@ class SegmentAPI(ServerAPI):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @trace_method("SegmentAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         if len(name) < 3:
@@ -122,11 +123,11 @@ class SegmentAPI(ServerAPI):
             name=name,
             tenant=tenant,
         )
-
+    @trace_method("SegmentAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
-
+    @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
         if len(name) < 3:
@@ -135,7 +136,7 @@ class SegmentAPI(ServerAPI):
         self._sysdb.create_tenant(
             name=name,
         )
-
+    @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> t.Tenant:
         return self._sysdb.get_tenant(name=name)
@@ -175,10 +176,13 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
+        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
             segments = self._manager.create_segments(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
+        else:
+            logger.info(f"Collection {name} is not created.")
 
         # TODO: This event doesn't capture the get_or_create case appropriately
         self._product_telemetry_client.capture(
@@ -359,7 +363,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -402,7 +406,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -447,7 +451,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
