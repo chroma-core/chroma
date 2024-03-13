@@ -65,7 +65,6 @@ impl Ord for SparseIndexDelimiter {
 /// - `replace_block` - Replace an existing block with a new one
 /// - `len` - Get the number of blocks in the sparse index
 /// - `is_valid` - Check if the sparse index is valid, useful for debugging and testing
-#[derive(Clone)] // TODO: remove this clone
 pub(super) struct SparseIndex {
     forward: BTreeMap<SparseIndexDelimiter, Uuid>,
     reverse: HashMap<Uuid, SparseIndexDelimiter>,
