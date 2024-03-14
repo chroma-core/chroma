@@ -31,7 +31,7 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		AssignmentPolicy:          "simple",
-		SystemCatalogProvider:     "memory",
+		SystemCatalogProvider:     "database",
 		NotificationStoreProvider: "memory",
 		NotifierProvider:          "memory",
 		Testing:                   true}, grpcutils.Default, suite.db)
