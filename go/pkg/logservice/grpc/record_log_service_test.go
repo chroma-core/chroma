@@ -36,7 +36,7 @@ func (suite *RecordLogServiceTestSuite) SetupSuite() {
 		StartGrpc:  false,
 	})
 	suite.s = s
-	suite.db = dbcore.GetDB(context.Background())
+	suite.db = dbcore.ConfigDatabaseForTesting()
 }
 
 func (suite *RecordLogServiceTestSuite) SetupTest() {
