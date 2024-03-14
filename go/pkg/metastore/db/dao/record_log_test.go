@@ -28,8 +28,6 @@ func (suite *RecordLogDbTestSuite) SetupSuite() {
 	suite.Db = &recordLogDb{
 		db: suite.db,
 	}
-	suite.collectionId1 = types.NewUniqueID()
-	suite.collectionId2 = types.NewUniqueID()
 	suite.records = make([][]byte, 0, 5)
 	suite.records = append(suite.records, []byte("test1"), []byte("test2"),
 		[]byte("test3"), []byte("test4"), []byte("test5"))
@@ -37,6 +35,8 @@ func (suite *RecordLogDbTestSuite) SetupSuite() {
 
 func (suite *RecordLogDbTestSuite) SetupTest() {
 	log.Info("setup test")
+	suite.collectionId1 = types.NewUniqueID()
+	suite.collectionId2 = types.NewUniqueID()
 	err := testutils.CreateCollections(suite.db, suite.collectionId1, suite.collectionId2)
 	suite.NoError(err)
 }
