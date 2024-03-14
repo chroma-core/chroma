@@ -12,7 +12,7 @@ type Segment struct {
 	CollectionID types.UniqueID
 	Metadata     *SegmentMetadata[SegmentMetadataValueType]
 	Ts           types.Timestamp
-	FilePaths    *[]string
+	FilePaths    map[string][]string
 }
 
 type CreateSegment struct {

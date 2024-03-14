@@ -175,7 +175,7 @@ func TestCollection(t *testing.T) {
 	// rapid.Check(t, testCollection)
 }
 
-func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, collection *coordinatorpb.Collection, filePaths map[string][]string) {
+func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, collection *coordinatorpb.Collection, filePaths map[string][]*coordinatorpb.FilePaths) {
 	getCollectionReq := coordinatorpb.GetCollectionsRequest{
 		Id: &collectionId,
 	}
@@ -194,7 +194,7 @@ func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, co
 	segments, err := suite.s.GetSegments(context.Background(), &getSegmentReq)
 	suite.NoError(err)
 	for _, segment := range segments.Segments {
-		suite.Equal(filePaths[segment.Id], segment.FilePaths)
+		suite.ElementsMatch(filePaths[segment.Id], segment.FilePaths)
 	}
 }
 
@@ -214,11 +214,19 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	suite.NoError(err)
 
 	flushInfo := make([]*coordinatorpb.FlushSegmentCompactionInfo, 0, len(segments.Segments))
-	filePaths := make(map[string][]string)
-	for index, segment := range segments.Segments {
-		for i := 0; i < rand.Intn(5); i++ {
-			filePath := "file_path_" + strconv.Itoa(index) + "_" + strconv.Itoa(i)
-			filePaths[segment.Id] = append(filePaths[segment.Id], filePath)
+	filePaths := make(map[string][]*coordinatorpb.FilePaths)
+	for _, segment := range segments.Segments {
+		filePaths[segment.Id] = make([]*coordinatorpb.FilePaths, 0)
+		for i := 0; i < rand.Intn(len(coordinatorpb.FilePathType_value)); i++ {
+			filePathsThisSeg := make([]string, 0)
+			for j := 0; j < rand.Intn(5); j++ {
+				filePathsThisSeg = append(filePathsThisSeg, "test_file_path_"+strconv.Itoa(j+1))
+			}
+			filePathTypeI := rand.Intn(len(coordinatorpb.FilePathType_value))
+			filePaths[segment.Id] = append(filePaths[segment.Id], &coordinatorpb.FilePaths{
+				Type:  coordinatorpb.FilePathType(filePathTypeI),
+				Paths: filePathsThisSeg,
+			})
 		}
 		info := &coordinatorpb.FlushSegmentCompactionInfo{
 			SegmentId: segment.Id,
@@ -251,7 +259,12 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	validateDatabase(suite, collectionID, collection, filePaths)
 
 	// flush one segment
-	filePaths[segments.Segments[0].Id] = []string{"test_file_path"}
+	filePaths[segments.Segments[0].Id] = []*coordinatorpb.FilePaths{
+		{
+			Type:  coordinatorpb.FilePathType(0),
+			Paths: []string{"test_file_path_1"},
+		},
+	}
 	info := &coordinatorpb.FlushSegmentCompactionInfo{
 		SegmentId: segments.Segments[0].Id,
 		FilePaths: filePaths[segments.Segments[0].Id],

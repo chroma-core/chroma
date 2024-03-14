@@ -714,7 +714,7 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 			Scope:        "VECTOR",
 			CollectionID: sampleCollections[0].ID,
 			Metadata:     metadata1,
-			FilePaths:    &[]string{},
+			FilePaths:    map[string][]string{},
 		},
 		{
 			ID:           types.MustParse("11111111-d7d7-413b-92e1-731098a6e492"),
@@ -723,7 +723,7 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 			Scope:        "VECTOR",
 			CollectionID: sampleCollections[1].ID,
 			Metadata:     metadata2,
-			FilePaths:    &[]string{},
+			FilePaths:    map[string][]string{},
 		},
 		{
 			ID:           types.MustParse("22222222-d7d7-413b-92e1-731098a6e492"),
@@ -732,7 +732,7 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 			Scope:        "METADATA",
 			CollectionID: types.NilUniqueID(),
 			Metadata:     metadata3, // This segment is not assigned to any collection
-			FilePaths:    &[]string{},
+			FilePaths:    map[string][]string{},
 		},
 	}
 	return sampleSegments
@@ -842,7 +842,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		Topic:        &testTopic,
 		CollectionID: suite.sampleCollections[0].ID,
 		Metadata:     metadata,
-		FilePaths:    &[]string{},
+		FilePaths:    map[string][]string{},
 	}
 
 	ctx := context.Background()

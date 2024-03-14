@@ -189,7 +189,7 @@ func TestConvertSegmentToProto(t *testing.T) {
 		Scope:     "METADATA",
 		Topic:     &testTopic,
 		Metadata:  nil,
-		FilePaths: &[]string{},
+		FilePaths: map[string][]string{},
 	}
 	segmentpb = convertSegmentToProto(segment)
 	assert.NotNil(t, segmentpb)

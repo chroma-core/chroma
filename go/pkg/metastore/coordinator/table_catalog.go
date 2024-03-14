@@ -480,7 +480,7 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 			Scope:     segmentAndMetadata.Segment.Scope,
 			Topic:     segmentAndMetadata.Segment.Topic,
 			Ts:        segmentAndMetadata.Segment.Ts,
-			FilePaths: &segmentAndMetadata.Segment.FilePaths,
+			FilePaths: segmentAndMetadata.Segment.FilePaths,
 		}
 
 		if segmentAndMetadata.Segment.CollectionID != nil {

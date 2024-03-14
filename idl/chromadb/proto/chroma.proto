@@ -34,6 +34,16 @@ enum SegmentScope {
     METADATA = 1;
 }
 
+enum FilePathType {
+    FILE_TYPE_METADATA = 0;
+    FILE_TYPE_VECTOR = 1;
+}
+
+message FilePaths {
+    FilePathType type = 1;
+    repeated string paths = 2;
+}
+
 message Segment {
     string id = 1;
     string type = 2;
@@ -43,7 +53,7 @@ message Segment {
     // collection and can be used to service queries (for it's given scope.)
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
-    repeated string filePaths = 7;
+    repeated FilePaths file_paths = 7;
 }
 
 message Collection {
