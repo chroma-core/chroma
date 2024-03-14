@@ -37,11 +37,11 @@ func (suite *RecordLogServiceTestSuite) SetupSuite() {
 	})
 	suite.s = s
 	suite.db = dbcore.GetDB(context.Background())
-	suite.collectionId = types.NewUniqueID()
 }
 
 func (suite *RecordLogServiceTestSuite) SetupTest() {
 	log.Info("setup test")
+	suite.collectionId = types.NewUniqueID()
 	err := testutils.CreateCollections(suite.db, suite.collectionId)
 	suite.NoError(err)
 }
