@@ -2,7 +2,7 @@ use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::errors::{ChromaError, ErrorCodes};
 use arrow::array::{
     BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
-    GenericByteBuilder,
+    GenericByteBuilder, UInt32Array, UInt32Builder,
 };
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
@@ -125,6 +125,11 @@ impl Block {
                                         .unwrap()
                                         .value(i)
                             }
+                            Key::Uint(inner_key) => {
+                                *inner_key
+                                    == key.as_any().downcast_ref::<UInt32Array>().unwrap().value(i)
+                                        as u32
+                            }
                         };
                         if key_matches {
                             match self.get_value_type() {
@@ -165,6 +170,15 @@ impl Block {
                                         // TODO: log error
                                         Err(_) => return None,
                                     }
+                                }
+                                ValueType::Uint => {
+                                    return Some(Value::UintValue(
+                                        value
+                                            .as_any()
+                                            .downcast_ref::<UInt32Array>()
+                                            .unwrap()
+                                            .value(i),
+                                    ))
                                 }
                                 // TODO: Add support for other types
                                 _ => unimplemented!(),
@@ -285,12 +299,14 @@ enum KeyBuilder {
     StringBuilder(StringBuilder),
     FloatBuilder(Float32Builder),
     BoolBuilder(BooleanBuilder),
+    UintBuilder(UInt32Builder),
 }
 
 enum ValueBuilder {
     Int32ArrayValueBuilder(ListBuilder<Int32Builder>),
     StringValueBuilder(StringBuilder),
     RoaringBitmapBuilder(BinaryBuilder),
+    UintValueBuilder(UInt32Builder),
 }
 
 /// BlockDataBuilder is used to build a block. It is used to add data to a block and then build the BlockData once all data has been added.
@@ -367,6 +383,9 @@ impl BlockDataBuilder {
             KeyType::Bool => {
                 KeyBuilder::BoolBuilder(BooleanBuilder::with_capacity(options.item_count))
             }
+            KeyType::Uint => {
+                KeyBuilder::UintBuilder(UInt32Builder::with_capacity(options.item_count))
+            }
         };
         let value_builder = match value_type {
             ValueType::Int32Array => {
@@ -379,6 +398,9 @@ impl BlockDataBuilder {
                 options.item_count,
                 options.total_value_capacity,
             )),
+            ValueType::Uint => {
+                ValueBuilder::UintValueBuilder(UInt32Builder::with_capacity(options.item_count))
+            }
             ValueType::RoaringBitmap => ValueBuilder::RoaringBitmapBuilder(
                 BinaryBuilder::with_capacity(options.item_count, options.total_value_capacity),
             ),
@@ -428,6 +450,12 @@ impl BlockDataBuilder {
                 }
                 _ => unreachable!("Invalid key type for block"),
             },
+            KeyBuilder::UintBuilder(ref mut builder) => match key.key {
+                Key::Uint(key) => {
+                    builder.append_value(key);
+                }
+                _ => unreachable!("Invalid key type for block"),
+            },
         }
 
         match self.value_builder {
@@ -440,6 +468,12 @@ impl BlockDataBuilder {
             ValueBuilder::StringValueBuilder(ref mut builder) => match value {
                 Value::StringValue(string) => {
                     builder.append_value(string);
+                }
+                _ => unreachable!("Invalid value type for block"),
+            },
+            ValueBuilder::UintValueBuilder(ref mut builder) => match value {
+                Value::UintValue(uint) => {
+                    builder.append_value(uint);
                 }
                 _ => unreachable!("Invalid value type for block"),
             },
@@ -481,6 +515,11 @@ impl BlockDataBuilder {
                 let arr = builder.finish();
                 (&arr as &dyn Array).slice(0, arr.len())
             }
+            KeyBuilder::UintBuilder(ref mut builder) => {
+                key_field = Field::new("key", DataType::UInt32, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
         };
 
         let value_field;
@@ -496,6 +535,11 @@ impl BlockDataBuilder {
             }
             ValueBuilder::StringValueBuilder(ref mut builder) => {
                 value_field = Field::new("value", DataType::Utf8, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
+            ValueBuilder::UintValueBuilder(ref mut builder) => {
+                value_field = Field::new("value", DataType::UInt32, true);
                 let arr = builder.finish();
                 (&arr as &dyn Array).slice(0, arr.len())
             }
