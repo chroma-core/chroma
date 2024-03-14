@@ -755,15 +755,20 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 		suite.NoError(errSegmentCreation)
 	}
 
-	results, err := c.GetSegments(ctx, types.NilUniqueID(), nil, nil, nil, types.NilUniqueID())
+	var results []*model.Segment
+	for _, segment := range sampleSegments {
+		result, err := c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+		suite.NoError(err)
+		suite.Equal([]*model.Segment{segment}, result)
+		results = append(results, result...)
+	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].ID.String() < results[j].ID.String()
 	})
-	suite.NoError(err)
 	suite.Equal(sampleSegments, results)
 
 	// Duplicate create fails
-	err = c.CreateSegment(ctx, &model.CreateSegment{
+	err := c.CreateSegment(ctx, &model.CreateSegment{
 		ID:           sampleSegments[0].ID,
 		Type:         sampleSegments[0].Type,
 		Topic:        sampleSegments[0].Topic,
