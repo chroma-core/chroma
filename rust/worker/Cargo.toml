@@ -42,7 +42,6 @@ tantivy = "0.21.1"
 [dev-dependencies]
 proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
-"rand" = "0.8.5"
 
 [build-dependencies]
 tonic-build = "0.10"

@@ -1,22 +1,36 @@
 use crate::blockstore::{Blockfile, BlockfileKey, Key, PositionalPostingListBuilder, Value};
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::index::fulltext::tokenizer::ChromaTokenizer;
+use crate::index::fulltext::tokenizer::{ChromaTokenizer, ChromaTokenStream};
+use tantivy::tokenizer::Token;
 use std::collections::HashMap;
+use crate::errors::{ChromaError, ErrorCodes};
 use thiserror::Error;
+
+static MAX_DOC_SIZE: usize = 16000;
+static MIN_QUERY_SIZE: usize = 3;
+static MIN_DOC_SIZE: usize = 5;
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
     #[error("Already in a transaction")]
-    AlreadyInTransaction,
+    InTransaction,
     #[error("Not in a transaction")]
     NotInTransaction,
+    #[error("Document too short")]
+    DocumentTooShort,
+    #[error("Query too short")]
+    QueryTooShort,
+    #[error("Negative offset IDs are not allowed")]
+    NegativeOffsetId,
 }
 
 impl ChromaError for FullTextIndexError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FullTextIndexError::AlreadyInTransaction => ErrorCodes::FailedPrecondition,
+            FullTextIndexError::InTransaction => ErrorCodes::FailedPrecondition,
             FullTextIndexError::NotInTransaction => ErrorCodes::FailedPrecondition,
+            FullTextIndexError::DocumentTooShort => ErrorCodes::InvalidArgument,
+            FullTextIndexError::QueryTooShort => ErrorCodes::InvalidArgument,
+            FullTextIndexError::NegativeOffsetId => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -24,6 +38,7 @@ impl ChromaError for FullTextIndexError {
 pub(crate) trait FullTextIndex {
     fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
     fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+    fn in_transaction(&self) -> bool;
 
     // Must be done inside a transaction.
     fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>>;
@@ -59,75 +74,15 @@ impl BlockfileFullTextIndex {
     }
 }
 
-impl FullTextIndex for BlockfileFullTextIndex {
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        if self.in_transaction {
-            return Err(Box::new(FullTextIndexError::AlreadyInTransaction));
+impl BlockfileFullTextIndex {
+    // Factored this way for testing.
+    fn search_tokens(&self, tokens: &Vec<Token>) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+        if tokens.is_empty() {
+            return Ok(vec![]);
         }
-        self.posting_lists_blockfile.begin_transaction()?;
-        self.frequencies_blockfile.begin_transaction()?;
-        self.in_transaction = true;
-        Ok(())
-    }
-
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_transaction {
-            return Err(Box::new(FullTextIndexError::NotInTransaction));
+        if tokens.iter().map(|t| t.position_length).sum::<usize>() < MIN_QUERY_SIZE {
+            return Err(Box::new(FullTextIndexError::QueryTooShort));
         }
-        self.in_transaction = false;
-        for (key, mut value) in self.uncommitted.drain() {
-            let positional_posting_list = value.build();
-            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
-            self.posting_lists_blockfile.set(
-                blockfilekey,
-                Value::PositionalPostingListValue(positional_posting_list),
-            );
-        }
-        for (key, value) in self.uncommitted_frequencies.drain() {
-            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
-            self.frequencies_blockfile
-                .set(blockfilekey, Value::Int32Value(value));
-        }
-        self.posting_lists_blockfile.commit_transaction()?;
-        self.frequencies_blockfile.commit_transaction()?;
-        self.uncommitted.clear();
-        Ok(())
-    }
-
-    fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_transaction {
-            return Err(Box::new(FullTextIndexError::NotInTransaction));
-        }
-        let tokens = self.tokenizer.encode(document);
-        for token in tokens.get_tokens() {
-            self.uncommitted_frequencies
-                .entry(token.text.to_string())
-                .and_modify(|e| *e += 1)
-                .or_insert(1);
-            let mut builder = self
-                .uncommitted
-                .entry(token.text.to_string())
-                .or_insert(PositionalPostingListBuilder::new());
-
-            // Store starting positions of tokens. These are NOT affected by token filters.
-            // For search, we can use the start and end positions to compute offsets to
-            // check full string match.
-            //
-            // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
-            if !builder.contains_doc_id(offset_id) {
-                // Casting to i32 is safe since we limit the size of the document.
-                builder.add_doc_id_and_positions(offset_id, vec![token.offset_from as i32]);
-            } else {
-                builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]);
-            }
-        }
-        Ok(())
-    }
-
-    fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
-        let binding = self.tokenizer.encode(query);
-        let tokens = binding.get_tokens();
-
         // Get query tokens sorted by frequency.
         let mut token_frequencies = vec![];
         for token in tokens {
@@ -187,20 +142,21 @@ impl FullTextIndex for BlockfileFullTextIndex {
                 .offset_from as i32;
             let mut new_candidates: HashMap<i32, Vec<i32>> = HashMap::new();
             for (doc_id, positions) in candidates.iter() {
+                let doc_id = *doc_id;
                 let mut new_positions = vec![];
                 for position in positions {
                     if let Some(positions_for_doc_id) =
-                        positional_posting_list.get_positions_for_doc_id(*doc_id)
+                        positional_posting_list.get_positions_for_doc_id(doc_id)
                     {
                         for position_for_doc_id in positions_for_doc_id.values() {
-                            if position_for_doc_id - token_offset == *position {
+                            if *position_for_doc_id - token_offset == *position {
                                 new_positions.push(*position);
                             }
                         }
                     }
                 }
                 if !new_positions.is_empty() {
-                    new_candidates.insert(*doc_id, new_positions);
+                    new_candidates.insert(doc_id, new_positions);
                 }
             }
             candidates = new_candidates;
@@ -215,8 +171,88 @@ impl FullTextIndex for BlockfileFullTextIndex {
     }
 }
 
+impl FullTextIndex for BlockfileFullTextIndex {
+    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        if self.in_transaction {
+            return Err(Box::new(FullTextIndexError::InTransaction));
+        }
+        self.posting_lists_blockfile.begin_transaction()?;
+        self.frequencies_blockfile.begin_transaction()?;
+
+        self.in_transaction = true;
+        Ok(())
+    }
+
+    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        if !self.in_transaction {
+            return Err(Box::new(FullTextIndexError::NotInTransaction));
+        }
+        for (key, mut value) in self.uncommitted.drain() {
+            let positional_posting_list = value.build();
+            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
+            self.posting_lists_blockfile.set(blockfilekey, Value::PositionalPostingListValue(positional_posting_list));
+        }
+        for (key, value) in self.uncommitted_frequencies.drain() {
+            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
+            self.frequencies_blockfile.set(blockfilekey, Value::Int32Value(value.try_into().unwrap()));
+        }
+
+        self.posting_lists_blockfile.commit_transaction()?;
+        self.frequencies_blockfile.commit_transaction()?;
+        self.uncommitted.clear();
+        self.in_transaction = false;
+        Ok(())
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.in_transaction
+    }
+
+    fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
+        if !self.in_transaction {
+            return Err(Box::new(FullTextIndexError::NotInTransaction));
+        }
+        if document.len() < MIN_DOC_SIZE as usize {
+            return Err(Box::new(FullTextIndexError::DocumentTooShort));
+        }
+        if offset_id < 0 {
+            return Err(Box::new(FullTextIndexError::NegativeOffsetId));
+        }
+        let offset_id = offset_id;
+        let tokens = self.tokenizer.encode(document);
+        for token in tokens.get_tokens() {
+            self.uncommitted_frequencies.entry(token.text.to_string()).and_modify(|e| *e += 1).or_insert(1);
+            let mut builder = self.uncommitted.entry(token.text.to_string()).or_insert(PositionalPostingListBuilder::new());
+
+            // Store starting positions of tokens. These are NOT affected by token filters.
+            // For search, we can use the start and end positions to compute offsets to
+            // check full string match.
+            //
+            // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html 
+            if !builder.contains_doc_id(offset_id) {
+                builder.add_doc_id_and_positions(offset_id, vec![token.offset_from.try_into().unwrap()]);
+            } else {
+                builder.add_positions_for_doc_id(offset_id, vec![token.offset_from.try_into().unwrap()]);
+            }
+        }
+        Ok(())
+    }
+
+    fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+        if self.in_transaction {
+            return Err(Box::new(FullTextIndexError::InTransaction));
+        }
+        if query.len() < MIN_QUERY_SIZE {
+            return Err(Box::new(FullTextIndexError::QueryTooShort));
+        }
+        let binding = self.tokenizer.encode(query);
+        let tokens = binding.get_tokens();
+        return self.search_tokens(tokens);
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
     use crate::blockstore::provider::{BlockfileProvider, HashMapBlockfileProvider};
     use crate::blockstore::{HashMapBlockfile, KeyType, ValueType};
@@ -325,18 +361,275 @@ mod tests {
         )));
         let mut index = BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer);
         index.begin_transaction().unwrap();
-        index.add_document("!!!!", 1).unwrap();
-        index.add_document(",,!!", 2).unwrap();
-        index.add_document(".!", 3).unwrap();
-        index.add_document("!.!.!.!", 4).unwrap();
+        index.add_document("!!!!!!!!", 1).unwrap();
+        index.add_document(",,!!,,,,", 2).unwrap();
+        index.add_document(".!.!.!.!.!.!", 3).unwrap();
+        index.add_document("!.!.!.!!!!!!", 4).unwrap();
         index.commit_transaction().unwrap();
 
-        let res = index.search("!!").unwrap();
+        let res = index.search("!!!").unwrap();
         assert!(res.contains(&1));
-        assert!(res.contains(&2));
+        assert!(res.contains(&4));
 
-        let res = index.search(".!").unwrap();
+        let res = index.search(".!.").unwrap();
         assert!(res.contains(&3));
         assert!(res.contains(&4));
+    }
+
+    use proptest::prelude::*;
+    use proptest_state_machine::{prop_state_machine, ReferenceStateMachine, StateMachineTest};
+    use proptest::test_runner::Config;
+    use rand::prelude::IteratorRandom;
+    use std::rc::Rc;
+
+    #[derive(Debug, Clone)]
+    pub(crate) enum Transition {
+        BeginTransaction,
+        CommitTransaction,
+        AddDocument(String, i32),
+        Search(String),
+    }
+
+    #[derive(Debug, Clone)]
+    pub(crate) struct ReferenceState {
+        in_transaction: bool,
+        state: HashMap<String, i32>,
+    }
+
+    impl ReferenceState {
+        fn new() -> Self {
+            ReferenceState {
+                in_transaction: false,
+                state: HashMap::new(),
+            }
+        }
+
+        fn search(&self, query: &str) -> Vec<i32> {
+            if query.len() < MIN_QUERY_SIZE {
+                return vec![];
+            }
+            if self.in_transaction {
+                return vec![];
+            }
+            let mut results = vec![];
+            for (doc, id) in &self.state {
+                if doc.contains(query) {
+                    results.push(*id);
+                }
+            }
+            results
+        }
+
+        fn add_document(&mut self, doc: String, id: i32) {
+            if doc.len() < MIN_DOC_SIZE {
+                return;
+            }
+            if id < 0 {
+                return;
+            }
+            if !self.in_transaction {
+                return;
+            }
+            self.state.insert(doc, id);
+        }
+    }
+
+    static DOC_STRATEGY: &str = ".{4,16000}";
+    static ID_STRATEGY: &std::ops::Range<i32> = &((-5..999999));
+    static QUERY_STRATEGY: &str = ".{3,1000}";
+
+    impl ReferenceStateMachine for ReferenceState {
+        type State = ReferenceState;
+        type Transition = Transition;
+
+        fn init_state() -> BoxedStrategy<Self::State> {
+            Just(ReferenceState::new()).boxed()
+        }
+
+        fn transitions(state: &ReferenceState) -> BoxedStrategy<Transition> {
+            if state.state.is_empty() {
+                // Nothing added yet.
+                return prop_oneof![
+                    Just(Transition::BeginTransaction),
+                    (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                    QUERY_STRATEGY.prop_map(Transition::Search),
+                ].boxed();
+            }
+
+            // TODO if we add another strategy here we should refactor as described
+            // in https://stackoverflow.com/questions/69483902/is-there-a-simple-way-to-move-clone-of-rc-into-closure
+            let s = Rc::new(state.state.clone());
+            let s2 = Rc::clone(&s);
+            let s_len = s.len();
+            let maximum_document_length = s.keys().max_by_key(|k| k.len()).unwrap().len();
+            prop_oneof![
+                Just(Transition::BeginTransaction),
+                Just(Transition::CommitTransaction),
+                (DOC_STRATEGY, ID_STRATEGY).prop_map(move |(doc, id)| Transition::AddDocument(doc, id)),
+                QUERY_STRATEGY.prop_map(Transition::Search),
+                (0..s_len).prop_map(move |i| {
+                    // Search for a random entire document in the index.
+                    let mut keys = s.keys().collect::<Vec<&String>>().clone();
+                    keys.sort();
+                    let doc = keys[i].clone();
+                    Transition::Search(doc.to_string())
+                }),
+                (0..s_len, 0..(maximum_document_length), 0..maximum_document_length).prop_map(move |(i, start, end)| {
+                    // Search for a random substring of a random document in the index.
+                    let mut keys = s2.keys().collect::<Vec<&String>>().clone();
+                    keys.sort();
+
+                    let doc = keys[i].clone();
+
+                    // Unicooooode. We're cutting on codepoints but our strategy
+                    // is on Unicode scalar values (chars/bytes). So we have some work to do.
+                    // It's fine for all of this to be inefficient -- it only runs in tests.
+                    // https://tonsky.me/blog/unicode/
+                    //
+                    // We take the start strategy and map it to a legal starting byte:
+                    // - We need it to be < doc.len() - MIN_QUERY_SIZE, so we do % (doc.len() - MIN_QUERY_SIZE)
+                    let maximum_start_byte = start % (doc.len() - MIN_QUERY_SIZE);
+                    // Now we find the last unicode character which starts before
+                    // maximum_start_byte. This is the start of our search substring.
+                    let start_byte = doc.char_indices().filter(|(i, _)| *i <= maximum_start_byte).last().unwrap().0;
+                    // We take the end strategy and map it to a legal ending byte:
+                    // - We need it to be in the range [start_byte + MIN_QUERY_SIZE, doc.len()]
+                    // - We do % (doc.len() - start_byte - MIN_QUERY_SIZE) to get a byte in that range.
+                    // - We add start_byte + MIN_QUERY_SIZE to put it into the proper place.
+                    let minimum_end_byte = (end % (doc.len() - start_byte - MIN_QUERY_SIZE)) + start_byte + MIN_QUERY_SIZE;
+                    // Now we find the first unicode character which starts after
+                    // minimum_end_byte. This is the end of our search substring.
+                    // If we can't find one, we use the end of the string.
+                    let end_byte = doc.char_indices().filter(|(i, _)| *i >= minimum_end_byte).next().map(|(i, _)| i).unwrap_or(doc.len());
+                    let query = &doc[start_byte..end_byte];
+                    Transition::Search(query.to_string())
+                }),
+            ].boxed()
+        }
+
+        fn apply(mut state: ReferenceState, transition: &Transition) -> Self::State {
+            match transition {
+                Transition::BeginTransaction => {
+                    state.in_transaction = true;
+                },
+                Transition::CommitTransaction => {
+                    state.in_transaction = false;
+                },
+                Transition::AddDocument(doc, id) => {
+                    if !state.in_transaction {
+                        return state;
+                    }
+                    if doc.len() < MIN_DOC_SIZE {
+                        return state;
+                    }
+                    state.add_document(doc.clone(), *id);
+                },
+                Transition::Search(_) => {
+                    // no-op
+                },
+            }
+            state
+        }
+    }
+
+    impl StateMachineTest for BlockfileFullTextIndex {
+        type SystemUnderTest = Self;
+        type Reference = ReferenceState;
+
+        fn init_test(_ref_state: &ReferenceState) -> Self::SystemUnderTest {
+
+            let mut provider = HashMapBlockfileProvider::new();
+            let pl_blockfile = provider
+                .create("pl", KeyType::String, ValueType::PositionalPostingList)
+                .unwrap();
+            let freq_blockfile = provider
+                .create("freq", KeyType::String, ValueType::Int32)
+                .unwrap();
+            let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap())));
+            BlockfileFullTextIndex::new(pl_blockfile, freq_blockfile, tokenizer)
+        }
+
+        fn apply(
+            mut state: Self::SystemUnderTest,
+            _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
+            transition: Transition,
+        ) -> Self::SystemUnderTest {
+            match transition {
+                Transition::BeginTransaction => {
+                    let in_transaction = state.in_transaction();
+                    let res = state.begin_transaction();
+                    if in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
+                },
+                Transition::CommitTransaction => {
+                    let in_transaction = state.in_transaction();
+                    let res = state.commit_transaction();
+                    if !in_transaction {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
+                },
+                Transition::AddDocument(doc, id) => {
+                    let in_transaction = state.in_transaction();
+                    let res = state.add_document(&doc, id);
+                    if !in_transaction || doc.len() < MIN_DOC_SIZE {
+                        assert!(res.is_err());
+                    } else {
+                        assert!(res.is_ok());
+                    }
+                },
+                Transition::Search(query) => {
+                    let in_transaction = state.in_transaction();
+                    let res = state.search(&query);
+                    if in_transaction || query.len() < MIN_QUERY_SIZE {
+                        assert!(res.is_err());
+                        return state;
+                    }
+                    let res = res.unwrap();
+                    let ref_res = _ref_state.search(&query);
+                    for id in &ref_res {
+                        assert!(res.contains(&id));
+                    }
+                    for id in res {
+                        assert!(ref_res.contains(&id));
+                    }
+                },
+            }
+            state
+        }
+
+        fn check_invariants(
+            state: &Self::SystemUnderTest,
+            ref_state: &<Self::Reference as ReferenceStateMachine>::State,
+        ) {
+            assert_eq!(state.in_transaction(), ref_state.in_transaction);
+            if state.in_transaction() {
+                return;
+            }
+            let mut tokenizer = TantivyChromaTokenizer::new(Box::new(NgramTokenizer::new(1, 1, false).unwrap()));
+            for (doc, id) in &ref_state.state {
+                let tokens = tokenizer.encode(doc);
+                let res = state.search_tokens(&tokens.get_tokens());
+                let res = res.unwrap();
+                assert!(res.contains(&id));
+            }
+            // TODO once we have a way to iterate over values in the blockfile,
+            // make sure blockfile state is also a subset of ref state.
+        }
+    }
+
+    prop_state_machine! {
+        #![proptest_config(Config {
+            verbose: 0,
+            cases: 10,
+            .. Config::default()
+        })]
+
+        #[test]
+        fn proptest_fulltext_index(sequential 1..10 => BlockfileFullTextIndex);
     }
 }
