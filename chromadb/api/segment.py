@@ -1,6 +1,8 @@
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
+from chromadb.quota import QuotaEnforcer, Resource
+from chromadb.rate_limiting import rate_limit
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
@@ -58,7 +60,6 @@ import time
 import logging
 import re
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +102,7 @@ class SegmentAPI(ServerAPI):
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
+        self._quota = self.require(QuotaEnforcer)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
@@ -110,6 +112,7 @@ class SegmentAPI(ServerAPI):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @trace_method("SegmentAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         if len(name) < 3:
@@ -120,11 +123,11 @@ class SegmentAPI(ServerAPI):
             name=name,
             tenant=tenant,
         )
-
+    @trace_method("SegmentAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
-
+    @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
         if len(name) < 3:
@@ -133,7 +136,7 @@ class SegmentAPI(ServerAPI):
         self._sysdb.create_tenant(
             name=name,
         )
-
+    @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> t.Tenant:
         return self._sysdb.get_tenant(name=name)
@@ -173,10 +176,13 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
+        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
             segments = self._manager.create_segments(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
+        else:
+            logger.info(f"Collection {name} is not created.")
 
         # TODO: This event doesn't capture the get_or_create case appropriately
         self._product_telemetry_client.capture(
@@ -346,6 +352,7 @@ class SegmentAPI(ServerAPI):
             raise ValueError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.ADD_PER_MINUTE)
     @override
     def _add(
         self,
@@ -356,6 +363,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -398,6 +406,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -442,6 +451,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
@@ -465,6 +475,7 @@ class SegmentAPI(ServerAPI):
         return True
 
     @trace_method("SegmentAPI._get", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.GET_PER_MINUTE)
     @override
     def _get(
         self,
@@ -643,6 +654,7 @@ class SegmentAPI(ServerAPI):
         return metadata_segment.count()
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
+    @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
     @override
     def _query(
         self,

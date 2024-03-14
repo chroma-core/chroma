@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-lb
+  namespace: chroma
+spec:
+  ports:
+    - name: worker-port
+      port: 50052
+      targetPort: 50051
+  selector:
+    app: worker
+  type: LoadBalancer

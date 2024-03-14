@@ -60,9 +60,9 @@ def test_http_client_with_inconsistent_host_settings() -> None:
 def test_http_client_with_inconsistent_port_settings() -> None:
     try:
         chromadb.HttpClient(
-            port="8002",
+            port=8002,
             settings=Settings(
-                chroma_server_http_port="8001",
+                chroma_server_http_port=8001,
             ),
         )
     except ValueError as e:

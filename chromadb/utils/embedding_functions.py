@@ -506,11 +506,17 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             raise ValueError(
                 f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
             )
+
+        # Suppress onnxruntime warnings. This produces logspew, mainly when onnx tries to use CoreML, which doesn't fit this model.
+        so = self.ort.SessionOptions()
+        so.log_severity_level = 3
+
         return self.ort.InferenceSession(
             os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
             # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
             # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
             providers=self._preferred_providers,
+            sess_options=so,
         )
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -665,7 +671,10 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
 class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
-        self, model_name: str = "ViT-B-32", checkpoint: str = "laion2b_s34b_b79k"
+        self,
+        model_name: str = "ViT-B-32",
+        checkpoint: str = "laion2b_s34b_b79k",
+        device: Optional[str] = "cpu",
     ) -> None:
         try:
             import open_clip
@@ -691,6 +700,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             model_name=model_name, pretrained=checkpoint
         )
         self._model = model
+        self._model.to(device)
         self._preprocess = preprocess
         self._tokenizer = open_clip.get_tokenizer(model_name=model_name)
 

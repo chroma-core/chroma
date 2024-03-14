@@ -63,6 +63,7 @@
     "db:run-auth-xtoken": "cd ../.. && echo \"CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=X_CHROMA_TOKEN\nCHROMA_SERVER_AUTH_CREDENTIALS=test-token\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
     "prebuild": "rimraf dist",
     "build": "tsup",
+    "watch": "tsup --watch",
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
     "release": "run-s build test:run && npm publish",

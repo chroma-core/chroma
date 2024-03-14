@@ -61,7 +61,7 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host=TEST_CLOUD_HOST,
-        chroma_server_http_port=str(port),
+        chroma_server_http_port=port,
         chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
         chroma_client_auth_credentials=valid_token,
         chroma_client_auth_token_transport_header=TOKEN_TRANSPORT_HEADER,
@@ -82,7 +82,7 @@ def test_valid_key(mock_cloud_server: System, valid_token: str) -> None:
         database=DEFAULT_DATABASE,
         api_key=valid_token,
         cloud_host=TEST_CLOUD_HOST,
-        cloud_port=mock_cloud_server.settings.chroma_server_http_port,  # type: ignore
+        cloud_port=mock_cloud_server.settings.chroma_server_http_port or 8000,
         enable_ssl=False,
     )
 
@@ -98,7 +98,7 @@ def test_invalid_key(mock_cloud_server: System, valid_token: str) -> None:
             database=DEFAULT_DATABASE,
             api_key=invalid_token,
             cloud_host=TEST_CLOUD_HOST,
-            cloud_port=mock_cloud_server.settings.chroma_server_http_port,  # type: ignore
+            cloud_port=mock_cloud_server.settings.chroma_server_http_port or 8000,
             enable_ssl=False,
         )
         client.heartbeat()

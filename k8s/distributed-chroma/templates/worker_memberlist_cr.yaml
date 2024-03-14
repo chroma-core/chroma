@@ -1,0 +1,79 @@
+# These kubernetes manifests are UNDER ACTIVE  DEVELOPMENT and are not yet ready for production use.
+# They will be used for the upcoming distributed version of chroma. They are not even ready
+# for testing yet. Please do not use them unless you are working on the distributed version of chroma.
+
+apiVersion: chroma.cluster/v1
+kind: MemberList
+metadata:
+  name: worker-memberlist
+  namespace: {{ .Values.namespace}}
+spec:
+  members:
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: worker-memberlist-readerwriter
+rules:
+- apiGroups:
+  - chroma.cluster
+  resources:
+  - memberlists
+  verbs:
+  - get
+  - list
+  - watch
+  # TODO: FIX THIS LEAKY PERMISSION
+  - create
+  - update
+  - patch
+  - delete
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: coordinator-worker-memberlist-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: worker-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: coordinator-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  # Awkward name, but this lets the worker-serviceaccount read
+  # the worker-memberlist.
+  name: worker-worker-memberlist-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: worker-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: worker-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: worker-memberlist-readerwriter-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: worker-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: {{ .Values.namespace }}

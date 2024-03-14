@@ -2,7 +2,6 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from chromadb.proto import chroma_pb2 as chromadb_dot_proto_dot_chroma__pb2
 from chromadb.proto import coordinator_pb2 as chromadb_dot_proto_dot_coordinator__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
@@ -19,7 +18,7 @@ class SysDBStub(object):
         self.CreateDatabase = channel.unary_unary(
             "/chroma.SysDB/CreateDatabase",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseResponse.FromString,
         )
         self.GetDatabase = channel.unary_unary(
             "/chroma.SysDB/GetDatabase",
@@ -29,7 +28,7 @@ class SysDBStub(object):
         self.CreateTenant = channel.unary_unary(
             "/chroma.SysDB/CreateTenant",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantResponse.FromString,
         )
         self.GetTenant = channel.unary_unary(
             "/chroma.SysDB/GetTenant",
@@ -39,12 +38,12 @@ class SysDBStub(object):
         self.CreateSegment = channel.unary_unary(
             "/chroma.SysDB/CreateSegment",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentResponse.FromString,
         )
         self.DeleteSegment = channel.unary_unary(
             "/chroma.SysDB/DeleteSegment",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentResponse.FromString,
         )
         self.GetSegments = channel.unary_unary(
             "/chroma.SysDB/GetSegments",
@@ -54,7 +53,7 @@ class SysDBStub(object):
         self.UpdateSegment = channel.unary_unary(
             "/chroma.SysDB/UpdateSegment",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentResponse.FromString,
         )
         self.CreateCollection = channel.unary_unary(
             "/chroma.SysDB/CreateCollection",
@@ -64,7 +63,7 @@ class SysDBStub(object):
         self.DeleteCollection = channel.unary_unary(
             "/chroma.SysDB/DeleteCollection",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionResponse.FromString,
         )
         self.GetCollections = channel.unary_unary(
             "/chroma.SysDB/GetCollections",
@@ -74,12 +73,22 @@ class SysDBStub(object):
         self.UpdateCollection = channel.unary_unary(
             "/chroma.SysDB/UpdateCollection",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionResponse.FromString,
         )
         self.ResetState = channel.unary_unary(
             "/chroma.SysDB/ResetState",
             request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.ResetStateResponse.FromString,
+        )
+        self.GetLastCompactionTimeForTenant = channel.unary_unary(
+            "/chroma.SysDB/GetLastCompactionTimeForTenant",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetLastCompactionTimeForTenantRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetLastCompactionTimeForTenantResponse.FromString,
+        )
+        self.SetLastCompactionTimeForTenant = channel.unary_unary(
+            "/chroma.SysDB/SetLastCompactionTimeForTenant",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.SetLastCompactionTimeForTenantRequest.SerializeToString,
+            response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
         )
 
 
@@ -164,13 +173,25 @@ class SysDBServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def GetLastCompactionTimeForTenant(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def SetLastCompactionTimeForTenant(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_SysDBServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "CreateDatabase": grpc.unary_unary_rpc_method_handler(
             servicer.CreateDatabase,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseResponse.SerializeToString,
         ),
         "GetDatabase": grpc.unary_unary_rpc_method_handler(
             servicer.GetDatabase,
@@ -180,7 +201,7 @@ def add_SysDBServicer_to_server(servicer, server):
         "CreateTenant": grpc.unary_unary_rpc_method_handler(
             servicer.CreateTenant,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantResponse.SerializeToString,
         ),
         "GetTenant": grpc.unary_unary_rpc_method_handler(
             servicer.GetTenant,
@@ -190,12 +211,12 @@ def add_SysDBServicer_to_server(servicer, server):
         "CreateSegment": grpc.unary_unary_rpc_method_handler(
             servicer.CreateSegment,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentResponse.SerializeToString,
         ),
         "DeleteSegment": grpc.unary_unary_rpc_method_handler(
             servicer.DeleteSegment,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentResponse.SerializeToString,
         ),
         "GetSegments": grpc.unary_unary_rpc_method_handler(
             servicer.GetSegments,
@@ -205,7 +226,7 @@ def add_SysDBServicer_to_server(servicer, server):
         "UpdateSegment": grpc.unary_unary_rpc_method_handler(
             servicer.UpdateSegment,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentResponse.SerializeToString,
         ),
         "CreateCollection": grpc.unary_unary_rpc_method_handler(
             servicer.CreateCollection,
@@ -215,7 +236,7 @@ def add_SysDBServicer_to_server(servicer, server):
         "DeleteCollection": grpc.unary_unary_rpc_method_handler(
             servicer.DeleteCollection,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionResponse.SerializeToString,
         ),
         "GetCollections": grpc.unary_unary_rpc_method_handler(
             servicer.GetCollections,
@@ -225,12 +246,22 @@ def add_SysDBServicer_to_server(servicer, server):
         "UpdateCollection": grpc.unary_unary_rpc_method_handler(
             servicer.UpdateCollection,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionResponse.SerializeToString,
         ),
         "ResetState": grpc.unary_unary_rpc_method_handler(
             servicer.ResetState,
             request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.ResetStateResponse.SerializeToString,
+        ),
+        "GetLastCompactionTimeForTenant": grpc.unary_unary_rpc_method_handler(
+            servicer.GetLastCompactionTimeForTenant,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetLastCompactionTimeForTenantRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetLastCompactionTimeForTenantResponse.SerializeToString,
+        ),
+        "SetLastCompactionTimeForTenant": grpc.unary_unary_rpc_method_handler(
+            servicer.SetLastCompactionTimeForTenant,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.SetLastCompactionTimeForTenantRequest.FromString,
+            response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -261,7 +292,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/CreateDatabase",
             chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -319,7 +350,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/CreateTenant",
             chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.CreateTenantResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -377,7 +408,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/CreateSegment",
             chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -406,7 +437,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/DeleteSegment",
             chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -464,7 +495,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/UpdateSegment",
             chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -522,7 +553,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/DeleteCollection",
             chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -580,7 +611,7 @@ class SysDB(object):
             target,
             "/chroma.SysDB/UpdateCollection",
             chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -609,7 +640,65 @@ class SysDB(object):
             target,
             "/chroma.SysDB/ResetState",
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            chromadb_dot_proto_dot_coordinator__pb2.ResetStateResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
+
+    @staticmethod
+    def GetLastCompactionTimeForTenant(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/chroma.SysDB/GetLastCompactionTimeForTenant",
+            chromadb_dot_proto_dot_coordinator__pb2.GetLastCompactionTimeForTenantRequest.SerializeToString,
+            chromadb_dot_proto_dot_coordinator__pb2.GetLastCompactionTimeForTenantResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
+
+    @staticmethod
+    def SetLastCompactionTimeForTenant(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/chroma.SysDB/SetLastCompactionTimeForTenant",
+            chromadb_dot_proto_dot_coordinator__pb2.SetLastCompactionTimeForTenantRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
             options,
             channel_credentials,
             insecure,

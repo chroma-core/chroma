@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.coordinator.replicaCount }}
+  selector:
+    matchLabels:
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        app: coordinator
+    spec:
+      serviceAccountName: coordinator-serviceaccount
+      containers:
+        - command:
+            - "/bin/sh"
+            - "-c"
+            # This has to be one line to be passed into the `exec` env correctly. I truly could not tell you why.
+            - coordinator coordinator {{ range $k, $v := .Values.coordinator.flags }} --{{ $k }}={{ $v }} {{ end }}
+          env:
+            {{ range .Values.coordinator.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+          image: "{{ .Values.coordinator.image.repository }}:{{ .Values.coordinator.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          name: coordinator
+          ports:
+            - containerPort: 50051
+              name: grpc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: coordinator
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coordinator-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coordinator-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: coordinator-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-server
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-server
+  template:
+    metadata:
+      labels:
+        app: frontend-server
+    spec:
+      containers:
+        - name: frontend-server
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: chroma
+              mountPath: /test
+          env:
+            - name: IS_PERSISTENT
+              {{ .Values.frontend.isPersistent }}
+            - name: CHROMA_PRODUCER_IMPL
+              {{ .Values.frontend.producerImpl }}
+            - name: CHROMA_CONSUMER_IMPL
+              {{ .Values.frontend.consumerImpl }}
+            - name: CHROMA_SEGMENT_MANAGER_IMPL
+              {{ .Values.frontend.segmentManagerImpl }}
+            - name: PULSAR_BROKER_URL
+              {{ .Values.frontend.pulsarBrokerUrl }}
+            - name: PULSAR_BROKER_PORT
+              {{ .Values.frontend.pulsarBrokerPort }}
+            - name: PULSAR_ADMIN_PORT
+              {{ .Values.frontend.pulsarAdminPort }}
+            - name: ALLOW_RESET
+              {{ .Values.frontend.allowReset }}
+            - name: CHROMA_SYSDB_IMPL
+              {{ .Values.frontend.sysdbImpl }}
+            - name: CHROMA_SERVER_GRPC_PORT
+              {{ .Values.frontend.serverGrpcPort }}
+            - name: CHROMA_COORDINATOR_HOST
+              {{ .Values.frontend.coordinatorHost }}
+            - name: CHROMA_SERVER_AUTH_PROVIDER
+              {{ .Values.frontend.authProvider }}
+            - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
+              {{ .Values.frontend.authCredentialsProvider }}
+            - name: CHROMA_SERVER_AUTHZ_PROVIDER
+              {{ .Values.frontend.authzProvider }}
+            - name: CHROMA_SERVER_AUTHZ_CONFIG_PROVIDER
+              {{ .Values.frontend.authzConfigProvider }}
+            - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
+              {{ .Values.frontend.memberlistProviderImpl }}
+            - name: CHROMA_LOGSERVICE_HOST
+              {{ .Values.frontend.logServiceHost }}
+            - name: CHROMA_LOGSERVICE_PORT
+              {{ .Values.frontend.logServicePort }}
+{{ .Values.frontend.otherEnvConfig | nindent 12 }}
+      volumes:
+        - name: chroma
+          emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-server
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: server-port
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: frontend-server
+  type: ClusterIP

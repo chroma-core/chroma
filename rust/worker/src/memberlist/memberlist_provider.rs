@@ -149,10 +149,11 @@ impl CustomResourceMemberlistProvider {
             match event {
                 Ok(event) => {
                     let event = event;
+                    println!("Kube stream event: {:?}", event);
                     Some(event)
                 }
                 Err(err) => {
-                    println!("Error A: {}", err);
+                    println!("Error acquiring memberlist: {}", err);
                     None
                 }
             }
@@ -194,6 +195,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
     ) {
         match event {
             Some(memberlist) => {
+                println!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {

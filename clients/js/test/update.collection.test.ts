@@ -6,7 +6,12 @@ import { IDS, DOCUMENTS, EMBEDDINGS, METADATAS } from "./data";
 test("it should get embedding with matching documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.get({
     ids: ["test1"],
@@ -14,7 +19,7 @@ test("it should get embedding with matching documents", async () => {
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
       IncludeEnum.Documents,
-    ]
+    ],
   });
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
@@ -24,7 +29,7 @@ test("it should get embedding with matching documents", async () => {
     ids: ["test1"],
     embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
     metadatas: [{ test: "test1new" }],
-    documents: ["doc1new"]
+    documents: ["doc1new"],
   });
 
   const results2 = await collection.get({
@@ -33,7 +38,7 @@ test("it should get embedding with matching documents", async () => {
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
       IncludeEnum.Documents,
-    ]
+    ],
   });
   expect(results2).toBeDefined();
   expect(results2).toBeInstanceOf(Object);

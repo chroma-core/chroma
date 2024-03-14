@@ -8,7 +8,7 @@ worker:
     my_port: 50051
     num_indexing_threads: 4
     pulsar_url: "pulsar://127.0.0.1:6650"
-    pulsar_tenant: "public"
+    pulsar_tenant: "default"
     pulsar_namespace: "default"
     kube_namespace: "chroma"
     assignment_policy:

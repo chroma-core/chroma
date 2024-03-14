@@ -1,8 +1,11 @@
 mod assignment;
+mod blockstore;
+mod compactor;
 mod config;
 mod errors;
 mod index;
 mod ingest;
+mod log;
 mod memberlist;
 mod segment;
 mod server;

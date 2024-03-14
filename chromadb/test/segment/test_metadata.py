@@ -3,6 +3,8 @@ import shutil
 import tempfile
 import pytest
 from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
+
+from chromadb.api.types import validate_metadata
 from chromadb.config import System, Settings
 from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB
@@ -657,3 +659,89 @@ def test_delete_segment(
         res = cur.execute(sql, params)
         # assert that the segment is gone
         assert len(res.fetchall()) == 0
+
+    fts_t = Table("embedding_fulltext_search")
+    q_fts = (
+        _db.querybuilder()
+        .from_(fts_t)
+        .select()
+        .where(
+            fts_t.rowid.isin(
+                _db.querybuilder()
+                .from_(t)
+                .select(t.id)
+                .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+            )
+        )
+    )
+    sql, params = get_sql(q_fts)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that all FTS rows are gone
+        assert len(res.fetchall()) == 0
+
+
+def test_delete_single_fts_record(
+        system: System,
+        sample_embeddings: Iterator[SubmitEmbeddingRecord],
+        produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    max_id = seq_ids[-1]
+
+    sync(segment, max_id)
+
+    assert segment.count() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+    _id = segment._id
+    _db = system.instance(SqliteDB)
+    # Delete by ID
+    delete_embedding = SubmitEmbeddingRecord(
+        id="embedding_0",
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+        collection_id=uuid.UUID(int=0),
+    )
+    max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
+        -1
+    ]
+    t = Table("embeddings")
+
+    sync(segment, max_id)
+    fts_t = Table("embedding_fulltext_search")
+    q_fts = (
+        _db.querybuilder()
+        .from_(fts_t)
+        .select()
+        .where(
+            fts_t.rowid.isin(
+                _db.querybuilder()
+                .from_(t)
+                .select(t.id)
+                .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+                .where(t.embedding_id == ParameterValue(delete_embedding["id"]))
+            )
+        )
+    )
+    sql, params = get_sql(q_fts)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that the ids that are deleted from the segment are also gone from the fts table
+        assert len(res.fetchall()) == 0
+
+
+def test_metadata_validation_forbidden_key() -> None:
+    with pytest.raises(ValueError, match="chroma:document"):
+        validate_metadata(
+            {"chroma:document": "this is not the document you are looking for"}
+        )
