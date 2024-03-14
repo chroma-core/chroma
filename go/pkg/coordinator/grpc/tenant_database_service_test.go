@@ -50,8 +50,6 @@ func (suite *TenantDatabaseServiceTestSuite) SetupTest() {
 
 func (suite *TenantDatabaseServiceTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	// TODO: clean up per test when delete is implemented for tenant
-	dbcore.ResetTestTables(suite.db)
 }
 
 func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime() {
@@ -97,6 +95,10 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 	suite.Equal(1, len(tenants.TenantLastCompactionTime))
 	suite.Equal(tenantId, tenants.TenantLastCompactionTime[0].TenantId)
 	suite.Equal(int64(1), tenants.TenantLastCompactionTime[0].LastCompactionTime)
+
+	// clean up
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
 }
 
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {

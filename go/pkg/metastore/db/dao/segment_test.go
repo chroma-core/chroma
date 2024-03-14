@@ -113,11 +113,9 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_RegisterFilePath() {
 	suite.NoError(err)
 
 	// create entries to flush
-	testFilePathTypes := []string{
-		"TypeA", "TypeB", "TypeC", "TypeD",
-	}
 	segmentsFilePaths := make(map[string]map[string][]string)
 	flushSegmentCompactions := make([]*model.FlushSegmentCompaction, 0)
+	testFilePathTypes := []string{"TypeA", "TypeB", "TypeC", "TypeD"}
 	for _, segment := range segments {
 		segmentID := segment.Segment.ID
 		segmentsFilePaths[segmentID] = make(map[string][]string)

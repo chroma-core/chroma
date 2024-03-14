@@ -37,12 +37,14 @@ func (suite *RecordLogDbTestSuite) SetupSuite() {
 
 func (suite *RecordLogDbTestSuite) SetupTest() {
 	log.Info("setup test")
-	testutils.SetupTest(suite.db, suite.collectionId1, suite.collectionId2)
+	err := testutils.CreateCollections(suite.db, suite.collectionId1, suite.collectionId2)
+	suite.NoError(err)
 }
 
 func (suite *RecordLogDbTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	testutils.TearDownTest(suite.db)
+	err := testutils.CleanupCollections(suite.db, suite.collectionId1, suite.collectionId2)
+	suite.NoError(err)
 }
 
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {

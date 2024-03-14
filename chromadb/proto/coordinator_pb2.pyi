@@ -269,11 +269,18 @@ class SetLastCompactionTimeForTenantRequest(_message.Message):
 
 class FlushSegmentCompactionInfo(_message.Message):
     __slots__ = ["segment_id", "file_paths"]
+    class FilePathsEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: _chroma_pb2.FilePaths
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[_chroma_pb2.FilePaths, _Mapping]] = ...) -> None: ...
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     FILE_PATHS_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
-    file_paths: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.FilePaths]
-    def __init__(self, segment_id: _Optional[str] = ..., file_paths: _Optional[_Iterable[_Union[_chroma_pb2.FilePaths, _Mapping]]] = ...) -> None: ...
+    file_paths: _containers.MessageMap[str, _chroma_pb2.FilePaths]
+    def __init__(self, segment_id: _Optional[str] = ..., file_paths: _Optional[_Mapping[str, _chroma_pb2.FilePaths]] = ...) -> None: ...
 
 class FlushCollectionCompactionRequest(_message.Message):
     __slots__ = ["tenant_id", "collection_id", "log_position", "collection_version", "segment_compaction_info"]

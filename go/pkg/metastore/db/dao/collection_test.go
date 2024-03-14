@@ -56,7 +56,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	err = suite.db.Create(metadata).Error
 	suite.NoError(err)
 
-	query := suite.db.Table("collections").Select("collections.id")
+	query := suite.db.Table("collections").Select("collections.id").Where("collections.id = ?", collectionID)
 	rows, err := query.Rows()
 	suite.NoError(err)
 	for rows.Next() {

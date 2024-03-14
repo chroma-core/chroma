@@ -22,11 +22,6 @@ class SegmentScope(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = []
     VECTOR: _ClassVar[SegmentScope]
     METADATA: _ClassVar[SegmentScope]
-
-class FilePathType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
-    FILE_TYPE_METADATA: _ClassVar[FilePathType]
-    FILE_TYPE_VECTOR: _ClassVar[FilePathType]
 ADD: Operation
 UPDATE: Operation
 UPSERT: Operation
@@ -35,8 +30,6 @@ FLOAT32: ScalarEncoding
 INT32: ScalarEncoding
 VECTOR: SegmentScope
 METADATA: SegmentScope
-FILE_TYPE_METADATA: FilePathType
-FILE_TYPE_VECTOR: FilePathType
 
 class Status(_message.Message):
     __slots__ = ["reason", "code"]
@@ -57,15 +50,20 @@ class Vector(_message.Message):
     def __init__(self, dimension: _Optional[int] = ..., vector: _Optional[bytes] = ..., encoding: _Optional[_Union[ScalarEncoding, str]] = ...) -> None: ...
 
 class FilePaths(_message.Message):
-    __slots__ = ["type", "paths"]
-    TYPE_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ["paths"]
     PATHS_FIELD_NUMBER: _ClassVar[int]
-    type: FilePathType
     paths: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, type: _Optional[_Union[FilePathType, str]] = ..., paths: _Optional[_Iterable[str]] = ...) -> None: ...
+    def __init__(self, paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Segment(_message.Message):
     __slots__ = ["id", "type", "scope", "topic", "collection", "metadata", "file_paths"]
+    class FilePathsEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: FilePaths
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[FilePaths, _Mapping]] = ...) -> None: ...
     ID_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
@@ -79,8 +77,8 @@ class Segment(_message.Message):
     topic: str
     collection: str
     metadata: UpdateMetadata
-    file_paths: _containers.RepeatedCompositeFieldContainer[FilePaths]
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Iterable[_Union[FilePaths, _Mapping]]] = ...) -> None: ...
+    file_paths: _containers.MessageMap[str, FilePaths]
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
 
 class Collection(_message.Message):
     __slots__ = ["id", "name", "topic", "metadata", "dimension", "tenant", "database", "logPosition", "version"]

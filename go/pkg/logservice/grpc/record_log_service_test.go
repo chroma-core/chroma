@@ -42,12 +42,14 @@ func (suite *RecordLogServiceTestSuite) SetupSuite() {
 
 func (suite *RecordLogServiceTestSuite) SetupTest() {
 	log.Info("setup test")
-	testutils.SetupTest(suite.db, suite.collectionId)
+	err := testutils.CreateCollections(suite.db, suite.collectionId)
+	suite.NoError(err)
 }
 
 func (suite *RecordLogServiceTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	testutils.TearDownTest(suite.db)
+	err := testutils.CleanupCollections(suite.db, suite.collectionId)
+	suite.NoError(err)
 }
 
 func encodeVector(dimension int32, vector []float32, encoding coordinatorpb.ScalarEncoding) *coordinatorpb.Vector {

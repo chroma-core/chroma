@@ -147,12 +147,11 @@ func convertSegmentToProto(segment *model.Segment) *coordinatorpb.Segment {
 	}
 	scope := coordinatorpb.SegmentScope_value[segment.Scope]
 	segmentSceope := coordinatorpb.SegmentScope(scope)
-	filePaths := make([]*coordinatorpb.FilePaths, 0, len(segment.FilePaths))
+	filePaths := make(map[string]*coordinatorpb.FilePaths)
 	for t, paths := range segment.FilePaths {
-		filePaths = append(filePaths, &coordinatorpb.FilePaths{
-			Type:  coordinatorpb.FilePathType(coordinatorpb.FilePathType_value[t]),
+		filePaths[t] = &coordinatorpb.FilePaths{
 			Paths: paths,
-		})
+		}
 	}
 	segmentpb := &coordinatorpb.Segment{
 		Id:         segment.ID.String(),

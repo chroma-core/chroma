@@ -178,7 +178,7 @@ message SetLastCompactionTimeForTenantRequest {
 
 message FlushSegmentCompactionInfo {
   string segment_id = 1;
-  repeated FilePaths file_paths = 2;
+  map<string,FilePaths> file_paths = 2;
 }
 
 message FlushCollectionCompactionRequest {
