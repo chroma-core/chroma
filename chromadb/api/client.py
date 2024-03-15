@@ -461,8 +461,7 @@ class Client(SharedSystemClient, ClientAPI):
 
     @override
     def close(self) -> None:
-        if self.get_settings().is_persistent:
-            self._server.close()
+        self._server.close()
 
     # endregion
 
