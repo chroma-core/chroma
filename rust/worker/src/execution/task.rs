@@ -1,13 +1,67 @@
+use crate::system::Receiver;
 use async_trait::async_trait;
+use std::fmt::Debug;
 
-#[async_trait]
-trait Operator<Input, Output>
+#[derive(Debug)]
+struct ExecutionMessage<Op, Input, Output>
 where
-    Self: Send + Sync + Sized,
+    Op: Operator<Input, Output>,
     Input: Send + Sync,
     Output: Send + Sync,
 {
-    async fn process(&self, input: Input) -> Output;
+    operator: Op,
+    input: Input,
+    reply_to: Option<tokio::sync::oneshot::Sender<Output>>,
+}
+
+// TODO: rename
+#[async_trait]
+pub(super) trait ExecutionMessageWrapper: Send + Sync + Debug {
+    async fn execute(&mut self);
+}
+
+#[async_trait]
+impl<Op, Input, Output> ExecutionMessageWrapper for ExecutionMessage<Op, Input, Output>
+where
+    Op: Operator<Input, Output>,
+    Input: Send + Sync + Clone + Debug,
+    Output: Send + Sync + Debug,
+{
+    async fn execute(&mut self) {
+        let result = self.operator.execute(self.input.clone()).await;
+        let res = self.reply_to.take().unwrap().send(result);
+    }
+}
+
+pub(super) fn wrap<Op, Input, Output>(
+    operator: Op,
+    input: Input,
+    reply_to: tokio::sync::oneshot::Sender<Output>,
+) -> Box<dyn ExecutionMessageWrapper>
+where
+    Op: Operator<Input, Output> + 'static,
+    Input: Send + Sync + Clone + Debug + 'static,
+    Output: Send + Sync + Debug + 'static,
+{
+    Box::new(ExecutionMessage {
+        operator,
+        input,
+        reply_to: Some(reply_to),
+    })
+}
+
+struct ExecutionContext {
+    dispatch: Box<dyn Receiver<Box<dyn ExecutionMessageWrapper>>>,
+}
+
+#[async_trait]
+pub(super) trait Operator<Input, Output>
+where
+    Self: Send + Sync + Sized + Debug,
+    Input: Send + Sync,
+    Output: Send + Sync,
+{
+    async fn execute(&self, input: Input) -> Output;
 
     fn then<Other, OutputNext>(
         self,
@@ -81,7 +135,7 @@ impl Combinable<Vec<Vec<String>>> for Vec<String> {
     }
 }
 
-struct Pipeline<O1, O2, Input, Intermediate, Output>
+pub(super) struct Pipeline<O1, O2, Input, Intermediate, Output>
 where
     O1: Operator<Input, Intermediate>,
     O2: Operator<Intermediate, Output>,
@@ -94,6 +148,23 @@ where
     _marker: std::marker::PhantomData<(Input, Intermediate, Output)>,
 }
 
+impl<O1, O2, Input, Intermediate, Output> std::fmt::Debug
+    for Pipeline<O1, O2, Input, Intermediate, Output>
+where
+    O1: Operator<Input, Intermediate>,
+    O2: Operator<Intermediate, Output>,
+    Input: Send + Sync,
+    Intermediate: Send + Sync,
+    Output: Send + Sync,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pipeline")
+            .field("operator1", &self.operator1)
+            .field("operator2", &self.operator2)
+            .finish()
+    }
+}
+
 #[async_trait]
 impl<O1, O2, Input, Intermediate, Output> Operator<Input, Output>
     for Pipeline<O1, O2, Input, Intermediate, Output>
@@ -104,13 +175,13 @@ where
     Intermediate: Send + Sync,
     Output: Send + Sync,
 {
-    async fn process(&self, input: Input) -> Output {
-        let intermediate = self.operator1.process(input).await;
-        self.operator2.process(intermediate).await
+    async fn execute(&self, input: Input) -> Output {
+        let intermediate = self.operator1.execute(input).await;
+        self.operator2.execute(intermediate).await
     }
 }
 
-struct Parallel<O1, O2, Input, Output1, Output2, OutputCombined>
+pub(super) struct Parallel<O1, O2, Input, Output1, Output2, OutputCombined>
 where
     O1: Operator<Input, Output1>,
     O2: Operator<Input, Output2>,
@@ -135,11 +206,29 @@ where
     Output2: Send + Sync + Combinable<Output1, Combined = OutputCombined>,
     OutputCombined: Send + Sync,
 {
-    async fn process(&self, input: Input) -> OutputCombined {
-        let operator1_future = self.operator1.process(input.clone());
-        let operator2_future = self.operator2.process(input);
+    async fn execute(&self, input: Input) -> OutputCombined {
+        let operator1_future = self.operator1.execute(input.clone());
+        let operator2_future = self.operator2.execute(input);
         let (res1, res2) = tokio::join!(operator1_future, operator2_future);
         res1.combine_with(res2)
+    }
+}
+
+impl<O1, O2, Input, Output1, Output2, OutputCombined> std::fmt::Debug
+    for Parallel<O1, O2, Input, Output1, Output2, OutputCombined>
+where
+    O1: Operator<Input, Output1>,
+    O2: Operator<Input, Output2>,
+    Input: Send + Sync + Clone,
+    Output1: Send + Sync,
+    Output2: Send + Sync,
+    OutputCombined: Send + Sync,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Parallel")
+            .field("operator1", &self.operator1)
+            .field("operator2", &self.operator2)
+            .finish()
     }
 }
 
@@ -147,26 +236,30 @@ where
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
     struct OperatorA; // Example operator
     #[async_trait]
     impl Operator<u32, String> for OperatorA {
-        async fn process(&self, input: u32) -> String {
+        async fn execute(&self, input: u32) -> String {
             input.to_string()
         }
     }
 
+    #[derive(Debug)]
     struct OperatorB; // Another operator, expecting String and returning usize
     #[async_trait]
     impl Operator<String, u32> for OperatorB {
-        async fn process(&self, input: String) -> u32 {
+        async fn execute(&self, input: String) -> u32 {
             input.len() as u32
         }
     }
 
+    #[derive(Debug)]
+
     struct OperatorC; // Another operator, expecting String and returning String + "2"
     #[async_trait]
     impl Operator<String, String> for OperatorC {
-        async fn process(&self, input: String) -> String {
+        async fn execute(&self, input: String) -> String {
             input + "2"
         }
     }
@@ -177,17 +270,18 @@ mod tests {
         let operator_2 = OperatorB;
         let operator_3 = OperatorA;
         let pipeline = operator_1.then(operator_2).then(operator_3);
-        let result = pipeline.process(42).await;
+        let result = pipeline.execute(42).await;
         println!("Result: {}", result);
         assert_eq!(result, "2".to_owned());
     }
 
     #[tokio::test]
     async fn test_parallel_complicated_data() {
+        #[derive(Debug)]
         struct PullData; // Example operator
         #[async_trait]
         impl Operator<(), Vec<String>> for PullData {
-            async fn process(&self, _: ()) -> Vec<String> {
+            async fn execute(&self, _: ()) -> Vec<String> {
                 vec![
                     "Hello".to_owned(),
                     "World".to_owned(),
@@ -198,15 +292,17 @@ mod tests {
             }
         }
 
+        #[derive(Debug)]
         struct SortData; // Another operator, expecting Vec<String> and returning Vec<String>
         #[async_trait]
         impl Operator<Vec<String>, Vec<String>> for SortData {
-            async fn process(&self, mut input: Vec<String>) -> Vec<String> {
+            async fn execute(&self, mut input: Vec<String>) -> Vec<String> {
                 input.sort();
                 input
             }
         }
 
+        #[derive(Debug)]
         // Operator that dedups a range of the input, assumes input is sorted
         struct DedupePartial {
             start: usize,
@@ -215,17 +311,18 @@ mod tests {
 
         #[async_trait]
         impl Operator<Vec<String>, Vec<String>> for DedupePartial {
-            async fn process(&self, input: Vec<String>) -> Vec<String> {
+            async fn execute(&self, input: Vec<String>) -> Vec<String> {
                 let mut range = input[self.start..self.end].to_vec();
                 range.dedup();
                 range
             }
         }
 
+        #[derive(Debug)]
         struct MergeDedupe; // Another operator, expecting Vec<Vec<String>> and returning Vec<String>
         #[async_trait]
         impl Operator<Vec<Vec<String>>, Vec<String>> for MergeDedupe {
-            async fn process(&self, input: Vec<Vec<String>>) -> Vec<String> {
+            async fn execute(&self, input: Vec<Vec<String>>) -> Vec<String> {
                 let mut result = input.into_iter().flatten().collect::<Vec<String>>();
                 result.sort();
                 result.dedup();
@@ -248,7 +345,9 @@ mod tests {
                     .parallel(dedupe_partial_3),
             )
             .then(merge_dedupe);
-        let result = pipeline.process(()).await;
+        println!("Pipeline: {:?}", pipeline);
+        let result = pipeline.execute(()).await;
+
         println!("Result: {:?}", result);
     }
 }
