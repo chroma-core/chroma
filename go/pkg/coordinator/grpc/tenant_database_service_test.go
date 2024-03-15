@@ -2,13 +2,13 @@ package grpc
 
 import (
 	"context"
-	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -21,9 +21,11 @@ import (
 
 type TenantDatabaseServiceTestSuite struct {
 	suite.Suite
-	catalog *coordinator.Catalog
-	db      *gorm.DB
-	s       *Server
+	catalog      *coordinator.Catalog
+	db           *gorm.DB
+	s            *Server
+	t            *testing.T
+	collectionId types.UniqueID
 }
 
 func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
@@ -31,12 +33,12 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		AssignmentPolicy:          "simple",
-		SystemCatalogProvider:     "database",
+		SystemCatalogProvider:     "memory",
 		NotificationStoreProvider: "memory",
 		NotifierProvider:          "memory",
 		Testing:                   true}, grpcutils.Default, suite.db)
 	if err != nil {
-		suite.T().Fatalf("error creating server: %v", err)
+		suite.t.Fatalf("error creating server: %v", err)
 	}
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
@@ -50,6 +52,8 @@ func (suite *TenantDatabaseServiceTestSuite) SetupTest() {
 
 func (suite *TenantDatabaseServiceTestSuite) TearDownTest() {
 	log.Info("teardown test")
+	// TODO: clean up per test when delete is implemented for tenant
+	dbcore.ResetTestTables(suite.db)
 }
 
 func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime() {
@@ -62,7 +66,7 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 		},
 	}
 	_, err := suite.s.SetLastCompactionTimeForTenant(context.Background(), request)
-	suite.Equal(status.Error(codes.Code(code.Code_INTERNAL), common.ErrTenantNotFound.Error()), err)
+	suite.Equal(status.Error(codes.Code(code.Code_INTERNAL), "error SetTenantLastCompactionTime"), err)
 
 	// create tenant
 	_, err = suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
@@ -95,13 +99,10 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 	suite.Equal(1, len(tenants.TenantLastCompactionTime))
 	suite.Equal(tenantId, tenants.TenantLastCompactionTime[0].TenantId)
 	suite.Equal(int64(1), tenants.TenantLastCompactionTime[0].LastCompactionTime)
-
-	// clean up
-	err = dao.CleanUpTestTenant(suite.db, tenantId)
-	suite.NoError(err)
 }
 
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {
 	testSuite := new(TenantDatabaseServiceTestSuite)
+	testSuite.t = t
 	suite.Run(t, testSuite)
 }

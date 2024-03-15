@@ -118,69 +118,28 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
+func ResetTestTables(db *gorm.DB) {
+	db.Exec("TRUNCATE TABLE tenants, databases, collection_metadata, collections, segment_metadata, segments, notifications")
+	CreateDefaultTenantAndDatabase(db)
+}
+
 func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
-	defaultTenant := &dbmodel.Tenant{
+	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
 		ID:                 common.DefaultTenant,
 		LastCompactionTime: time.Now().Unix(),
-	}
-	db.Model(&dbmodel.Tenant{}).Where("id = ?", common.DefaultTenant).Save(defaultTenant)
-
-	var database []dbmodel.Database
-	databaseId := types.NewUniqueID().String()
-	result := db.Model(&dbmodel.Database{}).
-		Where("name = ?", common.DefaultDatabase).
-		Where("tenant_id = ?", common.DefaultTenant).
-		Find(&database)
-	if result.Error != nil {
-		return ""
-	}
-
-	if result.RowsAffected == 0 {
-		db.Create(&dbmodel.Database{
-			ID:       databaseId,
-			Name:     common.DefaultDatabase,
-			TenantID: common.DefaultTenant,
-		})
-		return databaseId
-	}
-
-	err := result.Row().Scan(&database)
-	if err != nil {
-		return ""
-	}
-	return database[0].ID
+	})
+	databaseId := types.NilUniqueID().String()
+	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
+		ID:       databaseId,
+		Name:     common.DefaultDatabase,
+		TenantID: common.DefaultTenant,
+	})
+	return databaseId
 }
 
 func CreateTestTables(db *gorm.DB) {
 	log.Info("CreateTestTables")
-	tableExist := db.Migrator().HasTable(&dbmodel.Tenant{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.Tenant{})
-	}
-	tableExist = db.Migrator().HasTable(&dbmodel.Database{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.Database{})
-	}
-	tableExist = db.Migrator().HasTable(&dbmodel.CollectionMetadata{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.CollectionMetadata{})
-	}
-	tableExist = db.Migrator().HasTable(&dbmodel.Collection{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.Collection{})
-	}
-	tableExist = db.Migrator().HasTable(&dbmodel.SegmentMetadata{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
-	}
-	tableExist = db.Migrator().HasTable(&dbmodel.Segment{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.Segment{})
-	}
-	tableExist = db.Migrator().HasTable(&dbmodel.Notification{})
-	if !tableExist {
-		db.Migrator().CreateTable(&dbmodel.Notification{})
-	}
+	db.AutoMigrate(&dbmodel.Tenant{}, &dbmodel.Database{}, &dbmodel.CollectionMetadata{}, &dbmodel.Collection{}, &dbmodel.SegmentMetadata{}, &dbmodel.Segment{}, &dbmodel.Notification{})
 
 	// create default tenant and database
 	CreateDefaultTenantAndDatabase(db)

@@ -1,13 +1,18 @@
 package testutils
 
 import (
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"strconv"
 )
 
-func CreateCollections(db *gorm.DB, collectionIds ...types.UniqueID) error {
+func SetupTest(db *gorm.DB, collectionIds ...types.UniqueID) {
+	dbcore.ResetTestTables(db)
+
 	// create test collections
 	for index, collectionId := range collectionIds {
 		collectionName := "collection" + strconv.Itoa(index+1)
@@ -22,27 +27,18 @@ func CreateCollections(db *gorm.DB, collectionIds ...types.UniqueID) error {
 		}
 		err := db.Create(collection).Error
 		if err != nil {
-			return err
+			log.Error("create collection error", zap.Error(err))
 		}
 	}
-	return nil
 }
 
-func CleanupCollections(db *gorm.DB, collectionIds ...types.UniqueID) error {
-	// delete test collections
-	for _, collectionId := range collectionIds {
-		err := db.Where("id = ?", collectionId.String()).Delete(&dbmodel.Collection{}).Error
-		if err != nil {
-			return err
-		}
-	}
-
-	// cleanup logs
-	err := db.Where("collection_id in ?", collectionIds).Delete(&dbmodel.RecordLog{}).Error
-	if err != nil {
-		return err
-	}
-	return nil
+func TearDownTest(db *gorm.DB) {
+	db.Migrator().DropTable(&dbmodel.Segment{})
+	db.Migrator().CreateTable(&dbmodel.Segment{})
+	db.Migrator().DropTable(&dbmodel.Collection{})
+	db.Migrator().CreateTable(&dbmodel.Collection{})
+	db.Migrator().DropTable(&dbmodel.RecordLog{})
+	db.Migrator().CreateTable(&dbmodel.RecordLog{})
 }
 
 func MoveLogPosition(db *gorm.DB, collectionId types.UniqueID, position int64) {

@@ -21,12 +21,6 @@ func (s *tenantDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Tenant{}).Error
 }
 
-func (s *tenantDb) DeleteByID(tenantID string) (int, error) {
-	var tenants []dbmodel.Tenant
-	err := s.db.Clauses(clause.Returning{}).Where("id = ?", tenantID).Delete(&tenants).Error
-	return len(tenants), err
-}
-
 func (s *tenantDb) GetAllTenants() ([]*dbmodel.Tenant, error) {
 	var tenants []*dbmodel.Tenant
 
@@ -67,7 +61,6 @@ func (s *tenantDb) Insert(tenant *dbmodel.Tenant) error {
 }
 
 func (s *tenantDb) UpdateTenantLastCompactionTime(tenantID string, lastCompactionTime int64) error {
-	log.Info("UpdateTenantLastCompactionTime", zap.String("tenantID", tenantID), zap.Int64("lastCompactionTime", lastCompactionTime))
 	var tenants []dbmodel.Tenant
 	result := s.db.Model(&tenants).
 		Clauses(clause.Returning{Columns: []clause.Column{{Name: "id"}}}).
@@ -85,7 +78,6 @@ func (s *tenantDb) UpdateTenantLastCompactionTime(tenantID string, lastCompactio
 }
 
 func (s *tenantDb) GetTenantsLastCompactionTime(tenantIDs []string) ([]*dbmodel.Tenant, error) {
-	log.Info("GetTenantsLastCompactionTime", zap.Any("tenantIDs", tenantIDs))
 	var tenants []*dbmodel.Tenant
 
 	result := s.db.Select("id", "last_compaction_time").Find(&tenants, "id IN ?", tenantIDs)

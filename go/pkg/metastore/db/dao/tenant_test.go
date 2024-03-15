@@ -21,6 +21,7 @@ type TenantDbTestSuite struct {
 func (suite *TenantDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
+	dbcore.ResetTestTables(suite.db)
 	suite.Db = &tenantDb{
 		db: suite.db,
 	}
@@ -37,15 +38,14 @@ func (suite *TenantDbTestSuite) TearDownTest() {
 func (suite *TenantDbTestSuite) TestTenantDb_UpdateTenantLastCompactionTime() {
 	tenantId := "testUpdateTenantLastCompactionTime"
 	var tenant dbmodel.Tenant
-	err := suite.Db.Insert(&dbmodel.Tenant{
+	suite.Db.Insert(&dbmodel.Tenant{
 		ID:                 tenantId,
 		LastCompactionTime: 0,
 	})
-	suite.Require().NoError(err)
 	suite.db.First(&tenant, "id = ?", tenantId)
 	suite.Require().Equal(int64(0), tenant.LastCompactionTime)
 
-	err = suite.Db.UpdateTenantLastCompactionTime(tenantId, 1)
+	err := suite.Db.UpdateTenantLastCompactionTime(tenantId, 1)
 	suite.Require().NoError(err)
 	suite.db.First(&tenant, "id = ?", tenantId)
 	suite.Require().Equal(int64(1), tenant.LastCompactionTime)
@@ -63,11 +63,10 @@ func (suite *TenantDbTestSuite) TestTenantDb_GetTenantsLastCompactionTime() {
 	tenantIds := make([]string, 0)
 	for i := 0; i < 10; i++ {
 		tenantId := "testGetTenantsLastCompactionTime" + strconv.Itoa(i)
-		err := suite.Db.Insert(&dbmodel.Tenant{
+		suite.Db.Insert(&dbmodel.Tenant{
 			ID:                 tenantId,
 			LastCompactionTime: int64(i),
 		})
-		suite.Require().NoError(err)
 		tenantIds = append(tenantIds, tenantId)
 	}
 

@@ -3,137 +3,84 @@ package dao
 import (
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 	"testing"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/stretchr/testify/assert"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-type CollectionDbTestSuite struct {
-	suite.Suite
-	db           *gorm.DB
-	collectionDb *collectionDb
-	tenantName   string
-	databaseName string
-	databaseId   string
-}
+func TestCollectionDb_GetCollections(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	assert.NoError(t, err)
 
-func (suite *CollectionDbTestSuite) SetupSuite() {
-	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
-	suite.collectionDb = &collectionDb{
-		db: suite.db,
+	err = db.AutoMigrate(&dbmodel.Tenant{}, &dbmodel.Database{}, &dbmodel.Collection{}, &dbmodel.CollectionMetadata{})
+	databaseID := dbcore.CreateDefaultTenantAndDatabase(db)
+
+	assert.NoError(t, err)
+	name := "test_name"
+	topic := "test_topic"
+	collection := &dbmodel.Collection{
+		ID:         types.NewUniqueID().String(),
+		Name:       &name,
+		Topic:      &topic,
+		DatabaseID: databaseID,
 	}
-	suite.tenantName = "test_collection_tenant"
-	suite.databaseName = "test_collection_database"
-	DbId, err := CreateTestTenantAndDatabase(suite.db, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.databaseId = DbId
-}
-
-func (suite *CollectionDbTestSuite) TearDownSuite() {
-	log.Info("teardown suite")
-	err := CleanUpTestDatabase(suite.db, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	err = CleanUpTestTenant(suite.db, suite.tenantName)
-	suite.NoError(err)
-}
-
-func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
-	collectionName := "test_collection_get_collections"
-	collectionTopic := "test_collection_topic"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, collectionTopic, 128, suite.databaseId)
-	suite.NoError(err)
+	err = db.Create(collection).Error
+	assert.NoError(t, err)
 
 	testKey := "test"
 	testValue := "test"
 	metadata := &dbmodel.CollectionMetadata{
-		CollectionID: collectionID,
+		CollectionID: collection.ID,
 		Key:          &testKey,
 		StrValue:     &testValue,
 	}
-	err = suite.db.Create(metadata).Error
-	suite.NoError(err)
+	err = db.Create(metadata).Error
+	assert.NoError(t, err)
 
-	query := suite.db.Table("collections").Select("collections.id").Where("collections.id = ?", collectionID)
-	rows, err := query.Rows()
-	suite.NoError(err)
-	for rows.Next() {
-		var scanedCollectionID string
-		err = rows.Scan(&scanedCollectionID)
-		suite.NoError(err)
-		suite.Equal(collectionID, scanedCollectionID)
+	collectionDb := &collectionDb{
+		db: db,
 	}
-	collections, err := suite.collectionDb.GetCollections(nil, nil, nil, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
-	suite.Equal(collectionName, *collections[0].Collection.Name)
-	suite.Equal(collectionTopic, *collections[0].Collection.Topic)
-	suite.Len(collections[0].CollectionMetadata, 1)
-	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
-	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
+
+	query := db.Table("collections").Select("collections.id")
+	rows, err := query.Rows()
+	assert.NoError(t, err)
+	for rows.Next() {
+		var collectionID string
+		err = rows.Scan(&collectionID)
+		assert.NoError(t, err)
+		log.Info("collectionID", zap.String("collectionID", collectionID))
+	}
+	collections, err := collectionDb.GetCollections(nil, nil, nil, common.DefaultTenant, common.DefaultDatabase)
+	assert.NoError(t, err)
+	assert.Len(t, collections, 1)
+	assert.Equal(t, collection.ID, collections[0].Collection.ID)
+	assert.Equal(t, collection.Name, collections[0].Collection.Name)
+	assert.Equal(t, collection.Topic, collections[0].Collection.Topic)
+	assert.Len(t, collections[0].CollectionMetadata, 1)
+	assert.Equal(t, metadata.Key, collections[0].CollectionMetadata[0].Key)
+	assert.Equal(t, metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 
 	// Test when filtering by ID
-	collections, err = suite.collectionDb.GetCollections(nil, nil, nil, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
+	collections, err = collectionDb.GetCollections(nil, nil, nil, common.DefaultTenant, common.DefaultDatabase)
+	assert.NoError(t, err)
+	assert.Len(t, collections, 1)
+	assert.Equal(t, collection.ID, collections[0].Collection.ID)
 
 	// Test when filtering by name
-	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, nil, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
+	collections, err = collectionDb.GetCollections(nil, collection.Name, nil, common.DefaultTenant, common.DefaultDatabase)
+	assert.NoError(t, err)
+	assert.Len(t, collections, 1)
+	assert.Equal(t, collection.ID, collections[0].Collection.ID)
 
 	// Test when filtering by topic
-	collections, err = suite.collectionDb.GetCollections(nil, nil, &collectionTopic, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
-
-	// clean up
-	err = CleanUpTestCollection(suite.db, collectionID)
-	suite.NoError(err)
-}
-
-func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion() {
-	collectionName := "test_collection_get_collections"
-	collectionTopic := "test_topic"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, collectionTopic, 128, suite.databaseId)
-	// verify default values
-	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, nil, "", "")
-	suite.NoError(err)
-	suite.Len(collections, 1)
-	suite.Equal(int64(0), collections[0].Collection.LogPosition)
-	suite.Equal(int32(0), collections[0].Collection.Version)
-
-	// update log position and version
-	version, err := suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(10), 0)
-	suite.NoError(err)
-	suite.Equal(int32(1), version)
-	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, nil, "", "")
-	suite.Len(collections, 1)
-	suite.Equal(int64(10), collections[0].Collection.LogPosition)
-	suite.Equal(int32(1), collections[0].Collection.Version)
-
-	// invalid log position
-	_, err = suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(5), 0)
-	suite.Error(err, "collection log position Stale")
-
-	// invalid version
-	_, err = suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(20), 0)
-	suite.Error(err, "collection version invalid")
-	_, err = suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(20), 3)
-	suite.Error(err, "collection version invalid")
-
-	//clean up
-	err = CleanUpTestCollection(suite.db, collectionID)
-	suite.NoError(err)
-}
-
-func TestCollectionDbTestSuiteSuite(t *testing.T) {
-	testSuite := new(CollectionDbTestSuite)
-	suite.Run(t, testSuite)
+	collections, err = collectionDb.GetCollections(nil, nil, collection.Topic, common.DefaultTenant, common.DefaultDatabase)
+	assert.NoError(t, err)
+	assert.Len(t, collections, 1)
+	assert.Equal(t, collection.ID, collections[0].Collection.ID)
 }

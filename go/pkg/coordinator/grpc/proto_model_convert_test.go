@@ -184,12 +184,11 @@ func TestConvertSegmentToProto(t *testing.T) {
 	// Test case 2: segment is not nil
 	testTopic := "test_topic"
 	segment := &model.Segment{
-		ID:        types.NewUniqueID(),
-		Type:      "test_type",
-		Scope:     "METADATA",
-		Topic:     &testTopic,
-		Metadata:  nil,
-		FilePaths: map[string][]string{},
+		ID:       types.NewUniqueID(),
+		Type:     "test_type",
+		Scope:    "METADATA",
+		Topic:    &testTopic,
+		Metadata: nil,
 	}
 	segmentpb = convertSegmentToProto(segment)
 	assert.NotNil(t, segmentpb)
