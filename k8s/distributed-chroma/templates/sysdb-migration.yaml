@@ -1,13 +1,13 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: migration
+  name: sysdb-migration
   namespace: {{ .Values.namespace }}
 spec:
   template:
     metadata:
       labels:
-        app: migration
+        app: sysdb-migration
     spec:
       restartPolicy: OnFailure
       containers:
@@ -19,4 +19,5 @@ spec:
           image: "{{ .Values.sysdbMigration.image.repository }}:{{ .Values.sysdbMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration
+
 ---
