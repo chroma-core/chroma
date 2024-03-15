@@ -119,17 +119,36 @@ func GetDB(ctx context.Context) *gorm.DB {
 }
 
 func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
-	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
+	defaultTenant := &dbmodel.Tenant{
 		ID:                 common.DefaultTenant,
 		LastCompactionTime: time.Now().Unix(),
-	})
+	}
+	db.Model(&dbmodel.Tenant{}).Where("id = ?", common.DefaultTenant).Save(defaultTenant)
+
+	var database []dbmodel.Database
 	databaseId := types.NewUniqueID().String()
-	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
-		ID:       databaseId,
-		Name:     common.DefaultDatabase,
-		TenantID: common.DefaultTenant,
-	})
-	return databaseId
+	result := db.Model(&dbmodel.Database{}).
+		Where("name = ?", common.DefaultDatabase).
+		Where("tenant_id = ?", common.DefaultTenant).
+		Find(&database)
+	if result.Error != nil {
+		return ""
+	}
+
+	if result.RowsAffected == 0 {
+		db.Create(&dbmodel.Database{
+			ID:       databaseId,
+			Name:     common.DefaultDatabase,
+			TenantID: common.DefaultTenant,
+		})
+		return databaseId
+	}
+
+	err := result.Row().Scan(&database)
+	if err != nil {
+		return ""
+	}
+	return database[0].ID
 }
 
 func CreateTestTables(db *gorm.DB) {
