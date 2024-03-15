@@ -37,6 +37,11 @@ func (suite *RecordLogServiceTestSuite) SetupSuite() {
 	})
 	suite.s = s
 	suite.db = dbcore.ConfigDatabaseForTesting()
+	recordLogTableExist := suite.db.Migrator().HasTable(&dbmodel.RecordLog{})
+	if !recordLogTableExist {
+		err := suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+		suite.NoError(err)
+	}
 }
 
 func (suite *RecordLogServiceTestSuite) SetupTest() {

@@ -134,7 +134,34 @@ func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
 
 func CreateTestTables(db *gorm.DB) {
 	log.Info("CreateTestTables")
-	db.AutoMigrate(&dbmodel.Tenant{}, &dbmodel.Database{}, &dbmodel.CollectionMetadata{}, &dbmodel.Collection{}, &dbmodel.SegmentMetadata{}, &dbmodel.Segment{}, &dbmodel.Notification{})
+	tableExist := db.Migrator().HasTable(&dbmodel.Tenant{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Tenant{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Database{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Database{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.CollectionMetadata{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.CollectionMetadata{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Collection{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Collection{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.SegmentMetadata{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Segment{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Segment{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Notification{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Notification{})
+	}
 
 	// create default tenant and database
 	CreateDefaultTenantAndDatabase(db)
