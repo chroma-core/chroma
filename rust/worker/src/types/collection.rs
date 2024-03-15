@@ -15,6 +15,8 @@ pub(crate) struct Collection {
     pub(crate) dimension: Option<i32>,
     pub(crate) tenant: String,
     pub(crate) database: String,
+    pub(crate) log_position: i64,
+    pub(crate) version: i32,
 }
 
 #[derive(Error, Debug)]

@@ -19,6 +19,7 @@ pub(crate) struct Segment {
     pub(crate) topic: Option<String>,
     pub(crate) collection: Option<Uuid>,
     pub(crate) metadata: Option<Metadata>,
+    pub(crate) file_path: HashMap<String, Vector<String>>,
 }
 
 #[derive(Error, Debug)]
