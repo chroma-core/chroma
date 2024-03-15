@@ -83,9 +83,9 @@ k8s_resource(
 )
 
 # Production Chroma
-k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"])
-k8s_resource('pulsar', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
-k8s_resource('sysdb-migration', resource_deps=['postgres'], labels=["infrastructure"])
+k8s_resource('postgres', resource_deps=['k8s_setup', 'namespace'], labels=["infrastructure"])
+k8s_resource('pulsar', resource_deps=['k8s_setup', 'namespace'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
+k8s_resource('sysdb-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['sysdb-migration'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('sysdb', resource_deps=['pulsar', 'sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('frontend-service', resource_deps=['pulsar', 'sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
