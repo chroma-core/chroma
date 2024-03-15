@@ -29,4 +29,5 @@ type Catalog interface {
 	GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*model.Tenant, error)
 	SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error
 	GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error)
+	FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error)
 }
