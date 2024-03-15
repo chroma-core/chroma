@@ -6,6 +6,7 @@ hypothesis<=6.98.9 # > Than this version has API changes we don't currently supp
 hypothesis[numpy]<=6.98.9
 mypy-protobuf
 pre-commit
+psutil
 pytest
 pytest-asyncio
 pytest-httpserver
