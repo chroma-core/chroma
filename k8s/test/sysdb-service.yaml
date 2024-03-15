@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: coordinator-lb
+  name: sysdb-lb
   namespace: chroma
 spec:
   ports:
@@ -9,5 +9,5 @@ spec:
       port: 50051
       targetPort: 50051
   selector:
-    app: coordinator
+    app: sysdb 
   type: LoadBalancer
