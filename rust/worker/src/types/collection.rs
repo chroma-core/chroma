@@ -59,6 +59,8 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
             database: proto_collection.database,
+            log_position: proto_collection.log_position,
+            version: proto_collection.version,
         })
     }
 }
@@ -77,6 +79,8 @@ mod test {
             dimension: None,
             tenant: "baz".to_string(),
             database: "qux".to_string(),
+            log_position: 0,
+            version: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(converted_collection.id, Uuid::nil());

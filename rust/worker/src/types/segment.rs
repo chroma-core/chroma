@@ -3,6 +3,8 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
+use std::collections::HashMap;
+use std::vec::Vec;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -19,7 +21,7 @@ pub(crate) struct Segment {
     pub(crate) topic: Option<String>,
     pub(crate) collection: Option<Uuid>,
     pub(crate) metadata: Option<Metadata>,
-    pub(crate) file_path: HashMap<String, Vector<String>>,
+    pub(crate) file_path: HashMap<String, Vec<String>>,
 }
 
 #[derive(Error, Debug)]
@@ -79,7 +81,11 @@ impl TryFrom<chroma_proto::Segment> for Segment {
                 return Err(SegmentConversionError::InvalidUuid);
             }
         };
-
+        let mut file_paths = HashMap::new();
+        for (key, value) in proto_segment.file_paths {
+            let values = value.paths.iter().map(|x| x.to_string()).collect();
+            file_paths.insert(key, values);
+        }
         Ok(Segment {
             id: segment_uuid,
             r#type: segment_type,
@@ -87,6 +93,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             topic: proto_segment.topic,
             collection: collection_uuid,
             metadata: segment_metadata,
+            file_path: file_paths,
         })
     }
 }
@@ -116,6 +123,7 @@ mod tests {
             topic: Some("test".to_string()),
             collection: Some("00000000-0000-0000-0000-000000000000".to_string()),
             metadata: Some(metadata),
+            file_paths: HashMap::new(),
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
         assert_eq!(converted_segment.id, Uuid::nil());

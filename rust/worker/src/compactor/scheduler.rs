@@ -322,6 +322,8 @@ mod tests {
             dimension: Some(1),
             tenant: "tenant_1".to_string(),
             database: "database_1".to_string(),
+            log_position: 0,
+            version: 0,
         };
 
         let collection_2 = Collection {
@@ -332,6 +334,8 @@ mod tests {
             dimension: Some(1),
             tenant: "tenant_2".to_string(),
             database: "database_2".to_string(),
+            log_position: 0,
+            version: 0,
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
