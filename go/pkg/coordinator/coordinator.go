@@ -38,6 +38,7 @@ func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPo
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
 	s.catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
+
 	return s, nil
 }
 

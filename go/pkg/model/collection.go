@@ -13,8 +13,6 @@ type Collection struct {
 	TenantID     string
 	DatabaseName string
 	Ts           types.Timestamp
-	LogPosition  int64
-	Version      int32
 }
 
 type CreateCollection struct {
@@ -46,20 +44,6 @@ type UpdateCollection struct {
 	TenantID      string
 	DatabaseName  string
 	Ts            types.Timestamp
-}
-
-type FlushCollectionCompaction struct {
-	ID                       types.UniqueID
-	TenantID                 string
-	LogPosition              int64
-	CurrentCollectionVersion int32
-	FlushSegmentCompactions  []*FlushSegmentCompaction
-}
-
-type FlushCollectionInfo struct {
-	ID                       string
-	CollectionVersion        int32
-	TenantLastCompactionTime int64
 }
 
 func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string, collectionTopic *string) bool {

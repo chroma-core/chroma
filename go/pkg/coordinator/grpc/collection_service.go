@@ -2,9 +2,7 @@ package grpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/model"
@@ -210,53 +208,6 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	res.Status = setResponseStatus(successCode)
-	return res, nil
-}
-
-func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
-	blob, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	log.Info("flush collection compaction", zap.String("request", string(blob)))
-	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
-	if err != nil {
-		return nil, err
-	}
-	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(req.SegmentCompactionInfo))
-	for _, flushSegmentCompaction := range req.SegmentCompactionInfo {
-		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
-		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
-		if err != nil {
-			return nil, err
-		}
-		filePaths := make(map[string][]string)
-		for key, filePath := range flushSegmentCompaction.FilePaths {
-			filePaths[key] = filePath.Paths
-		}
-		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
-			ID:        segmentID,
-			FilePaths: filePaths,
-		})
-	}
-	FlushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:                       collectionID,
-		TenantID:                 req.TenantId,
-		LogPosition:              req.LogPosition,
-		CurrentCollectionVersion: req.CollectionVersion,
-		FlushSegmentCompactions:  segmentCompactionInfo,
-	}
-	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
-	if err != nil {
-		log.Error("error FlushCollectionCompaction", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError(err.Error())
-	}
-	res := &coordinatorpb.FlushCollectionCompactionResponse{
-		CollectionId:       flushCollectionInfo.ID,
-		CollectionVersion:  flushCollectionInfo.CollectionVersion,
-		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
-	}
 	return res, nil
 }
 

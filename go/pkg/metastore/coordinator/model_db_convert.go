@@ -22,8 +22,6 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			TenantID:     collectionAndMetadata.TenantID,
 			DatabaseName: collectionAndMetadata.DatabaseName,
 			Ts:           collectionAndMetadata.Collection.Ts,
-			LogPosition:  collectionAndMetadata.Collection.LogPosition,
-			Version:      collectionAndMetadata.Collection.Version,
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
 		collections = append(collections, collection)

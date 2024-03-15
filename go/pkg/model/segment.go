@@ -12,7 +12,6 @@ type Segment struct {
 	CollectionID types.UniqueID
 	Metadata     *SegmentMetadata[SegmentMetadataValueType]
 	Ts           types.Timestamp
-	FilePaths    map[string][]string
 }
 
 type CreateSegment struct {
@@ -42,11 +41,6 @@ type GetSegments struct {
 	Scope        *string
 	Topic        *string
 	CollectionID types.UniqueID
-}
-
-type FlushSegmentCompaction struct {
-	ID        types.UniqueID
-	FilePaths map[string][]string
 }
 
 func FilterSegments(segment *Segment, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) bool {

@@ -38,7 +38,6 @@ type SysDBClient interface {
 	ResetState(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ResetStateResponse, error)
 	GetLastCompactionTimeForTenant(ctx context.Context, in *GetLastCompactionTimeForTenantRequest, opts ...grpc.CallOption) (*GetLastCompactionTimeForTenantResponse, error)
 	SetLastCompactionTimeForTenant(ctx context.Context, in *SetLastCompactionTimeForTenantRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	FlushCollectionCompaction(ctx context.Context, in *FlushCollectionCompactionRequest, opts ...grpc.CallOption) (*FlushCollectionCompactionResponse, error)
 }
 
 type sysDBClient struct {
@@ -184,15 +183,6 @@ func (c *sysDBClient) SetLastCompactionTimeForTenant(ctx context.Context, in *Se
 	return out, nil
 }
 
-func (c *sysDBClient) FlushCollectionCompaction(ctx context.Context, in *FlushCollectionCompactionRequest, opts ...grpc.CallOption) (*FlushCollectionCompactionResponse, error) {
-	out := new(FlushCollectionCompactionResponse)
-	err := c.cc.Invoke(ctx, "/chroma.SysDB/FlushCollectionCompaction", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // SysDBServer is the server API for SysDB service.
 // All implementations must embed UnimplementedSysDBServer
 // for forward compatibility
@@ -212,7 +202,6 @@ type SysDBServer interface {
 	ResetState(context.Context, *emptypb.Empty) (*ResetStateResponse, error)
 	GetLastCompactionTimeForTenant(context.Context, *GetLastCompactionTimeForTenantRequest) (*GetLastCompactionTimeForTenantResponse, error)
 	SetLastCompactionTimeForTenant(context.Context, *SetLastCompactionTimeForTenantRequest) (*emptypb.Empty, error)
-	FlushCollectionCompaction(context.Context, *FlushCollectionCompactionRequest) (*FlushCollectionCompactionResponse, error)
 	mustEmbedUnimplementedSysDBServer()
 }
 
@@ -264,9 +253,6 @@ func (UnimplementedSysDBServer) GetLastCompactionTimeForTenant(context.Context, 
 }
 func (UnimplementedSysDBServer) SetLastCompactionTimeForTenant(context.Context, *SetLastCompactionTimeForTenantRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLastCompactionTimeForTenant not implemented")
-}
-func (UnimplementedSysDBServer) FlushCollectionCompaction(context.Context, *FlushCollectionCompactionRequest) (*FlushCollectionCompactionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FlushCollectionCompaction not implemented")
 }
 func (UnimplementedSysDBServer) mustEmbedUnimplementedSysDBServer() {}
 
@@ -551,24 +537,6 @@ func _SysDB_SetLastCompactionTimeForTenant_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SysDB_FlushCollectionCompaction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FlushCollectionCompactionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SysDBServer).FlushCollectionCompaction(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/chroma.SysDB/FlushCollectionCompaction",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SysDBServer).FlushCollectionCompaction(ctx, req.(*FlushCollectionCompactionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // SysDB_ServiceDesc is the grpc.ServiceDesc for SysDB service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -635,10 +603,6 @@ var SysDB_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetLastCompactionTimeForTenant",
 			Handler:    _SysDB_SetLastCompactionTimeForTenant_Handler,
-		},
-		{
-			MethodName: "FlushCollectionCompaction",
-			Handler:    _SysDB_FlushCollectionCompaction_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
