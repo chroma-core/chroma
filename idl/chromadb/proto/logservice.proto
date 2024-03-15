@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package chroma;
-option go_package = "github.com/chroma/chroma-coordinator/internal/proto/logservicepb";
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/logservicepb";
 
 import "chromadb/proto/chroma.proto";
 
@@ -20,8 +20,13 @@ message PullLogsRequest {
   int32 batch_size = 3;
 }
 
+message RecordLog {
+  int64 log_id = 1;
+  SubmitEmbeddingRecord record = 2;
+}
+
 message PullLogsResponse {
-  repeated SubmitEmbeddingRecord records = 1;
+  repeated RecordLog records = 1;
 }
 
 message CollectionInfo {

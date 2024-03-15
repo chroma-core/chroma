@@ -39,6 +39,11 @@ arrow = "50.0.0"
 roaring = "0.10.3"
 tantivy = "0.21.1"
 
+[dev-dependencies]
+proptest = "1.4.0"
+proptest-state-machine = "0.1.0"
+"rand" = "0.8.5"
+
 [build-dependencies]
 tonic-build = "0.10"
 cc = "1.0"

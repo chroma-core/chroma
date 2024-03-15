@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend-server
-          image: server
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -24,38 +24,48 @@ spec:
               mountPath: /test
           env:
             - name: IS_PERSISTENT
-              value: "TRUE"
+              {{ .Values.frontend.isPersistent }}
             - name: CHROMA_PRODUCER_IMPL
-              value: "chromadb.logservice.logservice.LogService"
+              {{ .Values.frontend.producerImpl }}
             - name: CHROMA_CONSUMER_IMPL
-              value: "chromadb.logservice.logservice.LogService"
+              {{ .Values.frontend.consumerImpl }}
             - name: CHROMA_SEGMENT_MANAGER_IMPL
-              value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
+              {{ .Values.frontend.segmentManagerImpl }}
             - name: PULSAR_BROKER_URL
-              value: "pulsar.chroma"
+              {{ .Values.frontend.pulsarBrokerUrl }}
             - name: PULSAR_BROKER_PORT
-              value: "6650"
+              {{ .Values.frontend.pulsarBrokerPort }}
             - name: PULSAR_ADMIN_PORT
-              value: "8080"
+              {{ .Values.frontend.pulsarAdminPort }}
             - name: ALLOW_RESET
-              value: "TRUE"
+              {{ .Values.frontend.allowReset }}
             - name: CHROMA_SYSDB_IMPL
-              value: "chromadb.db.impl.grpc.client.GrpcSysDB"
+              {{ .Values.frontend.sysdbImpl }}
             - name: CHROMA_SERVER_GRPC_PORT
-              value: "50051"
+              {{ .Values.frontend.serverGrpcPort }}
             - name: CHROMA_COORDINATOR_HOST
-              value: "coordinator.chroma"
+              {{ .Values.frontend.coordinatorHost }}
+            - name: CHROMA_SERVER_AUTH_PROVIDER
+              {{ .Values.frontend.authProvider }}
+            - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
+              {{ .Values.frontend.authCredentialsProvider }}
+            - name: CHROMA_SERVER_AUTHZ_PROVIDER
+              {{ .Values.frontend.authzProvider }}
+            - name: CHROMA_SERVER_AUTHZ_CONFIG_PROVIDER
+              {{ .Values.frontend.authzConfigProvider }}
             - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
-              value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"
+              {{ .Values.frontend.memberlistProviderImpl }}
             - name: CHROMA_LOGSERVICE_HOST
-              value: "logservice.chroma"
+              {{ .Values.frontend.logServiceHost }}
             - name: CHROMA_LOGSERVICE_PORT
-              value: "50051"
+              {{ .Values.frontend.logServicePort }}
+{{ .Values.frontend.otherEnvConfig | nindent 12 }}
       volumes:
         - name: chroma
           emptyDir: {}
 
 ---
+
 apiVersion: v1
 kind: Service
 metadata:

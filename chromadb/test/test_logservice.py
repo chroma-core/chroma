@@ -45,29 +45,31 @@ def verify_records(
         pushed_records = logservice.pull_logs(collection.id, start_id, 100)
         assert len(pushed_records) == len(batch_records["ids"])
         for i, record in enumerate(pushed_records):
-            assert record.id == batch_records["ids"][i]
-            assert record.operation == operation
+            assert record.record.id == batch_records["ids"][i]
+            assert record.record.operation == operation
             embedding = array.array("f", batch_records["embeddings"][i]).tobytes()
-            assert record.vector.vector == embedding
+            assert record.record.vector.vector == embedding
             metadata_count = 0
             if "metadatas" in batch_records:
                 metadata_count += len(batch_records["metadatas"][i])
                 for key, value in batch_records["metadatas"][i].items():
                     if isinstance(value, int):
-                        assert record.metadata.metadata[key].int_value == value
+                        assert record.record.metadata.metadata[key].int_value == value
                     elif isinstance(value, float):
-                        assert record.metadata.metadata[key].float_value == value
+                        assert record.record.metadata.metadata[key].float_value == value
                     elif isinstance(value, str):
-                        assert record.metadata.metadata[key].string_value == value
+                        assert (
+                            record.record.metadata.metadata[key].string_value == value
+                        )
                     else:
                         assert False
             if "documents" in batch_records:
                 metadata_count += 1
                 assert (
-                    record.metadata.metadata["chroma:document"].string_value
+                    record.record.metadata.metadata["chroma:document"].string_value
                     == batch_records["documents"][i]
                 )
-            assert len(record.metadata.metadata) == metadata_count
+            assert len(record.record.metadata.metadata) == metadata_count
         start_id += len(pushed_records)
 
 
@@ -133,8 +135,8 @@ def test_delete(api):  # type: ignore
     pushed_records = logservice.pull_logs(collection.id, 3, 100)
     assert len(pushed_records) == 2
     for record in pushed_records:
-        assert record.operation == 3
-        assert record.id in ["id1", "id2"]
+        assert record.record.operation == 3
+        assert record.record.id in ["id1", "id2"]
 
 
 @skip_if_not_cluster()

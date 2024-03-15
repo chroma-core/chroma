@@ -39,21 +39,21 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   public async generate(texts: string[]): Promise<number[][]> {
     await this.loadClient();
 
-     // Store a promise that resolves to the pipeline
+    // Store a promise that resolves to the pipeline
     this.pipelinePromise = new Promise(async (resolve, reject) => {
       try {
-        const pipeline = this.transformersApi
+        const pipeline = this.transformersApi;
 
-        const quantized = this.quantized
-        const revision = this.revision
-        const progress_callback = this.progress_callback
+        const quantized = this.quantized;
+        const revision = this.revision;
+        const progress_callback = this.progress_callback;
 
         resolve(
           await pipeline("feature-extraction", this.model, {
             quantized,
             revision,
             progress_callback,
-          })
+          }),
         );
       } catch (e) {
         reject(e);
@@ -66,34 +66,36 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   }
 
   private async loadClient() {
-      if(this.transformersApi) return;
-      try {
-          // eslint-disable-next-line global-require,import/no-extraneous-dependencies
-          let { pipeline } = await TransformersEmbeddingFunction.import();
-          TransformersApi = pipeline;
-      } catch (_a) {
-          // @ts-ignore
-          if (_a.code === 'MODULE_NOT_FOUND') {
-              throw new Error("Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`");
-          }
-          throw _a; // Re-throw other errors
+    if (this.transformersApi) return;
+    try {
+      // eslint-disable-next-line global-require,import/no-extraneous-dependencies
+      let { pipeline } = await TransformersEmbeddingFunction.import();
+      TransformersApi = pipeline;
+    } catch (_a) {
+      // @ts-ignore
+      if (_a.code === "MODULE_NOT_FOUND") {
+        throw new Error(
+          "Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`",
+        );
       }
-      this.transformersApi = TransformersApi;
+      throw _a; // Re-throw other errors
+    }
+    this.transformersApi = TransformersApi;
   }
 
   /** @ignore */
   static async import(): Promise<{
-      // @ts-ignore
-      pipeline: typeof import("@xenova/transformers");
+    // @ts-ignore
+    pipeline: typeof import("@xenova/transformers");
   }> {
-      try {
-          // @ts-ignore
-          const { pipeline } = await import("@xenova/transformers");
-          return { pipeline };
-      } catch (e) {
-          throw new Error(
-              "Please install @xenova/transformers as a dependency with, e.g. `yarn add @xenova/transformers`"
-          );
-      }
+    try {
+      // @ts-ignore
+      const { pipeline } = await import("@xenova/transformers");
+      return { pipeline };
+    } catch (e) {
+      throw new Error(
+        "Please install @xenova/transformers as a dependency with, e.g. `yarn add @xenova/transformers`",
+      );
+    }
   }
 }

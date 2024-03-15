@@ -404,6 +404,7 @@ class SqliteMetadataSegment(MetadataReader):
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
         t = Table("embeddings")
+        fts_t = Table("embedding_fulltext_search")
         q = (
             self._db.querybuilder()
             .from_(t)
@@ -411,6 +412,23 @@ class SqliteMetadataSegment(MetadataReader):
             .where(t.embedding_id == ParameterValue(record["id"]))
             .delete()
         )
+        q_fts = (
+            self._db.querybuilder()
+            .from_(fts_t)
+            .delete()
+            .where(
+                fts_t.rowid.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                    .where(t.embedding_id == ParameterValue(record["id"]))
+                )
+            )
+        )
+        cur.execute(*get_sql(q_fts))
         sql, params = get_sql(q)
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
@@ -422,6 +440,7 @@ class SqliteMetadataSegment(MetadataReader):
             # Manually delete metadata; cannot use cascade because
             # that triggers on replace
             metadata_t = Table("embedding_metadata")
+
             q = (
                 self._db.querybuilder()
                 .from_(metadata_t)

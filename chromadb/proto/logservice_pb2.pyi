@@ -49,17 +49,24 @@ class PullLogsRequest(_message.Message):
         batch_size: _Optional[int] = ...,
     ) -> None: ...
 
+class RecordLog(_message.Message):
+    __slots__ = ["log_id", "record"]
+    LOG_ID_FIELD_NUMBER: _ClassVar[int]
+    RECORD_FIELD_NUMBER: _ClassVar[int]
+    log_id: int
+    record: _chroma_pb2.SubmitEmbeddingRecord
+    def __init__(
+        self,
+        log_id: _Optional[int] = ...,
+        record: _Optional[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]] = ...,
+    ) -> None: ...
+
 class PullLogsResponse(_message.Message):
     __slots__ = ["records"]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
-    records: _containers.RepeatedCompositeFieldContainer[
-        _chroma_pb2.SubmitEmbeddingRecord
-    ]
+    records: _containers.RepeatedCompositeFieldContainer[RecordLog]
     def __init__(
-        self,
-        records: _Optional[
-            _Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]
-        ] = ...,
+        self, records: _Optional[_Iterable[_Union[RecordLog, _Mapping]]] = ...
     ) -> None: ...
 
 class CollectionInfo(_message.Message):
