@@ -154,11 +154,7 @@ class Collection(BaseModel):
                 embeddings = self._embed(input=documents)
             elif images is not None:
                 embeddings = self._embed(input=images)
-            else:
-                if uris is None:
-                    raise ValueError(
-                        "You must provide either embeddings, documents, images, or uris."
-                    )
+            elif uris is not None:
                 if self._data_loader is None:
                     raise ValueError(
                         "You must set a data loader on the collection if loading from URIs."
@@ -441,11 +437,7 @@ class Collection(BaseModel):
                 embeddings = self._embed(input=documents)
             elif images is not None:
                 embeddings = self._embed(input=images)
-            else:
-                if uris is None:
-                    raise ValueError(
-                        "You must provide either embeddings, documents, images, or uris."
-                    )
+            elif uris is not None:
                 if self._data_loader is None:
                     raise ValueError(
                         "You must set a data loader on the collection if loading from URIs."
@@ -498,11 +490,7 @@ class Collection(BaseModel):
                 embeddings = self._embed(input=documents)
             elif images is not None:
                 embeddings = self._embed(input=images)
-            else:
-                if uris is None:
-                    raise ValueError(
-                        "You must provide either embeddings, documents, images, or uris."
-                    )
+            elif uris is not None:
                 if self._data_loader is None:
                     raise ValueError(
                         "You must set a data loader on the collection if loading from URIs."
