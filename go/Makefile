@@ -6,6 +6,7 @@ build:
 test: build
 	go test -race -cover ./...
 
+
 lint:
 	#brew install golangci-lint
 	golangci-lint run

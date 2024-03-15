@@ -6,8 +6,7 @@ import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 import { IEmbeddingFunction } from "../src/embeddings/IEmbeddingFunction";
 
 export class TestEmbeddingFunction implements IEmbeddingFunction {
-
-  constructor() { }
+  constructor() {}
 
   public async generate(texts: string[]): Promise<number[][]> {
     let embeddings: number[][] = [];
@@ -22,7 +21,10 @@ test("it should query a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-  const results = await collection.query({ queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], nResults: 2 });
+  const results = await collection.query({
+    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    nResults: 2,
+  });
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
   expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids[0]));
@@ -33,12 +35,17 @@ test("it should query a collection", async () => {
 test("it should get embedding with matching documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.query({
     queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 3,
-    whereDocument: { $contains: "This is a test" }
+    whereDocument: { $contains: "This is a test" },
   });
 
   // it should only return doc1
@@ -48,14 +55,14 @@ test("it should get embedding with matching documents", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
 
   const results2 = await collection.query({
     queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 3,
     whereDocument: { $contains: "This is a test" },
-    include: [IncludeEnum.Embeddings]
+    include: [IncludeEnum.Embeddings],
   });
 
   // expect(results2.embeddings[0][0]).toBeInstanceOf(Array);
@@ -63,37 +70,48 @@ test("it should get embedding with matching documents", async () => {
   expect(results2.embeddings![0][0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
 
-
 test("it should exclude documents matching - not_contains", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.query({
     queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 3,
-    whereDocument: { $not_contains: "This is a test" }
+    whereDocument: { $not_contains: "This is a test" },
   });
 
   // it should only return doc1
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
   expect(results.ids.length).toBe(1);
-  expect(["test2","test3"]).toEqual(expect.arrayContaining(results.ids[0]));
+  expect(["test2", "test3"]).toEqual(expect.arrayContaining(results.ids[0]));
 });
-
 
 // test queryTexts
 test("it should query a collection with text", async () => {
   await chroma.reset();
   let embeddingFunction = new TestEmbeddingFunction();
-  const collection = await chroma.createCollection({ name: "test", embeddingFunction: embeddingFunction });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  const collection = await chroma.createCollection({
+    name: "test",
+    embeddingFunction: embeddingFunction,
+  });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.query({
     queryTexts: ["test"],
     nResults: 3,
-    whereDocument: { $contains: "This is a test" }
+    whereDocument: { $contains: "This is a test" },
   });
 
   expect(results).toBeDefined();
@@ -102,21 +120,28 @@ test("it should query a collection with text", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
-})
-
+});
 
 test("it should query a collection with text and where", async () => {
   await chroma.reset();
   let embeddingFunction = new TestEmbeddingFunction();
-  const collection = await chroma.createCollection({ name: "test", embeddingFunction: embeddingFunction });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  const collection = await chroma.createCollection({
+    name: "test",
+    embeddingFunction: embeddingFunction,
+  });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.query({
     queryTexts: ["test"],
     nResults: 3,
-    where: { "float_value" : 2 }
+    where: { float_value: 2 },
   });
 
   expect(results).toBeDefined();
@@ -125,21 +150,28 @@ test("it should query a collection with text and where", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-      expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
-})
-
+});
 
 test("it should query a collection with text and where in", async () => {
   await chroma.reset();
   let embeddingFunction = new TestEmbeddingFunction();
-  const collection = await chroma.createCollection({ name: "test", embeddingFunction: embeddingFunction });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  const collection = await chroma.createCollection({
+    name: "test",
+    embeddingFunction: embeddingFunction,
+  });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.query({
     queryTexts: ["test"],
     nResults: 3,
-    where: { "float_value" : { '$in': [2,5,10] }}
+    where: { float_value: { $in: [2, 5, 10] } },
   });
 
   expect(results).toBeDefined();
@@ -148,20 +180,28 @@ test("it should query a collection with text and where in", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-      expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
-})
+});
 
 test("it should query a collection with text and where nin", async () => {
   await chroma.reset();
   let embeddingFunction = new TestEmbeddingFunction();
-  const collection = await chroma.createCollection({ name: "test", embeddingFunction: embeddingFunction });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  const collection = await chroma.createCollection({
+    name: "test",
+    embeddingFunction: embeddingFunction,
+  });
+  await collection.add({
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    metadatas: METADATAS,
+    documents: DOCUMENTS,
+  });
 
   const results = await collection.query({
     queryTexts: ["test"],
     nResults: 3,
-    where: { "float_value" : { '$nin': [-2,0] }}
+    where: { float_value: { $nin: [-2, 0] } },
   });
 
   expect(results).toBeDefined();
@@ -170,6 +210,6 @@ test("it should query a collection with text and where nin", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-      expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
-})
+});

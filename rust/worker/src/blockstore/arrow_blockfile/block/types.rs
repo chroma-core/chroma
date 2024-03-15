@@ -1,16 +1,21 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::errors::{ChromaError, ErrorCodes};
-use arrow::array::{BooleanArray, BooleanBuilder, Float32Array, Float32Builder};
+use arrow::array::{
+    BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
+    GenericByteBuilder, UInt32Array, UInt32Builder,
+};
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
 use parking_lot::RwLock;
+use std::io::Error;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::delta::BlockDelta;
 use super::iterator::BlockIterator;
 
 /// BlockState represents the state of a block in the blockstore. Conceptually, a block is immutable once the broarder system
@@ -58,12 +63,15 @@ pub struct Block {
 pub enum BlockError {
     #[error("Invalid state transition")]
     InvalidStateTransition,
+    #[error("Block data error")]
+    BlockDataError(#[from] BlockDataBuildError),
 }
 
 impl ChromaError for BlockError {
     fn code(&self) -> ErrorCodes {
         match self {
             BlockError::InvalidStateTransition => ErrorCodes::Internal,
+            BlockError::BlockDataError(e) => e.code(),
         }
     }
 }
@@ -117,6 +125,11 @@ impl Block {
                                         .unwrap()
                                         .value(i)
                             }
+                            Key::Uint(inner_key) => {
+                                *inner_key
+                                    == key.as_any().downcast_ref::<UInt32Array>().unwrap().value(i)
+                                        as u32
+                            }
                         };
                         if key_matches {
                             match self.get_value_type() {
@@ -141,6 +154,30 @@ impl Block {
                                             .unwrap()
                                             .value(i)
                                             .to_string(),
+                                    ))
+                                }
+                                ValueType::RoaringBitmap => {
+                                    let bytes = value
+                                        .as_any()
+                                        .downcast_ref::<BinaryArray>()
+                                        .unwrap()
+                                        .value(i);
+                                    let bitmap = roaring::RoaringBitmap::deserialize_from(bytes);
+                                    match bitmap {
+                                        Ok(bitmap) => {
+                                            return Some(Value::RoaringBitmapValue(bitmap))
+                                        }
+                                        // TODO: log error
+                                        Err(_) => return None,
+                                    }
+                                }
+                                ValueType::Uint => {
+                                    return Some(Value::UintValue(
+                                        value
+                                            .as_any()
+                                            .downcast_ref::<UInt32Array>()
+                                            .unwrap()
+                                            .value(i),
                                     ))
                                 }
                                 // TODO: Add support for other types
@@ -202,6 +239,29 @@ impl Block {
         }
     }
 
+    pub fn apply_delta(&self, delta: &BlockDelta) -> Result<(), Box<BlockError>> {
+        let data = match BlockData::try_from(delta) {
+            Ok(data) => data,
+            Err(e) => return Err(Box::new(BlockError::BlockDataError(e))),
+        };
+        let mut inner = self.inner.write();
+        match inner.state {
+            BlockState::Uninitialized => {
+                inner.data = Some(data);
+                inner.state = BlockState::Initialized;
+                Ok(())
+            }
+            BlockState::Initialized => {
+                inner.data = Some(data);
+                inner.state = BlockState::Initialized;
+                Ok(())
+            }
+            BlockState::Commited | BlockState::Registered => {
+                Err(Box::new(BlockError::InvalidStateTransition))
+            }
+        }
+    }
+
     pub(super) fn iter(&self) -> BlockIterator {
         BlockIterator::new(
             self.clone(),
@@ -239,11 +299,14 @@ enum KeyBuilder {
     StringBuilder(StringBuilder),
     FloatBuilder(Float32Builder),
     BoolBuilder(BooleanBuilder),
+    UintBuilder(UInt32Builder),
 }
 
 enum ValueBuilder {
     Int32ArrayValueBuilder(ListBuilder<Int32Builder>),
     StringValueBuilder(StringBuilder),
+    RoaringBitmapBuilder(BinaryBuilder),
+    UintValueBuilder(UInt32Builder),
 }
 
 /// BlockDataBuilder is used to build a block. It is used to add data to a block and then build the BlockData once all data has been added.
@@ -320,6 +383,9 @@ impl BlockDataBuilder {
             KeyType::Bool => {
                 KeyBuilder::BoolBuilder(BooleanBuilder::with_capacity(options.item_count))
             }
+            KeyType::Uint => {
+                KeyBuilder::UintBuilder(UInt32Builder::with_capacity(options.item_count))
+            }
         };
         let value_builder = match value_type {
             ValueType::Int32Array => {
@@ -332,6 +398,12 @@ impl BlockDataBuilder {
                 options.item_count,
                 options.total_value_capacity,
             )),
+            ValueType::Uint => {
+                ValueBuilder::UintValueBuilder(UInt32Builder::with_capacity(options.item_count))
+            }
+            ValueType::RoaringBitmap => ValueBuilder::RoaringBitmapBuilder(
+                BinaryBuilder::with_capacity(options.item_count, options.total_value_capacity),
+            ),
             // TODO: Implement the other value types
             _ => unimplemented!(),
         };
@@ -378,6 +450,12 @@ impl BlockDataBuilder {
                 }
                 _ => unreachable!("Invalid key type for block"),
             },
+            KeyBuilder::UintBuilder(ref mut builder) => match key.key {
+                Key::Uint(key) => {
+                    builder.append_value(key);
+                }
+                _ => unreachable!("Invalid key type for block"),
+            },
         }
 
         match self.value_builder {
@@ -390,6 +468,24 @@ impl BlockDataBuilder {
             ValueBuilder::StringValueBuilder(ref mut builder) => match value {
                 Value::StringValue(string) => {
                     builder.append_value(string);
+                }
+                _ => unreachable!("Invalid value type for block"),
+            },
+            ValueBuilder::UintValueBuilder(ref mut builder) => match value {
+                Value::UintValue(uint) => {
+                    builder.append_value(uint);
+                }
+                _ => unreachable!("Invalid value type for block"),
+            },
+            ValueBuilder::RoaringBitmapBuilder(ref mut builder) => match value {
+                Value::RoaringBitmapValue(bitmap) => {
+                    let mut bytes = Vec::with_capacity(bitmap.serialized_size());
+                    match bitmap.serialize_into(&mut bytes) {
+                        Ok(_) => builder.append_value(&bytes),
+                        Err(e) => {
+                            return Err(Box::new(BlockDataAddError::RoaringBitmapError(e)));
+                        }
+                    }
                 }
                 _ => unreachable!("Invalid value type for block"),
             },
@@ -419,6 +515,11 @@ impl BlockDataBuilder {
                 let arr = builder.finish();
                 (&arr as &dyn Array).slice(0, arr.len())
             }
+            KeyBuilder::UintBuilder(ref mut builder) => {
+                key_field = Field::new("key", DataType::UInt32, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
         };
 
         let value_field;
@@ -434,6 +535,16 @@ impl BlockDataBuilder {
             }
             ValueBuilder::StringValueBuilder(ref mut builder) => {
                 value_field = Field::new("value", DataType::Utf8, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
+            ValueBuilder::UintValueBuilder(ref mut builder) => {
+                value_field = Field::new("value", DataType::UInt32, true);
+                let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
+            ValueBuilder::RoaringBitmapBuilder(ref mut builder) => {
+                value_field = Field::new("value", DataType::Binary, true);
                 let arr = builder.finish();
                 (&arr as &dyn Array).slice(0, arr.len())
             }
@@ -457,12 +568,15 @@ impl BlockDataBuilder {
 pub enum BlockDataAddError {
     #[error("Blockfile key not in order")]
     KeyNotInOrder,
+    #[error("Roaring bitmap error")]
+    RoaringBitmapError(#[from] Error),
 }
 
 impl ChromaError for BlockDataAddError {
     fn code(&self) -> ErrorCodes {
         match self {
             BlockDataAddError::KeyNotInOrder => ErrorCodes::InvalidArgument,
+            BlockDataAddError::RoaringBitmapError(_) => ErrorCodes::Internal,
         }
     }
 }

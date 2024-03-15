@@ -1,6 +1,6 @@
 use super::types::Block;
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
-use arrow::array::{Array, BooleanArray, Int32Array, ListArray, StringArray};
+use arrow::array::{Array, BooleanArray, Int32Array, ListArray, StringArray, UInt32Array};
 
 /// An iterator over the contents of a block.
 /// This is a simple wrapper around the Arrow array data that is stored in the block.
@@ -75,6 +75,10 @@ impl Iterator for BlockIterator {
             },
             KeyType::Bool => match key.as_any().downcast_ref::<BooleanArray>() {
                 Some(key) => Key::Bool(key.value(self.index)),
+                None => return None,
+            },
+            KeyType::Uint => match key.as_any().downcast_ref::<UInt32Array>() {
+                Some(key) => Key::Uint(key.value(self.index) as u32),
                 None => return None,
             },
         };

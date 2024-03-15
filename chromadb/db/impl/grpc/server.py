@@ -77,7 +77,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
 
     @overrides
     def stop(self) -> None:
-        self._server.stop(0)
+        self._server.stop(None)
         return super().stop()
 
     @overrides

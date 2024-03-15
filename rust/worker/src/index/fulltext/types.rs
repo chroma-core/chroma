@@ -86,7 +86,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
         for (key, value) in self.uncommitted_frequencies.drain() {
             let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
             self.frequencies_blockfile
-                .set(blockfilekey, Value::Int32Value(value));
+                .set(blockfilekey, Value::IntValue(value));
         }
         self.posting_lists_blockfile.commit_transaction()?;
         self.frequencies_blockfile.commit_transaction()?;
@@ -135,7 +135,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
                 BlockfileKey::new("".to_string(), Key::String(token.text.to_string()));
             let value = self.frequencies_blockfile.get(blockfilekey);
             match value {
-                Ok(Value::Int32Value(frequency)) => {
+                Ok(Value::IntValue(frequency)) => {
                     token_frequencies.push((token.text.to_string(), frequency));
                 }
                 Ok(_) => {
@@ -230,7 +230,7 @@ mod tests {
             .create("pl", KeyType::String, ValueType::PositionalPostingList)
             .unwrap();
         let freq_blockfile = provider
-            .create("freq", KeyType::String, ValueType::Int32)
+            .create("freq", KeyType::String, ValueType::Int)
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
@@ -245,7 +245,7 @@ mod tests {
             .create("pl", KeyType::String, ValueType::PositionalPostingList)
             .unwrap();
         let freq_blockfile = provider
-            .create("freq", KeyType::String, ValueType::Int32)
+            .create("freq", KeyType::String, ValueType::Int)
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
@@ -266,7 +266,7 @@ mod tests {
             .create("pl", KeyType::String, ValueType::PositionalPostingList)
             .unwrap();
         let freq_blockfile = provider
-            .create("freq", KeyType::String, ValueType::Int32)
+            .create("freq", KeyType::String, ValueType::Int)
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
@@ -287,7 +287,7 @@ mod tests {
             .create("pl", KeyType::String, ValueType::PositionalPostingList)
             .unwrap();
         let freq_blockfile = provider
-            .create("freq", KeyType::String, ValueType::Int32)
+            .create("freq", KeyType::String, ValueType::Int)
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
@@ -318,7 +318,7 @@ mod tests {
             .create("pl", KeyType::String, ValueType::PositionalPostingList)
             .unwrap();
         let freq_blockfile = provider
-            .create("freq", KeyType::String, ValueType::Int32)
+            .create("freq", KeyType::String, ValueType::Int)
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
