@@ -29,3 +29,7 @@ worker:
     storage:
         S3:
             bucket: "chroma-storage"
+    log:
+        Grpc:
+            host: "logservice.chroma"
+            port: 50051
