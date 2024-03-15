@@ -12,13 +12,22 @@ ENV PROTOC_ZIP=protoc-25.1-linux-x86_64.zip
 RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1/$PROTOC_ZIP \
     && unzip -o $PROTOC_ZIP -d /usr/local bin/protoc \
     && unzip -o $PROTOC_ZIP -d /usr/local 'include/*' \
-    && rm -f $PROTOC_ZIP
-
-COPY . .
+    && rm -f $PROTOC_ZIP \
 
 ENV CARGO_TARGET_DIR=/root/.cache/cargo
-RUN --mount=type=cache,target=/root/.cache/cargo if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
+
+COPY Cargo.toml Cargo.lock ./
+COPY rust/worker/Cargo.toml rust/worker/Cargo.toml
+COPY rust/worker/src/bin/prebuild.rs rust/worker/src/bin/prebuild.rs
+RUN cd rust/worker \
+    && cargo build --bin prebuild --target-dir /root/build
+
+COPY rust rust
+COPY idl idl
+
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin worker  --target-dir /root/build --release; else cargo build --bin worker --target-dir /root/build; fi
 
 WORKDIR /chroma/rust/worker
 
-CMD ["cargo", "run"]
+CMD bash -c 'if [ "$RELEASE_MODE" = "1" ]; then /root/build/release/worker; else /root/build/debug/worker; fi'
+
