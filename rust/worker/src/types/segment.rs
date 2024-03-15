@@ -51,6 +51,8 @@ impl TryFrom<chroma_proto::Segment> for Segment {
     type Error = SegmentConversionError;
 
     fn try_from(proto_segment: chroma_proto::Segment) -> Result<Self, Self::Error> {
+        let mut proto_segment = proto_segment;
+
         let segment_uuid = match Uuid::try_parse(&proto_segment.id) {
             Ok(uuid) => uuid,
             Err(_) => return Err(SegmentConversionError::InvalidUuid),
@@ -81,11 +83,13 @@ impl TryFrom<chroma_proto::Segment> for Segment {
                 return Err(SegmentConversionError::InvalidUuid);
             }
         };
+
         let mut file_paths = HashMap::new();
-        for (key, value) in proto_segment.file_paths {
-            let values = value.paths.iter().map(|x| x.to_string()).collect();
-            file_paths.insert(key, values);
+        let drain = proto_segment.file_paths.drain();
+        for (key, mut value) in drain {
+            file_paths.insert(key, value.paths);
         }
+
         Ok(Segment {
             id: segment_uuid,
             r#type: segment_type,
