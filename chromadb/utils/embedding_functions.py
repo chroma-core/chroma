@@ -282,7 +282,6 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 self._client.embed(
                     input[i : i + self._batch_size],
                     model=self._model_name,
-                    input_type="document",
                     truncation=self._truncation,
                 ).embeddings
             )
