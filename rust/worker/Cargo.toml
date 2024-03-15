@@ -7,6 +7,12 @@ edition = "2021"
 name = "worker"
 path = "src/bin/worker.rs"
 
+
+[[bin]] # Use to prebuild binary in docker
+name = "prebuild"
+path = "src/bin/prebuild.rs"
+
+
 [dependencies]
 tonic = "0.10"
 prost = "0.12"

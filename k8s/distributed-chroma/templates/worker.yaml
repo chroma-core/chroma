@@ -38,7 +38,6 @@ spec:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
           imagePullPolicy: IfNotPresent
-          command: ["cargo", "run"]
           ports:
             - containerPort: 50051
           volumeMounts:
