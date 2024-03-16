@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 from typing import Generator
 from unittest.mock import patch
@@ -79,19 +80,28 @@ def test_http_client_with_inconsistent_port_settings() -> None:
 
 
 def test_persistent_client_close(persistent_api: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     col.add(ids=["1"], documents=["test"])
     open_files = current_process.open_files()
-    assert any(["test_server/chroma.sqlite3" in file.path for file in open_files])
+    print("OPEN FILES", open_files)
+    assert any(["chroma.sqlite3" in file.path for file in open_files])
     assert any(["data_level0.bin" in file.path for file in open_files])
     persistent_api.close()
     open_files = current_process.open_files()
-    assert all(["test_server/chroma.sqlite3" not in file.path for file in open_files])
+    assert all(["chroma.sqlite3" not in file.path for file in open_files])
     assert all(["data_level0.bin" not in file.path for file in open_files])
 
 
 def test_http_client_close(http_api: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
     with HTTPServer(port=8000) as httpserver:
         # Define the response
         httpserver.expect_request("/api/v1/tenants/default_tenant").respond_with_data(
