@@ -61,6 +61,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        cache_folder: Optional[str] = None,
     ):
         if model_name not in self.models:
             try:
@@ -69,7 +70,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(model_name, device=device)
+            self.models[model_name] = SentenceTransformer(model_name, device=device, cache_folder=cache_folder)
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
