@@ -3,8 +3,10 @@
 package ent
 
 import (
-	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/base"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/schema"
+	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/testbase"
 	"github.com/google/uuid"
 )
 
@@ -12,30 +14,33 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
-	baseFields := schema.Base{}.Fields()
-	_ = baseFields
-	// baseDescName is the schema descriptor for name field.
-	baseDescName := baseFields[2].Descriptor()
-	// base.NameValidator is a validator for the "name" field. It is called by the builders before save.
-	base.NameValidator = baseDescName.Validators[0].(func(string) error)
-	// baseDescCreatedAt is the schema descriptor for created_at field.
-	baseDescCreatedAt := baseFields[3].Descriptor()
-	// base.DefaultCreatedAt holds the default value on creation for the created_at field.
-	base.DefaultCreatedAt = baseDescCreatedAt.Default.(func() uint)
-	// baseDescUpdatedAt is the schema descriptor for updated_at field.
-	baseDescUpdatedAt := baseFields[4].Descriptor()
-	// base.DefaultUpdatedAt holds the default value on creation for the updated_at field.
-	base.DefaultUpdatedAt = baseDescUpdatedAt.Default.(func() uint)
-	// baseDescDeletedAt is the schema descriptor for deleted_at field.
-	baseDescDeletedAt := baseFields[5].Descriptor()
-	// base.DefaultDeletedAt holds the default value on creation for the deleted_at field.
-	base.DefaultDeletedAt = baseDescDeletedAt.Default.(uint)
-	// baseDescVersion is the schema descriptor for version field.
-	baseDescVersion := baseFields[6].Descriptor()
-	// base.DefaultVersion holds the default value on creation for the version field.
-	base.DefaultVersion = baseDescVersion.Default.(int)
-	// baseDescID is the schema descriptor for id field.
-	baseDescID := baseFields[1].Descriptor()
-	// base.DefaultID holds the default value on creation for the id field.
-	base.DefaultID = baseDescID.Default.(func() uuid.UUID)
+	testbaseMixin := schema.TestBase{}.Mixin()
+	testbaseMixinFields0 := testbaseMixin[0].Fields()
+	_ = testbaseMixinFields0
+	testbaseFields := schema.TestBase{}.Fields()
+	_ = testbaseFields
+	// testbaseDescName is the schema descriptor for name field.
+	testbaseDescName := testbaseMixinFields0[2].Descriptor()
+	// testbase.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	testbase.NameValidator = testbaseDescName.Validators[0].(func(string) error)
+	// testbaseDescCreatedAt is the schema descriptor for created_at field.
+	testbaseDescCreatedAt := testbaseMixinFields0[3].Descriptor()
+	// testbase.DefaultCreatedAt holds the default value on creation for the created_at field.
+	testbase.DefaultCreatedAt = testbaseDescCreatedAt.Default.(func() time.Time)
+	// testbaseDescUpdatedAt is the schema descriptor for updated_at field.
+	testbaseDescUpdatedAt := testbaseMixinFields0[4].Descriptor()
+	// testbase.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	testbase.UpdateDefaultUpdatedAt = testbaseDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// testbaseDescVersion is the schema descriptor for version field.
+	testbaseDescVersion := testbaseMixinFields0[6].Descriptor()
+	// testbase.DefaultVersion holds the default value on creation for the version field.
+	testbase.DefaultVersion = testbaseDescVersion.Default.(int)
+	// testbaseDescText is the schema descriptor for text field.
+	testbaseDescText := testbaseFields[0].Descriptor()
+	// testbase.TextValidator is a validator for the "text" field. It is called by the builders before save.
+	testbase.TextValidator = testbaseDescText.Validators[0].(func(string) error)
+	// testbaseDescID is the schema descriptor for id field.
+	testbaseDescID := testbaseMixinFields0[1].Descriptor()
+	// testbase.DefaultID holds the default value on creation for the id field.
+	testbase.DefaultID = testbaseDescID.Default.(func() uuid.UUID)
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
@@ -27,6 +28,93 @@ func (tbu *TestBaseUpdate) Where(ps ...predicate.TestBase) *TestBaseUpdate {
 	return tbu
 }
 
+// SetName sets the "name" field.
+func (tbu *TestBaseUpdate) SetName(s string) *TestBaseUpdate {
+	tbu.mutation.SetName(s)
+	return tbu
+}
+
+// SetNillableName sets the "name" field if the given value is not nil.
+func (tbu *TestBaseUpdate) SetNillableName(s *string) *TestBaseUpdate {
+	if s != nil {
+		tbu.SetName(*s)
+	}
+	return tbu
+}
+
+// ClearName clears the value of the "name" field.
+func (tbu *TestBaseUpdate) ClearName() *TestBaseUpdate {
+	tbu.mutation.ClearName()
+	return tbu
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (tbu *TestBaseUpdate) SetUpdatedAt(t time.Time) *TestBaseUpdate {
+	tbu.mutation.SetUpdatedAt(t)
+	return tbu
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (tbu *TestBaseUpdate) SetDeletedAt(t time.Time) *TestBaseUpdate {
+	tbu.mutation.SetDeletedAt(t)
+	return tbu
+}
+
+// SetNillableDeletedAt sets the "deleted_at" field if the given value is not nil.
+func (tbu *TestBaseUpdate) SetNillableDeletedAt(t *time.Time) *TestBaseUpdate {
+	if t != nil {
+		tbu.SetDeletedAt(*t)
+	}
+	return tbu
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (tbu *TestBaseUpdate) ClearDeletedAt() *TestBaseUpdate {
+	tbu.mutation.ClearDeletedAt()
+	return tbu
+}
+
+// SetVersion sets the "version" field.
+func (tbu *TestBaseUpdate) SetVersion(i int) *TestBaseUpdate {
+	tbu.mutation.ResetVersion()
+	tbu.mutation.SetVersion(i)
+	return tbu
+}
+
+// SetNillableVersion sets the "version" field if the given value is not nil.
+func (tbu *TestBaseUpdate) SetNillableVersion(i *int) *TestBaseUpdate {
+	if i != nil {
+		tbu.SetVersion(*i)
+	}
+	return tbu
+}
+
+// AddVersion adds i to the "version" field.
+func (tbu *TestBaseUpdate) AddVersion(i int) *TestBaseUpdate {
+	tbu.mutation.AddVersion(i)
+	return tbu
+}
+
+// SetText sets the "text" field.
+func (tbu *TestBaseUpdate) SetText(s string) *TestBaseUpdate {
+	tbu.mutation.SetText(s)
+	return tbu
+}
+
+// SetNillableText sets the "text" field if the given value is not nil.
+func (tbu *TestBaseUpdate) SetNillableText(s *string) *TestBaseUpdate {
+	if s != nil {
+		tbu.SetText(*s)
+	}
+	return tbu
+}
+
+// ClearText clears the value of the "text" field.
+func (tbu *TestBaseUpdate) ClearText() *TestBaseUpdate {
+	tbu.mutation.ClearText()
+	return tbu
+}
+
 // Mutation returns the TestBaseMutation object of the builder.
 func (tbu *TestBaseUpdate) Mutation() *TestBaseMutation {
 	return tbu.mutation
@@ -34,6 +122,7 @@ func (tbu *TestBaseUpdate) Mutation() *TestBaseMutation {
 
 // Save executes the query and returns the number of nodes affected by the update operation.
 func (tbu *TestBaseUpdate) Save(ctx context.Context) (int, error) {
+	tbu.defaults()
 	return withHooks(ctx, tbu.sqlSave, tbu.mutation, tbu.hooks)
 }
 
@@ -59,14 +148,67 @@ func (tbu *TestBaseUpdate) ExecX(ctx context.Context) {
 	}
 }
 
+// defaults sets the default values of the builder before save.
+func (tbu *TestBaseUpdate) defaults() {
+	if _, ok := tbu.mutation.UpdatedAt(); !ok {
+		v := testbase.UpdateDefaultUpdatedAt()
+		tbu.mutation.SetUpdatedAt(v)
+	}
+}
+
+// check runs all checks and user-defined validators on the builder.
+func (tbu *TestBaseUpdate) check() error {
+	if v, ok := tbu.mutation.Name(); ok {
+		if err := testbase.NameValidator(v); err != nil {
+			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "TestBase.name": %w`, err)}
+		}
+	}
+	if v, ok := tbu.mutation.Text(); ok {
+		if err := testbase.TextValidator(v); err != nil {
+			return &ValidationError{Name: "text", err: fmt.Errorf(`ent: validator failed for field "TestBase.text": %w`, err)}
+		}
+	}
+	return nil
+}
+
 func (tbu *TestBaseUpdate) sqlSave(ctx context.Context) (n int, err error) {
-	_spec := sqlgraph.NewUpdateSpec(testbase.Table, testbase.Columns, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeInt))
+	if err := tbu.check(); err != nil {
+		return n, err
+	}
+	_spec := sqlgraph.NewUpdateSpec(testbase.Table, testbase.Columns, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeUUID))
 	if ps := tbu.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := tbu.mutation.Name(); ok {
+		_spec.SetField(testbase.FieldName, field.TypeString, value)
+	}
+	if tbu.mutation.NameCleared() {
+		_spec.ClearField(testbase.FieldName, field.TypeString)
+	}
+	if value, ok := tbu.mutation.UpdatedAt(); ok {
+		_spec.SetField(testbase.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := tbu.mutation.DeletedAt(); ok {
+		_spec.SetField(testbase.FieldDeletedAt, field.TypeTime, value)
+	}
+	if tbu.mutation.DeletedAtCleared() {
+		_spec.ClearField(testbase.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := tbu.mutation.Version(); ok {
+		_spec.SetField(testbase.FieldVersion, field.TypeInt, value)
+	}
+	if value, ok := tbu.mutation.AddedVersion(); ok {
+		_spec.AddField(testbase.FieldVersion, field.TypeInt, value)
+	}
+	if value, ok := tbu.mutation.Text(); ok {
+		_spec.SetField(testbase.FieldText, field.TypeString, value)
+	}
+	if tbu.mutation.TextCleared() {
+		_spec.ClearField(testbase.FieldText, field.TypeString)
 	}
 	if n, err = sqlgraph.UpdateNodes(ctx, tbu.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
@@ -86,6 +228,93 @@ type TestBaseUpdateOne struct {
 	fields   []string
 	hooks    []Hook
 	mutation *TestBaseMutation
+}
+
+// SetName sets the "name" field.
+func (tbuo *TestBaseUpdateOne) SetName(s string) *TestBaseUpdateOne {
+	tbuo.mutation.SetName(s)
+	return tbuo
+}
+
+// SetNillableName sets the "name" field if the given value is not nil.
+func (tbuo *TestBaseUpdateOne) SetNillableName(s *string) *TestBaseUpdateOne {
+	if s != nil {
+		tbuo.SetName(*s)
+	}
+	return tbuo
+}
+
+// ClearName clears the value of the "name" field.
+func (tbuo *TestBaseUpdateOne) ClearName() *TestBaseUpdateOne {
+	tbuo.mutation.ClearName()
+	return tbuo
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (tbuo *TestBaseUpdateOne) SetUpdatedAt(t time.Time) *TestBaseUpdateOne {
+	tbuo.mutation.SetUpdatedAt(t)
+	return tbuo
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (tbuo *TestBaseUpdateOne) SetDeletedAt(t time.Time) *TestBaseUpdateOne {
+	tbuo.mutation.SetDeletedAt(t)
+	return tbuo
+}
+
+// SetNillableDeletedAt sets the "deleted_at" field if the given value is not nil.
+func (tbuo *TestBaseUpdateOne) SetNillableDeletedAt(t *time.Time) *TestBaseUpdateOne {
+	if t != nil {
+		tbuo.SetDeletedAt(*t)
+	}
+	return tbuo
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (tbuo *TestBaseUpdateOne) ClearDeletedAt() *TestBaseUpdateOne {
+	tbuo.mutation.ClearDeletedAt()
+	return tbuo
+}
+
+// SetVersion sets the "version" field.
+func (tbuo *TestBaseUpdateOne) SetVersion(i int) *TestBaseUpdateOne {
+	tbuo.mutation.ResetVersion()
+	tbuo.mutation.SetVersion(i)
+	return tbuo
+}
+
+// SetNillableVersion sets the "version" field if the given value is not nil.
+func (tbuo *TestBaseUpdateOne) SetNillableVersion(i *int) *TestBaseUpdateOne {
+	if i != nil {
+		tbuo.SetVersion(*i)
+	}
+	return tbuo
+}
+
+// AddVersion adds i to the "version" field.
+func (tbuo *TestBaseUpdateOne) AddVersion(i int) *TestBaseUpdateOne {
+	tbuo.mutation.AddVersion(i)
+	return tbuo
+}
+
+// SetText sets the "text" field.
+func (tbuo *TestBaseUpdateOne) SetText(s string) *TestBaseUpdateOne {
+	tbuo.mutation.SetText(s)
+	return tbuo
+}
+
+// SetNillableText sets the "text" field if the given value is not nil.
+func (tbuo *TestBaseUpdateOne) SetNillableText(s *string) *TestBaseUpdateOne {
+	if s != nil {
+		tbuo.SetText(*s)
+	}
+	return tbuo
+}
+
+// ClearText clears the value of the "text" field.
+func (tbuo *TestBaseUpdateOne) ClearText() *TestBaseUpdateOne {
+	tbuo.mutation.ClearText()
+	return tbuo
 }
 
 // Mutation returns the TestBaseMutation object of the builder.
@@ -108,6 +337,7 @@ func (tbuo *TestBaseUpdateOne) Select(field string, fields ...string) *TestBaseU
 
 // Save executes the query and returns the updated TestBase entity.
 func (tbuo *TestBaseUpdateOne) Save(ctx context.Context) (*TestBase, error) {
+	tbuo.defaults()
 	return withHooks(ctx, tbuo.sqlSave, tbuo.mutation, tbuo.hooks)
 }
 
@@ -133,8 +363,34 @@ func (tbuo *TestBaseUpdateOne) ExecX(ctx context.Context) {
 	}
 }
 
+// defaults sets the default values of the builder before save.
+func (tbuo *TestBaseUpdateOne) defaults() {
+	if _, ok := tbuo.mutation.UpdatedAt(); !ok {
+		v := testbase.UpdateDefaultUpdatedAt()
+		tbuo.mutation.SetUpdatedAt(v)
+	}
+}
+
+// check runs all checks and user-defined validators on the builder.
+func (tbuo *TestBaseUpdateOne) check() error {
+	if v, ok := tbuo.mutation.Name(); ok {
+		if err := testbase.NameValidator(v); err != nil {
+			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "TestBase.name": %w`, err)}
+		}
+	}
+	if v, ok := tbuo.mutation.Text(); ok {
+		if err := testbase.TextValidator(v); err != nil {
+			return &ValidationError{Name: "text", err: fmt.Errorf(`ent: validator failed for field "TestBase.text": %w`, err)}
+		}
+	}
+	return nil
+}
+
 func (tbuo *TestBaseUpdateOne) sqlSave(ctx context.Context) (_node *TestBase, err error) {
-	_spec := sqlgraph.NewUpdateSpec(testbase.Table, testbase.Columns, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeInt))
+	if err := tbuo.check(); err != nil {
+		return _node, err
+	}
+	_spec := sqlgraph.NewUpdateSpec(testbase.Table, testbase.Columns, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeUUID))
 	id, ok := tbuo.mutation.ID()
 	if !ok {
 		return nil, &ValidationError{Name: "id", err: errors.New(`ent: missing "TestBase.id" for update`)}
@@ -158,6 +414,33 @@ func (tbuo *TestBaseUpdateOne) sqlSave(ctx context.Context) (_node *TestBase, er
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := tbuo.mutation.Name(); ok {
+		_spec.SetField(testbase.FieldName, field.TypeString, value)
+	}
+	if tbuo.mutation.NameCleared() {
+		_spec.ClearField(testbase.FieldName, field.TypeString)
+	}
+	if value, ok := tbuo.mutation.UpdatedAt(); ok {
+		_spec.SetField(testbase.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := tbuo.mutation.DeletedAt(); ok {
+		_spec.SetField(testbase.FieldDeletedAt, field.TypeTime, value)
+	}
+	if tbuo.mutation.DeletedAtCleared() {
+		_spec.ClearField(testbase.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := tbuo.mutation.Version(); ok {
+		_spec.SetField(testbase.FieldVersion, field.TypeInt, value)
+	}
+	if value, ok := tbuo.mutation.AddedVersion(); ok {
+		_spec.AddField(testbase.FieldVersion, field.TypeInt, value)
+	}
+	if value, ok := tbuo.mutation.Text(); ok {
+		_spec.SetField(testbase.FieldText, field.TypeString, value)
+	}
+	if tbuo.mutation.TextCleared() {
+		_spec.ClearField(testbase.FieldText, field.TypeString)
 	}
 	_node = &TestBase{config: tbuo.config}
 	_spec.Assign = _node.assignValues

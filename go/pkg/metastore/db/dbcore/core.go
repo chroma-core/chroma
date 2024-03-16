@@ -3,6 +3,7 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"github.com/chroma-core/chroma/go/pkg/coordinator/ent"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"os"
 	"reflect"
@@ -16,6 +17,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	_ "github.com/lib/pq"
 )
 
 var (
@@ -199,6 +202,24 @@ func GetDBConfigForTesting() DBConfig {
 		MaxOpenConns: 100,
 		SslMode:      "disable",
 	}
+}
+
+func ConfigEntClientForTesting() (*ent.Client, error) {
+	dbConfig := GetDBConfigForTesting()
+	clientDataSource := fmt.Sprintf("host=%s port=%d user=%s dbname=%s password=%s sslmode=disable",
+		dbConfig.Address, dbConfig.Port, dbConfig.Username, dbConfig.DBName, dbConfig.Password)
+	log.Info("ConfigEntClientForTesting", zap.String("clientDataSource", clientDataSource))
+	client, err := ent.Open("postgres", clientDataSource)
+	if err != nil {
+		log.Error("failed opening connection to postgres", zap.Error(err))
+		return nil, err
+	}
+	err = client.Schema.Create(context.Background())
+	if err != nil {
+		log.Error("failed creating schema resources", zap.Error(err))
+		return nil, err
+	}
+	return client, err
 }
 
 func ConfigDatabaseForTesting() *gorm.DB {

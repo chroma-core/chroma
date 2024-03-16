@@ -9,18 +9,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent"
 )
 
-// The BaseFunc type is an adapter to allow the use of ordinary
-// function as Base mutator.
-type BaseFunc func(context.Context, *ent.BaseMutation) (ent.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f BaseFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
-	if mv, ok := m.(*ent.BaseMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.BaseMutation", m)
-}
-
 // The TestBaseFunc type is an adapter to allow the use of ordinary
 // function as TestBase mutator.
 type TestBaseFunc func(context.Context, *ent.TestBaseMutation) (ent.Value, error)

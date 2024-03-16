@@ -5,17 +5,33 @@ package ent
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/testbase"
+	"github.com/google/uuid"
 )
 
 // TestBase is the model entity for the TestBase schema.
 type TestBase struct {
-	config
+	config `json:"-"`
 	// ID of the ent.
-	ID           int `json:"id,omitempty"`
+	ID uuid.UUID `json:"id,omitempty"`
+	// ParentID holds the value of the "parent_id" field.
+	ParentID uuid.UUID `json:"parent_id,omitempty"`
+	// Name holds the value of the "name" field.
+	Name *string `json:"name,omitempty"`
+	// CreatedAt holds the value of the "created_at" field.
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	// UpdatedAt holds the value of the "updated_at" field.
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// DeletedAt holds the value of the "deleted_at" field.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// Version holds the value of the "version" field.
+	Version int `json:"version,omitempty"`
+	// Text holds the value of the "text" field.
+	Text         string `json:"text,omitempty"`
 	selectValues sql.SelectValues
 }
 
@@ -24,8 +40,14 @@ func (*TestBase) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case testbase.FieldID:
+		case testbase.FieldVersion:
 			values[i] = new(sql.NullInt64)
+		case testbase.FieldName, testbase.FieldText:
+			values[i] = new(sql.NullString)
+		case testbase.FieldCreatedAt, testbase.FieldUpdatedAt, testbase.FieldDeletedAt:
+			values[i] = new(sql.NullTime)
+		case testbase.FieldID, testbase.FieldParentID:
+			values[i] = new(uuid.UUID)
 		default:
 			values[i] = new(sql.UnknownType)
 		}
@@ -42,11 +64,55 @@ func (tb *TestBase) assignValues(columns []string, values []any) error {
 	for i := range columns {
 		switch columns[i] {
 		case testbase.FieldID:
-			value, ok := values[i].(*sql.NullInt64)
-			if !ok {
-				return fmt.Errorf("unexpected type %T for field id", value)
+			if value, ok := values[i].(*uuid.UUID); !ok {
+				return fmt.Errorf("unexpected type %T for field id", values[i])
+			} else if value != nil {
+				tb.ID = *value
 			}
-			tb.ID = int(value.Int64)
+		case testbase.FieldParentID:
+			if value, ok := values[i].(*uuid.UUID); !ok {
+				return fmt.Errorf("unexpected type %T for field parent_id", values[i])
+			} else if value != nil {
+				tb.ParentID = *value
+			}
+		case testbase.FieldName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field name", values[i])
+			} else if value.Valid {
+				tb.Name = new(string)
+				*tb.Name = value.String
+			}
+		case testbase.FieldCreatedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field created_at", values[i])
+			} else if value.Valid {
+				tb.CreatedAt = value.Time
+			}
+		case testbase.FieldUpdatedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field updated_at", values[i])
+			} else if value.Valid {
+				tb.UpdatedAt = value.Time
+			}
+		case testbase.FieldDeletedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field deleted_at", values[i])
+			} else if value.Valid {
+				tb.DeletedAt = new(time.Time)
+				*tb.DeletedAt = value.Time
+			}
+		case testbase.FieldVersion:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field version", values[i])
+			} else if value.Valid {
+				tb.Version = int(value.Int64)
+			}
+		case testbase.FieldText:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field text", values[i])
+			} else if value.Valid {
+				tb.Text = value.String
+			}
 		default:
 			tb.selectValues.Set(columns[i], values[i])
 		}
@@ -82,7 +148,31 @@ func (tb *TestBase) Unwrap() *TestBase {
 func (tb *TestBase) String() string {
 	var builder strings.Builder
 	builder.WriteString("TestBase(")
-	builder.WriteString(fmt.Sprintf("id=%v", tb.ID))
+	builder.WriteString(fmt.Sprintf("id=%v, ", tb.ID))
+	builder.WriteString("parent_id=")
+	builder.WriteString(fmt.Sprintf("%v", tb.ParentID))
+	builder.WriteString(", ")
+	if v := tb.Name; v != nil {
+		builder.WriteString("name=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("created_at=")
+	builder.WriteString(tb.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	builder.WriteString("updated_at=")
+	builder.WriteString(tb.UpdatedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	if v := tb.DeletedAt; v != nil {
+		builder.WriteString("deleted_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("version=")
+	builder.WriteString(fmt.Sprintf("%v", tb.Version))
+	builder.WriteString(", ")
+	builder.WriteString("text=")
+	builder.WriteString(tb.Text)
 	builder.WriteByte(')')
 	return builder.String()
 }

@@ -40,7 +40,7 @@ func (tbd *TestBaseDelete) ExecX(ctx context.Context) int {
 }
 
 func (tbd *TestBaseDelete) sqlExec(ctx context.Context) (int, error) {
-	_spec := sqlgraph.NewDeleteSpec(testbase.Table, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeInt))
+	_spec := sqlgraph.NewDeleteSpec(testbase.Table, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeUUID))
 	if ps := tbd.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {

@@ -8,35 +8,37 @@ import (
 )
 
 var (
-	// BasesColumns holds the columns for the "bases" table.
-	BasesColumns = []*schema.Column{
+	// TestBasesColumns holds the columns for the "test_bases" table.
+	TestBasesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID, Unique: true},
 		{Name: "parent_id", Type: field.TypeUUID},
 		{Name: "name", Type: field.TypeString, Nullable: true, Size: 255},
-		{Name: "created_at", Type: field.TypeUint},
-		{Name: "updated_at", Type: field.TypeUint},
-		{Name: "deleted_at", Type: field.TypeUint, Default: 0},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
 		{Name: "version", Type: field.TypeInt, Default: 0},
-	}
-	// BasesTable holds the schema information for the "bases" table.
-	BasesTable = &schema.Table{
-		Name:       "bases",
-		Columns:    BasesColumns,
-		PrimaryKey: []*schema.Column{BasesColumns[0]},
-	}
-	// TestBasesColumns holds the columns for the "test_bases" table.
-	TestBasesColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "text", Type: field.TypeString, Nullable: true, Size: 255},
 	}
 	// TestBasesTable holds the schema information for the "test_bases" table.
 	TestBasesTable = &schema.Table{
 		Name:       "test_bases",
 		Columns:    TestBasesColumns,
 		PrimaryKey: []*schema.Column{TestBasesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "testbase_name_id",
+				Unique:  false,
+				Columns: []*schema.Column{TestBasesColumns[2], TestBasesColumns[0]},
+			},
+			{
+				Name:    "testbase_deleted_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{TestBasesColumns[5], TestBasesColumns[0]},
+			},
+		},
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
-		BasesTable,
 		TestBasesTable,
 	}
 )

@@ -15,7 +15,6 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
-	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/base"
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/testbase"
 )
 
@@ -24,8 +23,6 @@ type Client struct {
 	config
 	// Schema is the client for creating, migrating and dropping schema.
 	Schema *migrate.Schema
-	// Base is the client for interacting with the Base builders.
-	Base *BaseClient
 	// TestBase is the client for interacting with the TestBase builders.
 	TestBase *TestBaseClient
 }
@@ -39,7 +36,6 @@ func NewClient(opts ...Option) *Client {
 
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
-	c.Base = NewBaseClient(c.config)
 	c.TestBase = NewTestBaseClient(c.config)
 }
 
@@ -133,7 +129,6 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	return &Tx{
 		ctx:      ctx,
 		config:   cfg,
-		Base:     NewBaseClient(cfg),
 		TestBase: NewTestBaseClient(cfg),
 	}, nil
 }
@@ -154,7 +149,6 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	return &Tx{
 		ctx:      ctx,
 		config:   cfg,
-		Base:     NewBaseClient(cfg),
 		TestBase: NewTestBaseClient(cfg),
 	}, nil
 }
@@ -162,7 +156,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 // Debug returns a new debug-client. It's used to get verbose logging on specific operations.
 //
 //	client.Debug().
-//		Base.
+//		TestBase.
 //		Query().
 //		Count(ctx)
 func (c *Client) Debug() *Client {
@@ -184,159 +178,22 @@ func (c *Client) Close() error {
 // Use adds the mutation hooks to all the entity clients.
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
-	c.Base.Use(hooks...)
 	c.TestBase.Use(hooks...)
 }
 
 // Intercept adds the query interceptors to all the entity clients.
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
-	c.Base.Intercept(interceptors...)
 	c.TestBase.Intercept(interceptors...)
 }
 
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
-	case *BaseMutation:
-		return c.Base.mutate(ctx, m)
 	case *TestBaseMutation:
 		return c.TestBase.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
-	}
-}
-
-// BaseClient is a client for the Base schema.
-type BaseClient struct {
-	config
-}
-
-// NewBaseClient returns a client for the Base from the given config.
-func NewBaseClient(c config) *BaseClient {
-	return &BaseClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `base.Hooks(f(g(h())))`.
-func (c *BaseClient) Use(hooks ...Hook) {
-	c.hooks.Base = append(c.hooks.Base, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `base.Intercept(f(g(h())))`.
-func (c *BaseClient) Intercept(interceptors ...Interceptor) {
-	c.inters.Base = append(c.inters.Base, interceptors...)
-}
-
-// Create returns a builder for creating a Base entity.
-func (c *BaseClient) Create() *BaseCreate {
-	mutation := newBaseMutation(c.config, OpCreate)
-	return &BaseCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of Base entities.
-func (c *BaseClient) CreateBulk(builders ...*BaseCreate) *BaseCreateBulk {
-	return &BaseCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *BaseClient) MapCreateBulk(slice any, setFunc func(*BaseCreate, int)) *BaseCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &BaseCreateBulk{err: fmt.Errorf("calling to BaseClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*BaseCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &BaseCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for Base.
-func (c *BaseClient) Update() *BaseUpdate {
-	mutation := newBaseMutation(c.config, OpUpdate)
-	return &BaseUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *BaseClient) UpdateOne(b *Base) *BaseUpdateOne {
-	mutation := newBaseMutation(c.config, OpUpdateOne, withBase(b))
-	return &BaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *BaseClient) UpdateOneID(id uuid.UUID) *BaseUpdateOne {
-	mutation := newBaseMutation(c.config, OpUpdateOne, withBaseID(id))
-	return &BaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for Base.
-func (c *BaseClient) Delete() *BaseDelete {
-	mutation := newBaseMutation(c.config, OpDelete)
-	return &BaseDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *BaseClient) DeleteOne(b *Base) *BaseDeleteOne {
-	return c.DeleteOneID(b.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *BaseClient) DeleteOneID(id uuid.UUID) *BaseDeleteOne {
-	builder := c.Delete().Where(base.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &BaseDeleteOne{builder}
-}
-
-// Query returns a query builder for Base.
-func (c *BaseClient) Query() *BaseQuery {
-	return &BaseQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeBase},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a Base entity by its id.
-func (c *BaseClient) Get(ctx context.Context, id uuid.UUID) (*Base, error) {
-	return c.Query().Where(base.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *BaseClient) GetX(ctx context.Context, id uuid.UUID) *Base {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *BaseClient) Hooks() []Hook {
-	return c.hooks.Base
-}
-
-// Interceptors returns the client interceptors.
-func (c *BaseClient) Interceptors() []Interceptor {
-	return c.inters.Base
-}
-
-func (c *BaseClient) mutate(ctx context.Context, m *BaseMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&BaseCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&BaseUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&BaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&BaseDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("ent: unknown Base mutation op: %q", m.Op())
 	}
 }
 
@@ -401,7 +258,7 @@ func (c *TestBaseClient) UpdateOne(tb *TestBase) *TestBaseUpdateOne {
 }
 
 // UpdateOneID returns an update builder for the given id.
-func (c *TestBaseClient) UpdateOneID(id int) *TestBaseUpdateOne {
+func (c *TestBaseClient) UpdateOneID(id uuid.UUID) *TestBaseUpdateOne {
 	mutation := newTestBaseMutation(c.config, OpUpdateOne, withTestBaseID(id))
 	return &TestBaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
@@ -418,7 +275,7 @@ func (c *TestBaseClient) DeleteOne(tb *TestBase) *TestBaseDeleteOne {
 }
 
 // DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *TestBaseClient) DeleteOneID(id int) *TestBaseDeleteOne {
+func (c *TestBaseClient) DeleteOneID(id uuid.UUID) *TestBaseDeleteOne {
 	builder := c.Delete().Where(testbase.ID(id))
 	builder.mutation.id = &id
 	builder.mutation.op = OpDeleteOne
@@ -435,12 +292,12 @@ func (c *TestBaseClient) Query() *TestBaseQuery {
 }
 
 // Get returns a TestBase entity by its id.
-func (c *TestBaseClient) Get(ctx context.Context, id int) (*TestBase, error) {
+func (c *TestBaseClient) Get(ctx context.Context, id uuid.UUID) (*TestBase, error) {
 	return c.Query().Where(testbase.ID(id)).Only(ctx)
 }
 
 // GetX is like Get, but panics if an error occurs.
-func (c *TestBaseClient) GetX(ctx context.Context, id int) *TestBase {
+func (c *TestBaseClient) GetX(ctx context.Context, id uuid.UUID) *TestBase {
 	obj, err := c.Get(ctx, id)
 	if err != nil {
 		panic(err)
@@ -476,9 +333,9 @@ func (c *TestBaseClient) mutate(ctx context.Context, m *TestBaseMutation) (Value
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		Base, TestBase []ent.Hook
+		TestBase []ent.Hook
 	}
 	inters struct {
-		Base, TestBase []ent.Interceptor
+		TestBase []ent.Interceptor
 	}
 )

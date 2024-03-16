@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/predicate"
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/testbase"
+	"github.com/google/uuid"
 )
 
 // TestBaseQuery is the builder for querying TestBase entities.
@@ -81,8 +82,8 @@ func (tbq *TestBaseQuery) FirstX(ctx context.Context) *TestBase {
 
 // FirstID returns the first TestBase ID from the query.
 // Returns a *NotFoundError when no TestBase ID was found.
-func (tbq *TestBaseQuery) FirstID(ctx context.Context) (id int, err error) {
-	var ids []int
+func (tbq *TestBaseQuery) FirstID(ctx context.Context) (id uuid.UUID, err error) {
+	var ids []uuid.UUID
 	if ids, err = tbq.Limit(1).IDs(setContextOp(ctx, tbq.ctx, "FirstID")); err != nil {
 		return
 	}
@@ -94,7 +95,7 @@ func (tbq *TestBaseQuery) FirstID(ctx context.Context) (id int, err error) {
 }
 
 // FirstIDX is like FirstID, but panics if an error occurs.
-func (tbq *TestBaseQuery) FirstIDX(ctx context.Context) int {
+func (tbq *TestBaseQuery) FirstIDX(ctx context.Context) uuid.UUID {
 	id, err := tbq.FirstID(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
@@ -132,8 +133,8 @@ func (tbq *TestBaseQuery) OnlyX(ctx context.Context) *TestBase {
 // OnlyID is like Only, but returns the only TestBase ID in the query.
 // Returns a *NotSingularError when more than one TestBase ID is found.
 // Returns a *NotFoundError when no entities are found.
-func (tbq *TestBaseQuery) OnlyID(ctx context.Context) (id int, err error) {
-	var ids []int
+func (tbq *TestBaseQuery) OnlyID(ctx context.Context) (id uuid.UUID, err error) {
+	var ids []uuid.UUID
 	if ids, err = tbq.Limit(2).IDs(setContextOp(ctx, tbq.ctx, "OnlyID")); err != nil {
 		return
 	}
@@ -149,7 +150,7 @@ func (tbq *TestBaseQuery) OnlyID(ctx context.Context) (id int, err error) {
 }
 
 // OnlyIDX is like OnlyID, but panics if an error occurs.
-func (tbq *TestBaseQuery) OnlyIDX(ctx context.Context) int {
+func (tbq *TestBaseQuery) OnlyIDX(ctx context.Context) uuid.UUID {
 	id, err := tbq.OnlyID(ctx)
 	if err != nil {
 		panic(err)
@@ -177,7 +178,7 @@ func (tbq *TestBaseQuery) AllX(ctx context.Context) []*TestBase {
 }
 
 // IDs executes the query and returns a list of TestBase IDs.
-func (tbq *TestBaseQuery) IDs(ctx context.Context) (ids []int, err error) {
+func (tbq *TestBaseQuery) IDs(ctx context.Context) (ids []uuid.UUID, err error) {
 	if tbq.ctx.Unique == nil && tbq.path != nil {
 		tbq.Unique(true)
 	}
@@ -189,7 +190,7 @@ func (tbq *TestBaseQuery) IDs(ctx context.Context) (ids []int, err error) {
 }
 
 // IDsX is like IDs, but panics if an error occurs.
-func (tbq *TestBaseQuery) IDsX(ctx context.Context) []int {
+func (tbq *TestBaseQuery) IDsX(ctx context.Context) []uuid.UUID {
 	ids, err := tbq.IDs(ctx)
 	if err != nil {
 		panic(err)
@@ -257,6 +258,18 @@ func (tbq *TestBaseQuery) Clone() *TestBaseQuery {
 
 // GroupBy is used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
+//
+// Example:
+//
+//	var v []struct {
+//		ParentID uuid.UUID `json:"parent_id,omitempty"`
+//		Count int `json:"count,omitempty"`
+//	}
+//
+//	client.TestBase.Query().
+//		GroupBy(testbase.FieldParentID).
+//		Aggregate(ent.Count()).
+//		Scan(ctx, &v)
 func (tbq *TestBaseQuery) GroupBy(field string, fields ...string) *TestBaseGroupBy {
 	tbq.ctx.Fields = append([]string{field}, fields...)
 	grbuild := &TestBaseGroupBy{build: tbq}
@@ -268,6 +281,16 @@ func (tbq *TestBaseQuery) GroupBy(field string, fields ...string) *TestBaseGroup
 
 // Select allows the selection one or more fields/columns for the given query,
 // instead of selecting all fields in the entity.
+//
+// Example:
+//
+//	var v []struct {
+//		ParentID uuid.UUID `json:"parent_id,omitempty"`
+//	}
+//
+//	client.TestBase.Query().
+//		Select(testbase.FieldParentID).
+//		Scan(ctx, &v)
 func (tbq *TestBaseQuery) Select(fields ...string) *TestBaseSelect {
 	tbq.ctx.Fields = append(tbq.ctx.Fields, fields...)
 	sbuild := &TestBaseSelect{TestBaseQuery: tbq}
@@ -342,7 +365,7 @@ func (tbq *TestBaseQuery) sqlCount(ctx context.Context) (int, error) {
 }
 
 func (tbq *TestBaseQuery) querySpec() *sqlgraph.QuerySpec {
-	_spec := sqlgraph.NewQuerySpec(testbase.Table, testbase.Columns, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeInt))
+	_spec := sqlgraph.NewQuerySpec(testbase.Table, testbase.Columns, sqlgraph.NewFieldSpec(testbase.FieldID, field.TypeUUID))
 	_spec.From = tbq.sql
 	if unique := tbq.ctx.Unique; unique != nil {
 		_spec.Unique = *unique
