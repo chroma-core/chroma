@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CACHE_DIR = os.environ.get("CHROMA_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "chroma"))
+
 
 def _verify_sha256(fname: str, expected_sha256: str) -> bool:
     sha256_hash = hashlib.sha256()
@@ -61,6 +63,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        cache_dir: Optional[str] = str(os.path.join(DEFAULT_CACHE_DIR, "sentence_transformers")),
     ):
         if model_name not in self.models:
             try:
@@ -69,7 +72,9 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(model_name, device=device)
+            self.models[model_name] = SentenceTransformer(
+                model_name, device=device, cache_folder=cache_dir
+            )
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
@@ -340,6 +345,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "hkunlp/instructor-base",
         device: str = "cpu",
         instruction: Optional[str] = None,
+        cache_dir: Optional[str] = str(os.path.join(DEFAULT_CACHE_DIR, "instructor")),
     ):
         try:
             from InstructorEmbedding import INSTRUCTOR
@@ -347,7 +353,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The InstructorEmbedding python package is not installed. Please install it with `pip install InstructorEmbedding`"
             )
-        self._model = INSTRUCTOR(model_name, device=device)
+        self._model = INSTRUCTOR(model_name, device=device, cache_folder=cache_dir)
         self._instruction = instruction
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -366,7 +372,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    DOWNLOAD_PATH = os.path.join(DEFAULT_CACHE_DIR, "onnx_models", MODEL_NAME)
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
