@@ -219,7 +219,7 @@ func ConfigEntClientForTesting() (*ent.Client, error) {
 		log.Error("failed creating schema resources", zap.Error(err))
 		return nil, err
 	}
-	return client, err
+	return client.Debug(), err
 }
 
 func ConfigDatabaseForTesting() *gorm.DB {

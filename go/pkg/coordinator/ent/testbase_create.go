@@ -4,9 +4,7 @@ package ent
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
@@ -27,6 +25,14 @@ func (tbc *TestBaseCreate) SetParentID(u uuid.UUID) *TestBaseCreate {
 	return tbc
 }
 
+// SetNillableParentID sets the "parent_id" field if the given value is not nil.
+func (tbc *TestBaseCreate) SetNillableParentID(u *uuid.UUID) *TestBaseCreate {
+	if u != nil {
+		tbc.SetParentID(*u)
+	}
+	return tbc
+}
+
 // SetName sets the "name" field.
 func (tbc *TestBaseCreate) SetName(s string) *TestBaseCreate {
 	tbc.mutation.SetName(s)
@@ -42,35 +48,43 @@ func (tbc *TestBaseCreate) SetNillableName(s *string) *TestBaseCreate {
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (tbc *TestBaseCreate) SetCreatedAt(t time.Time) *TestBaseCreate {
-	tbc.mutation.SetCreatedAt(t)
+func (tbc *TestBaseCreate) SetCreatedAt(i int64) *TestBaseCreate {
+	tbc.mutation.SetCreatedAt(i)
 	return tbc
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (tbc *TestBaseCreate) SetNillableCreatedAt(t *time.Time) *TestBaseCreate {
-	if t != nil {
-		tbc.SetCreatedAt(*t)
+func (tbc *TestBaseCreate) SetNillableCreatedAt(i *int64) *TestBaseCreate {
+	if i != nil {
+		tbc.SetCreatedAt(*i)
 	}
 	return tbc
 }
 
 // SetUpdatedAt sets the "updated_at" field.
-func (tbc *TestBaseCreate) SetUpdatedAt(t time.Time) *TestBaseCreate {
-	tbc.mutation.SetUpdatedAt(t)
+func (tbc *TestBaseCreate) SetUpdatedAt(i int64) *TestBaseCreate {
+	tbc.mutation.SetUpdatedAt(i)
+	return tbc
+}
+
+// SetNillableUpdatedAt sets the "updated_at" field if the given value is not nil.
+func (tbc *TestBaseCreate) SetNillableUpdatedAt(i *int64) *TestBaseCreate {
+	if i != nil {
+		tbc.SetUpdatedAt(*i)
+	}
 	return tbc
 }
 
 // SetDeletedAt sets the "deleted_at" field.
-func (tbc *TestBaseCreate) SetDeletedAt(t time.Time) *TestBaseCreate {
-	tbc.mutation.SetDeletedAt(t)
+func (tbc *TestBaseCreate) SetDeletedAt(i int64) *TestBaseCreate {
+	tbc.mutation.SetDeletedAt(i)
 	return tbc
 }
 
 // SetNillableDeletedAt sets the "deleted_at" field if the given value is not nil.
-func (tbc *TestBaseCreate) SetNillableDeletedAt(t *time.Time) *TestBaseCreate {
-	if t != nil {
-		tbc.SetDeletedAt(*t)
+func (tbc *TestBaseCreate) SetNillableDeletedAt(i *int64) *TestBaseCreate {
+	if i != nil {
+		tbc.SetDeletedAt(*i)
 	}
 	return tbc
 }
@@ -153,8 +167,12 @@ func (tbc *TestBaseCreate) ExecX(ctx context.Context) {
 // defaults sets the default values of the builder before save.
 func (tbc *TestBaseCreate) defaults() {
 	if _, ok := tbc.mutation.CreatedAt(); !ok {
-		v := testbase.DefaultCreatedAt()
+		v := testbase.DefaultCreatedAt
 		tbc.mutation.SetCreatedAt(v)
+	}
+	if _, ok := tbc.mutation.UpdatedAt(); !ok {
+		v := testbase.DefaultUpdatedAt
+		tbc.mutation.SetUpdatedAt(v)
 	}
 	if _, ok := tbc.mutation.Version(); !ok {
 		v := testbase.DefaultVersion
@@ -168,22 +186,10 @@ func (tbc *TestBaseCreate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (tbc *TestBaseCreate) check() error {
-	if _, ok := tbc.mutation.ParentID(); !ok {
-		return &ValidationError{Name: "parent_id", err: errors.New(`ent: missing required field "TestBase.parent_id"`)}
-	}
 	if v, ok := tbc.mutation.Name(); ok {
 		if err := testbase.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "TestBase.name": %w`, err)}
 		}
-	}
-	if _, ok := tbc.mutation.CreatedAt(); !ok {
-		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "TestBase.created_at"`)}
-	}
-	if _, ok := tbc.mutation.UpdatedAt(); !ok {
-		return &ValidationError{Name: "updated_at", err: errors.New(`ent: missing required field "TestBase.updated_at"`)}
-	}
-	if _, ok := tbc.mutation.Version(); !ok {
-		return &ValidationError{Name: "version", err: errors.New(`ent: missing required field "TestBase.version"`)}
 	}
 	if v, ok := tbc.mutation.Text(); ok {
 		if err := testbase.TextValidator(v); err != nil {
@@ -234,16 +240,16 @@ func (tbc *TestBaseCreate) createSpec() (*TestBase, *sqlgraph.CreateSpec) {
 		_node.Name = &value
 	}
 	if value, ok := tbc.mutation.CreatedAt(); ok {
-		_spec.SetField(testbase.FieldCreatedAt, field.TypeTime, value)
+		_spec.SetField(testbase.FieldCreatedAt, field.TypeInt64, value)
 		_node.CreatedAt = value
 	}
 	if value, ok := tbc.mutation.UpdatedAt(); ok {
-		_spec.SetField(testbase.FieldUpdatedAt, field.TypeTime, value)
+		_spec.SetField(testbase.FieldUpdatedAt, field.TypeInt64, value)
 		_node.UpdatedAt = value
 	}
 	if value, ok := tbc.mutation.DeletedAt(); ok {
-		_spec.SetField(testbase.FieldDeletedAt, field.TypeTime, value)
-		_node.DeletedAt = &value
+		_spec.SetField(testbase.FieldDeletedAt, field.TypeInt64, value)
+		_node.DeletedAt = value
 	}
 	if value, ok := tbc.mutation.Version(); ok {
 		_spec.SetField(testbase.FieldVersion, field.TypeInt, value)
@@ -251,7 +257,7 @@ func (tbc *TestBaseCreate) createSpec() (*TestBase, *sqlgraph.CreateSpec) {
 	}
 	if value, ok := tbc.mutation.Text(); ok {
 		_spec.SetField(testbase.FieldText, field.TypeString, value)
-		_node.Text = value
+		_node.Text = &value
 	}
 	return _node, _spec
 }

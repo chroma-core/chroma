@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
@@ -36,9 +35,12 @@ type TestBaseMutation struct {
 	id            *uuid.UUID
 	parent_id     *uuid.UUID
 	name          *string
-	created_at    *time.Time
-	updated_at    *time.Time
-	deleted_at    *time.Time
+	created_at    *int64
+	addcreated_at *int64
+	updated_at    *int64
+	addupdated_at *int64
+	deleted_at    *int64
+	adddeleted_at *int64
 	version       *int
 	addversion    *int
 	text          *string
@@ -183,9 +185,22 @@ func (m *TestBaseMutation) OldParentID(ctx context.Context) (v uuid.UUID, err er
 	return oldValue.ParentID, nil
 }
 
+// ClearParentID clears the value of the "parent_id" field.
+func (m *TestBaseMutation) ClearParentID() {
+	m.parent_id = nil
+	m.clearedFields[testbase.FieldParentID] = struct{}{}
+}
+
+// ParentIDCleared returns if the "parent_id" field was cleared in this mutation.
+func (m *TestBaseMutation) ParentIDCleared() bool {
+	_, ok := m.clearedFields[testbase.FieldParentID]
+	return ok
+}
+
 // ResetParentID resets all changes to the "parent_id" field.
 func (m *TestBaseMutation) ResetParentID() {
 	m.parent_id = nil
+	delete(m.clearedFields, testbase.FieldParentID)
 }
 
 // SetName sets the "name" field.
@@ -238,12 +253,13 @@ func (m *TestBaseMutation) ResetName() {
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (m *TestBaseMutation) SetCreatedAt(t time.Time) {
-	m.created_at = &t
+func (m *TestBaseMutation) SetCreatedAt(i int64) {
+	m.created_at = &i
+	m.addcreated_at = nil
 }
 
 // CreatedAt returns the value of the "created_at" field in the mutation.
-func (m *TestBaseMutation) CreatedAt() (r time.Time, exists bool) {
+func (m *TestBaseMutation) CreatedAt() (r int64, exists bool) {
 	v := m.created_at
 	if v == nil {
 		return
@@ -254,7 +270,7 @@ func (m *TestBaseMutation) CreatedAt() (r time.Time, exists bool) {
 // OldCreatedAt returns the old "created_at" field's value of the TestBase entity.
 // If the TestBase object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *TestBaseMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+func (m *TestBaseMutation) OldCreatedAt(ctx context.Context) (v int64, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
 	}
@@ -268,18 +284,52 @@ func (m *TestBaseMutation) OldCreatedAt(ctx context.Context) (v time.Time, err e
 	return oldValue.CreatedAt, nil
 }
 
+// AddCreatedAt adds i to the "created_at" field.
+func (m *TestBaseMutation) AddCreatedAt(i int64) {
+	if m.addcreated_at != nil {
+		*m.addcreated_at += i
+	} else {
+		m.addcreated_at = &i
+	}
+}
+
+// AddedCreatedAt returns the value that was added to the "created_at" field in this mutation.
+func (m *TestBaseMutation) AddedCreatedAt() (r int64, exists bool) {
+	v := m.addcreated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCreatedAt clears the value of the "created_at" field.
+func (m *TestBaseMutation) ClearCreatedAt() {
+	m.created_at = nil
+	m.addcreated_at = nil
+	m.clearedFields[testbase.FieldCreatedAt] = struct{}{}
+}
+
+// CreatedAtCleared returns if the "created_at" field was cleared in this mutation.
+func (m *TestBaseMutation) CreatedAtCleared() bool {
+	_, ok := m.clearedFields[testbase.FieldCreatedAt]
+	return ok
+}
+
 // ResetCreatedAt resets all changes to the "created_at" field.
 func (m *TestBaseMutation) ResetCreatedAt() {
 	m.created_at = nil
+	m.addcreated_at = nil
+	delete(m.clearedFields, testbase.FieldCreatedAt)
 }
 
 // SetUpdatedAt sets the "updated_at" field.
-func (m *TestBaseMutation) SetUpdatedAt(t time.Time) {
-	m.updated_at = &t
+func (m *TestBaseMutation) SetUpdatedAt(i int64) {
+	m.updated_at = &i
+	m.addupdated_at = nil
 }
 
 // UpdatedAt returns the value of the "updated_at" field in the mutation.
-func (m *TestBaseMutation) UpdatedAt() (r time.Time, exists bool) {
+func (m *TestBaseMutation) UpdatedAt() (r int64, exists bool) {
 	v := m.updated_at
 	if v == nil {
 		return
@@ -290,7 +340,7 @@ func (m *TestBaseMutation) UpdatedAt() (r time.Time, exists bool) {
 // OldUpdatedAt returns the old "updated_at" field's value of the TestBase entity.
 // If the TestBase object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *TestBaseMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+func (m *TestBaseMutation) OldUpdatedAt(ctx context.Context) (v int64, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
 	}
@@ -304,18 +354,52 @@ func (m *TestBaseMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err e
 	return oldValue.UpdatedAt, nil
 }
 
+// AddUpdatedAt adds i to the "updated_at" field.
+func (m *TestBaseMutation) AddUpdatedAt(i int64) {
+	if m.addupdated_at != nil {
+		*m.addupdated_at += i
+	} else {
+		m.addupdated_at = &i
+	}
+}
+
+// AddedUpdatedAt returns the value that was added to the "updated_at" field in this mutation.
+func (m *TestBaseMutation) AddedUpdatedAt() (r int64, exists bool) {
+	v := m.addupdated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearUpdatedAt clears the value of the "updated_at" field.
+func (m *TestBaseMutation) ClearUpdatedAt() {
+	m.updated_at = nil
+	m.addupdated_at = nil
+	m.clearedFields[testbase.FieldUpdatedAt] = struct{}{}
+}
+
+// UpdatedAtCleared returns if the "updated_at" field was cleared in this mutation.
+func (m *TestBaseMutation) UpdatedAtCleared() bool {
+	_, ok := m.clearedFields[testbase.FieldUpdatedAt]
+	return ok
+}
+
 // ResetUpdatedAt resets all changes to the "updated_at" field.
 func (m *TestBaseMutation) ResetUpdatedAt() {
 	m.updated_at = nil
+	m.addupdated_at = nil
+	delete(m.clearedFields, testbase.FieldUpdatedAt)
 }
 
 // SetDeletedAt sets the "deleted_at" field.
-func (m *TestBaseMutation) SetDeletedAt(t time.Time) {
-	m.deleted_at = &t
+func (m *TestBaseMutation) SetDeletedAt(i int64) {
+	m.deleted_at = &i
+	m.adddeleted_at = nil
 }
 
 // DeletedAt returns the value of the "deleted_at" field in the mutation.
-func (m *TestBaseMutation) DeletedAt() (r time.Time, exists bool) {
+func (m *TestBaseMutation) DeletedAt() (r int64, exists bool) {
 	v := m.deleted_at
 	if v == nil {
 		return
@@ -326,7 +410,7 @@ func (m *TestBaseMutation) DeletedAt() (r time.Time, exists bool) {
 // OldDeletedAt returns the old "deleted_at" field's value of the TestBase entity.
 // If the TestBase object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *TestBaseMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+func (m *TestBaseMutation) OldDeletedAt(ctx context.Context) (v int64, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
 	}
@@ -340,9 +424,28 @@ func (m *TestBaseMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err 
 	return oldValue.DeletedAt, nil
 }
 
+// AddDeletedAt adds i to the "deleted_at" field.
+func (m *TestBaseMutation) AddDeletedAt(i int64) {
+	if m.adddeleted_at != nil {
+		*m.adddeleted_at += i
+	} else {
+		m.adddeleted_at = &i
+	}
+}
+
+// AddedDeletedAt returns the value that was added to the "deleted_at" field in this mutation.
+func (m *TestBaseMutation) AddedDeletedAt() (r int64, exists bool) {
+	v := m.adddeleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (m *TestBaseMutation) ClearDeletedAt() {
 	m.deleted_at = nil
+	m.adddeleted_at = nil
 	m.clearedFields[testbase.FieldDeletedAt] = struct{}{}
 }
 
@@ -355,6 +458,7 @@ func (m *TestBaseMutation) DeletedAtCleared() bool {
 // ResetDeletedAt resets all changes to the "deleted_at" field.
 func (m *TestBaseMutation) ResetDeletedAt() {
 	m.deleted_at = nil
+	m.adddeleted_at = nil
 	delete(m.clearedFields, testbase.FieldDeletedAt)
 }
 
@@ -408,10 +512,24 @@ func (m *TestBaseMutation) AddedVersion() (r int, exists bool) {
 	return *v, true
 }
 
+// ClearVersion clears the value of the "version" field.
+func (m *TestBaseMutation) ClearVersion() {
+	m.version = nil
+	m.addversion = nil
+	m.clearedFields[testbase.FieldVersion] = struct{}{}
+}
+
+// VersionCleared returns if the "version" field was cleared in this mutation.
+func (m *TestBaseMutation) VersionCleared() bool {
+	_, ok := m.clearedFields[testbase.FieldVersion]
+	return ok
+}
+
 // ResetVersion resets all changes to the "version" field.
 func (m *TestBaseMutation) ResetVersion() {
 	m.version = nil
 	m.addversion = nil
+	delete(m.clearedFields, testbase.FieldVersion)
 }
 
 // SetText sets the "text" field.
@@ -431,7 +549,7 @@ func (m *TestBaseMutation) Text() (r string, exists bool) {
 // OldText returns the old "text" field's value of the TestBase entity.
 // If the TestBase object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *TestBaseMutation) OldText(ctx context.Context) (v string, err error) {
+func (m *TestBaseMutation) OldText(ctx context.Context) (v *string, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldText is only allowed on UpdateOne operations")
 	}
@@ -588,21 +706,21 @@ func (m *TestBaseMutation) SetField(name string, value ent.Value) error {
 		m.SetName(v)
 		return nil
 	case testbase.FieldCreatedAt:
-		v, ok := value.(time.Time)
+		v, ok := value.(int64)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetCreatedAt(v)
 		return nil
 	case testbase.FieldUpdatedAt:
-		v, ok := value.(time.Time)
+		v, ok := value.(int64)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUpdatedAt(v)
 		return nil
 	case testbase.FieldDeletedAt:
-		v, ok := value.(time.Time)
+		v, ok := value.(int64)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
@@ -630,6 +748,15 @@ func (m *TestBaseMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *TestBaseMutation) AddedFields() []string {
 	var fields []string
+	if m.addcreated_at != nil {
+		fields = append(fields, testbase.FieldCreatedAt)
+	}
+	if m.addupdated_at != nil {
+		fields = append(fields, testbase.FieldUpdatedAt)
+	}
+	if m.adddeleted_at != nil {
+		fields = append(fields, testbase.FieldDeletedAt)
+	}
 	if m.addversion != nil {
 		fields = append(fields, testbase.FieldVersion)
 	}
@@ -641,6 +768,12 @@ func (m *TestBaseMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *TestBaseMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case testbase.FieldCreatedAt:
+		return m.AddedCreatedAt()
+	case testbase.FieldUpdatedAt:
+		return m.AddedUpdatedAt()
+	case testbase.FieldDeletedAt:
+		return m.AddedDeletedAt()
 	case testbase.FieldVersion:
 		return m.AddedVersion()
 	}
@@ -652,6 +785,27 @@ func (m *TestBaseMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *TestBaseMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case testbase.FieldCreatedAt:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCreatedAt(v)
+		return nil
+	case testbase.FieldUpdatedAt:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUpdatedAt(v)
+		return nil
+	case testbase.FieldDeletedAt:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddDeletedAt(v)
+		return nil
 	case testbase.FieldVersion:
 		v, ok := value.(int)
 		if !ok {
@@ -667,11 +821,23 @@ func (m *TestBaseMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *TestBaseMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(testbase.FieldParentID) {
+		fields = append(fields, testbase.FieldParentID)
+	}
 	if m.FieldCleared(testbase.FieldName) {
 		fields = append(fields, testbase.FieldName)
 	}
+	if m.FieldCleared(testbase.FieldCreatedAt) {
+		fields = append(fields, testbase.FieldCreatedAt)
+	}
+	if m.FieldCleared(testbase.FieldUpdatedAt) {
+		fields = append(fields, testbase.FieldUpdatedAt)
+	}
 	if m.FieldCleared(testbase.FieldDeletedAt) {
 		fields = append(fields, testbase.FieldDeletedAt)
+	}
+	if m.FieldCleared(testbase.FieldVersion) {
+		fields = append(fields, testbase.FieldVersion)
 	}
 	if m.FieldCleared(testbase.FieldText) {
 		fields = append(fields, testbase.FieldText)
@@ -690,11 +856,23 @@ func (m *TestBaseMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *TestBaseMutation) ClearField(name string) error {
 	switch name {
+	case testbase.FieldParentID:
+		m.ClearParentID()
+		return nil
 	case testbase.FieldName:
 		m.ClearName()
 		return nil
+	case testbase.FieldCreatedAt:
+		m.ClearCreatedAt()
+		return nil
+	case testbase.FieldUpdatedAt:
+		m.ClearUpdatedAt()
+		return nil
 	case testbase.FieldDeletedAt:
 		m.ClearDeletedAt()
+		return nil
+	case testbase.FieldVersion:
+		m.ClearVersion()
 		return nil
 	case testbase.FieldText:
 		m.ClearText()

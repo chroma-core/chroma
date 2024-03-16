@@ -19,7 +19,7 @@ func (TestBase) Mixin() []ent.Mixin {
 // Fields of the TestBase.
 func (TestBase) Fields() []ent.Field {
 	return []ent.Field{
-		field.String("text").MaxLen(255).Optional(),
+		field.String("text").MaxLen(255).Optional().Nillable(),
 	}
 }
 

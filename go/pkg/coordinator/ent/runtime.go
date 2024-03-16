@@ -3,8 +3,6 @@
 package ent
 
 import (
-	"time"
-
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/schema"
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/testbase"
 	"github.com/google/uuid"
@@ -26,11 +24,13 @@ func init() {
 	// testbaseDescCreatedAt is the schema descriptor for created_at field.
 	testbaseDescCreatedAt := testbaseMixinFields0[3].Descriptor()
 	// testbase.DefaultCreatedAt holds the default value on creation for the created_at field.
-	testbase.DefaultCreatedAt = testbaseDescCreatedAt.Default.(func() time.Time)
+	testbase.DefaultCreatedAt = testbaseDescCreatedAt.Default.(int64)
 	// testbaseDescUpdatedAt is the schema descriptor for updated_at field.
 	testbaseDescUpdatedAt := testbaseMixinFields0[4].Descriptor()
+	// testbase.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	testbase.DefaultUpdatedAt = testbaseDescUpdatedAt.Default.(int64)
 	// testbase.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
-	testbase.UpdateDefaultUpdatedAt = testbaseDescUpdatedAt.UpdateDefault.(func() time.Time)
+	testbase.UpdateDefaultUpdatedAt = testbaseDescUpdatedAt.UpdateDefault.(func() int64)
 	// testbaseDescVersion is the schema descriptor for version field.
 	testbaseDescVersion := testbaseMixinFields0[6].Descriptor()
 	// testbase.DefaultVersion holds the default value on creation for the version field.

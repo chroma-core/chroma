@@ -3,8 +3,6 @@
 package testbase
 
 import (
-	"time"
-
 	"entgo.io/ent/dialect/sql"
 	"github.com/chroma-core/chroma/go/pkg/coordinator/ent/predicate"
 	"github.com/google/uuid"
@@ -66,17 +64,17 @@ func Name(v string) predicate.TestBase {
 }
 
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
-func CreatedAt(v time.Time) predicate.TestBase {
+func CreatedAt(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldEQ(FieldCreatedAt, v))
 }
 
 // UpdatedAt applies equality check predicate on the "updated_at" field. It's identical to UpdatedAtEQ.
-func UpdatedAt(v time.Time) predicate.TestBase {
+func UpdatedAt(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldEQ(FieldUpdatedAt, v))
 }
 
 // DeletedAt applies equality check predicate on the "deleted_at" field. It's identical to DeletedAtEQ.
-func DeletedAt(v time.Time) predicate.TestBase {
+func DeletedAt(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldEQ(FieldDeletedAt, v))
 }
 
@@ -128,6 +126,16 @@ func ParentIDLT(v uuid.UUID) predicate.TestBase {
 // ParentIDLTE applies the LTE predicate on the "parent_id" field.
 func ParentIDLTE(v uuid.UUID) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLTE(FieldParentID, v))
+}
+
+// ParentIDIsNil applies the IsNil predicate on the "parent_id" field.
+func ParentIDIsNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldIsNull(FieldParentID))
+}
+
+// ParentIDNotNil applies the NotNil predicate on the "parent_id" field.
+func ParentIDNotNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldNotNull(FieldParentID))
 }
 
 // NameEQ applies the EQ predicate on the "name" field.
@@ -206,122 +214,142 @@ func NameContainsFold(v string) predicate.TestBase {
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
-func CreatedAtEQ(v time.Time) predicate.TestBase {
+func CreatedAtEQ(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldEQ(FieldCreatedAt, v))
 }
 
 // CreatedAtNEQ applies the NEQ predicate on the "created_at" field.
-func CreatedAtNEQ(v time.Time) predicate.TestBase {
+func CreatedAtNEQ(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldNEQ(FieldCreatedAt, v))
 }
 
 // CreatedAtIn applies the In predicate on the "created_at" field.
-func CreatedAtIn(vs ...time.Time) predicate.TestBase {
+func CreatedAtIn(vs ...int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldIn(FieldCreatedAt, vs...))
 }
 
 // CreatedAtNotIn applies the NotIn predicate on the "created_at" field.
-func CreatedAtNotIn(vs ...time.Time) predicate.TestBase {
+func CreatedAtNotIn(vs ...int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldNotIn(FieldCreatedAt, vs...))
 }
 
 // CreatedAtGT applies the GT predicate on the "created_at" field.
-func CreatedAtGT(v time.Time) predicate.TestBase {
+func CreatedAtGT(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldGT(FieldCreatedAt, v))
 }
 
 // CreatedAtGTE applies the GTE predicate on the "created_at" field.
-func CreatedAtGTE(v time.Time) predicate.TestBase {
+func CreatedAtGTE(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldGTE(FieldCreatedAt, v))
 }
 
 // CreatedAtLT applies the LT predicate on the "created_at" field.
-func CreatedAtLT(v time.Time) predicate.TestBase {
+func CreatedAtLT(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLT(FieldCreatedAt, v))
 }
 
 // CreatedAtLTE applies the LTE predicate on the "created_at" field.
-func CreatedAtLTE(v time.Time) predicate.TestBase {
+func CreatedAtLTE(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLTE(FieldCreatedAt, v))
 }
 
+// CreatedAtIsNil applies the IsNil predicate on the "created_at" field.
+func CreatedAtIsNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldIsNull(FieldCreatedAt))
+}
+
+// CreatedAtNotNil applies the NotNil predicate on the "created_at" field.
+func CreatedAtNotNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldNotNull(FieldCreatedAt))
+}
+
 // UpdatedAtEQ applies the EQ predicate on the "updated_at" field.
-func UpdatedAtEQ(v time.Time) predicate.TestBase {
+func UpdatedAtEQ(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldEQ(FieldUpdatedAt, v))
 }
 
 // UpdatedAtNEQ applies the NEQ predicate on the "updated_at" field.
-func UpdatedAtNEQ(v time.Time) predicate.TestBase {
+func UpdatedAtNEQ(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldNEQ(FieldUpdatedAt, v))
 }
 
 // UpdatedAtIn applies the In predicate on the "updated_at" field.
-func UpdatedAtIn(vs ...time.Time) predicate.TestBase {
+func UpdatedAtIn(vs ...int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldIn(FieldUpdatedAt, vs...))
 }
 
 // UpdatedAtNotIn applies the NotIn predicate on the "updated_at" field.
-func UpdatedAtNotIn(vs ...time.Time) predicate.TestBase {
+func UpdatedAtNotIn(vs ...int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldNotIn(FieldUpdatedAt, vs...))
 }
 
 // UpdatedAtGT applies the GT predicate on the "updated_at" field.
-func UpdatedAtGT(v time.Time) predicate.TestBase {
+func UpdatedAtGT(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldGT(FieldUpdatedAt, v))
 }
 
 // UpdatedAtGTE applies the GTE predicate on the "updated_at" field.
-func UpdatedAtGTE(v time.Time) predicate.TestBase {
+func UpdatedAtGTE(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldGTE(FieldUpdatedAt, v))
 }
 
 // UpdatedAtLT applies the LT predicate on the "updated_at" field.
-func UpdatedAtLT(v time.Time) predicate.TestBase {
+func UpdatedAtLT(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLT(FieldUpdatedAt, v))
 }
 
 // UpdatedAtLTE applies the LTE predicate on the "updated_at" field.
-func UpdatedAtLTE(v time.Time) predicate.TestBase {
+func UpdatedAtLTE(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLTE(FieldUpdatedAt, v))
 }
 
+// UpdatedAtIsNil applies the IsNil predicate on the "updated_at" field.
+func UpdatedAtIsNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldIsNull(FieldUpdatedAt))
+}
+
+// UpdatedAtNotNil applies the NotNil predicate on the "updated_at" field.
+func UpdatedAtNotNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldNotNull(FieldUpdatedAt))
+}
+
 // DeletedAtEQ applies the EQ predicate on the "deleted_at" field.
-func DeletedAtEQ(v time.Time) predicate.TestBase {
+func DeletedAtEQ(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldEQ(FieldDeletedAt, v))
 }
 
 // DeletedAtNEQ applies the NEQ predicate on the "deleted_at" field.
-func DeletedAtNEQ(v time.Time) predicate.TestBase {
+func DeletedAtNEQ(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldNEQ(FieldDeletedAt, v))
 }
 
 // DeletedAtIn applies the In predicate on the "deleted_at" field.
-func DeletedAtIn(vs ...time.Time) predicate.TestBase {
+func DeletedAtIn(vs ...int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldIn(FieldDeletedAt, vs...))
 }
 
 // DeletedAtNotIn applies the NotIn predicate on the "deleted_at" field.
-func DeletedAtNotIn(vs ...time.Time) predicate.TestBase {
+func DeletedAtNotIn(vs ...int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldNotIn(FieldDeletedAt, vs...))
 }
 
 // DeletedAtGT applies the GT predicate on the "deleted_at" field.
-func DeletedAtGT(v time.Time) predicate.TestBase {
+func DeletedAtGT(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldGT(FieldDeletedAt, v))
 }
 
 // DeletedAtGTE applies the GTE predicate on the "deleted_at" field.
-func DeletedAtGTE(v time.Time) predicate.TestBase {
+func DeletedAtGTE(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldGTE(FieldDeletedAt, v))
 }
 
 // DeletedAtLT applies the LT predicate on the "deleted_at" field.
-func DeletedAtLT(v time.Time) predicate.TestBase {
+func DeletedAtLT(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLT(FieldDeletedAt, v))
 }
 
 // DeletedAtLTE applies the LTE predicate on the "deleted_at" field.
-func DeletedAtLTE(v time.Time) predicate.TestBase {
+func DeletedAtLTE(v int64) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLTE(FieldDeletedAt, v))
 }
 
@@ -373,6 +401,16 @@ func VersionLT(v int) predicate.TestBase {
 // VersionLTE applies the LTE predicate on the "version" field.
 func VersionLTE(v int) predicate.TestBase {
 	return predicate.TestBase(sql.FieldLTE(FieldVersion, v))
+}
+
+// VersionIsNil applies the IsNil predicate on the "version" field.
+func VersionIsNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldIsNull(FieldVersion))
+}
+
+// VersionNotNil applies the NotNil predicate on the "version" field.
+func VersionNotNil() predicate.TestBase {
+	return predicate.TestBase(sql.FieldNotNull(FieldVersion))
 }
 
 // TextEQ applies the EQ predicate on the "text" field.

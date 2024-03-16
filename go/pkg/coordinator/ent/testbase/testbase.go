@@ -3,8 +3,6 @@
 package testbase
 
 import (
-	"time"
-
 	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 )
@@ -58,9 +56,11 @@ var (
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
-	DefaultCreatedAt func() time.Time
+	DefaultCreatedAt int64
+	// DefaultUpdatedAt holds the default value on creation for the "updated_at" field.
+	DefaultUpdatedAt int64
 	// UpdateDefaultUpdatedAt holds the default value on update for the "updated_at" field.
-	UpdateDefaultUpdatedAt func() time.Time
+	UpdateDefaultUpdatedAt func() int64
 	// DefaultVersion holds the default value on creation for the "version" field.
 	DefaultVersion int
 	// TextValidator is a validator for the "text" field. It is called by the builders before save.

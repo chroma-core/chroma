@@ -5,7 +5,6 @@ package ent
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
@@ -23,15 +22,15 @@ type TestBase struct {
 	// Name holds the value of the "name" field.
 	Name *string `json:"name,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
-	CreatedAt time.Time `json:"created_at,omitempty"`
+	CreatedAt int64 `json:"created_at,omitempty"`
 	// UpdatedAt holds the value of the "updated_at" field.
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt int64 `json:"updated_at,omitempty"`
 	// DeletedAt holds the value of the "deleted_at" field.
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	DeletedAt int64 `json:"deleted_at,omitempty"`
 	// Version holds the value of the "version" field.
 	Version int `json:"version,omitempty"`
 	// Text holds the value of the "text" field.
-	Text         string `json:"text,omitempty"`
+	Text         *string `json:"text,omitempty"`
 	selectValues sql.SelectValues
 }
 
@@ -40,12 +39,10 @@ func (*TestBase) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case testbase.FieldVersion:
+		case testbase.FieldCreatedAt, testbase.FieldUpdatedAt, testbase.FieldDeletedAt, testbase.FieldVersion:
 			values[i] = new(sql.NullInt64)
 		case testbase.FieldName, testbase.FieldText:
 			values[i] = new(sql.NullString)
-		case testbase.FieldCreatedAt, testbase.FieldUpdatedAt, testbase.FieldDeletedAt:
-			values[i] = new(sql.NullTime)
 		case testbase.FieldID, testbase.FieldParentID:
 			values[i] = new(uuid.UUID)
 		default:
@@ -83,23 +80,22 @@ func (tb *TestBase) assignValues(columns []string, values []any) error {
 				*tb.Name = value.String
 			}
 		case testbase.FieldCreatedAt:
-			if value, ok := values[i].(*sql.NullTime); !ok {
+			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field created_at", values[i])
 			} else if value.Valid {
-				tb.CreatedAt = value.Time
+				tb.CreatedAt = value.Int64
 			}
 		case testbase.FieldUpdatedAt:
-			if value, ok := values[i].(*sql.NullTime); !ok {
+			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field updated_at", values[i])
 			} else if value.Valid {
-				tb.UpdatedAt = value.Time
+				tb.UpdatedAt = value.Int64
 			}
 		case testbase.FieldDeletedAt:
-			if value, ok := values[i].(*sql.NullTime); !ok {
+			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field deleted_at", values[i])
 			} else if value.Valid {
-				tb.DeletedAt = new(time.Time)
-				*tb.DeletedAt = value.Time
+				tb.DeletedAt = value.Int64
 			}
 		case testbase.FieldVersion:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -111,7 +107,8 @@ func (tb *TestBase) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field text", values[i])
 			} else if value.Valid {
-				tb.Text = value.String
+				tb.Text = new(string)
+				*tb.Text = value.String
 			}
 		default:
 			tb.selectValues.Set(columns[i], values[i])
@@ -158,21 +155,21 @@ func (tb *TestBase) String() string {
 	}
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
-	builder.WriteString(tb.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(fmt.Sprintf("%v", tb.CreatedAt))
 	builder.WriteString(", ")
 	builder.WriteString("updated_at=")
-	builder.WriteString(tb.UpdatedAt.Format(time.ANSIC))
+	builder.WriteString(fmt.Sprintf("%v", tb.UpdatedAt))
 	builder.WriteString(", ")
-	if v := tb.DeletedAt; v != nil {
-		builder.WriteString("deleted_at=")
-		builder.WriteString(v.Format(time.ANSIC))
-	}
+	builder.WriteString("deleted_at=")
+	builder.WriteString(fmt.Sprintf("%v", tb.DeletedAt))
 	builder.WriteString(", ")
 	builder.WriteString("version=")
 	builder.WriteString(fmt.Sprintf("%v", tb.Version))
 	builder.WriteString(", ")
-	builder.WriteString("text=")
-	builder.WriteString(tb.Text)
+	if v := tb.Text; v != nil {
+		builder.WriteString("text=")
+		builder.WriteString(*v)
+	}
 	builder.WriteByte(')')
 	return builder.String()
 }

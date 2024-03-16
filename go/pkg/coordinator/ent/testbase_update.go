@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
@@ -49,22 +48,42 @@ func (tbu *TestBaseUpdate) ClearName() *TestBaseUpdate {
 }
 
 // SetUpdatedAt sets the "updated_at" field.
-func (tbu *TestBaseUpdate) SetUpdatedAt(t time.Time) *TestBaseUpdate {
-	tbu.mutation.SetUpdatedAt(t)
+func (tbu *TestBaseUpdate) SetUpdatedAt(i int64) *TestBaseUpdate {
+	tbu.mutation.ResetUpdatedAt()
+	tbu.mutation.SetUpdatedAt(i)
+	return tbu
+}
+
+// AddUpdatedAt adds i to the "updated_at" field.
+func (tbu *TestBaseUpdate) AddUpdatedAt(i int64) *TestBaseUpdate {
+	tbu.mutation.AddUpdatedAt(i)
+	return tbu
+}
+
+// ClearUpdatedAt clears the value of the "updated_at" field.
+func (tbu *TestBaseUpdate) ClearUpdatedAt() *TestBaseUpdate {
+	tbu.mutation.ClearUpdatedAt()
 	return tbu
 }
 
 // SetDeletedAt sets the "deleted_at" field.
-func (tbu *TestBaseUpdate) SetDeletedAt(t time.Time) *TestBaseUpdate {
-	tbu.mutation.SetDeletedAt(t)
+func (tbu *TestBaseUpdate) SetDeletedAt(i int64) *TestBaseUpdate {
+	tbu.mutation.ResetDeletedAt()
+	tbu.mutation.SetDeletedAt(i)
 	return tbu
 }
 
 // SetNillableDeletedAt sets the "deleted_at" field if the given value is not nil.
-func (tbu *TestBaseUpdate) SetNillableDeletedAt(t *time.Time) *TestBaseUpdate {
-	if t != nil {
-		tbu.SetDeletedAt(*t)
+func (tbu *TestBaseUpdate) SetNillableDeletedAt(i *int64) *TestBaseUpdate {
+	if i != nil {
+		tbu.SetDeletedAt(*i)
 	}
+	return tbu
+}
+
+// AddDeletedAt adds i to the "deleted_at" field.
+func (tbu *TestBaseUpdate) AddDeletedAt(i int64) *TestBaseUpdate {
+	tbu.mutation.AddDeletedAt(i)
 	return tbu
 }
 
@@ -92,6 +111,12 @@ func (tbu *TestBaseUpdate) SetNillableVersion(i *int) *TestBaseUpdate {
 // AddVersion adds i to the "version" field.
 func (tbu *TestBaseUpdate) AddVersion(i int) *TestBaseUpdate {
 	tbu.mutation.AddVersion(i)
+	return tbu
+}
+
+// ClearVersion clears the value of the "version" field.
+func (tbu *TestBaseUpdate) ClearVersion() *TestBaseUpdate {
+	tbu.mutation.ClearVersion()
 	return tbu
 }
 
@@ -150,7 +175,7 @@ func (tbu *TestBaseUpdate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (tbu *TestBaseUpdate) defaults() {
-	if _, ok := tbu.mutation.UpdatedAt(); !ok {
+	if _, ok := tbu.mutation.UpdatedAt(); !ok && !tbu.mutation.UpdatedAtCleared() {
 		v := testbase.UpdateDefaultUpdatedAt()
 		tbu.mutation.SetUpdatedAt(v)
 	}
@@ -183,26 +208,44 @@ func (tbu *TestBaseUpdate) sqlSave(ctx context.Context) (n int, err error) {
 			}
 		}
 	}
+	if tbu.mutation.ParentIDCleared() {
+		_spec.ClearField(testbase.FieldParentID, field.TypeUUID)
+	}
 	if value, ok := tbu.mutation.Name(); ok {
 		_spec.SetField(testbase.FieldName, field.TypeString, value)
 	}
 	if tbu.mutation.NameCleared() {
 		_spec.ClearField(testbase.FieldName, field.TypeString)
 	}
+	if tbu.mutation.CreatedAtCleared() {
+		_spec.ClearField(testbase.FieldCreatedAt, field.TypeInt64)
+	}
 	if value, ok := tbu.mutation.UpdatedAt(); ok {
-		_spec.SetField(testbase.FieldUpdatedAt, field.TypeTime, value)
+		_spec.SetField(testbase.FieldUpdatedAt, field.TypeInt64, value)
+	}
+	if value, ok := tbu.mutation.AddedUpdatedAt(); ok {
+		_spec.AddField(testbase.FieldUpdatedAt, field.TypeInt64, value)
+	}
+	if tbu.mutation.UpdatedAtCleared() {
+		_spec.ClearField(testbase.FieldUpdatedAt, field.TypeInt64)
 	}
 	if value, ok := tbu.mutation.DeletedAt(); ok {
-		_spec.SetField(testbase.FieldDeletedAt, field.TypeTime, value)
+		_spec.SetField(testbase.FieldDeletedAt, field.TypeInt64, value)
+	}
+	if value, ok := tbu.mutation.AddedDeletedAt(); ok {
+		_spec.AddField(testbase.FieldDeletedAt, field.TypeInt64, value)
 	}
 	if tbu.mutation.DeletedAtCleared() {
-		_spec.ClearField(testbase.FieldDeletedAt, field.TypeTime)
+		_spec.ClearField(testbase.FieldDeletedAt, field.TypeInt64)
 	}
 	if value, ok := tbu.mutation.Version(); ok {
 		_spec.SetField(testbase.FieldVersion, field.TypeInt, value)
 	}
 	if value, ok := tbu.mutation.AddedVersion(); ok {
 		_spec.AddField(testbase.FieldVersion, field.TypeInt, value)
+	}
+	if tbu.mutation.VersionCleared() {
+		_spec.ClearField(testbase.FieldVersion, field.TypeInt)
 	}
 	if value, ok := tbu.mutation.Text(); ok {
 		_spec.SetField(testbase.FieldText, field.TypeString, value)
@@ -251,22 +294,42 @@ func (tbuo *TestBaseUpdateOne) ClearName() *TestBaseUpdateOne {
 }
 
 // SetUpdatedAt sets the "updated_at" field.
-func (tbuo *TestBaseUpdateOne) SetUpdatedAt(t time.Time) *TestBaseUpdateOne {
-	tbuo.mutation.SetUpdatedAt(t)
+func (tbuo *TestBaseUpdateOne) SetUpdatedAt(i int64) *TestBaseUpdateOne {
+	tbuo.mutation.ResetUpdatedAt()
+	tbuo.mutation.SetUpdatedAt(i)
+	return tbuo
+}
+
+// AddUpdatedAt adds i to the "updated_at" field.
+func (tbuo *TestBaseUpdateOne) AddUpdatedAt(i int64) *TestBaseUpdateOne {
+	tbuo.mutation.AddUpdatedAt(i)
+	return tbuo
+}
+
+// ClearUpdatedAt clears the value of the "updated_at" field.
+func (tbuo *TestBaseUpdateOne) ClearUpdatedAt() *TestBaseUpdateOne {
+	tbuo.mutation.ClearUpdatedAt()
 	return tbuo
 }
 
 // SetDeletedAt sets the "deleted_at" field.
-func (tbuo *TestBaseUpdateOne) SetDeletedAt(t time.Time) *TestBaseUpdateOne {
-	tbuo.mutation.SetDeletedAt(t)
+func (tbuo *TestBaseUpdateOne) SetDeletedAt(i int64) *TestBaseUpdateOne {
+	tbuo.mutation.ResetDeletedAt()
+	tbuo.mutation.SetDeletedAt(i)
 	return tbuo
 }
 
 // SetNillableDeletedAt sets the "deleted_at" field if the given value is not nil.
-func (tbuo *TestBaseUpdateOne) SetNillableDeletedAt(t *time.Time) *TestBaseUpdateOne {
-	if t != nil {
-		tbuo.SetDeletedAt(*t)
+func (tbuo *TestBaseUpdateOne) SetNillableDeletedAt(i *int64) *TestBaseUpdateOne {
+	if i != nil {
+		tbuo.SetDeletedAt(*i)
 	}
+	return tbuo
+}
+
+// AddDeletedAt adds i to the "deleted_at" field.
+func (tbuo *TestBaseUpdateOne) AddDeletedAt(i int64) *TestBaseUpdateOne {
+	tbuo.mutation.AddDeletedAt(i)
 	return tbuo
 }
 
@@ -294,6 +357,12 @@ func (tbuo *TestBaseUpdateOne) SetNillableVersion(i *int) *TestBaseUpdateOne {
 // AddVersion adds i to the "version" field.
 func (tbuo *TestBaseUpdateOne) AddVersion(i int) *TestBaseUpdateOne {
 	tbuo.mutation.AddVersion(i)
+	return tbuo
+}
+
+// ClearVersion clears the value of the "version" field.
+func (tbuo *TestBaseUpdateOne) ClearVersion() *TestBaseUpdateOne {
+	tbuo.mutation.ClearVersion()
 	return tbuo
 }
 
@@ -365,7 +434,7 @@ func (tbuo *TestBaseUpdateOne) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (tbuo *TestBaseUpdateOne) defaults() {
-	if _, ok := tbuo.mutation.UpdatedAt(); !ok {
+	if _, ok := tbuo.mutation.UpdatedAt(); !ok && !tbuo.mutation.UpdatedAtCleared() {
 		v := testbase.UpdateDefaultUpdatedAt()
 		tbuo.mutation.SetUpdatedAt(v)
 	}
@@ -415,26 +484,44 @@ func (tbuo *TestBaseUpdateOne) sqlSave(ctx context.Context) (_node *TestBase, er
 			}
 		}
 	}
+	if tbuo.mutation.ParentIDCleared() {
+		_spec.ClearField(testbase.FieldParentID, field.TypeUUID)
+	}
 	if value, ok := tbuo.mutation.Name(); ok {
 		_spec.SetField(testbase.FieldName, field.TypeString, value)
 	}
 	if tbuo.mutation.NameCleared() {
 		_spec.ClearField(testbase.FieldName, field.TypeString)
 	}
+	if tbuo.mutation.CreatedAtCleared() {
+		_spec.ClearField(testbase.FieldCreatedAt, field.TypeInt64)
+	}
 	if value, ok := tbuo.mutation.UpdatedAt(); ok {
-		_spec.SetField(testbase.FieldUpdatedAt, field.TypeTime, value)
+		_spec.SetField(testbase.FieldUpdatedAt, field.TypeInt64, value)
+	}
+	if value, ok := tbuo.mutation.AddedUpdatedAt(); ok {
+		_spec.AddField(testbase.FieldUpdatedAt, field.TypeInt64, value)
+	}
+	if tbuo.mutation.UpdatedAtCleared() {
+		_spec.ClearField(testbase.FieldUpdatedAt, field.TypeInt64)
 	}
 	if value, ok := tbuo.mutation.DeletedAt(); ok {
-		_spec.SetField(testbase.FieldDeletedAt, field.TypeTime, value)
+		_spec.SetField(testbase.FieldDeletedAt, field.TypeInt64, value)
+	}
+	if value, ok := tbuo.mutation.AddedDeletedAt(); ok {
+		_spec.AddField(testbase.FieldDeletedAt, field.TypeInt64, value)
 	}
 	if tbuo.mutation.DeletedAtCleared() {
-		_spec.ClearField(testbase.FieldDeletedAt, field.TypeTime)
+		_spec.ClearField(testbase.FieldDeletedAt, field.TypeInt64)
 	}
 	if value, ok := tbuo.mutation.Version(); ok {
 		_spec.SetField(testbase.FieldVersion, field.TypeInt, value)
 	}
 	if value, ok := tbuo.mutation.AddedVersion(); ok {
 		_spec.AddField(testbase.FieldVersion, field.TypeInt, value)
+	}
+	if tbuo.mutation.VersionCleared() {
+		_spec.ClearField(testbase.FieldVersion, field.TypeInt)
 	}
 	if value, ok := tbuo.mutation.Text(); ok {
 		_spec.SetField(testbase.FieldText, field.TypeString, value)

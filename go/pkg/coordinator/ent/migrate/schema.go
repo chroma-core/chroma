@@ -11,12 +11,12 @@ var (
 	// TestBasesColumns holds the columns for the "test_bases" table.
 	TestBasesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID, Unique: true},
-		{Name: "parent_id", Type: field.TypeUUID},
+		{Name: "parent_id", Type: field.TypeUUID, Nullable: true},
 		{Name: "name", Type: field.TypeString, Nullable: true, Size: 255},
-		{Name: "created_at", Type: field.TypeTime},
-		{Name: "updated_at", Type: field.TypeTime},
-		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
-		{Name: "version", Type: field.TypeInt, Default: 0},
+		{Name: "created_at", Type: field.TypeInt64, Nullable: true, Default: 1710574697677},
+		{Name: "updated_at", Type: field.TypeInt64, Nullable: true, Default: 1710574697677},
+		{Name: "deleted_at", Type: field.TypeInt64, Nullable: true},
+		{Name: "version", Type: field.TypeInt, Nullable: true, Default: 0},
 		{Name: "text", Type: field.TypeString, Nullable: true, Size: 255},
 	}
 	// TestBasesTable holds the schema information for the "test_bases" table.
