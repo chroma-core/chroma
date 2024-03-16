@@ -22,7 +22,7 @@ frontendService:
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
-  coordinatorHost: 'value: "coordinator.chroma"'
+  coordinatorHost: 'value: "sysdb.chroma"'
   authProvider: 'value: ""'
   authCredentialsProvider: 'value: ""'
   authzProvider: 'value: ""'
