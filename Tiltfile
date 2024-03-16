@@ -42,6 +42,7 @@ k8s_yaml([
 k8s_yaml([
   'k8s/test/sysdb-service.yaml',
   'k8s/test/jaeger-service.yaml',
+  'k8s/test/pulsar-service.yaml',
   'k8s/test/logservice-service.yaml',
   'k8s/test/minio.yaml',
   'k8s/test/query-service-service.yaml',
