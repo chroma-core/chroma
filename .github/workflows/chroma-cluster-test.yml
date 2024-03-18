@@ -20,7 +20,8 @@ jobs:
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
                    "chromadb/test/test_logservice.py",
-                   "chromadb/property/test_collections.py",]
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
