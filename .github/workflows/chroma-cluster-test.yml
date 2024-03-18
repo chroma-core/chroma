@@ -19,7 +19,8 @@ jobs:
         testfile: ["chromadb/test/db/test_system.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
-                   "chromadb/test/test_logservice.py"]
+                   "chromadb/test/test_logservice.py",
+                   "chromadb/property/test_collections.py",]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
