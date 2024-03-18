@@ -15,7 +15,7 @@ spec:
             - 'migrate'
             - 'apply'
             - '--url'
-            - 'postgres://chroma:chroma@postgres:5432/chroma?sslmode=disable'
+            - "postgres://{{ .Values.sysdbMigration.username }}:{{ .Values.sysdbMigration.password }}@{{ .Values.sysdbMigration.netloc }}:{{ .Values.sysdbMigration.port }}/{{ .Values.sysdbMigration.dbName }}?sslmode={{ .Values.sysdbMigration.sslmode }}"
           image: "{{ .Values.sysdbMigration.image.repository }}:{{ .Values.sysdbMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration
