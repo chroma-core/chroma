@@ -172,20 +172,24 @@ mod tests {
         system::System,
     };
 
+    const MOCK_OPERATOR_SLEEP_DURATION_MS: u64 = 1000;
+
     #[derive(Debug)]
     struct MockOperator {}
     #[async_trait]
     impl Operator<f32, String> for MockOperator {
         async fn run(&self, input: &f32) -> String {
-            println!(
-                "Running MockOperator on thread {:?}",
-                std::thread::current().id()
-            );
             // sleep to simulate work
-            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(
+                MOCK_OPERATOR_SLEEP_DURATION_MS,
+            ))
+            .await;
             input.to_string()
         }
     }
+
+    const DISPATCH_FREQUENCY_MS: u64 = 100;
+    const DISPATCH_COUNT: usize = 20;
 
     #[derive(Debug)]
     struct MockDispatchUser {
@@ -194,17 +198,19 @@ mod tests {
     #[async_trait]
     impl Component for MockDispatchUser {
         fn queue_size(&self) -> usize {
-            1000 // TODO: make configurable
+            1000
         }
 
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
-            let res = self.dispatcher.send(task).await;
-            // TODO: handle error
-            // dispatch a new task every 100ms, 10 times
-            let duration = std::time::Duration::from_millis(100);
-            ctx.scheduler
-                .schedule_interval(ctx.sender.clone(), (), duration, Some(20), ctx);
+            // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
+            let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
+            ctx.scheduler.schedule_interval(
+                ctx.sender.clone(),
+                (),
+                duration,
+                Some(DISPATCH_COUNT),
+                ctx,
+            );
         }
     }
     #[async_trait]
