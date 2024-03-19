@@ -13,7 +13,7 @@ RUN --mount=type=cache,target="/root/.cache/go-build" make
 
 FROM alpine:3.17.3
 
-RUN apk add --no-cache bash bash-completion jq findutils
+RUN apk add --no-cache bash bash-completion findutils
 
 # As of 6 Dec 2023, the atlas package isn't in Alpine's main package manager, only
 # testing. So we have to add the testing repository to get it.
