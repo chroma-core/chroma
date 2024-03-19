@@ -44,8 +44,7 @@ impl System {
         );
 
         match C::runtime() {
-            // TODO: global should be called inhert since tokio spawns on current runtime by default
-            ComponentRuntime::Global => {
+            ComponentRuntime::Inherit => {
                 let join_handle = tokio::spawn(async move { executor.run(rx).await });
                 return ComponentHandle::new(cancel_token, Some(join_handle), sender);
             }

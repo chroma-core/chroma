@@ -17,7 +17,7 @@ pub(crate) enum ComponentState {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum ComponentRuntime {
-    Global,
+    Inherit,
     Dedicated,
 }
 
@@ -34,7 +34,7 @@ pub(crate) enum ComponentRuntime {
 pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn queue_size(&self) -> usize;
     fn runtime() -> ComponentRuntime {
-        ComponentRuntime::Global
+        ComponentRuntime::Inherit
     }
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
 }
