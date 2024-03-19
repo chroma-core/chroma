@@ -305,12 +305,13 @@ impl PulsarIngestTopic {
     }
 }
 
+#[async_trait]
 impl Component for PulsarIngestTopic {
     fn queue_size(&self) -> usize {
         1000
     }
 
-    fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         println!("Starting PulsarIngestTopic for topic");
         let stream = match self.consumer.write() {
             Ok(mut consumer_handle) => consumer_handle.take(),

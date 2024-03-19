@@ -175,12 +175,13 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl Component for TestComponent {
         fn queue_size(&self) -> usize {
             self.queue_size
         }
 
-        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
                 .schedule(ctx.sender.clone(), ScheduleMessage {}, duration, ctx);

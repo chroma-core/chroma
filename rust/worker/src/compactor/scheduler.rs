@@ -134,8 +134,9 @@ impl Scheduler {
     }
 }
 
+#[async_trait]
 impl Component for Scheduler {
-    fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.scheduler.schedule_interval(
             ctx.sender.clone(),
             ScheduleMessage {},
