@@ -1,4 +1,5 @@
 mod dispatcher;
-mod hnsw_query_orchestrator;
 mod operator;
+mod operators;
+mod orchestration;
 mod worker_thread;

@@ -1,4 +1,5 @@
-use super::operator::{wrap, PullLogsInput, PullLogsOperator, PullLogsOutput, TaskMessage};
+use super::super::operator::{wrap, TaskMessage};
+use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
 use crate::{
     log::log::Log,
     system::{Component, Handler, Receiver},

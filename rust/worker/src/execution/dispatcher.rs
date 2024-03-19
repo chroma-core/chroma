@@ -1,8 +1,9 @@
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::system::{Component, ComponentContext, Handler, Receiver};
 use async_trait::async_trait;
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::Debug;
 
+#[derive(Debug)]
 struct Dispatcher {
     task_queue: Vec<TaskMessage>,
     waiter_channels: Vec<TaskRequestMessage>,
@@ -16,13 +17,6 @@ impl Dispatcher {
             waiter_channels: Vec::new(),
             n_worker_threads,
         }
-    }
-}
-
-// TODO: don't manually implement Debug
-impl Debug for Dispatcher {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Dispatcher").finish()
     }
 }
 
