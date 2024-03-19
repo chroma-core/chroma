@@ -5,7 +5,8 @@ use std::fmt::Debug;
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
-/**```
+/**
+```plaintext
                             ┌─────────────────────────────────────────┐
                             │                                         │
                             │                                         │

@@ -13,7 +13,7 @@ In chroma, we have a relatively fixed number of query plans that we can execute.
 than a flexible state machine abstraction, we just manually define the states that we
 expect to encounter for a given query plan. This is a bit more rigid, but it's also simpler and easier to
 understand. We can always add more abstraction later if we need it.
-```
+```plaintext
 
                                ┌───► Brute Force ─────┐
                                │                      │
