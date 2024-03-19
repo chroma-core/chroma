@@ -37,6 +37,7 @@ pub(crate) trait Log: Send + Sync + LogClone + Debug {
         collection_id: String,
         offset: i64,
         batch_size: i32,
+        end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError>;
 
     async fn get_collections_with_new_data(
@@ -119,11 +120,17 @@ impl Log for GrpcLog {
         collection_id: String,
         offset: i64,
         batch_size: i32,
+        end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+        let end_timestamp = match end_timestamp {
+            Some(end_timestamp) => end_timestamp,
+            None => -1,
+        };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
-            collection_id: collection_id,
+            collection_id,
             start_from_id: offset,
-            batch_size: batch_size,
+            batch_size,
+            end_timestamp,
         });
         let response = request.await;
         match response {
@@ -260,6 +267,7 @@ impl Log for InMemoryLog {
         collection_id: String,
         offset: i64,
         batch_size: i32,
+        end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
         let logs = self.logs.get(&collection_id).unwrap();
         let mut result = Vec::new();

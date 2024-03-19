@@ -1,6 +1,9 @@
 package dao
 
 import (
+	"testing"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/logservice/testutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -8,7 +11,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"gorm.io/gorm"
-	"testing"
 )
 
 type RecordLogDbTestSuite struct {
@@ -101,7 +103,8 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
 func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	// pull empty logs
 	var recordLogs []*dbmodel.RecordLog
-	recordLogs, err := suite.Db.PullLogs(suite.collectionId1, 0, 3)
+	invalidEndTimestamp := int64(-1)
+	recordLogs, err := suite.Db.PullLogs(suite.collectionId1, 0, 3, invalidEndTimestamp)
 	suite.NoError(err)
 	suite.Len(recordLogs, 0)
 
@@ -114,7 +117,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	suite.Equal(2, count)
 
 	// pull logs from id 0 batch_size 3
-	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 0, 3)
+	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 0, 3, invalidEndTimestamp)
 	suite.NoError(err)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
@@ -123,7 +126,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	}
 
 	// pull logs from id 0 batch_size 6
-	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 0, 6)
+	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 0, 6, invalidEndTimestamp)
 	suite.NoError(err)
 	suite.Len(recordLogs, 5)
 
@@ -133,7 +136,16 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	}
 
 	// pull logs from id 3 batch_size 4
-	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 3, 4)
+	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 3, 4, invalidEndTimestamp)
+	suite.NoError(err)
+	suite.Len(recordLogs, 3)
+	for index := range recordLogs {
+		suite.Equal(int64(index+3), recordLogs[index].ID)
+		suite.Equal(suite.records[index+2], *recordLogs[index].Record)
+	}
+
+	// pull logs from id 3 batch_size 4 endTimestamp Now
+	recordLogs, err = suite.Db.PullLogs(suite.collectionId1, 3, 4, time.Now().UnixNano())
 	suite.NoError(err)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {

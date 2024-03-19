@@ -166,6 +166,7 @@ class LogService(Producer, Consumer):
             collection_id=str(collection_id),
             start_from_id=start_id,
             batch_size=batch_size,
+            end_timestamp=-1,
         )
         response = self._log_service_stub.PullLogs(request)
         return response.records  # type: ignore

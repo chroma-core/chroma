@@ -77,6 +77,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
                 input.collection_id.to_string(),
                 input.offset,
                 input.batch_size,
+                None,
             )
             .await
             .unwrap();
