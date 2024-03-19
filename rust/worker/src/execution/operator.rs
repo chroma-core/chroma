@@ -27,12 +27,12 @@ where
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
-pub(super) type TaskMessage = Box<dyn TaskWrapper>;
+pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
 
 /// A task wrapper is a trait that can be used to run a task. We use it to
 /// erase the I, O types from the Task struct so that tasks.
 #[async_trait]
-pub(super) trait TaskWrapper: Send + Debug {
+pub(crate) trait TaskWrapper: Send + Debug {
     async fn run(&self);
 }
 

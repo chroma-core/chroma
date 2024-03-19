@@ -46,7 +46,7 @@ use std::fmt::Debug;
   coarser work-stealing, and other optimizations.
 */
 #[derive(Debug)]
-struct Dispatcher {
+pub(crate) struct Dispatcher {
     task_queue: Vec<TaskMessage>,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,

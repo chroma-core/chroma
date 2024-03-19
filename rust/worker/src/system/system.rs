@@ -28,7 +28,7 @@ impl System {
         }
     }
 
-    pub(crate) fn start_component<C>(&mut self, component: C) -> ComponentHandle<C>
+    pub(crate) fn start_component<C>(&self, component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {

@@ -1,5 +1,5 @@
-mod dispatcher;
-mod operator;
+pub(crate) mod dispatcher;
+pub(crate) mod operator;
 mod operators;
-mod orchestration;
+pub(crate) mod orchestration;
 mod worker_thread;

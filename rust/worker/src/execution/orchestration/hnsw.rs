@@ -35,7 +35,7 @@ enum ExecutionState {
 }
 
 #[derive(Debug)]
-struct HnswQueryOrchestrator {
+pub(crate) struct HnswQueryOrchestrator {
     state: ExecutionState,
     // Query state
     query_vectors: Vec<Vec<f32>>,
@@ -49,7 +49,7 @@ struct HnswQueryOrchestrator {
 }
 
 impl HnswQueryOrchestrator {
-    pub fn new(
+    pub(crate) fn new(
         query_vectors: Vec<Vec<f32>>,
         k: i32,
         include_embeddings: bool,

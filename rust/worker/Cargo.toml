@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "worker"
-path = "src/bin/worker.rs"
+name = "query_service"
+path = "src/bin/query_service.rs"
 
 [dependencies]
 tonic = "0.10"
