@@ -57,6 +57,10 @@ impl Dispatcher {
         }
     }
 
+    /// Spawn worker threads
+    /// # Parameters
+    /// - system: The system to spawn the worker threads in
+    /// - self_receiver: The receiver to send tasks to the worker threads, this is a address back to the dispatcher
     fn spawn_workers(
         &self,
         system: &mut System,
@@ -68,6 +72,9 @@ impl Dispatcher {
         }
     }
 
+    /// Enqueue a task to be processed
+    /// # Parameters
+    /// - task: The task to enqueue
     async fn enqueue_task(&mut self, task: TaskMessage) {
         // If a worker is waiting for a task, send it to the worker in FIFO order
         // Otherwise, add it to the task queue
@@ -84,22 +91,29 @@ impl Dispatcher {
         }
     }
 
-    async fn handle_work_request(&mut self, worker: TaskRequestMessage) {
+    /// Handle a work request from a worker thread
+    /// # Parameters
+    /// - worker: The request for work
+    /// If no work is available, the worker will be placed in a queue and a task will be sent to it
+    /// when one is available
+    async fn handle_work_request(&mut self, request: TaskRequestMessage) {
         match self.task_queue.pop() {
-            Some(task) => match worker.reply_to.send(task).await {
+            Some(task) => match request.reply_to.send(task).await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error sending task to worker: {:?}", e);
                 }
             },
             None => {
-                self.waiters.push(worker);
+                self.waiters.push(request);
             }
         }
     }
 }
 
 /// A message that a worker thread sends to the dispatcher to request a task
+/// # Members
+/// - reply_to: The receiver to send the task to, this is the worker thread
 #[derive(Debug)]
 pub(super) struct TaskRequestMessage {
     reply_to: Box<dyn Receiver<TaskMessage>>,
@@ -114,6 +128,8 @@ impl TaskRequestMessage {
         TaskRequestMessage { reply_to }
     }
 }
+
+// ============= Component implementation =============
 
 #[async_trait]
 impl Component for Dispatcher {
