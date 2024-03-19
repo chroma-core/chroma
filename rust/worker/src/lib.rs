@@ -3,6 +3,7 @@ mod blockstore;
 mod compactor;
 mod config;
 mod errors;
+mod execution;
 mod index;
 mod ingest;
 mod log;
