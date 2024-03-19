@@ -134,8 +134,9 @@ impl Scheduler {
     }
 }
 
+#[async_trait]
 impl Component for Scheduler {
-    fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.scheduler.schedule_interval(
             ctx.sender.clone(),
             ScheduleMessage {},
@@ -186,7 +187,7 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub(crate) struct TestSysDb {
         collections: HashMap<Uuid, Collection>,
     }

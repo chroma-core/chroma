@@ -9,6 +9,7 @@ use crate::types::EmbeddingRecord;
 use crate::types::EmbeddingRecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use thiserror::Error;
 
 // CollectionInfo is a struct that contains information about a collection for the
@@ -30,7 +31,7 @@ pub(crate) struct CollectionRecord {
 }
 
 #[async_trait]
-pub(crate) trait Log: Send + Sync + LogClone {
+pub(crate) trait Log: Send + Sync + LogClone + Debug {
     async fn read(
         &mut self,
         collection_id: String,
@@ -62,7 +63,7 @@ impl Clone for Box<dyn Log> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct GrpcLog {
     client: LogServiceClient<tonic::transport::Channel>,
 }
@@ -222,8 +223,19 @@ pub(crate) struct LogRecord {
     pub(crate) record: Box<EmbeddingRecord>,
 }
 
+impl Debug for LogRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogRecord")
+            .field("collection_id", &self.collection_id)
+            .field("log_id", &self.log_id)
+            .field("log_id_ts", &self.log_id_ts)
+            .field("record", &self.record)
+            .finish()
+    }
+}
+
 // This is used for testing only
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
     logs: HashMap<String, Vec<Box<LogRecord>>>,
 }
