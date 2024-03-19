@@ -8,6 +8,21 @@ use async_trait::async_trait;
 use std::fmt::{self, Debug, Formatter};
 use uuid::Uuid;
 
+/**  The state of the orchestrator.
+In chroma, we have a relatively fixed number of query plans that we can execute. Rather
+than a flexible state machine abstraction, we just manually define the states that we
+expect to encounter for a given query plan. This is a bit more rigid, but it's also simpler and easier to
+understand. We can always add more abstraction later if we need it.
+```
+
+                               ┌───► Brute Force ─────┐
+                               │                      │
+  Pending ─► PullLogs ─► Dedupe│                      ├─► MergeResults ─► Finished
+                               │                      │
+                               └───► HNSW ────────────┘
+
+```
+*/
 #[derive(Debug)]
 enum ExecutionState {
     Pending,
@@ -18,6 +33,7 @@ enum ExecutionState {
     Finished,
 }
 
+#[derive(Debug)]
 struct HnswQueryOrchestrator {
     state: ExecutionState,
     // Query state
@@ -28,18 +44,6 @@ struct HnswQueryOrchestrator {
     // Services
     log: Box<dyn Log>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
-}
-
-impl Debug for HnswQueryOrchestrator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HnswQueryOrchestrator")
-            .field("state", &self.state)
-            .field("query_vectors", &self.query_vectors)
-            .field("k", &self.k)
-            .field("include_embeddings", &self.include_embeddings)
-            .field("segment_id", &self.segment_id)
-            .finish()
-    }
 }
 
 impl HnswQueryOrchestrator {
@@ -71,12 +75,16 @@ impl Component for HnswQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         self.state = ExecutionState::PullLogs;
-        // TODO: move box into constructor
-        let operator = Box::new(PullLogsOperator::new(self.log.clone()));
+        let operator = PullLogsOperator::new(self.log.clone());
         // TODO: segment id vs collection id
         let input = PullLogsInput::new(self.segment_id, 0, 100);
         let task = wrap(operator, input, ctx.sender.as_receiver());
-        // self.dispatcher.send(task).await;
+        match self.dispatcher.send(task).await {
+            Ok(_) => (),
+            Err(e) => {
+                // TODO: log an error
+            }
+        }
     }
 }
 
@@ -88,31 +96,6 @@ impl Handler<PullLogsOutput> for HnswQueryOrchestrator {
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         self.state = ExecutionState::Dedupe;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_on_start() {
-        let system = crate::system::System::new();
-        let log = Box::new(crate::log::log::InMemoryLog::new());
-        // reply_channel = chan();
-        // let orchestrator = HnswQueryOrchestrator::new(
-        //     vec![vec![1.0, 2.0, 3.0]],
-        //     10,
-        //     true,
-        //     Uuid::new_v4(),
-        //     log,
-        //     dispatcher,
-        //     reply_channel,
-        // );
-        // let handle = system.start_component(orchestrator);
-        // let msg = StartMessage { reply_chan : reply_chan}
-        // let res = handler.send(msg).await();
-        // handle.cancel();
-        // handle.join();
+        // TODO: implement the remaining state transitions and operators
     }
 }

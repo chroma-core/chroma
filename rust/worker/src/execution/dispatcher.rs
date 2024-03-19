@@ -1,22 +1,117 @@
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
-use crate::system::{Component, ComponentContext, Handler, Receiver};
+use crate::system::{Component, ComponentContext, Handler, Receiver, System};
 use async_trait::async_trait;
 use std::fmt::Debug;
 
+/// The dispatcher is responsible for distributing tasks to worker threads.
+/// It is a component that receives tasks and distributes them to worker threads.
+/**```
+                            ┌─────────────────────────────────────────┐
+                            │                                         │
+                            │                                         │
+                            │                                         │
+    TaskMessage ───────────►├─────┐          Dispatcher               │
+                            │     ▼                                   │
+                            │    ┌┬───────────────────────────────┐   │
+                            │    │┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼┼│   │
+                            └────┴──────────────┴─────────────────┴───┘
+                                                ▲
+                                                │     │
+                                                │     │
+                           TaskRequestMessage   │     │  TaskMessage
+                                                │     │
+                                                │     │
+                                                      ▼
+                     ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
+                     │                │   │                │   │                │
+                     │                │   │                │   │                │
+                     │                │   │                │   │                │
+                     │     Worker     │   │     Worker     │   │     Worker     │
+                     │                │   │                │   │                │
+                     │                │   │                │   │                │
+                     │                │   │                │   │                │
+                     └────────────────┘   └────────────────┘   └────────────────┘
+```
+# Implementation notes
+- The dispatcher has a queue of tasks that it distributes to worker threads
+- A worker thread sends a TaskRequestMessage to the dispatcher when it is ready for a new task
+- If not task is available for the worker thread, the dispatcher will place that worker's reciever
+    in a queue and send a task to the worker when it recieves another one
+*/
 #[derive(Debug)]
 struct Dispatcher {
     task_queue: Vec<TaskMessage>,
-    waiter_channels: Vec<TaskRequestMessage>,
+    waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
 }
 
 impl Dispatcher {
+    /// Create a new dispatcher
+    /// # Parameters
+    /// - n_worker_threads: The number of worker threads to use
     pub fn new(n_worker_threads: usize) -> Self {
         Dispatcher {
             task_queue: Vec::new(),
-            waiter_channels: Vec::new(),
+            waiters: Vec::new(),
             n_worker_threads,
         }
+    }
+
+    fn spawn_workers(
+        &self,
+        system: &mut System,
+        self_receiver: Box<dyn Receiver<TaskRequestMessage>>,
+    ) {
+        for _ in 0..self.n_worker_threads {
+            let worker = WorkerThread::new(self_receiver.clone());
+            system.start_component(worker);
+        }
+    }
+
+    async fn enqueue_task(&mut self, task: TaskMessage) {
+        // If a worker is waiting for a task, send it to the worker in FIFO order
+        // Otherwise, add it to the task queue
+        match self.waiters.pop() {
+            Some(channel) => match channel.reply_to.send(task).await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error sending task to worker: {:?}", e);
+                }
+            },
+            None => {
+                self.task_queue.push(task);
+            }
+        }
+    }
+
+    async fn handle_work_request(&mut self, worker: TaskRequestMessage) {
+        match self.task_queue.pop() {
+            Some(task) => match worker.reply_to.send(task).await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error sending task to worker: {:?}", e);
+                }
+            },
+            None => {
+                self.waiters.push(worker);
+            }
+        }
+    }
+}
+
+/// A message that a worker thread sends to the dispatcher to request a task
+#[derive(Debug)]
+pub(super) struct TaskRequestMessage {
+    reply_to: Box<dyn Receiver<TaskMessage>>,
+}
+
+impl TaskRequestMessage {
+    /// Create a new TaskRequestMessage
+    /// # Parameters
+    /// - reply_to: The receiver to send the task to, this is the worker thread
+    /// that is requesting the task
+    pub(super) fn new(reply_to: Box<dyn Receiver<TaskMessage>>) -> Self {
+        TaskRequestMessage { reply_to }
     }
 }
 
@@ -27,39 +122,14 @@ impl Component for Dispatcher {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        for _ in 0..self.n_worker_threads {
-            let worker = WorkerThread::new(ctx.sender.as_receiver());
-            // TODO: it is a bit ugly that we have to clone system, but its cheap to clone
-            // we can make this better later
-            ctx.system.clone().start_component(worker);
-        }
+        self.spawn_workers(&mut ctx.system.clone(), ctx.sender.as_receiver());
     }
 }
 
-#[derive(Debug)]
-pub(super) struct TaskRequestMessage {
-    reply_to: Box<dyn Receiver<TaskMessage>>,
-}
-
-impl TaskRequestMessage {
-    pub(super) fn new(reply_to: Box<dyn Receiver<TaskMessage>>) -> Self {
-        TaskRequestMessage { reply_to }
-    }
-}
-
-// Orchestrator will send task here
 #[async_trait]
 impl Handler<TaskMessage> for Dispatcher {
     async fn handle(&mut self, task: TaskMessage, _ctx: &ComponentContext<Dispatcher>) {
-        self.task_queue.push(task);
-        if let Some(channel) = self.waiter_channels.pop() {
-            match self.task_queue.pop() {
-                Some(task) => {
-                    channel.reply_to.send(task).await;
-                }
-                None => {}
-            }
-        }
+        self.enqueue_task(task).await;
     }
 }
 
@@ -67,14 +137,7 @@ impl Handler<TaskMessage> for Dispatcher {
 #[async_trait]
 impl Handler<TaskRequestMessage> for Dispatcher {
     async fn handle(&mut self, message: TaskRequestMessage, _ctx: &ComponentContext<Dispatcher>) {
-        match self.task_queue.pop() {
-            Some(task) => {
-                message.reply_to.send(task).await;
-            }
-            None => {
-                self.waiter_channels.push(message);
-            }
-        }
+        self.handle_work_request(message).await;
     }
 }
 
