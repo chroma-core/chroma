@@ -47,7 +47,7 @@ where
 {
     async fn run(&self) {
         let output = self.operator.run(&self.input).await;
-        let res = self.reply_channel.send(output);
+        let res = self.reply_channel.send(output).await;
         // TODO: if this errors, it means the caller was dropped
     }
 }

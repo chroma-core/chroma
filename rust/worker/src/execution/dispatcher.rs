@@ -166,13 +166,28 @@ impl Handler<TaskRequestMessage> for Dispatcher {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        env::current_dir,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
+
     use super::*;
     use crate::{
         execution::operator::{wrap, Operator},
         system::System,
     };
 
-    const MOCK_OPERATOR_SLEEP_DURATION_MS: u64 = 1000;
+    // Create a component that will schedule DISPATCH_COUNT invocations of the MockOperator
+    // on an interval of DISPATCH_FREQUENCY_MS.
+    // Each invocation will sleep for MOCK_OPERATOR_SLEEP_DURATION_MS to simulate work
+    // Use THREAD_COUNT worker threads
+    const MOCK_OPERATOR_SLEEP_DURATION_MS: u64 = 100;
+    const DISPATCH_FREQUENCY_MS: u64 = 5;
+    const DISPATCH_COUNT: usize = 50;
+    const THREAD_COUNT: usize = 4;
 
     #[derive(Debug)]
     struct MockOperator {}
@@ -188,12 +203,10 @@ mod tests {
         }
     }
 
-    const DISPATCH_FREQUENCY_MS: u64 = 100;
-    const DISPATCH_COUNT: usize = 20;
-
     #[derive(Debug)]
     struct MockDispatchUser {
         pub dispatcher: Box<dyn Receiver<TaskMessage>>,
+        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
     }
     #[async_trait]
     impl Component for MockDispatchUser {
@@ -215,14 +228,16 @@ mod tests {
     }
     #[async_trait]
     impl Handler<String> for MockDispatchUser {
-        async fn handle(&mut self, message: String, _ctx: &ComponentContext<MockDispatchUser>) {
-            println!(
-                "Received message: {} on thread {:?}",
-                message,
-                std::thread::current().id()
-            );
+        async fn handle(&mut self, message: String, ctx: &ComponentContext<MockDispatchUser>) {
+            self.counter.fetch_add(1, Ordering::SeqCst);
+            let curr_count = self.counter.load(Ordering::SeqCst);
+            // Cancel self
+            if curr_count == DISPATCH_COUNT {
+                ctx.cancellation_token.cancel();
+            }
         }
     }
+
     #[async_trait]
     impl Handler<()> for MockDispatchUser {
         async fn handle(&mut self, message: (), ctx: &ComponentContext<MockDispatchUser>) {
@@ -234,15 +249,19 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher() {
         let mut system = System::new();
-        let dispatcher = Dispatcher::new(24);
+        let dispatcher = Dispatcher::new(THREAD_COUNT);
         let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
         let dispatch_user = MockDispatchUser {
             dispatcher: dispatcher_handle.receiver(),
+            counter: counter.clone(),
         };
-        let dispatch_user_handle = system.start_component(dispatch_user);
+        let mut dispatch_user_handle = system.start_component(dispatch_user);
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
-        // sleep for a bit to allow the dispatcher to process the message, TODO: change to a join that waits for all messages to be consumed
-        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+        // Join on the dispatch user, since it will kill itself after DISPATCH_COUNT messages
+        dispatch_user_handle.join().await;
+        // We should have received DISPATCH_COUNT messages
+        assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
     }
 }
