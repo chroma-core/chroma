@@ -13,6 +13,7 @@ import (
 //go:generate mockery --name=Catalog
 type Catalog interface {
 	ResetState(ctx context.Context) error
+	CreateDefaultTenantAndDatabase(ctx context.Context, tenant string, database string) (string, error)
 	CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, error)
 	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, databaseName string) ([]*model.Collection, error)
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error

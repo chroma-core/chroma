@@ -64,33 +64,54 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			return err
 		}
 
-		// TODO: default database and tenant should be pre-defined object
-		err = tc.metaDomain.DatabaseDb(txCtx).Insert(&dbmodel.Database{
-			ID:       types.NilUniqueID().String(),
-			Name:     common.DefaultDatabase,
-			TenantID: common.DefaultTenant,
-		})
-		if err != nil {
-			log.Error("error inserting default database", zap.Error(err))
-			return err
-		}
-
 		err = tc.metaDomain.TenantDb(txCtx).DeleteAll()
 		if err != nil {
 			log.Error("error reset tenant db", zap.Error(err))
 			return err
 		}
-		err = tc.metaDomain.TenantDb(txCtx).Insert(&dbmodel.Tenant{
-			ID:                 common.DefaultTenant,
-			LastCompactionTime: time.Now().Unix(),
-		})
+
+		_, err = tc.CreateDefaultTenantAndDatabase(txCtx, common.DefaultTenant, common.DefaultDatabase)
 		if err != nil {
-			log.Error("error inserting default tenant", zap.Error(err))
+			log.Error("error create default tenant and database", zap.Error(err))
 			return err
 		}
 
 		return nil
 	})
+}
+
+func (tc *Catalog) CreateDefaultTenantAndDatabase(ctx context.Context, tenantName string, databaseName string) (string, error) {
+	var createdDatabaseId string
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		log.Info("create default tenant and database", zap.String("tenant", tenantName), zap.String("database", databaseName))
+		createTenant := &model.CreateTenant{
+			Name: tenantName,
+			Ts:   time.Now().Unix(),
+		}
+		tenant, err := tc.CreateTenant(ctx, createTenant, createTenant.Ts)
+		if err != nil {
+			return err
+		}
+
+		databaseID := types.NewUniqueID().String()
+		createDatabase := &model.CreateDatabase{
+			ID:     databaseID,
+			Name:   databaseName,
+			Tenant: tenant.Name,
+			Ts:     time.Now().Unix(),
+		}
+		database, err := tc.CreateDatabase(ctx, createDatabase, createDatabase.Ts)
+		if err != nil {
+			return err
+		}
+		createdDatabaseId = database.ID
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+	return createdDatabaseId, nil
 }
 
 func (tc *Catalog) CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase, ts types.Timestamp) (*model.Database, error) {
