@@ -3,6 +3,10 @@ use crate::system::{Component, ComponentContext, ComponentRuntime, Handler, Rece
 use async_trait::async_trait;
 use std::fmt::{Debug, Formatter, Result};
 
+/// A worker thread is responsible for executing tasks
+/// It sends requests to the dispatcher for new tasks.
+/// # Implementation notes
+/// - The actor loop will block until work is available
 pub(super) struct WorkerThread {
     dispatcher: Box<dyn Receiver<TaskRequestMessage>>,
 }
