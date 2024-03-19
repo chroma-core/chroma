@@ -1,10 +1,16 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
+export enum InputType {
+  DOCUMENT = "document",
+  QUERY = "query"
+}
+
 export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
   private model_name: string;
   private api_url: string;
   private batch_size: number;
   private truncation?: boolean;
+  private input_type?: InputType;
   private headers: { [key: string]: string };
 
   constructor({
@@ -12,11 +18,13 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
     model_name,
     batch_size,
     truncation,
+    input_type,
   }: {
     voyageai_api_key: string;
     model_name: string;
     batch_size?: number;
     truncation?: boolean;
+    input_type?: InputType;
   }) {
     this.api_url = "https://api.voyageai.com/v1/embeddings";
     this.headers = {
@@ -26,6 +34,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
 
     this.model_name = model_name;
     this.truncation = truncation;
+    this.input_type = input_type;
     if (batch_size) {
       this.batch_size = batch_size;
     } else {
@@ -50,6 +59,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
             input: texts.slice(index, index + this.batch_size),
             model: this.model_name,
             truncation: this.truncation,
+            input_type: this.input_type,
           }),
         });
 

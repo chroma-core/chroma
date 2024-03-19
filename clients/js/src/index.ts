@@ -11,7 +11,7 @@ export { DefaultEmbeddingFunction } from './embeddings/DefaultEmbeddingFunction'
 export { HuggingFaceEmbeddingServerFunction } from './embeddings/HuggingFaceEmbeddingServerFunction';
 export { JinaEmbeddingFunction } from './embeddings/JinaEmbeddingFunction';
 export { GoogleGenerativeAiEmbeddingFunction } from './embeddings/GoogleGeminiEmbeddingFunction';
-export { VoyageAIEmbeddingFunction } from './embeddings/VoyageAIEmbeddingFunction';
+export { VoyageAIEmbeddingFunction, InputType } from './embeddings/VoyageAIEmbeddingFunction';
 
 export {
     IncludeEnum,

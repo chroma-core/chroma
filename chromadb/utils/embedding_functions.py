@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from enum import Enum
 from functools import cached_property
 
 from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
@@ -236,12 +237,17 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
+    class InputType(Enum):
+        DOCUMENT = "document"
+        QUERY = "query"
+
     def __init__(
             self,
             api_key: str,
             model_name: str,
             embed_batch_size: Optional[int] = None,
             truncation: Optional[bool] = None,
+            input_type: Optional[InputType] = None,
             show_progress_bar: Optional[bool] = False,
     ):
         try:
@@ -259,6 +265,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self._batch_size = embed_batch_size
         self._truncation = truncation
         self._show_progress_bar = show_progress_bar
+        self._input_type = input_type.value
 
     def __call__(self, input: Documents) -> Embeddings:
         # Call VoyageAI Embedding API for each document.
@@ -283,6 +290,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     input[i : i + self._batch_size],
                     model=self._model_name,
                     truncation=self._truncation,
+                    input_type=self._input_type
                 ).embeddings
             )
 
