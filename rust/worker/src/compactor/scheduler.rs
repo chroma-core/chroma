@@ -187,7 +187,7 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub(crate) struct TestSysDb {
         collections: HashMap<Uuid, Collection>,
     }

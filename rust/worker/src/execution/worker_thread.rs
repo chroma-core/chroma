@@ -46,6 +46,6 @@ impl Handler<TaskMessage> for WorkerThread {
         task.run().await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.sender.as_receiver());
         let res = self.dispatcher.send(req).await;
-        // TODO: probably schedule a retry if res is an error
+        // TODO: task run should be able to error and we should send it as part of the result
     }
 }

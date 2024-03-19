@@ -1,5 +1,6 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
+use crate::sysdb::sysdb::SysDb;
 use crate::{
     log::log::Log,
     system::{Component, Handler, Receiver},
@@ -43,6 +44,7 @@ struct HnswQueryOrchestrator {
     segment_id: Uuid,
     // Services
     log: Box<dyn Log>,
+    sysdb: Box<dyn SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
 }
 
@@ -53,6 +55,7 @@ impl HnswQueryOrchestrator {
         include_embeddings: bool,
         segment_id: Uuid,
         log: Box<dyn Log>,
+        sysdb: Box<dyn SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
     ) -> Self {
         HnswQueryOrchestrator {
@@ -62,10 +65,52 @@ impl HnswQueryOrchestrator {
             include_embeddings,
             segment_id,
             log,
+            sysdb,
             dispatcher,
         }
     }
+
+    /// Get the collection id for a segment id.
+    /// TODO: This can be cached
+    async fn get_collection_id_for_segment_id(&mut self, segment_id: Uuid) -> Option<Uuid> {
+        let segments = self
+            .sysdb
+            .get_segments(Some(segment_id), None, None, None, None)
+            .await;
+        match segments {
+            Ok(segments) => match segments.get(0) {
+                Some(segment) => segment.collection,
+                None => None,
+            },
+            Err(e) => {
+                // Log an error and return
+                return None;
+            }
+        }
+    }
+
+    async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsOutput>>) {
+        self.state = ExecutionState::PullLogs;
+        let operator = PullLogsOperator::new(self.log.clone());
+        let collection_id = match self.get_collection_id_for_segment_id(self.segment_id).await {
+            Some(collection_id) => collection_id,
+            None => {
+                // Log an error and reply + return
+                return;
+            }
+        };
+        let input = PullLogsInput::new(collection_id, 0, 100);
+        let task = wrap(operator, input, self_address);
+        match self.dispatcher.send(task).await {
+            Ok(_) => (),
+            Err(e) => {
+                // TODO: log an error and reply to caller
+            }
+        }
+    }
 }
+
+// ============== Component Implementation ==============
 
 #[async_trait]
 impl Component for HnswQueryOrchestrator {
@@ -74,19 +119,11 @@ impl Component for HnswQueryOrchestrator {
     }
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
-        self.state = ExecutionState::PullLogs;
-        let operator = PullLogsOperator::new(self.log.clone());
-        // TODO: segment id vs collection id
-        let input = PullLogsInput::new(self.segment_id, 0, 100);
-        let task = wrap(operator, input, ctx.sender.as_receiver());
-        match self.dispatcher.send(task).await {
-            Ok(_) => (),
-            Err(e) => {
-                // TODO: log an error
-            }
-        }
+        self.pull_logs(ctx.sender.as_receiver()).await;
     }
 }
+
+// ============== Handlers ==============
 
 #[async_trait]
 impl Handler<PullLogsOutput> for HnswQueryOrchestrator {

@@ -36,10 +36,10 @@ use std::fmt::Debug;
 ## Implementation notes
 - The dispatcher has a queue of tasks that it distributes to worker threads
 - A worker thread sends a TaskRequestMessage to the dispatcher when it is ready for a new task
-- If not task is available for the worker thread, the dispatcher will place that worker's reciever
+- If no task is available for the worker thread, the dispatcher will place that worker's reciever
     in a queue and send a task to the worker when it recieves another one
 - The reason to introduce this abstraction is to allow us to control fairness and dynamically adjust
-  query system utilization. It also makes mechanisms like pausing/stopping work easier.
+  system utilization. It also makes mechanisms like pausing/stopping work easier.
   It would have likely been more performant to use the Tokio MT runtime, but we chose to use
   this abstraction to grant us flexibility. We can always switch to Tokio MT later if we need to,
   or make this dispatcher much more performant through implementing memory-awareness, task-batches,
