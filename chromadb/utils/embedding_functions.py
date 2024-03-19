@@ -168,6 +168,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_key=api_key,
                     api_version=api_version,
                     azure_endpoint=api_base,
+                    azure_deployment=deployment_id,
                     default_headers=default_headers,
                 ).embeddings
             else:
