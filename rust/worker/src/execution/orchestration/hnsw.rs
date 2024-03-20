@@ -1,6 +1,8 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
 use crate::errors::ChromaError;
+use crate::execution::operators::pull_log::PullLogsResult;
+use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::System;
 use crate::types::VectorQueryResult;
@@ -102,7 +104,7 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsOutput>>) {
+    async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
         let collection_id = match self.get_collection_id_for_segment_id(self.segment_id).await {
@@ -152,10 +154,10 @@ impl Component for HnswQueryOrchestrator {
 // ============== Handlers ==============
 
 #[async_trait]
-impl Handler<PullLogsOutput> for HnswQueryOrchestrator {
+impl Handler<PullLogsResult> for HnswQueryOrchestrator {
     async fn handle(
         &mut self,
-        message: PullLogsOutput,
+        message: PullLogsResult,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         self.state = ExecutionState::Dedupe;
@@ -163,17 +165,25 @@ impl Handler<PullLogsOutput> for HnswQueryOrchestrator {
         // TODO: implement the remaining state transitions and operators
         // This is an example of the final state transition and result
 
-        match self.result_channel.take() {
-            Some(tx) => {
-                let _ = tx.send(Ok(vec![vec![VectorQueryResult {
+        let result_channel = match self.result_channel.take() {
+            Some(tx) => tx,
+            None => {
+                // Log an error
+                return;
+            }
+        };
+
+        match message {
+            Ok(logs) => {
+                let _ = result_channel.send(Ok(vec![vec![VectorQueryResult {
                     id: "abc".to_string(),
                     seq_id: BigInt::from(0),
                     distance: 0.0,
                     vector: Some(vec![0.0, 0.0, 0.0]),
                 }]]));
             }
-            None => {
-                // Log an error
+            Err(e) => {
+                let _ = result_channel.send(Err(Box::new(e)));
             }
         }
     }

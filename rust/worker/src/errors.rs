@@ -1,7 +1,6 @@
 // Defines 17 standard error codes based on the error codes defined in the
 // gRPC spec. https://grpc.github.io/grpc/core/md_doc_statuscodes.html
 // Custom errors can use these codes in order to allow for generic handling
-
 use std::error::Error;
 
 #[derive(PartialEq, Debug)]
