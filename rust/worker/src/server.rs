@@ -178,23 +178,19 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             }
         };
 
-        let orchestrator = HnswQueryOrchestrator::new(
-            query_vectors,
-            request.k,
-            request.include_embeddings,
-            segment_uuid,
-            self.log.clone(),
-            self.sysdb.clone(),
-            dispatcher.clone(),
-        );
-
         match self.system {
             Some(ref system) => {
-                let handle = system.start_component(orchestrator);
-                // TODO:
-                // - await for reply here
-                // - cancel orchestrator
-                // - return results
+                let orchestrator = HnswQueryOrchestrator::new(
+                    system.clone(),
+                    query_vectors,
+                    request.k,
+                    request.include_embeddings,
+                    segment_uuid,
+                    self.log.clone(),
+                    self.sysdb.clone(),
+                    dispatcher.clone(),
+                );
+                let result: String = orchestrator.run().await;
             }
             None => {
                 return Err(Status::internal("No system found"));

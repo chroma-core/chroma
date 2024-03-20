@@ -1,12 +1,14 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
 use crate::sysdb::sysdb::SysDb;
+use crate::system::System;
 use crate::{
     log::log::Log,
     system::{Component, Handler, Receiver},
 };
 use async_trait::async_trait;
 use std::fmt::{self, Debug, Formatter};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -37,6 +39,8 @@ enum ExecutionState {
 #[derive(Debug)]
 pub(crate) struct HnswQueryOrchestrator {
     state: ExecutionState,
+    // Component Execution
+    system: System,
     // Query state
     query_vectors: Vec<Vec<f32>>,
     k: i32,
@@ -46,10 +50,13 @@ pub(crate) struct HnswQueryOrchestrator {
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
+    // Result container. TODO: This should be VectorQueryResult
+    result_channel: Option<tokio::sync::oneshot::Sender<String>>,
 }
 
 impl HnswQueryOrchestrator {
     pub(crate) fn new(
+        system: System,
         query_vectors: Vec<Vec<f32>>,
         k: i32,
         include_embeddings: bool,
@@ -60,6 +67,7 @@ impl HnswQueryOrchestrator {
     ) -> Self {
         HnswQueryOrchestrator {
             state: ExecutionState::Pending,
+            system,
             query_vectors,
             k,
             include_embeddings,
@@ -67,6 +75,7 @@ impl HnswQueryOrchestrator {
             log,
             sysdb,
             dispatcher,
+            result_channel: None,
         }
     }
 
@@ -108,6 +117,20 @@ impl HnswQueryOrchestrator {
             }
         }
     }
+
+    ///  Run the orchestrator and return the result.
+    ///  # Note
+    ///  Use this over spawning the component directly. This method will start the component and
+    /// wait for it to finish before returning the result.
+    /// RESUME POINT: RETURN THE CORRECT TYPE HERE
+    pub(crate) async fn run(mut self) -> String {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.result_channel = Some(tx);
+        let mut handle = self.system.clone().start_component(self);
+        let result = rx.await;
+        handle.stop();
+        result.unwrap()
+    }
 }
 
 // ============== Component Implementation ==============
@@ -134,5 +157,6 @@ impl Handler<PullLogsOutput> for HnswQueryOrchestrator {
     ) {
         self.state = ExecutionState::Dedupe;
         // TODO: implement the remaining state transitions and operators
+        // The query orchestrator kills itself in the last state
     }
 }
