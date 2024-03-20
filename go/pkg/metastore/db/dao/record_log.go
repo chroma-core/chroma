@@ -3,17 +3,20 @@ package dao
 import (
 	"database/sql"
 	"errors"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"time"
 )
 
 type recordLogDb struct {
 	db *gorm.DB
 }
+
+var _ dbmodel.IRecordLogDb = &recordLogDb{}
 
 func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]byte) (int, error) {
 	err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -58,18 +61,27 @@ func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]b
 	return len(recordsContent), nil
 }
 
-func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error) {
+func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize int, endTimestamp int64) ([]*dbmodel.RecordLog, error) {
 	var collectionIDStr = types.FromUniqueID(collectionID)
 	log.Info("PullLogs",
 		zap.String("collectionID", *collectionIDStr),
 		zap.Int64("ID", id),
-		zap.Int("batch_size", batchSize))
+		zap.Int("batch_size", batchSize),
+		zap.Int64("endTimestamp", endTimestamp))
 
 	var recordLogs []*dbmodel.RecordLog
-	result := s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Limit(batchSize).Find(&recordLogs)
-	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		log.Error("PullLogs error", zap.Error(result.Error))
-		return nil, result.Error
+	if endTimestamp > 0 {
+		result := s.db.Where("collection_id = ? AND id >= ? AND timestamp <= ?", collectionIDStr, id, endTimestamp).Order("id").Limit(batchSize).Find(&recordLogs)
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			log.Error("PullLogs error", zap.Error(result.Error))
+			return nil, result.Error
+		}
+	} else {
+		result := s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Limit(batchSize).Find(&recordLogs)
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			log.Error("PullLogs error", zap.Error(result.Error))
+			return nil, result.Error
+		}
 	}
 	log.Info("PullLogs",
 		zap.String("collectionID", *collectionIDStr),
