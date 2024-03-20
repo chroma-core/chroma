@@ -3,7 +3,7 @@ package logservice
 import (
 	"context"
 	"github.com/chroma-core/chroma/go/pkg/common"
-	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 )
 

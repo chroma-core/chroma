@@ -3,13 +3,20 @@ package dao
 import (
 	"database/sql"
 	"errors"
-	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"time"
 )
+
+//go:generate mockery --name=IRecordLogDb
+type IRecordLogDb interface {
+	PushLogs(collectionID types.UniqueID, recordsContent [][]byte) (int, error)
+	PullLogs(collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error)
+	GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error)
+}
 
 type recordLogDb struct {
 	db *gorm.DB
@@ -49,6 +56,17 @@ func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]b
 			tx.Rollback()
 			return err
 		}
+		if lastLogId == 0 {
+			// Check if collection position exists
+			var collectionPosition dbmodel.CollectionPosition
+			err = tx.Where("id = ?", collectionIDStr).Find(&collectionPosition).Error
+			if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+				tx.Create(&dbmodel.CollectionPosition{
+					ID:          *collectionIDStr,
+					LogPosition: 0,
+				})
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -85,7 +103,7 @@ func (s *recordLogDb) GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error)
 	var rawSql = `
 	    with summary as (
 		  select r.collection_id, r.id, r.timestamp, row_number() over(partition by r.collection_id order by r.id) as rank
-		  from record_logs r, collections c
+		  from record_logs r, collection_position c
 		  where r.collection_id = c.id
 		  and r.id>c.log_position
 		)

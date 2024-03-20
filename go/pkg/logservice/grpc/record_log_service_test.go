@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/logservice/testutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
-	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -31,7 +31,7 @@ type RecordLogServiceTestSuite struct {
 
 func (suite *RecordLogServiceTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	// setup server and db
+	// setup server and dbmodel
 	s, _ := New(Config{
 		DBProvider: "postgres",
 		DBConfig:   dbcore.GetDBConfigForTesting(),

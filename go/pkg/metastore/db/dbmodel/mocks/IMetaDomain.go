@@ -4,6 +4,7 @@ package mocks
 
 import (
 	context "context"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 
 	dbmodel "github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	mock "github.com/stretchr/testify/mock"

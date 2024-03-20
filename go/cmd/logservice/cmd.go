@@ -28,14 +28,14 @@ func init() {
 	Cmd.Flags().BoolVar(&conf.StartGrpc, "start-grpc", true, "start grpc server or not")
 
 	// DB provider
-	Cmd.Flags().StringVar(&conf.DBProvider, "db-provider", "postgres", "DB provider")
+	Cmd.Flags().StringVar(&conf.DBProvider, "dbmodel-provider", "postgres", "DB provider")
 
 	// DB dev
-	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-host", "postgres", "DB host")
-	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "DB port")
-	Cmd.Flags().StringVar(&conf.DBConfig.Username, "db-user", "chroma", "DB user")
-	Cmd.Flags().StringVar(&conf.DBConfig.Password, "db-password", "chroma", "DB password")
-	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "chroma", "DB name")
+	Cmd.Flags().StringVar(&conf.DBConfig.Address, "dbmodel-host", "postgres", "DB host")
+	Cmd.Flags().IntVar(&conf.DBConfig.Port, "dbmodel-port", 5432, "DB port")
+	Cmd.Flags().StringVar(&conf.DBConfig.Username, "dbmodel-user", "chroma", "DB user")
+	Cmd.Flags().StringVar(&conf.DBConfig.Password, "dbmodel-password", "chroma", "DB password")
+	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "dbmodel-name", "chroma", "DB name")
 	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 }
 

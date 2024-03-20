@@ -1,9 +1,9 @@
 package dao
 
 import (
+	dbcore2 "github.com/chroma-core/chroma/go/pkg/logservice/db/dbcore"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/logservice/testutils"
-	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
-	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/assert"
@@ -24,7 +24,9 @@ type RecordLogDbTestSuite struct {
 
 func (suite *RecordLogDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	var err error
+	suite.db, err = dbcore2.ConfigDatabaseForTesting()
+	assert.NoError(suite.t, err)
 	suite.Db = &recordLogDb{
 		db: suite.db,
 	}

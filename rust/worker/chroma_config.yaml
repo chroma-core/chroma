@@ -22,7 +22,7 @@ worker:
         queue_size: 10000
     sysdb:
         Grpc:
-            host: "coordinator.chroma"
+            host: "sysdb.chroma"
             port: 50051
     segment_manager:
         storage_path: "./tmp/segment_manager/"

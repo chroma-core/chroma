@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
-	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"

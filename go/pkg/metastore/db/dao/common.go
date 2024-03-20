@@ -2,6 +2,8 @@ package dao
 
 import (
 	"context"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dao"
+	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
 
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -42,5 +44,5 @@ func (*metaDomain) NotificationDb(ctx context.Context) dbmodel.INotificationDb {
 }
 
 func (*metaDomain) RecordLogDb(ctx context.Context) dbmodel.IRecordLogDb {
-	return &recordLogDb{dbcore.GetDB(ctx)}
+	return &dao.recordLogDb{dbcore.GetDB(ctx)}
 }

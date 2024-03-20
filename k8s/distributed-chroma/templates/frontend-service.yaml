@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend-server
+  name: frontend-service
   namespace: {{ .Values.namespace }}
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: frontend-server
+      app: frontend-service
   template:
     metadata:
       labels:
-        app: frontend-server
+        app: frontend-service
     spec:
       containers:
-        - name: frontend-server
-          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+        - name: frontend-service
+          image: "{{ .Values.frontendService.image.repository }}:{{ .Values.frontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -24,42 +24,42 @@ spec:
               mountPath: /test
           env:
             - name: IS_PERSISTENT
-              {{ .Values.frontend.isPersistent }}
+              {{ .Values.frontendService.isPersistent }}
             - name: CHROMA_PRODUCER_IMPL
-              {{ .Values.frontend.producerImpl }}
+              {{ .Values.frontendService.producerImpl }}
             - name: CHROMA_CONSUMER_IMPL
-              {{ .Values.frontend.consumerImpl }}
+              {{ .Values.frontendService.consumerImpl }}
             - name: CHROMA_SEGMENT_MANAGER_IMPL
-              {{ .Values.frontend.segmentManagerImpl }}
+              {{ .Values.frontendService.segmentManagerImpl }}
             - name: PULSAR_BROKER_URL
-              {{ .Values.frontend.pulsarBrokerUrl }}
+              {{ .Values.frontendService.pulsarBrokerUrl }}
             - name: PULSAR_BROKER_PORT
-              {{ .Values.frontend.pulsarBrokerPort }}
+              {{ .Values.frontendService.pulsarBrokerPort }}
             - name: PULSAR_ADMIN_PORT
-              {{ .Values.frontend.pulsarAdminPort }}
+              {{ .Values.frontendService.pulsarAdminPort }}
             - name: ALLOW_RESET
-              {{ .Values.frontend.allowReset }}
+              {{ .Values.frontendService.allowReset }}
             - name: CHROMA_SYSDB_IMPL
-              {{ .Values.frontend.sysdbImpl }}
+              {{ .Values.frontendService.sysdbImpl }}
             - name: CHROMA_SERVER_GRPC_PORT
-              {{ .Values.frontend.serverGrpcPort }}
+              {{ .Values.frontendService.serverGrpcPort }}
             - name: CHROMA_COORDINATOR_HOST
-              {{ .Values.frontend.coordinatorHost }}
+              {{ .Values.frontendService.coordinatorHost }}
             - name: CHROMA_SERVER_AUTH_PROVIDER
-              {{ .Values.frontend.authProvider }}
+              {{ .Values.frontendService.authProvider }}
             - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
-              {{ .Values.frontend.authCredentialsProvider }}
+              {{ .Values.frontendService.authCredentialsProvider }}
             - name: CHROMA_SERVER_AUTHZ_PROVIDER
-              {{ .Values.frontend.authzProvider }}
+              {{ .Values.frontendService.authzProvider }}
             - name: CHROMA_SERVER_AUTHZ_CONFIG_PROVIDER
-              {{ .Values.frontend.authzConfigProvider }}
+              {{ .Values.frontendService.authzConfigProvider }}
             - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
-              {{ .Values.frontend.memberlistProviderImpl }}
+              {{ .Values.frontendService.memberlistProviderImpl }}
             - name: CHROMA_LOGSERVICE_HOST
-              {{ .Values.frontend.logServiceHost }}
+              {{ .Values.frontendService.logServiceHost }}
             - name: CHROMA_LOGSERVICE_PORT
-              {{ .Values.frontend.logServicePort }}
-{{ .Values.frontend.otherEnvConfig | nindent 12 }}
+              {{ .Values.frontendService.logServicePort }}
+{{ .Values.frontendService.otherEnvConfig | nindent 12 }}
       volumes:
         - name: chroma
           emptyDir: {}
@@ -69,7 +69,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend-server
+  name: frontend-service
   namespace: {{ .Values.namespace }}
 spec:
   ports:
@@ -77,5 +77,5 @@ spec:
       port: 8000
       targetPort: 8000
   selector:
-    app: frontend-server
+    app: frontend-service
   type: ClusterIP

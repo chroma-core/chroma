@@ -5,7 +5,7 @@
 apiVersion: chroma.cluster/v1
 kind: MemberList
 metadata:
-  name: worker-memberlist
+  name: query-service-memberlist
   namespace: {{ .Values.namespace}}
 spec:
   members:
@@ -15,7 +15,7 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: worker-memberlist-readerwriter
+  name: query-service-memberlist-readerwriter
 rules:
 - apiGroups:
   - chroma.cluster
@@ -36,14 +36,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: coordinator-worker-memberlist-binding
+  name: sysdb-query-service-memberlist-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: worker-memberlist-readerwriter
+  name: query-service-memberlist-readerwriter
 subjects:
 - kind: ServiceAccount
-  name: coordinator-serviceaccount
+  name: sysdb-serviceaccount
   namespace: {{ .Values.namespace }}
 
 ---
@@ -51,16 +51,16 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  # Awkward name, but this lets the worker-serviceaccount read
-  # the worker-memberlist.
-  name: worker-worker-memberlist-binding
+  # Awkward name, but this lets the query-service-serviceaccount read
+  # the query-service-memberlist.
+  name: query-service-query-service-memberlist-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: worker-memberlist-readerwriter
+  name: query-service-memberlist-readerwriter
 subjects:
 - kind: ServiceAccount
-  name: worker-serviceaccount
+  name: query-service-serviceaccount
   namespace: {{ .Values.namespace }}
 
 ---
@@ -68,11 +68,11 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: worker-memberlist-readerwriter-binding
+  name: query-service-memberlist-readerwriter-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: worker-memberlist-readerwriter
+  name: query-service-memberlist-readerwriter
 subjects:
 - kind: ServiceAccount
   name: default
