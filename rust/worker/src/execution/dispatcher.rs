@@ -210,13 +210,14 @@ mod tests {
     struct MockOperator {}
     #[async_trait]
     impl Operator<f32, String> for MockOperator {
-        async fn run(&self, input: &f32) -> String {
+        type Error = ();
+        async fn run(&self, input: &f32) -> Result<String, Self::Error> {
             // sleep to simulate work
             tokio::time::sleep(tokio::time::Duration::from_millis(
                 MOCK_OPERATOR_SLEEP_DURATION_MS,
             ))
             .await;
-            input.to_string()
+            Ok(input.to_string())
         }
     }
 
@@ -244,8 +245,12 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<String> for MockDispatchUser {
-        async fn handle(&mut self, message: String, ctx: &ComponentContext<MockDispatchUser>) {
+    impl Handler<Result<String, ()>> for MockDispatchUser {
+        async fn handle(
+            &mut self,
+            message: Result<String, ()>,
+            ctx: &ComponentContext<MockDispatchUser>,
+        ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
             let curr_count = self.counter.load(Ordering::SeqCst);
             // Cancel self

@@ -1,4 +1,8 @@
-use crate::{execution::operator::Operator, log::log::Log, types::EmbeddingRecord};
+use crate::{
+    execution::operator::Operator,
+    log::log::{Log, PullLogsError},
+    types::EmbeddingRecord,
+};
 use async_trait::async_trait;
 use uuid::Uuid;
 
@@ -66,9 +70,12 @@ impl PullLogsOutput {
     }
 }
 
+pub type PullLogsResult = Result<PullLogsOutput, PullLogsError>;
+
 #[async_trait]
 impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
-    async fn run(&self, input: &PullLogsInput) -> PullLogsOutput {
+    type Error = PullLogsError;
+    async fn run(&self, input: &PullLogsInput) -> PullLogsResult {
         // We expect the log to be cheaply cloneable, we need to clone it since we need
         // a mutable reference to it. Not necessarily the best, but it works for our needs.
         let mut client_clone = self.client.clone();
@@ -79,8 +86,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
                 input.batch_size,
                 None,
             )
-            .await
-            .unwrap();
-        PullLogsOutput::new(logs)
+            .await?;
+        Ok(PullLogsOutput::new(logs))
     }
 }

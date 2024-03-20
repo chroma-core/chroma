@@ -10,20 +10,23 @@ where
     I: Send + Sync,
     O: Send + Sync,
 {
-    async fn run(&self, input: &I) -> O;
+    type Error;
+    // It would have been nice to do this with a default trait for result
+    // but that's not stable in rust yet.
+    async fn run(&self, input: &I) -> Result<O, Self::Error>;
 }
 
 /// A task is a wrapper around an operator and its input.
 /// It is a description of a function to be run.
 #[derive(Debug)]
-struct Task<Input, Output>
+struct Task<Input, Output, Error>
 where
     Input: Send + Sync + Debug,
     Output: Send + Sync + Debug,
 {
-    operator: Box<dyn Operator<Input, Output>>,
+    operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
-    reply_channel: Box<dyn Receiver<Output>>,
+    reply_channel: Box<dyn Receiver<Result<Output, Error>>>,
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
@@ -40,8 +43,9 @@ pub(crate) trait TaskWrapper: Send + Debug {
 /// erase the I, O types from the Task struct so that tasks can be
 /// stored in a homogenous queue regardless of their input and output types.
 #[async_trait]
-impl<Input, Output> TaskWrapper for Task<Input, Output>
+impl<Input, Output, Error> TaskWrapper for Task<Input, Output, Error>
 where
+    Error: Debug,
     Input: Send + Sync + Debug,
     Output: Send + Sync + Debug,
 {
@@ -53,12 +57,13 @@ where
 }
 
 /// Wrap an operator and its input into a task message.
-pub(super) fn wrap<Input, Output>(
-    operator: Box<dyn Operator<Input, Output>>,
+pub(super) fn wrap<Input, Output, Error>(
+    operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
-    reply_channel: Box<dyn Receiver<Output>>,
+    reply_channel: Box<dyn Receiver<Result<Output, Error>>>,
 ) -> TaskMessage
 where
+    Error: Debug + 'static,
     Input: Send + Sync + Debug + 'static,
     Output: Send + Sync + Debug + 'static,
 {
