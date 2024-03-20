@@ -25,7 +25,7 @@ mod chroma_proto {
 
 pub async fn query_service_entrypoint() {
     let config = config::RootConfig::load();
-
+    let system: system::System = system::System::new();
     let segment_manager = match segment::SegmentManager::try_from_config(&config.worker).await {
         Ok(segment_manager) => segment_manager,
         Err(err) => {
@@ -33,14 +33,15 @@ pub async fn query_service_entrypoint() {
             return;
         }
     };
-
-    let system: system::System = system::System::new();
-
-    // TODO: configurable
-    let dispatcher =
-        execution::dispatcher::Dispatcher::new(config.worker.num_indexing_threads as usize);
+    let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
+    {
+        Ok(dispatcher) => dispatcher,
+        Err(err) => {
+            println!("Failed to create dispatcher component: {:?}", err);
+            return;
+        }
+    };
     let mut dispatcher_handle = system.start_component(dispatcher);
-
     let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
         Ok(worker_server) => worker_server,
         Err(err) => {

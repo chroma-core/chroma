@@ -1,5 +1,9 @@
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
-use crate::system::{Component, ComponentContext, Handler, Receiver, System};
+use crate::{
+    config::{Configurable, WorkerConfig},
+    errors::ChromaError,
+    system::{Component, ComponentContext, Handler, Receiver, System},
+};
 use async_trait::async_trait;
 use std::fmt::Debug;
 
@@ -50,17 +54,23 @@ pub(crate) struct Dispatcher {
     task_queue: Vec<TaskMessage>,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
+    queue_size: usize,
+    worker_queue_size: usize,
 }
 
 impl Dispatcher {
     /// Create a new dispatcher
     /// # Parameters
     /// - n_worker_threads: The number of worker threads to use
-    pub fn new(n_worker_threads: usize) -> Self {
+    /// - queue_size: The size of the components message queue
+    /// - worker_queue_size: The size of the worker components queue
+    pub fn new(n_worker_threads: usize, queue_size: usize, worker_queue_size: usize) -> Self {
         Dispatcher {
             task_queue: Vec::new(),
             waiters: Vec::new(),
             n_worker_threads,
+            queue_size,
+            worker_queue_size,
         }
     }
 
@@ -74,7 +84,7 @@ impl Dispatcher {
         self_receiver: Box<dyn Receiver<TaskRequestMessage>>,
     ) {
         for _ in 0..self.n_worker_threads {
-            let worker = WorkerThread::new(self_receiver.clone());
+            let worker = WorkerThread::new(self_receiver.clone(), self.worker_queue_size);
             system.start_component(worker);
         }
     }
@@ -118,6 +128,17 @@ impl Dispatcher {
     }
 }
 
+#[async_trait]
+impl Configurable for Dispatcher {
+    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+        Ok(Dispatcher::new(
+            worker_config.dispatcher.num_worker_threads,
+            worker_config.dispatcher.dispatcher_queue_size,
+            worker_config.dispatcher.worker_queue_size,
+        ))
+    }
+}
+
 /// A message that a worker thread sends to the dispatcher to request a task
 /// # Members
 /// - reply_to: The receiver to send the task to, this is the worker thread
@@ -141,7 +162,7 @@ impl TaskRequestMessage {
 #[async_trait]
 impl Component for Dispatcher {
     fn queue_size(&self) -> usize {
-        1000 // TODO: make configurable
+        self.queue_size
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
@@ -166,18 +187,14 @@ impl Handler<TaskRequestMessage> for Dispatcher {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        env::current_dir,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-    };
-
     use super::*;
     use crate::{
         execution::operator::{wrap, Operator},
         system::System,
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
     };
 
     // Create a component that will schedule DISPATCH_COUNT invocations of the MockOperator
@@ -249,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher() {
         let mut system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT);
+        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let dispatch_user = MockDispatchUser {
