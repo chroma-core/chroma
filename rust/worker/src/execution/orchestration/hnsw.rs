@@ -175,6 +175,7 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
 
         match message {
             Ok(logs) => {
+                println!("Received logs: {:?}", logs);
                 let _ = result_channel.send(Ok(vec![vec![VectorQueryResult {
                     id: "abc".to_string(),
                     seq_id: BigInt::from(0),
