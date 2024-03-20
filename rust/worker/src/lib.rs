@@ -34,7 +34,7 @@ pub async fn query_service_entrypoint() {
         }
     };
 
-    let mut system: system::System = system::System::new();
+    let system: system::System = system::System::new();
 
     // TODO: configurable
     let dispatcher =

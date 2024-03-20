@@ -156,6 +156,14 @@ impl Handler<PullLogsOutput> for HnswQueryOrchestrator {
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         self.state = ExecutionState::Dedupe;
+        match self.result_channel.take() {
+            Some(tx) => {
+                let _ = tx.send("done".to_string());
+            }
+            None => {
+                // Log an error
+            }
+        }
         // TODO: implement the remaining state transitions and operators
         // The query orchestrator kills itself in the last state
     }
