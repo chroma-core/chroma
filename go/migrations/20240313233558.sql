@@ -1,3 +1,5 @@
+CREATE SCHEMA "public";
+
 -- Create "collection_metadata" table
 CREATE TABLE "public"."collection_metadata" (
   "collection_id" text NOT NULL,

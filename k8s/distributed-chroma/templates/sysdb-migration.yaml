@@ -14,7 +14,7 @@ spec:
         - command:
             - "/bin/sh"
             - "-c"
-            - "atlas schema clean && atlas migrate apply --url postgres://{{ .Values.sysdbMigration.username }}:{{ .Values.sysdbMigration.password }}@{{ .Values.sysdbMigration.netloc }}:{{ .Values.sysdbMigration.port }}/{{ .Values.sysdbMigration.dbName }}?sslmode={{ .Values.sysdbMigration.sslmode }}"
+            - "atlas schema clean --auto-approve --url postgres://{{ .Values.sysdbMigration.username }}:{{ .Values.sysdbMigration.password }}@{{ .Values.sysdbMigration.netloc }}:{{ .Values.sysdbMigration.port }}/{{ .Values.sysdbMigration.dbName }}?sslmode={{ .Values.sysdbMigration.sslmode }}; atlas migrate apply --url postgres://{{ .Values.sysdbMigration.username }}:{{ .Values.sysdbMigration.password }}@{{ .Values.sysdbMigration.netloc }}:{{ .Values.sysdbMigration.port }}/{{ .Values.sysdbMigration.dbName }}?sslmode={{ .Values.sysdbMigration.sslmode }}"
           image: "{{ .Values.sysdbMigration.image.repository }}:{{ .Values.sysdbMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration
