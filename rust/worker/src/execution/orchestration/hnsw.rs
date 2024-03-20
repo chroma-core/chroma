@@ -2,7 +2,6 @@ use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
 use crate::errors::ChromaError;
 use crate::execution::operators::pull_log::PullLogsResult;
-use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::System;
 use crate::types::VectorQueryResult;
@@ -13,6 +12,8 @@ use crate::{
 use async_trait::async_trait;
 use num_bigint::BigInt;
 use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -114,7 +115,16 @@ impl HnswQueryOrchestrator {
                 return;
             }
         };
-        let input = PullLogsInput::new(collection_id, 0, 100);
+        let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
+        let end_timestamp = match end_timestamp {
+            // TODO: change protobuf definition to use u64 instead of i64
+            Ok(end_timestamp) => end_timestamp.as_secs() as i64,
+            Err(e) => {
+                // Log an error and reply + return
+                return;
+            }
+        };
+        let input = PullLogsInput::new(collection_id, 0, 100, None, Some(end_timestamp));
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task).await {
             Ok(_) => (),
@@ -175,6 +185,8 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
 
         match message {
             Ok(logs) => {
+                // TODO: remove this after debugging
+                println!("Received logs: {:?}", logs);
                 let _ = result_channel.send(Ok(vec![vec![VectorQueryResult {
                     id: "abc".to_string(),
                     seq_id: BigInt::from(0),
