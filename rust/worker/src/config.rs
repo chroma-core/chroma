@@ -333,4 +333,10 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_default_config_path() {
+        // Sanity check that root config loads from default path correctly
+        let _ = RootConfig::load();
+    }
 }
