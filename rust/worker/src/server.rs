@@ -178,11 +178,12 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             }
         };
 
-        match self.system {
+        let result = match self.system {
             Some(ref system) => {
                 let orchestrator = HnswQueryOrchestrator::new(
+                    // TODO: Should not have to clone query vectors here
                     system.clone(),
-                    query_vectors,
+                    query_vectors.clone(),
                     request.k,
                     request.include_embeddings,
                     segment_uuid,
@@ -190,65 +191,53 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
                     self.sysdb.clone(),
                     dispatcher.clone(),
                 );
-                let result: String = orchestrator.run().await;
+                orchestrator.run().await
             }
             None => {
                 return Err(Status::internal("No system found"));
             }
+        };
+
+        let result = match result {
+            Ok(result) => result,
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "Error running orchestrator: {}",
+                    e
+                )));
+            }
+        };
+
+        for result_set in result {
+            let mut proto_results = Vec::new();
+            for query_result in result_set {
+                let proto_result = chroma_proto::VectorQueryResult {
+                    id: query_result.id,
+                    seq_id: query_result.seq_id.to_bytes_le().1,
+                    distance: query_result.distance,
+                    vector: match query_result.vector {
+                        Some(vector) => {
+                            match (vector, ScalarEncoding::FLOAT32, query_vectors[0].len())
+                                .try_into()
+                            {
+                                Ok(proto_vector) => Some(proto_vector),
+                                Err(e) => {
+                                    return Err(Status::internal(format!(
+                                        "Error converting vector: {}",
+                                        e
+                                    )));
+                                }
+                            }
+                        }
+                        None => None,
+                    },
+                };
+                proto_results.push(proto_result);
+            }
+            proto_results_for_all.push(chroma_proto::VectorQueryResults {
+                results: proto_results,
+            });
         }
-
-        // for proto_query_vector in request.vectors {
-        //     let (query_vector, encoding) = match proto_query_vector.try_into() {
-        //         Ok((vector, encoding)) => (vector, encoding),
-        //         Err(e) => {
-        //             return Err(Status::internal(format!("Error converting vector: {}", e)));
-        //         }
-        //     };
-
-        //     let results = match segment_manager
-        //         .query_vector(
-        //             &segment_uuid,
-        //             &query_vector,
-        //             request.k as usize,
-        //             request.include_embeddings,
-        //         )
-        //         .await
-        //     {
-        //         Ok(results) => results,
-        //         Err(e) => {
-        //             return Err(Status::internal(format!("Error querying segment: {}", e)));
-        //         }
-        //     };
-
-        //     let mut proto_results = Vec::new();
-        //     for query_result in results {
-        //         let proto_result = chroma_proto::VectorQueryResult {
-        //             id: query_result.id,
-        //             seq_id: query_result.seq_id.to_bytes_le().1,
-        //             distance: query_result.distance,
-        //             vector: match query_result.vector {
-        //                 Some(vector) => {
-        //                     match (vector, ScalarEncoding::FLOAT32, query_vector.len()).try_into() {
-        //                         Ok(proto_vector) => Some(proto_vector),
-        //                         Err(e) => {
-        //                             return Err(Status::internal(format!(
-        //                                 "Error converting vector: {}",
-        //                                 e
-        //                             )));
-        //                         }
-        //                     }
-        //                 }
-        //                 None => None,
-        //             },
-        //         };
-        //         proto_results.push(proto_result);
-        //     }
-
-        //     let vector_query_results = chroma_proto::VectorQueryResults {
-        //         results: proto_results,
-        //     };
-        //     proto_results_for_all.push(vector_query_results);
-        // }
 
         let resp = chroma_proto::QueryVectorsResponse {
             results: proto_results_for_all,
