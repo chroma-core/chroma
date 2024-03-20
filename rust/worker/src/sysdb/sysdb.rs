@@ -1,3 +1,4 @@
+use super::config::SysDbConfig;
 use crate::chroma_proto;
 use crate::config::{Configurable, WorkerConfig};
 use crate::types::{CollectionConversionError, SegmentConversionError};
@@ -10,8 +11,6 @@ use async_trait::async_trait;
 use std::fmt::Debug;
 use thiserror::Error;
 use uuid::Uuid;
-
-use super::config::SysDbConfig;
 
 const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";

@@ -10,11 +10,12 @@ use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::{pin, select};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct System {
     inner: Arc<Inner>,
 }
 
+#[derive(Debug)]
 struct Inner {
     scheduler: Scheduler,
 }
@@ -28,7 +29,7 @@ impl System {
         }
     }
 
-    pub(crate) fn start_component<C>(&mut self, component: C) -> ComponentHandle<C>
+    pub(crate) fn start_component<C>(&self, component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {

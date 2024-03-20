@@ -1,12 +1,16 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
+use crate::errors::ChromaError;
 use crate::sysdb::sysdb::SysDb;
+use crate::system::System;
+use crate::types::VectorQueryResult;
 use crate::{
     log::log::Log,
     system::{Component, Handler, Receiver},
 };
 use async_trait::async_trait;
-use std::fmt::{self, Debug, Formatter};
+use num_bigint::BigInt;
+use std::fmt::Debug;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -35,8 +39,10 @@ enum ExecutionState {
 }
 
 #[derive(Debug)]
-struct HnswQueryOrchestrator {
+pub(crate) struct HnswQueryOrchestrator {
     state: ExecutionState,
+    // Component Execution
+    system: System,
     // Query state
     query_vectors: Vec<Vec<f32>>,
     k: i32,
@@ -46,10 +52,15 @@ struct HnswQueryOrchestrator {
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
+    // Result channel
+    result_channel: Option<
+        tokio::sync::oneshot::Sender<Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>>>,
+    >,
 }
 
 impl HnswQueryOrchestrator {
-    pub fn new(
+    pub(crate) fn new(
+        system: System,
         query_vectors: Vec<Vec<f32>>,
         k: i32,
         include_embeddings: bool,
@@ -60,6 +71,7 @@ impl HnswQueryOrchestrator {
     ) -> Self {
         HnswQueryOrchestrator {
             state: ExecutionState::Pending,
+            system,
             query_vectors,
             k,
             include_embeddings,
@@ -67,6 +79,7 @@ impl HnswQueryOrchestrator {
             log,
             sysdb,
             dispatcher,
+            result_channel: None,
         }
     }
 
@@ -108,6 +121,19 @@ impl HnswQueryOrchestrator {
             }
         }
     }
+
+    ///  Run the orchestrator and return the result.
+    ///  # Note
+    ///  Use this over spawning the component directly. This method will start the component and
+    /// wait for it to finish before returning the result.
+    pub(crate) async fn run(mut self) -> Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.result_channel = Some(tx);
+        let mut handle = self.system.clone().start_component(self);
+        let result = rx.await;
+        handle.stop();
+        result.unwrap()
+    }
 }
 
 // ============== Component Implementation ==============
@@ -133,6 +159,22 @@ impl Handler<PullLogsOutput> for HnswQueryOrchestrator {
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         self.state = ExecutionState::Dedupe;
+
         // TODO: implement the remaining state transitions and operators
+        // This is an example of the final state transition and result
+
+        match self.result_channel.take() {
+            Some(tx) => {
+                let _ = tx.send(Ok(vec![vec![VectorQueryResult {
+                    id: "abc".to_string(),
+                    seq_id: BigInt::from(0),
+                    distance: 0.0,
+                    vector: Some(vec![0.0, 0.0, 0.0]),
+                }]]));
+            }
+            None => {
+                // Log an error
+            }
+        }
     }
 }

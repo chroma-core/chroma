@@ -15,13 +15,48 @@ mod sysdb;
 mod system;
 mod types;
 
+use crate::sysdb::sysdb::SysDb;
 use config::Configurable;
 use memberlist::MemberlistProvider;
 
-use crate::sysdb::sysdb::SysDb;
-
 mod chroma_proto {
     tonic::include_proto!("chroma");
+}
+
+pub async fn query_service_entrypoint() {
+    let config = config::RootConfig::load();
+    let system: system::System = system::System::new();
+    let segment_manager = match segment::SegmentManager::try_from_config(&config.worker).await {
+        Ok(segment_manager) => segment_manager,
+        Err(err) => {
+            println!("Failed to create segment manager component: {:?}", err);
+            return;
+        }
+    };
+    let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
+    {
+        Ok(dispatcher) => dispatcher,
+        Err(err) => {
+            println!("Failed to create dispatcher component: {:?}", err);
+            return;
+        }
+    };
+    let mut dispatcher_handle = system.start_component(dispatcher);
+    let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
+        Ok(worker_server) => worker_server,
+        Err(err) => {
+            println!("Failed to create worker server component: {:?}", err);
+            return;
+        }
+    };
+    worker_server.set_segment_manager(segment_manager.clone());
+    worker_server.set_dispatcher(dispatcher_handle.receiver());
+
+    let server_join_handle = tokio::spawn(async move {
+        crate::server::WorkerServer::run(worker_server).await;
+    });
+
+    let _ = tokio::join!(server_join_handle, dispatcher_handle.join());
 }
 
 pub async fn worker_entrypoint() {
@@ -103,5 +138,6 @@ pub async fn worker_entrypoint() {
         ingest_handle.join(),
         memberlist_handle.join(),
         scheduler_handler.join(),
+        server_join_handle,
     );
 }

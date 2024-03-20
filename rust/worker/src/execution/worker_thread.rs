@@ -9,11 +9,18 @@ use std::fmt::{Debug, Formatter, Result};
 /// - The actor loop will block until work is available
 pub(super) struct WorkerThread {
     dispatcher: Box<dyn Receiver<TaskRequestMessage>>,
+    queue_size: usize,
 }
 
 impl WorkerThread {
-    pub(super) fn new(dispatcher: Box<dyn Receiver<TaskRequestMessage>>) -> Self {
-        WorkerThread { dispatcher }
+    pub(super) fn new(
+        dispatcher: Box<dyn Receiver<TaskRequestMessage>>,
+        queue_size: usize,
+    ) -> WorkerThread {
+        WorkerThread {
+            dispatcher,
+            queue_size,
+        }
     }
 }
 
@@ -26,7 +33,7 @@ impl Debug for WorkerThread {
 #[async_trait]
 impl Component for WorkerThread {
     fn queue_size(&self) -> usize {
-        1000 // TODO: make configurable
+        self.queue_size
     }
 
     fn runtime() -> ComponentRuntime {
