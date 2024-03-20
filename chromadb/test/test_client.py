@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from typing import Generator
 from unittest.mock import patch
@@ -86,18 +87,19 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
         )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
+    temp_persist_dir=persistent_api.get_settings().persist_directory
     col1 = persistent_api.create_collection("test1")
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
     open_files = current_process.open_files()
     print("OPEN FILES BEFORE", open_files)
-    assert any(["chroma.sqlite3" in file.path for file in open_files])
-    assert any(["data_level0.bin" in file.path for file in open_files])
+    assert any([re.search(fr'{temp_persist_dir}.*chroma.sqlite3', file.path) is not None for file in open_files])
+    assert any([re.search(fr'{temp_persist_dir}.*data_level0.bin',file.path) is not None for file in open_files])
     persistent_api.close()
     open_files = current_process.open_files()
     print("OPEN FILES AFTER", open_files)
-    assert all(["chroma.sqlite3" not in file.path for file in open_files])
-    assert all(["data_level0.bin" not in file.path for file in open_files])
+    assert all([re.search(fr'{temp_persist_dir}.*chroma.sqlite3', file.path) is None for file in open_files])
+    assert all([re.search(fr'{temp_persist_dir}.*data_level0.bin',file.path) is None for file in open_files])
 
 
 def test_http_client_close(http_api: ClientAPI) -> None:
