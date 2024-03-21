@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -57,7 +58,7 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 		return nil, err
 	}
 	records := make([]*logservicepb.RecordLog, 0)
-	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize), req.GetEndTimestamp())
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())

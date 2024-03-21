@@ -1,6 +1,5 @@
 use parking_lot::RwLock;
 use std::fmt::Debug;
-use std::num;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
@@ -10,12 +9,13 @@ use super::{
     executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
 };
 
+#[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
     join_handle: Option<tokio::task::JoinHandle<()>>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Scheduler {
     handles: Arc<RwLock<Vec<SchedulerTaskHandle>>>,
 }

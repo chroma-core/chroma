@@ -18,6 +18,7 @@ message PullLogsRequest {
   string collection_id = 1;
   int64 start_from_id = 2;
   int32 batch_size = 3;
+  int64 end_timestamp = 4;
 }
 
 message RecordLog {
