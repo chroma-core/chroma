@@ -93,32 +93,33 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
     open_files = current_process.open_files()
+    filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path)
+        or re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path)
+    ]
     assert any(
         [
             re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is not None
-            for file in open_files
+            for file in filtered_open_files
         ]
     )
     assert any(
         [
             re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is not None
-            for file in open_files
+            for file in filtered_open_files
         ]
     )
     persistent_api.close()
     open_files = current_process.open_files()
-    assert all(
-        [
-            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
-            for file in open_files
-        ]
-    )
-    assert all(
-        [
-            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
-            for file in open_files
-        ]
-    )
+    post_filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path)
+        or re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path)
+    ]
+    assert len(post_filtered_open_files) == 0
 
 
 def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
