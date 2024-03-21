@@ -269,10 +269,18 @@ impl Log for InMemoryLog {
         batch_size: i32,
         end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
-        let logs = self.logs.get(&collection_id).unwrap();
+        let end_timestamp = match end_timestamp {
+            Some(end_timestamp) => end_timestamp,
+            None => i64::MAX,
+        };
+
+        let logs = match self.logs.get(&collection_id) {
+            Some(logs) => logs,
+            None => return Ok(Vec::new()),
+        };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
-            if i < logs.len() as i64 {
+            if i < logs.len() as i64 && logs[i as usize].log_id_ts <= end_timestamp {
                 result.push(logs[i as usize].record.clone());
             }
         }
