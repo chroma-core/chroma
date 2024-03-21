@@ -1,4 +1,5 @@
 pub(super) mod brute_force_knn;
+pub(super) mod group;
 pub(super) mod normalize_vectors;
 pub(super) mod partition;
 pub(super) mod pull_log;

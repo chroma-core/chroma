@@ -39,11 +39,8 @@ enum ExecutionState {
     PullLogs,
     Partition,
     Write,
-    Flush,
     Finished,
 }
-
-#[derive(Debug)]
 pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
