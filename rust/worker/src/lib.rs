@@ -2,6 +2,7 @@ mod assignment;
 mod blockstore;
 mod compactor;
 mod config;
+mod distance;
 mod errors;
 mod execution;
 mod index;
