@@ -174,7 +174,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 }
 
 func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManager, error) {
-	log.Info("Starting memberlist manager")
+	log.Info("Creating memberlist manager")
 	memberlist_name := config.WorkerMemberlistName
 	namespace := config.KubernetesNamespace
 	clientset, err := utils.GetKubernetesInterface()

@@ -39,6 +39,7 @@ func NewMemberlistManager(nodeWatcher IWatcher, memberlistStore IMemberlistStore
 }
 
 func (m *MemberlistManager) Start() error {
+	log.Info("Starting memberlist manager")
 	m.nodeWatcher.RegisterCallback(func(nodeIp string) {
 		m.workqueue.Add(nodeIp)
 	})
