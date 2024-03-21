@@ -3,6 +3,8 @@ use async_trait::async_trait;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
+/// # Note
+/// - Callers should ensure that the input vectors are normalized if using the cosine similarity metric.
 #[derive(Debug)]
 pub struct BruteForceKnnOperator {}
 
