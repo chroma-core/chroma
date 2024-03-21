@@ -23,8 +23,9 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         &self,
         input: &BruteForceKnnOperatorInput,
     ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
-        // For now, this is implemented extremely poorly from a performance perspective.
+        // For now, this is implemented poorly from a performance perspective.
         // We loop over every vector and do the distance calculation for every other vector.
+        // Distance calcs currently don't leverage SIMD.
         for vec in input.query_vecs.iter() {
             println!("{:?}", vec);
         }
