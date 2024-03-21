@@ -27,6 +27,9 @@ def ephemeral_api() -> Generator[ClientAPI, None, None]:
 def persistent_api() -> Generator[ClientAPI, None, None]:
     client = chromadb.PersistentClient(
         path=tempfile.gettempdir() + "/test_server",
+        settings=Settings(
+            allow_reset=True,
+        ),
     )
     yield client
     client.clear_system_cache()
@@ -86,6 +89,7 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
+    persistent_api.reset()
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory
@@ -116,6 +120,7 @@ def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
+    persistent_api.reset()
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory
@@ -146,6 +151,7 @@ def test_persistent_client_use_after_close(persistent_api: ClientAPI) -> None:
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
+    persistent_api.reset()
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory
