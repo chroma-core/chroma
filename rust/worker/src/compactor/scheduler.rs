@@ -281,7 +281,7 @@ mod tests {
                 collection_id: collection_id_1.clone(),
                 log_id: 1,
                 log_id_ts: 1,
-                record: Box::new(EmbeddingRecord {
+                record: EmbeddingRecord {
                     id: "embedding_id_1".to_string(),
                     seq_id: BigInt::from(1),
                     embedding: None,
@@ -289,7 +289,7 @@ mod tests {
                     metadata: None,
                     operation: Operation::Add,
                     collection_id: collection_uuid_1,
-                }),
+                },
             }),
         );
 
@@ -301,7 +301,7 @@ mod tests {
                 collection_id: collection_id_2.clone(),
                 log_id: 2,
                 log_id_ts: 2,
-                record: Box::new(EmbeddingRecord {
+                record: EmbeddingRecord {
                     id: "embedding_id_2".to_string(),
                     seq_id: BigInt::from(2),
                     embedding: None,
@@ -309,7 +309,7 @@ mod tests {
                     metadata: None,
                     operation: Operation::Add,
                     collection_id: collection_uuid_2,
-                }),
+                },
             }),
         );
 

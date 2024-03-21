@@ -1,11 +1,9 @@
 use super::super::operator::{wrap, TaskMessage};
-use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
-use crate::distance;
+use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator};
 use crate::distance::DistanceFunction;
 use crate::errors::ChromaError;
 use crate::execution::operators::brute_force_knn::{
-    BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput,
-    BruteForceKnnOperatorResult,
+    BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorResult,
 };
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::sysdb::sysdb::SysDb;
@@ -30,7 +28,7 @@ understand. We can always add more abstraction later if we need it.
 
                                ┌───► Brute Force ─────┐
                                │                      │
-  Pending ─► PullLogs ─► Dedupe│                      ├─► MergeResults ─► Finished
+  Pending ─► PullLogs ─► Group│                       ├─► MergeResults ─► Finished
                                │                      │
                                └───► HNSW ────────────┘
 
@@ -40,7 +38,7 @@ understand. We can always add more abstraction later if we need it.
 enum ExecutionState {
     Pending,
     PullLogs,
-    Dedupe,
+    Partition,
     QueryKnn,
     MergeResults,
     Finished,
@@ -142,7 +140,7 @@ impl HnswQueryOrchestrator {
     ///  Run the orchestrator and return the result.
     ///  # Note
     ///  Use this over spawning the component directly. This method will start the component and
-    /// wait for it to finish before returning the result.
+    ///  wait for it to finish before returning the result.
     pub(crate) async fn run(mut self) -> Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.result_channel = Some(tx);
@@ -175,19 +173,14 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
         message: PullLogsResult,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
-        self.state = ExecutionState::Dedupe;
+        self.state = ExecutionState::Partition;
 
         // TODO: implement the remaining state transitions and operators
         // TODO: don't need all this cloning and data shuffling, once we land the chunk abstraction
-        let mut dataset = Vec::new();
         match message {
             Ok(logs) => {
-                for log in logs.logs().iter() {
-                    // TODO: only adds have embeddings, unwrap is fine for now
-                    dataset.push(log.embedding.clone().unwrap());
-                }
                 let bf_input = BruteForceKnnOperatorInput {
-                    data: dataset,
+                    data: logs.logs(),
                     query: self.query_vectors[0].clone(),
                     k: self.k as usize,
                     distance_metric: DistanceFunction::Euclidean,
