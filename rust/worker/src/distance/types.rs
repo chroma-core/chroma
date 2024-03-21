@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn test_distance_function_distance() {
+    fn test_distance_function_l2sqr() {
         let a = vec![1.0, 2.0, 3.0];
         let a_mag = (1.0_f32.powi(2) + 2.0_f32.powi(2) + 3.0_f32.powi(2)).sqrt();
         let a_norm = vec![1.0 / a_mag, 2.0 / a_mag, 3.0 / a_mag];
