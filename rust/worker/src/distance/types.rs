@@ -17,6 +17,29 @@ pub(crate) enum DistanceFunction {
     InnerProduct,
 }
 
+impl DistanceFunction {
+    pub(crate) fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
+        match self {
+            DistanceFunction::Euclidean => {
+                // TODO: implement this in SSE/AVX SIMD
+                // let mut sum = 0.0;
+                // for i in 0..a.len() {
+                //     sum += (a[i] - b[i]).powi(2);
+                // }
+                // sum.sqrt()
+                // TODO: recheck the definition, do we just take ^2?
+                a.iter().zip(b).map(|(x, y)| (x - y).abs()).sum()
+            }
+            DistanceFunction::Cosine => {
+                todo!();
+            }
+            DistanceFunction::InnerProduct => {
+                todo!();
+            }
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub(crate) enum DistanceFunctionError {
     #[error("Invalid distance function `{0}`")]
