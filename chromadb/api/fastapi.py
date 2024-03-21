@@ -51,6 +51,10 @@ class FastAPI(ServerAPI):
     _settings: Settings
     _max_batch_size: int = -1
 
+    @override
+    def start(self) -> None:
+        super().start()
+
     @staticmethod
     def _validate_host(host: str) -> None:
         parsed = urlparse(host)
@@ -141,10 +145,15 @@ class FastAPI(ServerAPI):
         if self._settings.chroma_server_ssl_verify is not None:
             self._session.verify = self._settings.chroma_server_ssl_verify
 
+    def _raise_for_running(self) -> None:
+        if not self._running:
+            raise RuntimeError("Component not running or already closed")
+
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
+        self._raise_for_running()
         resp = self._session.get(self._api_url)
         raise_chroma_error(resp)
         return int(json.loads(resp.text)["nanosecond heartbeat"])
@@ -157,6 +166,7 @@ class FastAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> None:
         """Creates a database"""
+        self._raise_for_running()
         resp = self._session.post(
             self._api_url + "/databases",
             data=json.dumps({"name": name}),
@@ -172,6 +182,7 @@ class FastAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> Database:
         """Returns a database"""
+        self._raise_for_running()
         resp = self._session.get(
             self._api_url + "/databases/" + name,
             params={"tenant": tenant},
@@ -185,6 +196,7 @@ class FastAPI(ServerAPI):
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
+        self._raise_for_running()
         resp = self._session.post(
             self._api_url + "/tenants",
             data=json.dumps({"name": name}),
@@ -194,6 +206,7 @@ class FastAPI(ServerAPI):
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> Tenant:
+        self._raise_for_running()
         resp = self._session.get(
             self._api_url + "/tenants/" + name,
         )
@@ -211,6 +224,7 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         """Returns a list of all collections"""
+        self._raise_for_running()
         resp = self._session.get(
             self._api_url + "/collections",
             params={
@@ -234,6 +248,7 @@ class FastAPI(ServerAPI):
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
         """Returns a count of collections"""
+        self._raise_for_running()
         resp = self._session.get(
             self._api_url + "/count_collections",
             params={"tenant": tenant, "database": database},
@@ -256,6 +271,7 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Creates a collection"""
+        self._raise_for_running()
         resp = self._session.post(
             self._api_url + "/collections",
             data=json.dumps(
@@ -292,6 +308,7 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Returns a collection"""
+        self._raise_for_running()
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
@@ -327,6 +344,7 @@ class FastAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
+        self._raise_for_running()
         return cast(
             Collection,
             self.create_collection(
@@ -349,6 +367,7 @@ class FastAPI(ServerAPI):
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """Updates a collection"""
+        self._raise_for_running()
         resp = self._session.put(
             self._api_url + "/collections/" + str(id),
             data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
@@ -364,6 +383,7 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         """Deletes a collection"""
+        self._raise_for_running()
         resp = self._session.delete(
             self._api_url + "/collections/" + name,
             params={"tenant": tenant, "database": database},
@@ -377,6 +397,7 @@ class FastAPI(ServerAPI):
         collection_id: UUID,
     ) -> int:
         """Returns the number of embeddings in the database"""
+        self._raise_for_running()
         resp = self._session.get(
             self._api_url + "/collections/" + str(collection_id) + "/count"
         )
@@ -390,6 +411,7 @@ class FastAPI(ServerAPI):
         collection_id: UUID,
         n: int = 10,
     ) -> GetResult:
+        self._raise_for_running()
         return cast(
             GetResult,
             self._get(
@@ -414,6 +436,7 @@ class FastAPI(ServerAPI):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
     ) -> GetResult:
+        self._raise_for_running()
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
@@ -454,6 +477,7 @@ class FastAPI(ServerAPI):
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
         """Deletes embeddings from the database"""
+        self._raise_for_running()
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/delete",
             data=json.dumps(
@@ -479,6 +503,7 @@ class FastAPI(ServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        self._raise_for_running()
         resp = self._session.post(
             self._api_url + url,
             data=json.dumps(
@@ -508,6 +533,7 @@ class FastAPI(ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
+        self._raise_for_running()
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
         resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
@@ -529,6 +555,7 @@ class FastAPI(ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
+        self._raise_for_running()
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
         resp = self._submit_batch(
@@ -552,6 +579,7 @@ class FastAPI(ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
+        self._raise_for_running()
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
         resp = self._submit_batch(
@@ -572,6 +600,7 @@ class FastAPI(ServerAPI):
         include: Include = ["metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
+        self._raise_for_running()
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/query",
             data=json.dumps(
@@ -602,6 +631,7 @@ class FastAPI(ServerAPI):
     @override
     def reset(self) -> bool:
         """Resets the database"""
+        self._raise_for_running()
         resp = self._session.post(self._api_url + "/reset")
         raise_chroma_error(resp)
         return cast(bool, json.loads(resp.text))
@@ -610,6 +640,7 @@ class FastAPI(ServerAPI):
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
+        self._raise_for_running()
         resp = self._session.get(self._api_url + "/version")
         raise_chroma_error(resp)
         return cast(str, json.loads(resp.text))
@@ -623,6 +654,7 @@ class FastAPI(ServerAPI):
     @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     def max_batch_size(self) -> int:
+        self._raise_for_running()
         if self._max_batch_size == -1:
             resp = self._session.get(self._api_url + "/pre-flight-checks")
             raise_chroma_error(resp)
@@ -632,7 +664,9 @@ class FastAPI(ServerAPI):
     @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
     @override
     def close(self) -> None:
+        self._raise_for_running()
         self._session.close()
+        self._system.stop()
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

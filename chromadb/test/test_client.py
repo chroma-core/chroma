@@ -296,6 +296,10 @@ def test_http_client_double_close(http_api: ClientAPI) -> None:
         assert len(_pool_manager.pools._container) > 0
         http_api.close()
         assert len(_pool_manager.pools._container) == 0
+        with pytest.raises(
+            RuntimeError, match="Component not running or already closed"
+        ):
+            http_api.close()
 
 
 def test_http_client_use_after_close(http_api: ClientAPI) -> None:
@@ -312,31 +316,29 @@ def test_http_client_use_after_close(http_api: ClientAPI) -> None:
         assert len(_pool_manager.pools._container) > 0
         http_api.close()
         assert len(_pool_manager.pools._container) == 0
-        http_api.heartbeat()
-        assert len(_pool_manager.pools._container) > 0
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.heartbeat()
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     col.add(ids=["1"], documents=["test"])
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     col.delete(ids=["1"])
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     col.update(ids=["1"], documents=["test1231"])
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     col.upsert(ids=["1"], documents=["test1231"])
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     col.count()
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.create_collection("test1")
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.get_collection("test")
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.get_or_create_collection("test")
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.list_collections()
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.delete_collection("test")
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.count_collections()
-        # with pytest.raises(RuntimeError,match="Component not running"):
-        #     http_api.heartbeat()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.heartbeat()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.add(ids=["1"], documents=["test"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.delete(ids=["1"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.update(ids=["1"], documents=["test1231"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.upsert(ids=["1"], documents=["test1231"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.count()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.create_collection("test1")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.get_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.get_or_create_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.list_collections()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.delete_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.count_collections()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            http_api.heartbeat()
