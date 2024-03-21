@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import time
 from typing import Generator
 from unittest.mock import patch
 from pytest_httpserver import HTTPServer
@@ -87,19 +88,185 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
         )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
-    temp_persist_dir=persistent_api.get_settings().persist_directory
+    temp_persist_dir = persistent_api.get_settings().persist_directory
     col1 = persistent_api.create_collection("test1")
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
     open_files = current_process.open_files()
     print("OPEN FILES BEFORE", open_files)
-    assert any([re.search(fr'{temp_persist_dir}.*chroma.sqlite3', file.path) is not None for file in open_files])
-    assert any([re.search(fr'{temp_persist_dir}.*data_level0.bin',file.path) is not None for file in open_files])
+    assert any(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is not None
+            for file in open_files
+        ]
+    )
+    assert any(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is not None
+            for file in open_files
+        ]
+    )
     persistent_api.close()
     open_files = current_process.open_files()
     print("OPEN FILES AFTER", open_files)
-    assert all([re.search(fr'{temp_persist_dir}.*chroma.sqlite3', file.path) is None for file in open_files])
-    assert all([re.search(fr'{temp_persist_dir}.*data_level0.bin',file.path) is None for file in open_files])
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
+            for file in open_files
+        ]
+    )
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
+            for file in open_files
+        ]
+    )
+
+
+def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+    current_process = psutil.Process()
+    col = persistent_api.create_collection("test")
+    temp_persist_dir = persistent_api.get_settings().persist_directory
+    col.add(ids=["1"], documents=["test"])
+    open_files = current_process.open_files()
+    assert any(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is not None
+            for file in open_files
+        ]
+    )
+    assert any(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is not None
+            for file in open_files
+        ]
+    )
+    persistent_api.close()
+    open_files = current_process.open_files()
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
+            for file in open_files
+        ]
+    )
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
+            for file in open_files
+        ]
+    )
+    persistent_api.close()
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
+            for file in open_files
+        ]
+    )
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
+            for file in open_files
+        ]
+    )
+
+
+def test_persistent_client_use_after_close(persistent_api: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+    current_process = psutil.Process()
+    col = persistent_api.create_collection("test")
+    temp_persist_dir = persistent_api.get_settings().persist_directory
+    col.add(ids=["1"], documents=["test"])
+    open_files = current_process.open_files()
+    assert any(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is not None
+            for file in open_files
+        ]
+    )
+    assert any(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is not None
+            for file in open_files
+        ]
+    )
+    persistent_api.close()
+    open_files = current_process.open_files()
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
+            for file in open_files
+        ]
+    )
+    assert all(
+        [
+            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
+            for file in open_files
+        ]
+    )
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.add(ids=["1"], documents=["test"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.delete(ids=["1"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.update(ids=["1"], documents=["test1231"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.upsert(ids=["1"], documents=["test1231"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.count()
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.create_collection("test1")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.get_collection("test")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.get_or_create_collection("test")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.list_collections()
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.delete_collection("test")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.count_collections()
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.heartbeat()
+
+
+def _instrument_http_server(httpserver: HTTPServer) -> None:
+    httpserver.expect_request("/api/v1/tenants/default_tenant").respond_with_data(
+        "default_tenant"
+    )
+    httpserver.expect_request(
+        "/api/v1/databases/default_database?tenant=default_tenant"
+    ).respond_with_data(json.dumps({"version": "0.0.1"}))
+    httpserver.expect_request("/api/v1/collections").respond_with_data(
+        json.dumps(
+            {
+                "name": "x",
+                "id": "4ca8f010-b535-4778-9262-c6f3812e17b6",
+                "metadata": None,
+                "tenant": "default_tenant",
+                "database": "default_database",
+            }
+        )
+    )
+    httpserver.expect_request("/api/v1/pre-flight-checks").respond_with_data(
+        json.dumps(
+            {
+                "max_batch_size": 10000,
+            }
+        )
+    )
+    httpserver.expect_request(
+        "/api/v1/collections/4ca8f010-b535-4778-9262-c6f3812e17b6/add"
+    ).respond_with_data(json.dumps({}))
+    httpserver.expect_request("/api/v1").respond_with_data(
+        json.dumps({"nanosecond heartbeat": time.time_ns()})
+    )
 
 
 def test_http_client_close(http_api: ClientAPI) -> None:
@@ -108,37 +275,68 @@ def test_http_client_close(http_api: ClientAPI) -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     with HTTPServer(port=8000) as httpserver:
-        # Define the response
-        httpserver.expect_request("/api/v1/tenants/default_tenant").respond_with_data(
-            "default_tenant"
-        )
-        httpserver.expect_request(
-            "/api/v1/databases/default_database?tenant=default_tenant"
-        ).respond_with_data(json.dumps({"version": "0.0.1"}))
-        httpserver.expect_request("/api/v1/collections").respond_with_data(
-            json.dumps(
-                {
-                    "name": "x",
-                    "id": "4ca8f010-b535-4778-9262-c6f3812e17b6",
-                    "metadata": None,
-                    "tenant": "default_tenant",
-                    "database": "default_database",
-                }
-            )
-        )
-        httpserver.expect_request("/api/v1/pre-flight-checks").respond_with_data(
-            json.dumps(
-                {
-                    "max_batch_size": 10000,
-                }
-            )
-        )
-        httpserver.expect_request(
-            "/api/v1/collections/4ca8f010-b535-4778-9262-c6f3812e17b6/add"
-        ).respond_with_data(json.dumps({}))
+        _instrument_http_server(httpserver)
         col = http_api.create_collection("test")
         col.add(ids=["1"], documents=["test"])
         _pool_manager = http_api._server._session.get_adapter("http://").poolmanager  # type: ignore
         assert len(_pool_manager.pools._container) > 0
         http_api.close()
         assert len(_pool_manager.pools._container) == 0
+
+
+def test_http_client_double_close(http_api: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+    with HTTPServer(port=8000) as httpserver:
+        _instrument_http_server(httpserver)
+        http_api.heartbeat()
+        _pool_manager = http_api._server._session.get_adapter("http://").poolmanager  # type: ignore
+        assert len(_pool_manager.pools._container) > 0
+        http_api.close()
+        assert len(_pool_manager.pools._container) == 0
+
+
+def test_http_client_use_after_close(http_api: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+    with HTTPServer(port=8000) as httpserver:
+        _instrument_http_server(httpserver)
+        http_api.heartbeat()
+        col = http_api.create_collection("test")
+        col.add(ids=["1"], documents=["test"])
+        _pool_manager = http_api._server._session.get_adapter("http://").poolmanager  # type: ignore
+        assert len(_pool_manager.pools._container) > 0
+        http_api.close()
+        assert len(_pool_manager.pools._container) == 0
+        http_api.heartbeat()
+        assert len(_pool_manager.pools._container) > 0
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.heartbeat()
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     col.add(ids=["1"], documents=["test"])
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     col.delete(ids=["1"])
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     col.update(ids=["1"], documents=["test1231"])
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     col.upsert(ids=["1"], documents=["test1231"])
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     col.count()
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.create_collection("test1")
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.get_collection("test")
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.get_or_create_collection("test")
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.list_collections()
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.delete_collection("test")
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.count_collections()
+        # with pytest.raises(RuntimeError,match="Component not running"):
+        #     http_api.heartbeat()
