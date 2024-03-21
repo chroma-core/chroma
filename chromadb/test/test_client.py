@@ -99,6 +99,7 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
     open_files = current_process.open_files()
+    print("OPEN FILES", open_files)
     filtered_open_files = [
         file
         for file in open_files
