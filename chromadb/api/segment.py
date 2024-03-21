@@ -110,7 +110,8 @@ class SegmentAPI(ServerAPI):
         self._collection_cache = {}
 
     def _raise_for_running(self) -> None:
-        self._raise_for_running()
+        if not self._running:
+            raise RuntimeError("Component not running or already closed")
 
     @override
     def start(self) -> None:

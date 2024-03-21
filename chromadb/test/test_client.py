@@ -93,7 +93,6 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
     open_files = current_process.open_files()
-    print("OPEN FILES BEFORE", open_files)
     assert any(
         [
             re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is not None
@@ -108,7 +107,6 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     )
     persistent_api.close()
     open_files = current_process.open_files()
-    print("OPEN FILES AFTER", open_files)
     assert all(
         [
             re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
@@ -159,19 +157,8 @@ def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
             for file in open_files
         ]
     )
-    persistent_api.close()
-    assert all(
-        [
-            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
-            for file in open_files
-        ]
-    )
-    assert all(
-        [
-            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
-            for file in open_files
-        ]
-    )
+    with pytest.raises(RuntimeError, match="Component not running or already closed"):
+        persistent_api.close()
 
 
 def test_persistent_client_use_after_close(persistent_api: ClientAPI) -> None:
