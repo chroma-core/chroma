@@ -112,7 +112,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_collection_assignment_policy_impl: str = (
         "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
     )
-    worker_memberlist_name: str = "worker-memberlist"
+    worker_memberlist_name: str = "query-service-memberlist"
     chroma_coordinator_host = "localhost"
 
     chroma_logservice_host = "localhost"
@@ -331,11 +331,11 @@ class System(Component):
             and settings["chroma_segment_cache_policy"] != "LRU"
         ):
             logger.error(
-                f"Failed to set chroma_segment_cache_policy: Only LRU is available."
+                "Failed to set chroma_segment_cache_policy: Only LRU is available."
             )
             if settings["chroma_memory_limit_bytes"] == 0:
                 logger.error(
-                    f"Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
+                    "Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
                 )
 
         # Apply the nofile limit if set
