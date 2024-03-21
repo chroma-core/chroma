@@ -258,7 +258,7 @@ mod tests {
         let kube_ns = "chroma".to_string();
         let kube_client = Client::try_default().await.unwrap();
         let memberlist_provider = CustomResourceMemberlistProvider::new(
-            "worker-memberlist".to_string(),
+            "query-service-memberlist".to_string(),
             kube_client.clone(),
             kube_ns.clone(),
             10,

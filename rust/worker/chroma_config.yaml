@@ -16,7 +16,7 @@ worker:
             hasher: Murmur3
     memberlist_provider:
         CustomResource:
-            memberlist_name: "worker-memberlist"
+            memberlist_name: "query-service-memberlist"
             queue_size: 100
     ingest:
         queue_size: 10000
