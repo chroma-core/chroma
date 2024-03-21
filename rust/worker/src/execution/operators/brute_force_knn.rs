@@ -1,4 +1,4 @@
-use crate::execution::operator::Operator;
+use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 
 #[derive(Debug)]
@@ -7,8 +7,7 @@ pub struct BruteForceKnnOperator {}
 pub struct BruteForceKnnOperatorInput {
     pub query_vecs: Vec<Vec<f32>>,
     pub k: usize,
-    // TODO: add distance metric
-    // pub distance_metric: String,
+    pub distance_metric: DistanceFunction,
 }
 
 pub struct BruteForceKnnOperatorOutput {
