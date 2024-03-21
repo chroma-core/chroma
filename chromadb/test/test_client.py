@@ -106,6 +106,7 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
         if re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path)
         or re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path)
     ]
+    print("FILTERED OPEN FILES", filtered_open_files)
     assert len(filtered_open_files) > 0
     persistent_api.close()
     open_files = current_process.open_files()
