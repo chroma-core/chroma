@@ -292,6 +292,7 @@ def basic_http_client() -> Generator[System, None, None]:
     )
     system = System(settings)
     api = system.instance(ServerAPI)
+    api.start()
     _await_server(api)
     system.start()
     yield system
