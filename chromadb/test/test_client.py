@@ -92,7 +92,9 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     persistent_api.reset()
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
-    temp_persist_dir = persistent_api.get_settings().persist_directory
+    temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
+        "\\", "\\\\"
+    )
     col1 = persistent_api.create_collection("test1")
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
@@ -123,7 +125,9 @@ def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
     persistent_api.reset()
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
-    temp_persist_dir = persistent_api.get_settings().persist_directory
+    temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
+        "\\", "\\\\"
+    )
     col.add(ids=["1"], documents=["test"])
     open_files = current_process.open_files()
     filtered_open_files = [
@@ -154,7 +158,9 @@ def test_persistent_client_use_after_close(persistent_api: ClientAPI) -> None:
     persistent_api.reset()
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
-    temp_persist_dir = persistent_api.get_settings().persist_directory
+    temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
+        "\\", "\\\\"
+    )
     col.add(ids=["1"], documents=["test"])
     open_files = current_process.open_files()
     assert any(
