@@ -21,7 +21,8 @@ docker_build(
 docker_build(
   'local:query-service',
   context='.',
-  dockerfile='./rust/worker/Dockerfile'
+  dockerfile='./rust/worker/Dockerfile',
+  only=['./rust/'],
 )
 
 k8s_yaml(
