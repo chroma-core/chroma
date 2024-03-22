@@ -118,7 +118,7 @@ impl HnswQueryOrchestrator {
         let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
         let end_timestamp = match end_timestamp {
             // TODO: change protobuf definition to use u64 instead of i64
-            Ok(end_timestamp) => end_timestamp.as_secs() as i64,
+            Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
                 // Log an error and reply + return
                 return;
