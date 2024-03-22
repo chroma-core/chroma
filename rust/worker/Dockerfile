@@ -7,6 +7,7 @@ WORKDIR /
 RUN git clone https://github.com/chroma-core/hnswlib.git
 
 WORKDIR /chroma/
+COPY . .
 
 ENV PROTOC_ZIP=protoc-25.1-linux-x86_64.zip
 RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1/$PROTOC_ZIP \
@@ -14,10 +15,7 @@ RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1
     && unzip -o $PROTOC_ZIP -d /usr/local 'include/*' \
     && rm -f $PROTOC_ZIP
 
-COPY . .
-
-ENV CARGO_TARGET_DIR=/root/.cache/cargo
-RUN --mount=type=cache,target=/root/.cache/cargo if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
 
 WORKDIR /chroma/rust/worker
 
