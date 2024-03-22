@@ -17,6 +17,4 @@ RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1
 
 RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
 
-WORKDIR /chroma/rust/worker
-
-CMD ["cargo", "run"]
+CMD ["./target/release/query_service"]
