@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import time
+import uuid
 from typing import Generator
 from unittest.mock import patch
 from pytest_httpserver import HTTPServer
@@ -84,12 +85,16 @@ def test_http_client_with_inconsistent_port_settings() -> None:
         )
 
 
-def test_persistent_client_close(persistent_api: ClientAPI) -> None:
+def test_persistent_client_close() -> None:
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
-    persistent_api.reset()
+    persistent_api = chromadb.PersistentClient(
+        path=tempfile.gettempdir() + "/test_server-"+uuid.uuid4().hex,
+        settings=Settings(
+        ),
+    )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
@@ -119,12 +124,15 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     assert len(post_filtered_open_files) == 0
 
 
-def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
+def test_persistent_client_double_close() -> None:
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
-    persistent_api.reset()
+    persistent_api = chromadb.PersistentClient(
+        path=tempfile.gettempdir() + "/test_server-"+uuid.uuid4().hex,
+        settings=Settings(),
+    )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
@@ -152,12 +160,15 @@ def test_persistent_client_double_close(persistent_api: ClientAPI) -> None:
         persistent_api.close()
 
 
-def test_persistent_client_use_after_close(persistent_api: ClientAPI) -> None:
+def test_persistent_client_use_after_close() -> None:
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
-    persistent_api.reset()
+    persistent_api = chromadb.PersistentClient(
+        path=tempfile.gettempdir() + "/test_server-"+uuid.uuid4().hex,
+        settings=Settings(),
+    )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
