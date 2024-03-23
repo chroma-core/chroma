@@ -37,7 +37,6 @@ spec:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          command: ["cargo", "run"]
           ports:
             - containerPort: 50051
           volumeMounts:
