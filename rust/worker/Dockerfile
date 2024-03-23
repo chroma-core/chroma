@@ -3,8 +3,6 @@ ARG CHROMA_KUBERNETES_INTEGRATION=0
 ENV CHROMA_KUBERNETES_INTEGRATION $CHROMA_KUBERNETES_INTEGRATION
 
 ARG RELEASE_MODE=
-ENV BINARY_LOCATION=${RELEASE_MODE:+target/release/query_service}
-ENV BINARY_LOCATION=${BINARY_LOCATION:-target/debug/query_service}
 
 WORKDIR /
 RUN git clone https://github.com/chroma-core/hnswlib.git
@@ -25,12 +23,13 @@ RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1
 
 # We need to replace the query node's real main() with a dummy at the expected location.
 RUN mkdir -p rust/worker/src/bin/ && echo "fn main() {}" > rust/worker/src/bin/query_service.rs
-RUN cargo build
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
 RUN rm -rf rust/
 
 COPY rust/ rust/
 RUN touch rust/worker/src/bin/query_service.rs
-RUN cargo build
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
+RUN if [ "$RELEASE_MODE" = "1" ]; then cp target/release/query_service .; else cp target/debug/query_service .; fi
 
 FROM debian:bookworm-slim
 
