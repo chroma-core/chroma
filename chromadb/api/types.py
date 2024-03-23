@@ -27,6 +27,7 @@ OneOrMany = Union[T, List[T]]
 # URIs
 URI = str
 URIs = List[URI]
+METADATA_TOMBSTONE = "___METADATA_TOMBSTONE___"
 
 
 def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
@@ -278,7 +279,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(value, (str, int, float)):
+        if not isinstance(value, bool) and not isinstance(
+            value, (str, int, float, type(None))
+        ):
             raise ValueError(
                 f"Expected metadata value to be a str, int, float or bool, got {value} which is a {type(value).__name__}"
             )

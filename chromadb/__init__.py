@@ -20,6 +20,7 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
     UpdateCollectionMetadata,
+    METADATA_TOMBSTONE,
 )
 
 # Re-export types from chromadb.types
@@ -37,6 +38,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "METADATA_TOMBSTONE",
 ]
 
 logger = logging.getLogger(__name__)
