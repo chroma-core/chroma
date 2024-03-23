@@ -37,7 +37,8 @@ export function repack(value: unknown): any {
 }
 
 export async function handleError(error: unknown) {
-  if (error instanceof Response) {
+  // @ts-ignore
+  if (error instanceof Response || (error && typeof error === 'object' && error.constructor && error.constructor.name === "Response")) {
     try {
       const res = await (error as Response).json();
       if ("error" in res) {

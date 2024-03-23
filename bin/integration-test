@@ -62,8 +62,8 @@ cd clients/js
 npm install
 npm run test:run
 
-docker compose down
 cd ../..
+docker compose -f docker-compose.test.yml down
 for auth_type in basic token xtoken; do
   echo "Testing $auth_type auth"
   setup_auth "$auth_type"
@@ -71,5 +71,14 @@ for auth_type in basic token xtoken; do
   docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
   yarn test:run-auth-"$auth_type"
   cd ../..
-  docker compose down
+  docker compose -f docker-compose.test-auth.yml down
 done
+
+docker compose down
+sh bin/run_ssl_server.sh
+cd clients/js
+npm run test:run-ssl
+cd ../..
+docker compose down
+# clean certs created by run_ssl_server.sh
+rm -rf certs/
