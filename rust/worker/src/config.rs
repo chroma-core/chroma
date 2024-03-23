@@ -165,7 +165,7 @@ mod tests {
                     log:
                         Grpc:
                             host: "localhost"
-                            port: 50052
+                            port: 50051
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -217,7 +217,7 @@ mod tests {
                     log:
                         Grpc:
                             host: "localhost"
-                            port: 50052
+                            port: 50051
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -285,7 +285,7 @@ mod tests {
                     log:
                         Grpc:
                             host: "localhost"
-                            port: 50052
+                            port: 50051
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -333,7 +333,7 @@ mod tests {
                     log:
                         Grpc:
                             host: "localhost"
-                            port: 50052
+                            port: 50051
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
