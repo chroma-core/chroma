@@ -76,7 +76,7 @@ def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
     return cast(Metadatas, target)
 
 
-CollectionMetadata = Dict[str, Any]
+CollectionMetadata = UpdateMetadata
 UpdateCollectionMetadata = UpdateMetadata
 
 # Documents

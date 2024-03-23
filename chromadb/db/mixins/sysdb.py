@@ -402,6 +402,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata_t.str_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
@@ -456,7 +457,7 @@ class SqlSysDB(SqlDB, SysDB):
 
             # apply limit and offset
             if limit is not None:
-                collections = collections[offset:offset+limit]
+                collections = collections[offset : offset + limit]
             else:
                 collections = collections[offset:]
 
@@ -664,13 +665,15 @@ class SqlSysDB(SqlDB, SysDB):
         )
         metadata: Dict[str, Union[str, int, float]] = {}
         for row in rows:
-            key = str(row[-4])
-            if row[-3] is not None:
-                metadata[key] = str(row[-3])
+            key = str(row[-5])
+            if row[-4] is not None:
+                metadata[key] = str(row[-4])
+            elif row[-3] is not None:
+                metadata[key] = int(row[-3])
             elif row[-2] is not None:
-                metadata[key] = int(row[-2])
+                metadata[key] = float(row[-2])
             elif row[-1] is not None:
-                metadata[key] = float(row[-1])
+                metadata[key] = bool(row[-1])
         return metadata or None
 
     @trace_method("SqlSysDB._insert_metadata", OpenTelemetryGranularity.ALL)
@@ -711,6 +714,7 @@ class SqlSysDB(SqlDB, SysDB):
                 table.str_value,
                 table.int_value,
                 table.float_value,
+                table.bool_value,
             )
         )
         sql_id = self.uuid_to_db(id)
@@ -722,6 +726,16 @@ class SqlSysDB(SqlDB, SysDB):
                     ParameterValue(v),
                     None,
                     None,
+                    None,
+                )
+            elif isinstance(v, bool):
+                q = q.insert(
+                    ParameterValue(sql_id),
+                    ParameterValue(k),
+                    None,
+                    None,
+                    None,
+                    ParameterValue(v),
                 )
             elif isinstance(v, int):
                 q = q.insert(
@@ -729,6 +743,7 @@ class SqlSysDB(SqlDB, SysDB):
                     ParameterValue(k),
                     None,
                     ParameterValue(v),
+                    None,
                     None,
                 )
             elif isinstance(v, float):
@@ -738,6 +753,7 @@ class SqlSysDB(SqlDB, SysDB):
                     None,
                     None,
                     ParameterValue(v),
+                    None,
                 )
             elif v is None:
                 continue
