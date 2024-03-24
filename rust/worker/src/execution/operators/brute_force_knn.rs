@@ -108,4 +108,19 @@ mod tests {
             1.0f32 - ((data_1[0] * 0.0) + (data_1[1] * 1.0) + (data_1[2] * 0.0));
         assert_eq!(output.distances, vec![0.0, expected_distance_1]);
     }
+
+    #[tokio::test]
+    async fn test_data_less_than_k() {
+        // If we have less data than k, we should return all the data, sorted by distance.
+        let operator = BruteForceKnnOperator {};
+        let input = BruteForceKnnOperatorInput {
+            data: vec![vec![0.0, 0.0, 0.0]],
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+        };
+        let output = operator.run(&input).await.unwrap();
+        assert_eq!(output.indices, vec![0]);
+        assert_eq!(output.distances, vec![0.0]);
+    }
 }
