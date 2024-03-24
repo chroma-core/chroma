@@ -178,12 +178,12 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
         self.state = ExecutionState::Dedupe;
 
         // TODO: implement the remaining state transitions and operators
-        // TODO: don't need all these cloning and data shuffling, once we land the chunk abstraction
+        // TODO: don't need all this cloning and data shuffling, once we land the chunk abstraction
         let mut dataset = Vec::new();
         match message {
             Ok(logs) => {
                 for log in logs.logs().iter() {
-                    // TODO: only adds have embeddings, fine for now
+                    // TODO: only adds have embeddings, unwrap is fine for now
                     dataset.push(log.embedding.clone().unwrap());
                 }
                 let bf_input = BruteForceKnnOperatorInput {
