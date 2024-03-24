@@ -28,6 +28,8 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
+		// We remove the collection id for space reasons, as its double stored in the wrapping database RecordLog object.
+		// PullLogs will rehydrate the collection id from the database.
 		record.CollectionId = ""
 		data, err := proto.Marshal(record)
 		if err != nil {
@@ -58,7 +60,8 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 		return nil, err
 	}
 	records := make([]*logservicepb.RecordLog, 0)
-	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize), req.GetEndTimestamp())
+	// TODO: hardcoding timestamp to -1 for now, we can add this as a parameter later
+	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize), -1)
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
@@ -73,10 +76,13 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
+		// Here we rehydrate the collection id from the database since in PushLogs we removed it for space reasons.
+		record.CollectionId = *recordLogs[index].CollectionID
 		recordLog := &logservicepb.RecordLog{
 			LogId:  recordLogs[index].ID,
 			Record: record,
 		}
+		log.Info("PullLogs Record Success", zap.Int64("logId", recordLogs[index].ID), zap.String("collectionID", record.CollectionId))
 		records = append(records, recordLog)
 	}
 	res.Records = records

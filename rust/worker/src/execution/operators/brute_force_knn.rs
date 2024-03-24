@@ -1,5 +1,6 @@
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
+use std::cmp;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -14,6 +15,7 @@ pub struct BruteForceKnnOperator {}
 /// * `query` - The query vector.
 /// * `k` - The number of nearest neighbors to find.
 /// * `distance_metric` - The distance metric to use.
+#[derive(Debug)]
 pub struct BruteForceKnnOperatorInput {
     pub data: Vec<Vec<f32>>,
     pub query: Vec<f32>,
@@ -27,10 +29,12 @@ pub struct BruteForceKnnOperatorInput {
 /// One row for each query vector.
 /// * `distances` - The distances of the nearest neighbors.
 /// One row for each query vector.
+#[derive(Debug)]
 pub struct BruteForceKnnOperatorOutput {
     pub indices: Vec<usize>,
     pub distances: Vec<f32>,
 }
+pub type BruteForceKnnOperatorResult = Result<BruteForceKnnOperatorOutput, ()>;
 
 #[async_trait]
 impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for BruteForceKnnOperator {
@@ -42,14 +46,19 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
     ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
         // We could use a heap approach here, but for now we just sort the distances and take the
         // first k.
+        println!("Running brute force knn operator");
         let mut sorted_indices_distances = input
             .data
             .iter()
             .map(|data| input.distance_metric.distance(&input.query, data))
             .enumerate()
             .collect::<Vec<(usize, f32)>>();
+        println!("Brute force knn operator distances computed");
         sorted_indices_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let (sorted_indices, sorted_distances) = sorted_indices_distances.drain(..input.k).unzip();
+        let (sorted_indices, sorted_distances) = sorted_indices_distances
+            .drain(..cmp::min(input.k, input.data.len()))
+            .unzip();
+        println!("Brute force knn operator finished");
 
         Ok(BruteForceKnnOperatorOutput {
             indices: sorted_indices,

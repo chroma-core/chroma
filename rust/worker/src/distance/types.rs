@@ -20,6 +20,11 @@ pub(crate) enum DistanceFunction {
 impl DistanceFunction {
     // TOOD: Should we error if mismatched dimensions?
     pub(crate) fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
+        println!(
+            "Calculating distance between vectors of length {} and {}",
+            a.len(),
+            b.len()
+        );
         // TODO: implement this in SSE/AVX SIMD
         // For now we write these as loops since we suspect that will more likely
         // lead to the compiler vectorizing the code. (We saw this on

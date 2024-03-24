@@ -30,12 +30,15 @@ pub struct WorkerServer {
 #[async_trait]
 impl Configurable for WorkerServer {
     async fn try_from_config(config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+        println!("Creating worker server from config");
+        println!("Creating sysdb from config for worker server");
         let sysdb = match crate::sysdb::from_config(&config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
             }
         };
+        println!("Creating log from config for worker server");
         let log = match crate::log::from_config(&config).await {
             Ok(log) => log,
             Err(err) => {
@@ -197,6 +200,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
                 return Err(Status::internal("No system found"));
             }
         };
+        println!("Server recieved result: {:?}", result);
 
         let result = match result {
             Ok(result) => result,
@@ -243,6 +247,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             results: proto_results_for_all,
         };
 
+        println!("Server sending response: {:?}", resp);
         return Ok(Response::new(resp));
     }
 }

@@ -43,6 +43,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             raise Exception("Missing grpc_url in segment metadata")
 
         channel = grpc.insecure_channel(segment["metadata"]["grpc_url"])
+        print("Connected to grpc segment at ", segment["metadata"]["grpc_url"])
         self._vector_reader_stub = VectorReaderStub(channel)  # type: ignore
         self._segment = segment
         self._opentelemetry_client = system.require(OpenTelemetryClient)

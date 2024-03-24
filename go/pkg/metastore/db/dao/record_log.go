@@ -88,6 +88,7 @@ func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize 
 		zap.Int64("ID", id),
 		zap.Int("batch_size", batchSize),
 		zap.Int("count", len(recordLogs)))
+	// log.Info("PullLogs success", zap.String("log collection id", *recordLogs[0].CollectionID))
 	return recordLogs, nil
 }
 

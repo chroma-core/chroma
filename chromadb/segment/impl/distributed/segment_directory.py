@@ -214,6 +214,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
 
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
+        print("Getting segment endpoint, curr memberlist: ", self._curr_memberlist)
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher)

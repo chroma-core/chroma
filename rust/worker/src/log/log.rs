@@ -138,12 +138,21 @@ impl Log for GrpcLog {
                 let logs = response.into_inner().records;
                 let mut result = Vec::new();
                 for log in logs {
+                    println!("log: {:?}", log);
+                    println!(
+                        "log collection id: {:?}",
+                        log.clone().record.unwrap().collection_id
+                    );
                     let embedding_record = log.try_into();
                     match embedding_record {
                         Ok(embedding_record) => {
                             result.push(embedding_record);
                         }
                         Err(err) => {
+                            println!(
+                                "Failed to convert proto embedding record into EmbeddingRecord: {}",
+                                err
+                            );
                             return Err(PullLogsError::ConversionError(err));
                         }
                     }
@@ -192,7 +201,7 @@ impl Log for GrpcLog {
 pub(crate) enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
-    #[error("Failed to convert proto segment")]
+    #[error("Failed to convert proto embedding record into EmbeddingRecord")]
     ConversionError(#[from] EmbeddingRecordConversionError),
 }
 
