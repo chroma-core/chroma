@@ -1,5 +1,6 @@
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
+use std::cmp;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -14,6 +15,7 @@ pub struct BruteForceKnnOperator {}
 /// * `query` - The query vector.
 /// * `k` - The number of nearest neighbors to find.
 /// * `distance_metric` - The distance metric to use.
+#[derive(Debug)]
 pub struct BruteForceKnnOperatorInput {
     pub data: Vec<Vec<f32>>,
     pub query: Vec<f32>,
@@ -27,19 +29,19 @@ pub struct BruteForceKnnOperatorInput {
 /// One row for each query vector.
 /// * `distances` - The distances of the nearest neighbors.
 /// One row for each query vector.
+#[derive(Debug)]
 pub struct BruteForceKnnOperatorOutput {
     pub indices: Vec<usize>,
     pub distances: Vec<f32>,
 }
 
+pub type BruteForceKnnOperatorResult = Result<BruteForceKnnOperatorOutput, ()>;
+
 #[async_trait]
 impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for BruteForceKnnOperator {
     type Error = ();
 
-    async fn run(
-        &self,
-        input: &BruteForceKnnOperatorInput,
-    ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
+    async fn run(&self, input: &BruteForceKnnOperatorInput) -> BruteForceKnnOperatorResult {
         // We could use a heap approach here, but for now we just sort the distances and take the
         // first k.
         let mut sorted_indices_distances = input
@@ -49,7 +51,9 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             .enumerate()
             .collect::<Vec<(usize, f32)>>();
         sorted_indices_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let (sorted_indices, sorted_distances) = sorted_indices_distances.drain(..input.k).unzip();
+        let (sorted_indices, sorted_distances) = sorted_indices_distances
+            .drain(..cmp::min(input.k, input.data.len()))
+            .unzip();
 
         Ok(BruteForceKnnOperatorOutput {
             indices: sorted_indices,
@@ -103,5 +107,20 @@ mod tests {
         let expected_distance_1 =
             1.0f32 - ((data_1[0] * 0.0) + (data_1[1] * 1.0) + (data_1[2] * 0.0));
         assert_eq!(output.distances, vec![0.0, expected_distance_1]);
+    }
+
+    #[tokio::test]
+    async fn test_data_less_than_k() {
+        // If we have less data than k, we should return all the data, sorted by distance.
+        let operator = BruteForceKnnOperator {};
+        let input = BruteForceKnnOperatorInput {
+            data: vec![vec![0.0, 0.0, 0.0]],
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+        };
+        let output = operator.run(&input).await.unwrap();
+        assert_eq!(output.indices, vec![0]);
+        assert_eq!(output.distances, vec![0.0]);
     }
 }
