@@ -29,11 +29,11 @@ RUN rm -rf rust/
 COPY rust/ rust/
 RUN touch rust/worker/src/bin/query_service.rs
 RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
-RUN if [ "$RELEASE_MODE" = "1" ]; then cp target/release/query_service .; else cp target/debug/query_service .; fi
+RUN if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service .; else mv target/debug/query_service .; fi
 
 FROM debian:bookworm-slim
 
-COPY --from=builder /chroma/target/debug/query_service .
+COPY --from=builder /chroma/query_service .
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
 RUN apt-get update && apt-get install -y libssl-dev
 
