@@ -276,7 +276,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
         start = start or pulsar_to_int(pulsar.MessageId.latest)
         end = end or self.max_seqid()
         if not isinstance(start, int) or not isinstance(end, int):
-            raise ValueError("SeqIDs must be integers")
+            raise TypeError("SeqIDs must be integers")
         if start >= end:
             raise ValueError(f"Invalid SeqID range: {start} to {end}")
         return start, end

@@ -141,15 +141,3 @@ jobs:
         artifacts: "dist/chroma-${{steps.version.outputs.version}}.tar.gz"
         allowUpdates: true
         prerelease: true
-    - name: Trigger Hosted Chroma Release
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
-        script: |
-          const result = await github.rest.actions.createWorkflowDispatch({
-            owner: 'chroma-core',
-            repo: 'hosted-chroma',
-            workflow_id: 'build-and-publish-image.yaml',
-            ref: 'main'
-          })
-          console.log(result)

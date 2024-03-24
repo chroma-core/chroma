@@ -54,7 +54,7 @@ class RendezvousHashingAssignmentPolicy(CollectionAssignmentPolicy):
 
     @overrides
     def get_topics(self) -> Sequence[str]:
-        # Mirrors go/coordinator/internal/coordinator/assignment_policy.go
+        # Mirrors go/internal/coordinator/assignment_policy.go
         return [
             f"persistent://{self._tenant_id}/{self._topic_ns}/chroma_log_{i}"
             for i in range(16)

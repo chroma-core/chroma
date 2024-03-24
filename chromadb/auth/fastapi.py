@@ -1,4 +1,3 @@
-# FAST API code
 from contextvars import ContextVar
 from functools import wraps
 import logging
@@ -6,13 +5,13 @@ from typing import Callable, Optional, Dict, List, Union, cast, Any
 from overrides import override
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response, JSONResponse
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
+import chromadb
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
-    AuthorizationError,
     AuthorizationRequestContext,
     AuthzAction,
     AuthzResource,
@@ -28,6 +27,8 @@ from chromadb.auth import (
     ServerAuthorizationProvider,
 )
 from chromadb.auth.registry import resolve_provider
+from chromadb.errors import AuthorizationError
+from chromadb.utils.fastapi import fastapi_json_response
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -116,7 +117,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
@@ -143,7 +144,8 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
             FastAPIServerAuthenticationRequest(request)
         )
         if not response or not response.success():
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return fastapi_json_response(AuthorizationError("Unauthorized"))
+
         request.state.user_identity = response.get_user_identity()
         return await call_next(request)
 
@@ -152,6 +154,17 @@ request_var: ContextVar[Optional[Request]] = ContextVar("request_var", default=N
 authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
     "authz_provider", default=None
 )
+
+# This needs to be module-level config, since it's used in authz_context() where we
+# don't have a system (so don't have easy access to the settings).
+overwrite_singleton_tenant_database_access_from_auth: bool = False
+
+
+def set_overwrite_singleton_tenant_database_access_from_auth(
+    overwrite: bool = False,
+) -> None:
+    global overwrite_singleton_tenant_database_access_from_auth
+    overwrite_singleton_tenant_database_access_from_auth = overwrite
 
 
 def authz_context(
@@ -171,7 +184,7 @@ def authz_context(
             if request:
                 _provider = authz_provider.get()
                 a_list: List[Union[str, AuthzAction]] = []
-                if not isinstance(action, List):
+                if not isinstance(action, list):
                     a_list = [action]
                 else:
                     a_list = cast(List[Union[str, AuthzAction]], action)
@@ -203,6 +216,29 @@ def authz_context(
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
+                # In a multi-tenant environment, we may want to allow users to send
+                # requests without configuring a tenant and DB. If so, they can set
+                # the request tenant and DB however they like and we simply overwrite it.
+                if overwrite_singleton_tenant_database_access_from_auth:
+                    desired_tenant = request.state.user_identity.get_user_tenant()
+                    if desired_tenant and "tenant" in kwargs:
+                        if isinstance(kwargs["tenant"], str):
+                            kwargs["tenant"] = desired_tenant
+                        elif isinstance(
+                            kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant
+                        ):
+                            kwargs["tenant"].name = desired_tenant
+                    databases = request.state.user_identity.get_user_databases()
+                    if databases and len(databases) == 1 and "database" in kwargs:
+                        desired_database = databases[0]
+                        if isinstance(kwargs["database"], str):
+                            kwargs["database"] = desired_database
+                        elif isinstance(
+                            kwargs["database"],
+                            chromadb.server.fastapi.types.CreateDatabase,
+                        ):
+                            kwargs["database"].name = desired_database
+
             return f(*args, **kwargs)
 
         return wrapped
@@ -266,7 +302,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, authz_middleware: FastAPIChromaAuthzMiddleware
     ) -> None:

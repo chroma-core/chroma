@@ -15,6 +15,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+  'build >= 1.0.3',
   'requests >= 2.28',
   'pydantic >= 1.9',
   'chroma-hnswlib==0.7.3',
@@ -42,6 +43,7 @@ dependencies = [
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
   'mmh3>=4.0.1',
+  'orjson>=3.9.12',
 ]
 
 [tool.black]
@@ -51,6 +53,13 @@ target-version = ['py38', 'py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.mypy]
+ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = ["chromadb.proto.*"]
+ignore_errors = true
 
 [project.scripts]
 chroma = "chromadb.cli.cli:app"

@@ -1,0 +1,9 @@
+FROM debian:bookworm-slim
+
+RUN apt update
+RUN apt upgrade -y
+RUN apt install -y curl jq
+RUN curl -sSf https://atlasgo.sh | sh -s -- --community
+
+COPY ./go/migrations migrations
+COPY ./go/atlas.hcl atlas.hcl

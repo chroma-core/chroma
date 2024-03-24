@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Sequence, Set, Type, cast
+from typing import Any, Dict, List, Sequence, Set
 from uuid import UUID
-from chromadb.config import Settings, System, get_class
+from chromadb.config import Settings, System
 from chromadb.ingest import CollectionAssignmentPolicy, Consumer
 from chromadb.proto.chroma_pb2_grpc import (
     # SegmentServerServicer,
@@ -11,19 +11,9 @@ from chromadb.proto.chroma_pb2_grpc import (
 import chromadb.proto.chroma_pb2 as proto
 import grpc
 from concurrent import futures
-from chromadb.proto.convert import (
-    from_proto_segment,
-    to_proto_seq_id,
-    to_proto_vector,
-    to_proto_vector_embedding_record,
-)
-from chromadb.segment import SegmentImplementation, SegmentType, VectorReader
-from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
-    OpenTelemetryGranularity,
-    trace_method,
-)
-from chromadb.types import EmbeddingRecord, ScalarEncoding, Segment, SegmentScope
+from chromadb.segment import SegmentImplementation, SegmentType
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.types import EmbeddingRecord
 from chromadb.segment.distributed import MemberlistProvider, Memberlist
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 from chromadb.ingest.impl.pulsar_admin import PulsarAdmin
@@ -59,7 +49,7 @@ class SegmentServer(VectorReaderServicer):
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         # TODO: add term and epoch to segment server
         self._memberlist_provider = system.require(MemberlistProvider)
-        self._memberlist_provider.set_memberlist_name("worker-memberlist")
+        self._memberlist_provider.set_memberlist_name("query-service-memberlist")
         self._assignment_policy = system.require(CollectionAssignmentPolicy)
         self._create_pulsar_topics()
         self._consumer = system.require(Consumer)

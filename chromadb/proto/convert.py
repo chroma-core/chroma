@@ -42,7 +42,7 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
 
 def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
     encoding = vector.encoding
-    as_array: array.array[float] | array.array[int]
+    as_array: Union[array.array[float], array.array[int]]
     if encoding == proto.ScalarEncoding.FLOAT32:
         as_array = array.array("f")
         out_encoding = ScalarEncoding.FLOAT32
