@@ -152,7 +152,7 @@ impl Log for GrpcLog {
             }
             Err(e) => {
                 // TODO: switch to logging when logging is implemented
-                println!("Failed to pull: logs: {}", e);
+                println!("Failed to pull logs: {}", e);
                 Err(PullLogsError::FailedToPullLogs(e))
             }
         }
