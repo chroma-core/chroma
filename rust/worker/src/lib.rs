@@ -51,6 +51,7 @@ pub async fn query_service_entrypoint() {
         }
     };
     worker_server.set_segment_manager(segment_manager.clone());
+    worker_server.set_system(system);
     worker_server.set_dispatcher(dispatcher_handle.receiver());
 
     let server_join_handle = tokio::spawn(async move {
