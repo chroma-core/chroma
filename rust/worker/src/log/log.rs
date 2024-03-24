@@ -192,7 +192,7 @@ impl Log for GrpcLog {
 pub(crate) enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
-    #[error("Failed to convert proto segment")]
+    #[error("Failed to convert proto embedding record into EmbeddingRecord")]
     ConversionError(#[from] EmbeddingRecordConversionError),
 }
 
