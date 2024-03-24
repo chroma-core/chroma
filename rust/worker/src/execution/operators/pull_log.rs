@@ -123,6 +123,13 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
             offset += batch_size as i64;
             result.append(&mut logs);
 
+            // We used a a timestamp and we didn't get a full batch, so we have retrieved
+            // the last batch of logs relevant to our query
+            if input.end_timestamp.is_some() && num_records_read < batch_size as usize {
+                break;
+            }
+
+            // We have read all the records up to the size we wanted
             if input.num_records.is_some()
                 && num_records_read >= input.num_records.unwrap() as usize
             {
