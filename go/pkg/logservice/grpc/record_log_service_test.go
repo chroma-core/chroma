@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"testing"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/logservice/testutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -16,8 +19,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
-	"testing"
-	"time"
 )
 
 type RecordLogServiceTestSuite struct {
@@ -132,6 +133,11 @@ func (suite *RecordLogServiceTestSuite) TestServer_PushLogs() {
 func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 	// push some records
 	recordsToSubmit := GetTestEmbeddingRecords(suite.collectionId.String())
+	// deep clone the records since PushLogs will mutate the records and we need a source of truth
+	recordsToSubmit_sot := make([]*coordinatorpb.SubmitEmbeddingRecord, len(recordsToSubmit))
+	for i := range recordsToSubmit {
+		recordsToSubmit_sot[i] = proto.Clone(recordsToSubmit[i]).(*coordinatorpb.SubmitEmbeddingRecord)
+	}
 	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: suite.collectionId.String(),
 		Records:      recordsToSubmit,
@@ -150,13 +156,13 @@ func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 	suite.Len(pullResponse.Records, 3)
 	for index := range pullResponse.Records {
 		suite.Equal(int64(index+1), pullResponse.Records[index].LogId)
-		suite.Equal(pullResponse.Records[index].Record.Id, recordsToSubmit[index].Id)
-		suite.Equal(pullResponse.Records[index].Record.Operation, recordsToSubmit[index].Operation)
-		suite.Equal(pullResponse.Records[index].Record.CollectionId, recordsToSubmit[index].CollectionId)
-		suite.Equal(pullResponse.Records[index].Record.Metadata, recordsToSubmit[index].Metadata)
-		suite.Equal(pullResponse.Records[index].Record.Vector.Dimension, recordsToSubmit[index].Vector.Dimension)
-		suite.Equal(pullResponse.Records[index].Record.Vector.Encoding, recordsToSubmit[index].Vector.Encoding)
-		suite.Equal(pullResponse.Records[index].Record.Vector.Vector, recordsToSubmit[index].Vector.Vector)
+		suite.Equal(recordsToSubmit_sot[index].Id, pullResponse.Records[index].Record.Id)
+		suite.Equal(recordsToSubmit_sot[index].Operation, pullResponse.Records[index].Record.Operation)
+		suite.Equal(recordsToSubmit_sot[index].CollectionId, pullResponse.Records[index].Record.CollectionId)
+		suite.Equal(recordsToSubmit_sot[index].Metadata, pullResponse.Records[index].Record.Metadata)
+		suite.Equal(recordsToSubmit_sot[index].Vector.Dimension, pullResponse.Records[index].Record.Vector.Dimension)
+		suite.Equal(recordsToSubmit_sot[index].Vector.Encoding, pullResponse.Records[index].Record.Vector.Encoding)
+		suite.Equal(recordsToSubmit_sot[index].Vector.Vector, pullResponse.Records[index].Record.Vector.Vector)
 	}
 }
 
