@@ -2,25 +2,29 @@ update_settings(max_parallel_updates=6)
 
 docker_build(
   'local:sysdb-migration',
-  context='.',
+  '.',
+  only=['go/'],
   dockerfile='./go/Dockerfile.migration'
 )
 
 docker_build(
   'local:sysdb',
-  context='.',
+  '.',
+  only=['go/', 'idl/'],
   dockerfile='./go/Dockerfile'
 )
 
 docker_build(
   'local:frontend-service',
-  context='.',
+  '.',
+  only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
   dockerfile='./Dockerfile',
 )
 
 docker_build(
   'local:query-service',
-  context='.',
+  '.',
+  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
   dockerfile='./rust/worker/Dockerfile'
 )
 
