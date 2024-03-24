@@ -28,6 +28,8 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
+		// We remove the collection id for space reasons, as its double stored in the wrapping database RecordLog object.
+		// PullLogs will rehydrate the collection id from the database.
 		record.CollectionId = ""
 		data, err := proto.Marshal(record)
 		if err != nil {
@@ -73,6 +75,8 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
+		// Here we rehydrate the collection id from the database since in PushLogs we removed it for space reasons.
+		record.CollectionId = *recordLogs[index].CollectionID
 		recordLog := &logservicepb.RecordLog{
 			LogId:  recordLogs[index].ID,
 			Record: record,
