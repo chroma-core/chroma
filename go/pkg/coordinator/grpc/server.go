@@ -3,8 +3,9 @@ package grpc
 import (
 	"context"
 	"errors"
-	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"time"
+
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma-core/chroma/go/pkg/coordinator"
@@ -45,6 +46,7 @@ type Config struct {
 	// Kubernetes config
 	KubernetesNamespace  string
 	WorkerMemberlistName string
+	WorkerPodLabel       string
 
 	// Assignment policy config can be "simple" or "rendezvous"
 	AssignmentPolicy string
@@ -172,8 +174,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 }
 
 func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManager, error) {
-	// TODO: Make this configuration
-	log.Info("Starting memberlist manager")
+	log.Info("Creating memberlist manager")
 	memberlist_name := config.WorkerMemberlistName
 	namespace := config.KubernetesNamespace
 	clientset, err := utils.GetKubernetesInterface()
@@ -184,7 +185,7 @@ func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManag
 	if err != nil {
 		return nil, err
 	}
-	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker", config.WatchInterval)
+	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, config.WorkerPodLabel, config.WatchInterval)
 	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
 	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
 	return memberlist_manager, nil

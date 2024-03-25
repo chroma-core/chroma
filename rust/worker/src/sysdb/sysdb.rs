@@ -1,6 +1,4 @@
-use async_trait::async_trait;
-use uuid::Uuid;
-
+use super::config::SysDbConfig;
 use crate::chroma_proto;
 use crate::config::{Configurable, WorkerConfig};
 use crate::types::{CollectionConversionError, SegmentConversionError};
@@ -9,15 +7,16 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
     types::{Collection, Segment, SegmentScope},
 };
+use async_trait::async_trait;
+use std::fmt::Debug;
 use thiserror::Error;
-
-use super::config::SysDbConfig;
+use uuid::Uuid;
 
 const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
 #[async_trait]
-pub(crate) trait SysDb: Send + Sync + SysDbClone {
+pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
@@ -59,7 +58,7 @@ impl Clone for Box<dyn SysDb> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
 pub(crate) struct GrpcSysDb {

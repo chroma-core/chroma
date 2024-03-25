@@ -35,18 +35,21 @@ class PushLogsResponse(_message.Message):
     def __init__(self, record_count: _Optional[int] = ...) -> None: ...
 
 class PullLogsRequest(_message.Message):
-    __slots__ = ["collection_id", "start_from_id", "batch_size"]
+    __slots__ = ["collection_id", "start_from_id", "batch_size", "end_timestamp"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     START_FROM_ID_FIELD_NUMBER: _ClassVar[int]
     BATCH_SIZE_FIELD_NUMBER: _ClassVar[int]
+    END_TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
     start_from_id: int
     batch_size: int
+    end_timestamp: int
     def __init__(
         self,
         collection_id: _Optional[str] = ...,
         start_from_id: _Optional[int] = ...,
         batch_size: _Optional[int] = ...,
+        end_timestamp: _Optional[int] = ...,
     ) -> None: ...
 
 class RecordLog(_message.Message):

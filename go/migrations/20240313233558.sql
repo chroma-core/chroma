@@ -1,3 +1,5 @@
+CREATE SCHEMA "public";
+
 -- Create "collection_metadata" table
 CREATE TABLE "public"."collection_metadata" (
   "collection_id" text NOT NULL,
@@ -22,6 +24,7 @@ CREATE TABLE "public"."collections" (
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "log_position" bigint NULL DEFAULT 0,
+  "version" integer NULL DEFAULT 0,
   PRIMARY KEY ("id")
 );
 -- Create index "uni_collections_name" to table: "collections"
@@ -78,6 +81,7 @@ CREATE TABLE "public"."segments" (
   "is_deleted" boolean NULL DEFAULT false,
   "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "file_paths" text NULL DEFAULT '{}',
   PRIMARY KEY ("collection_id", "id")
 );
 -- Create "tenants" table

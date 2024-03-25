@@ -1,23 +1,21 @@
-use std::fmt::Debug;
-use std::sync::Arc;
-
+use super::scheduler::Scheduler;
+use super::sender::Sender;
+use super::ComponentContext;
+use super::ComponentRuntime;
+use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
 use futures::Stream;
 use futures::StreamExt;
+use std::fmt::Debug;
+use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::{pin, select};
 
-use super::ComponentRuntime;
-// use super::executor::StreamComponentExecutor;
-use super::scheduler::Scheduler;
-use super::sender::{self, Sender, Wrapper};
-use super::{executor, ComponentContext};
-use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct System {
     inner: Arc<Inner>,
 }
 
+#[derive(Debug)]
 struct Inner {
     scheduler: Scheduler,
 }
@@ -31,19 +29,13 @@ impl System {
         }
     }
 
-    pub(crate) fn start_component<C>(&mut self, mut component: C) -> ComponentHandle<C>
+    pub(crate) fn start_component<C>(&self, component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
         let sender = Sender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
-        let _ = component.on_start(&mut ComponentContext {
-            system: self.clone(),
-            sender: sender.clone(),
-            cancellation_token: cancel_token.clone(),
-            scheduler: self.inner.scheduler.clone(),
-        });
         let mut executor = ComponentExecutor::new(
             sender.clone(),
             cancel_token.clone(),
@@ -53,14 +45,14 @@ impl System {
         );
 
         match C::runtime() {
-            ComponentRuntime::Global => {
+            ComponentRuntime::Inherit => {
                 let join_handle = tokio::spawn(async move { executor.run(rx).await });
                 return ComponentHandle::new(cancel_token, Some(join_handle), sender);
             }
             ComponentRuntime::Dedicated => {
                 println!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
-                let mut rt = Builder::new_current_thread().enable_all().build().unwrap();
+                let rt = Builder::new_current_thread().enable_all().build().unwrap();
                 let join_handle = std::thread::spawn(move || {
                     rt.block_on(async move { executor.run(rx).await });
                 });

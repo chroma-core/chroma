@@ -3,51 +3,49 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: worker
+  name: query-service 
   namespace: {{ .Values.namespace }}
 spec:
   ports:
-    - name: worker-server-port
+    - name: query-service-server-port
       port: 50051
       targetPort: 50051
   selector:
-    app: worker-server
+    app: query-service-server
   type: ClusterIP
 
 ---
 
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: worker
+  name: query-service
   namespace: {{ .Values.namespace }}
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: worker
+      app: query-service
   template:
     metadata:
       labels:
-        app: worker
-        member-type: worker
+        app: query-service
+        member-type: query-service
     spec:
-      serviceAccountName: worker-serviceaccount
+      serviceAccountName: query-service-serviceaccount
       containers:
-        - name: worker
-          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+        - name: query-service
+          image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          command: ["cargo", "run"]
           ports:
             - containerPort: 50051
           volumeMounts:
             - name: chroma
               mountPath: /index_data
           env:
-            - name: CHROMA_WORKER__PULSAR_URL
+            - name: CHROMA_query-service__PULSAR_URL
               value: pulsar://pulsar.chroma:6650
-            - name: CHROMA_WORKER__MY_IP
+            - name: CHROMA_query-service__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
@@ -57,7 +55,7 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              member-type: worker
+              member-type: query-service
       volumes:
         - name: chroma
           emptyDir: {}
@@ -67,7 +65,7 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: worker-serviceaccount
+  name: query-service-serviceaccount
   namespace: {{ .Values.namespace }}
 
 ---
@@ -75,7 +73,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: worker-serviceaccount-rolebinding
+  name: query-service-serviceaccount-rolebinding
   namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -83,7 +81,7 @@ roleRef:
   name: pod-watcher
 subjects:
 - kind: ServiceAccount
-  name: worker-serviceaccount
+  name: query-service-serviceaccount
   namespace: {{ .Values.namespace }}
 
 ---

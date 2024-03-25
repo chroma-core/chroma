@@ -176,12 +176,13 @@ impl CustomResourceMemberlistProvider {
     }
 }
 
+#[async_trait]
 impl Component for CustomResourceMemberlistProvider {
     fn queue_size(&self) -> usize {
         self.queue_size
     }
 
-    fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
         self.connect_to_kube_stream(ctx);
     }
 }
@@ -257,7 +258,7 @@ mod tests {
         let kube_ns = "chroma".to_string();
         let kube_client = Client::try_default().await.unwrap();
         let memberlist_provider = CustomResourceMemberlistProvider::new(
-            "worker-memberlist".to_string(),
+            "query-service-memberlist".to_string(),
             kube_client.clone(),
             kube_ns.clone(),
             10,

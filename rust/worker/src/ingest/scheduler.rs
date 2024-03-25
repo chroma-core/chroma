@@ -49,12 +49,13 @@ impl RoundRobinScheduler {
     }
 }
 
+#[async_trait]
 impl Component for RoundRobinScheduler {
     fn queue_size(&self) -> usize {
         1000
     }
 
-    fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         let sleep_sender = ctx.sender.clone();
         let (new_tenant_tx, mut new_tenant_rx) = tokio::sync::mpsc::channel(1000);
         self.new_tenant_channel = Some(new_tenant_tx);

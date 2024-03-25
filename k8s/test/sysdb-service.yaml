@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: worker-lb
+  name: sysdb-lb
   namespace: chroma
 spec:
   ports:
-    - name: worker-port
-      port: 50052
+    - name: grpc
+      port: 50051
       targetPort: 50051
   selector:
-    app: worker
+    app: sysdb 
   type: LoadBalancer

@@ -11,13 +11,8 @@ from chromadb.proto.chroma_pb2_grpc import (
 import chromadb.proto.chroma_pb2 as proto
 import grpc
 from concurrent import futures
-from chromadb.proto.convert import (
-    to_proto_vector_embedding_record
-)
 from chromadb.segment import SegmentImplementation, SegmentType
-from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient
-)
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.types import EmbeddingRecord
 from chromadb.segment.distributed import MemberlistProvider, Memberlist
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
@@ -54,7 +49,7 @@ class SegmentServer(VectorReaderServicer):
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         # TODO: add term and epoch to segment server
         self._memberlist_provider = system.require(MemberlistProvider)
-        self._memberlist_provider.set_memberlist_name("worker-memberlist")
+        self._memberlist_provider.set_memberlist_name("query-service-memberlist")
         self._assignment_policy = system.require(CollectionAssignmentPolicy)
         self._create_pulsar_topics()
         self._consumer = system.require(Consumer)

@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -21,12 +22,14 @@ type CollectionInfo struct {
 func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
 	res := &logservicepb.PushLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
+		// We remove the collection id for space reasons, as its double stored in the wrapping database RecordLog object.
+		// PullLogs will rehydrate the collection id from the database.
 		record.CollectionId = ""
 		data, err := proto.Marshal(record)
 		if err != nil {
@@ -42,7 +45,7 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	recordCount, err := s.logService.PushLogs(ctx, collectionID, recordsContent)
 	if err != nil {
 		log.Error("error pushing logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pushing logs")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.RecordCount = int32(recordCount)
 	log.Info("PushLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", recordCount))
@@ -52,15 +55,15 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (*logservicepb.PullLogsResponse, error) {
 	res := &logservicepb.PullLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}
 	records := make([]*logservicepb.RecordLog, 0)
-	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize), req.GetEndTimestamp())
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for index := range recordLogs {
 		record := &coordinatorpb.SubmitEmbeddingRecord{}
@@ -72,6 +75,8 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
+		// Here we rehydrate the collection id from the database since in PushLogs we removed it for space reasons.
+		record.CollectionId = *recordLogs[index].CollectionID
 		recordLog := &logservicepb.RecordLog{
 			LogId:  recordLogs[index].ID,
 			Record: record,
@@ -90,7 +95,7 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 	recordLogs, err := s.logService.GetAllCollectionIDsToCompact()
 	if err != nil {
 		log.Error("error getting collection info", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error getting collection info")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for _, recordLog := range recordLogs {
 		collectionInfo := &logservicepb.CollectionInfo{

@@ -9,6 +9,7 @@ use crate::types::EmbeddingRecord;
 use crate::types::EmbeddingRecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use thiserror::Error;
 
 // CollectionInfo is a struct that contains information about a collection for the
@@ -30,12 +31,13 @@ pub(crate) struct CollectionRecord {
 }
 
 #[async_trait]
-pub(crate) trait Log: Send + Sync + LogClone {
+pub(crate) trait Log: Send + Sync + LogClone + Debug {
     async fn read(
         &mut self,
         collection_id: String,
         offset: i64,
         batch_size: i32,
+        end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError>;
 
     async fn get_collections_with_new_data(
@@ -62,7 +64,7 @@ impl Clone for Box<dyn Log> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct GrpcLog {
     client: LogServiceClient<tonic::transport::Channel>,
 }
@@ -118,11 +120,17 @@ impl Log for GrpcLog {
         collection_id: String,
         offset: i64,
         batch_size: i32,
+        end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+        let end_timestamp = match end_timestamp {
+            Some(end_timestamp) => end_timestamp,
+            None => -1,
+        };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
-            collection_id: collection_id,
+            collection_id,
             start_from_id: offset,
-            batch_size: batch_size,
+            batch_size,
+            end_timestamp,
         });
         let response = request.await;
         match response {
@@ -184,7 +192,7 @@ impl Log for GrpcLog {
 pub(crate) enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
-    #[error("Failed to convert proto segment")]
+    #[error("Failed to convert proto embedding record into EmbeddingRecord")]
     ConversionError(#[from] EmbeddingRecordConversionError),
 }
 
@@ -222,8 +230,19 @@ pub(crate) struct LogRecord {
     pub(crate) record: Box<EmbeddingRecord>,
 }
 
+impl Debug for LogRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogRecord")
+            .field("collection_id", &self.collection_id)
+            .field("log_id", &self.log_id)
+            .field("log_id_ts", &self.log_id_ts)
+            .field("record", &self.record)
+            .finish()
+    }
+}
+
 // This is used for testing only
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
     logs: HashMap<String, Vec<Box<LogRecord>>>,
 }
@@ -248,11 +267,20 @@ impl Log for InMemoryLog {
         collection_id: String,
         offset: i64,
         batch_size: i32,
+        end_timestamp: Option<i64>,
     ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
-        let logs = self.logs.get(&collection_id).unwrap();
+        let end_timestamp = match end_timestamp {
+            Some(end_timestamp) => end_timestamp,
+            None => i64::MAX,
+        };
+
+        let logs = match self.logs.get(&collection_id) {
+            Some(logs) => logs,
+            None => return Ok(Vec::new()),
+        };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
-            if i < logs.len() as i64 {
+            if i < logs.len() as i64 && logs[i as usize].log_id_ts <= end_timestamp {
                 result.push(logs[i as usize].record.clone());
             }
         }

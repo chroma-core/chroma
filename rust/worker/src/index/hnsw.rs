@@ -307,7 +307,7 @@ extern "C" {
 pub mod test {
     use super::*;
 
-    use crate::index::types::DistanceFunction;
+    use crate::distance::DistanceFunction;
     use crate::index::utils;
     use rand::Rng;
     use rayon::prelude::*;

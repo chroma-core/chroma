@@ -1,6 +1,5 @@
 use parking_lot::RwLock;
 use std::fmt::Debug;
-use std::num;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
@@ -10,12 +9,13 @@ use super::{
     executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
 };
 
+#[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
     join_handle: Option<tokio::task::JoinHandle<()>>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Scheduler {
     handles: Arc<RwLock<Vec<SchedulerTaskHandle>>>,
 }
@@ -175,12 +175,13 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl Component for TestComponent {
         fn queue_size(&self) -> usize {
             self.queue_size
         }
 
-        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
                 .schedule(ctx.sender.clone(), ScheduleMessage {}, duration, ctx);

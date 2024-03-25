@@ -20,6 +20,9 @@ var (
 	ErrCollectionTopicEmpty                  = errors.New("collection topic is empty")
 	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")
 	ErrCollectionDeleteNonExistingCollection = errors.New("delete non existing collection")
+	ErrCollectionLogPositionStale            = errors.New("collection log position Stale")
+	ErrCollectionVersionStale                = errors.New("collection version stale")
+	ErrCollectionVersionInvalid              = errors.New("collection version invalid")
 
 	// Collection metadata errors
 	ErrUnknownCollectionMetadataType = errors.New("collection metadata value type not supported")
@@ -35,7 +38,4 @@ var (
 
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
-
-	// Record Log errors
-	ErrPushLogs = errors.New("error pushing logs")
 )

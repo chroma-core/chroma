@@ -176,6 +176,25 @@ message SetLastCompactionTimeForTenantRequest {
   TenantLastCompactionTime tenant_last_compaction_time = 1;
 }
 
+message FlushSegmentCompactionInfo {
+  string segment_id = 1;
+  map<string,FilePaths> file_paths = 2;
+}
+
+message FlushCollectionCompactionRequest {
+  string tenant_id = 1;
+  string collection_id = 2;
+  int64 log_position = 3;
+  int32 collection_version = 4;
+  repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
+}
+
+message FlushCollectionCompactionResponse {
+  string collection_id = 1;
+  int32 collection_version = 2;
+  int64 last_compaction_time = 3;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -192,4 +211,5 @@ service SysDB {
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
+  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
 }
