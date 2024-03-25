@@ -1,8 +1,10 @@
 use super::positional_posting_list_value::PositionalPostingList;
+use crate::chroma_proto;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::types::EmbeddingRecord;
 use arrow::array::{Array, Int32Array};
 use parking_lot::RwLock;
+use prost::Message;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
@@ -232,7 +234,13 @@ impl Value {
                     Some(embedding) => embedding.len(),
                     None => 0,
                 };
-                let metadata_size = 3; // TODO: this should be json size
+                let metadata_size = match &record.metadata {
+                    Some(metadata) => {
+                        let as_proto: chroma_proto::UpdateMetadata = metadata.clone().into();
+                        as_proto.encoded_len()
+                    }
+                    None => 0,
+                };
                 let document_size = match record.get_document() {
                     Some(document) => document.len(),
                     None => 0,
