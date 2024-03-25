@@ -27,7 +27,7 @@ def test_ollama() -> None:
     except (HTTPError, ConnectionError):
         pytest.skip("Ollama server not running. Skipping test.")
     ef = OllamaEmbeddingFunction(
-        model_name=os.environ.get("OLLAMA_MODEL") or "llama2",
+        model_name=os.environ.get("OLLAMA_MODEL") or "nomic-embed-text",
         url=f"{os.environ.get('OLLAMA_SERVER_URL')}/embeddings",
     )
     embeddings = ef(["Here is an article about llamas...", "this is another article"])

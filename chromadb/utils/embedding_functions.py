@@ -61,7 +61,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
-        **kwargs: Any
+        **kwargs: Any,
     ):
         """Initialize SentenceTransformerEmbeddingFunction.
 
@@ -78,7 +78,9 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(model_name, device=device, **kwargs)
+            self.models[model_name] = SentenceTransformer(
+                model_name, device=device, **kwargs
+            )
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
@@ -830,17 +832,16 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
 
 class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     """
-    This class is used to get embeddings for a list of texts using the HuggingFace Embedding server (https://github.com/huggingface/text-embeddings-inference).
-    The embedding model is configured in the server.
+    This class is used to generate embeddings for a list of texts using the Ollama Embedding API (https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
     """
 
-    def __init__(self, url: str, model_name: str):
+    def __init__(self, url: str, model_name: str) -> None:
         """
-        Initialize the HuggingFaceEmbeddingServer.
+        Initialize the Ollama Embedding Function.
 
         Args:
-            url (str): The URL of the HuggingFace Embedding Server.
-            model_name (str): The name of the model to use for text embeddings. E.g. "llama2"
+            url (str): The URL of the Ollama Server.
+            model_name (str): The name of the model to use for text embeddings. E.g. "nomic-embed-text" (see https://ollama.com/library for available models).
         """
         try:
             import requests
@@ -863,7 +864,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings: The embeddings for the texts.
 
         Example:
-            >>> ollama_ef = OllamaEmbeddingFunction(url="http://localhost:11434/api/embeddings", model_name="llama2")
+            >>> ollama_ef = OllamaEmbeddingFunction(url="http://localhost:11434/api/embeddings", model_name="nomic-embed-text")
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = ollama_ef(texts)
         """
@@ -878,7 +879,9 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(
             Embeddings,
             [
-                embedding["embedding"] for embedding in embeddings if "embedding" in embedding
+                embedding["embedding"]
+                for embedding in embeddings
+                if "embedding" in embedding
             ],
         )
 
