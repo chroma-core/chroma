@@ -19,7 +19,7 @@ client = chromadb.PersistentClient(path="ollama")
 
 # create EF with custom endpoint
 ef = OllamaEmbeddingFunction(
-    model_name="llama2",
+    model_name="nomic-embed-text",
     url="http://127.0.0.1:11434/api/embeddings",
 )
 
