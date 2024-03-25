@@ -2,6 +2,7 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
+use aws_smithy_types::error::metadata;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -43,6 +44,30 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             }
             _ => Err(UpdateMetadataValueConversionError::InvalidValue),
         }
+    }
+}
+
+impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
+    fn from(value: UpdateMetadataValue) -> Self {
+        let proto_value = match value {
+            UpdateMetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
+                    value as i64,
+                )),
+            },
+            UpdateMetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
+                    value,
+                )),
+            },
+            UpdateMetadataValue::Str(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringValue(
+                    value,
+                )),
+            },
+            UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
+        };
+        proto_value
     }
 }
 
@@ -145,6 +170,20 @@ impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
             metadata.insert(key.clone(), value);
         }
         Ok(metadata)
+    }
+}
+
+impl From<UpdateMetadata> for chroma_proto::UpdateMetadata {
+    fn from(metadata: UpdateMetadata) -> Self {
+        let mut metadata = metadata;
+        let mut proto_metadata = chroma_proto::UpdateMetadata {
+            metadata: HashMap::new(),
+        };
+        for (key, value) in metadata.drain() {
+            let proto_value = value.into();
+            proto_metadata.metadata.insert(key.clone(), proto_value);
+        }
+        proto_metadata
     }
 }
 
