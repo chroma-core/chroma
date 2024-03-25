@@ -13,8 +13,6 @@ use arrow::{
 };
 use num_bigint::BigInt;
 use parking_lot::RwLock;
-use prost_types::Struct;
-use rayon::vec;
 use std::io::Error;
 use std::sync::Arc;
 use thiserror::Error;

@@ -1,11 +1,15 @@
 use super::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder};
-use crate::blockstore::{
-    arrow_blockfile::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockProvider},
-    types::{BlockfileKey, KeyType, Value, ValueType},
-    BlockfileError,
+use crate::{
+    blockstore::{
+        arrow_blockfile::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockProvider},
+        types::{BlockfileKey, KeyType, Value, ValueType},
+        BlockfileError,
+    },
+    chroma_proto,
 };
 use arrow::util::bit_util;
 use parking_lot::RwLock;
+use prost::Message;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -146,7 +150,7 @@ struct BlockDeltaInner {
     // A cache of the metadata json size for each blockfile key. This is used to avoid
     // reserializing the metadata json for each blockfile key. It may be heavy on memory
     // but we can easily optimize this later.
-    metadata_json_cache: HashMap<BlockfileKey, usize>,
+    // metadata_json_cache: HashMap<BlockfileKey, usize>,
 }
 
 impl BlockDeltaInner {
@@ -240,18 +244,13 @@ impl BlockDeltaInner {
             Value::EmbeddingRecordValue(embedding_record) => {
                 match &embedding_record.metadata {
                     Some(metadata) => {
-                        // RESUME POINT
-                        let as_str = match serde_json::to_string(metadata) {
-                            Ok(s) => s
-                            Err(_) => // TODO: log error
-                        };
-                        let len = as_str.len();
-                        acc + len
+                        // TODO: cache this
+                        let as_proto: chroma_proto::UpdateMetadata = metadata.clone().into();
+                        let bytes = as_proto.encoded_len();
+                        acc + bytes
                     }
                     None => 0,
                 }
-                // TODO: use real metadata length
-                acc + 3
             }
             _ => 0,
         })
@@ -446,9 +445,8 @@ impl From<Arc<Block>> for BlockDelta {
 mod test {
     use super::*;
     use crate::blockstore::types::{Key, KeyType, ValueType};
-    use crate::types::{EmbeddingRecord, ScalarEncoding, UpdateMetadataValue};
+    use crate::types::{LogRecord, ScalarEncoding, UpdateMetadataValue};
     use arrow::array::Int32Array;
-    use num_bigint::BigInt;
     use rand::{random, Rng};
     use std::collections::HashMap;
     use std::str::FromStr;
