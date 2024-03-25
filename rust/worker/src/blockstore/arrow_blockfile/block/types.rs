@@ -1,9 +1,11 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
+use crate::chroma_proto;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::types::{EmbeddingRecord, MetadataValue, UpdateMetadataValue};
 use arrow::array::{
     ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
     Float32Builder, GenericByteBuilder, StructArray, StructBuilder, UInt32Array, UInt32Builder,
+    UInt8Builder,
 };
 use arrow::datatypes::Fields;
 use arrow::{
@@ -13,6 +15,7 @@ use arrow::{
 };
 use num_bigint::BigInt;
 use parking_lot::RwLock;
+use prost::Message;
 use std::io::Error;
 use std::sync::Arc;
 use thiserror::Error;
@@ -358,7 +361,7 @@ enum ValueBuilder {
 struct EmbeddingRecordValueBuilder {
     user_id_builder: StringBuilder,
     document_builder: StringBuilder,
-    metadata_builder: StringBuilder,
+    metadata_builder: BinaryBuilder,
 }
 
 /// BlockDataBuilder is used to build a block. It is used to add data to a block and then build the BlockData once all data has been added.
@@ -530,7 +533,7 @@ impl BlockDataBuilder {
                     options.item_count,
                     value_options.total_document_capacity,
                 );
-                let metadata_builder = StringBuilder::with_capacity(
+                let metadata_builder = BinaryBuilder::with_capacity(
                     options.item_count,
                     value_options.total_metadata_capacity,
                 );
@@ -552,6 +555,8 @@ impl BlockDataBuilder {
     }
 
     /// Adds a key, value pair to the block. The key must be greater than the last key added to the block otherwise an error is returned.
+    /// TOOD: value builders should likely not take ownership of the value, and instead clone them into the arrow datastruct since that
+    /// must occur anyway.
     pub(super) fn add(
         &mut self,
         key: BlockfileKey,
@@ -633,10 +638,16 @@ impl BlockDataBuilder {
                     builder
                         .document_builder
                         .append_option(embedding_record.get_document());
-                    // TODO: This is a placeholder for the metadata field once we have json + cache support
-                    builder
-                        .metadata_builder
-                        .append_option(Some("has".to_string()));
+                    match embedding_record.metadata {
+                        Some(metadata) => {
+                            let proto: chroma_proto::UpdateMetadata = metadata.into();
+                            let bytes = proto.encode_to_vec();
+                            builder.metadata_builder.append_value(bytes);
+                        }
+                        None => {
+                            builder.metadata_builder.append_null();
+                        }
+                    }
                 }
                 _ => unreachable!("Invalid value type for block"),
             },
@@ -705,7 +716,7 @@ impl BlockDataBuilder {
                     DataType::Struct(Fields::from(vec![
                         Field::new("user_id", DataType::Utf8, true),
                         Field::new("document", DataType::Utf8, true),
-                        Field::new("metadata", DataType::Utf8, true),
+                        Field::new("metadata", DataType::Binary, true),
                     ])),
                     true,
                 );
@@ -722,7 +733,7 @@ impl BlockDataBuilder {
                         Arc::new(document_arr) as ArrayRef,
                     ),
                     (
-                        Arc::new(Field::new("metadata", DataType::Utf8, true)),
+                        Arc::new(Field::new("metadata", DataType::Binary, true)),
                         Arc::new(metadata_arr) as ArrayRef,
                     ),
                 ]);
