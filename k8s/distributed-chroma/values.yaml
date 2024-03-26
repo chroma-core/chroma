@@ -27,7 +27,7 @@ frontendService:
   authCredentialsProvider: 'value: ""'
   authzProvider: 'value: ""'
   authzConfigProvider: 'value: ""'
-  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"'
+  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"'
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: ''
