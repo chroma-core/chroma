@@ -306,7 +306,6 @@ mod tests {
         }
     }
 
->>>>>>> 723ee708 (Compaction manager)
     #[tokio::test]
     async fn test_compaction_manager() {
         let mut log = Box::new(InMemoryLog::new());
