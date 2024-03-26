@@ -146,10 +146,6 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_nofile: Optional[int] = None
 
-    pulsar_broker_url: Optional[str] = None
-    pulsar_admin_port: Optional[int] = 8080
-    pulsar_broker_port: Optional[int] = 6650
-
     chroma_server_auth_provider: Optional[str] = None
 
     @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)

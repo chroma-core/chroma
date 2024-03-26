@@ -54,29 +54,11 @@ def sqlite_persistent() -> Generator[Tuple[Producer, Consumer], None, None]:
         shutil.rmtree(save_path)
 
 
-def pulsar() -> Generator[Tuple[Producer, Consumer], None, None]:
-    """Fixture generator for pulsar Producer + Consumer. This fixture requires a running
-    pulsar cluster. You can use bin/cluster-test.sh to start a standalone pulsar and run this test.
-    Assumes pulsar_broker_url etc is set from the environment variables like PULSAR_BROKER_URL.
-    """
-    system = System(
-        Settings(
-            allow_reset=True,
-            chroma_producer_impl="chromadb.ingest.impl.pulsar.PulsarProducer",
-            chroma_consumer_impl="chromadb.ingest.impl.pulsar.PulsarConsumer",
-        )
-    )
-    producer = system.require(Producer)
-    consumer = system.require(Consumer)
-    system.start()
-    yield producer, consumer
-    system.stop()
-
-
 def fixtures() -> List[Callable[[], Generator[Tuple[Producer, Consumer], None, None]]]:
     fixtures = [sqlite, sqlite_persistent]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
-        fixtures = [pulsar]
+        # TODO: We should add the new log service here
+        fixtures = []
 
     return fixtures
 
