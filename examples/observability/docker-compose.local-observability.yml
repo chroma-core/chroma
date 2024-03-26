@@ -4,10 +4,21 @@ networks:
 
 services:
   zipkin:
-    image: openzipkin/zipkin
+    image: openzipkin/zipkin:latest
+    environment:
+      - STORAGE_TYPE=mysql
+      - MYSQL_HOST=zipkin-storage
+      - MYSQL_USER=zipkin
+      - MYSQL_PASS=zipkin
+      - JAVA_OPTS=-Xms1g -Xmx1g -XX:+ExitOnOutOfMemoryError
     ports:
-      - "9411:9411" # you can access Zipkin UI at http://localhost:9411
-    depends_on: [otel-collector]
+      - "9411:9411"
+    restart: unless-stopped
+    networks:
+      - net
+  zipkin-storage:
+    image: openzipkin/zipkin-mysql:${TAG:-latest}
+    restart: unless-stopped
     networks:
       - net
   otel-collector:
