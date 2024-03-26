@@ -1,5 +1,6 @@
 pub(crate) mod config;
 pub(crate) mod sysdb;
+pub(crate) mod test_sysdb;
 
 use crate::{
     config::{Configurable, WorkerConfig},

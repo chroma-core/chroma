@@ -4,10 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{executor, Component, ComponentContext, ComponentHandle, Handler, StreamHandler};
-use super::{
-    executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
-};
+use super::{sender::Sender, Receiver};
+use super::{Component, ComponentContext, Handler};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
@@ -141,6 +139,7 @@ impl Scheduler {
 
 mod tests {
     use super::*;
+    use crate::system::System;
     use async_trait::async_trait;
     use std::sync::Arc;
     use std::time::Duration;

@@ -1,4 +1,5 @@
 use super::super::operator::{wrap, TaskMessage};
+use crate::compactor::Task;
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::DataChunk;
 use crate::execution::operators::partition::PartitionInput;
@@ -8,7 +9,6 @@ use crate::execution::operators::pull_log::PullLogsInput;
 use crate::execution::operators::pull_log::PullLogsOperator;
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::log::log::Log;
-use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::Handler;
 use crate::system::Receiver;
@@ -39,71 +39,62 @@ enum ExecutionState {
     PullLogs,
     Partition,
     Write,
+    Flush,
     Finished,
 }
+
+#[derive(Debug)]
 pub struct CompactOrchestrator {
+    id: Uuid,
+    task: Task,
     state: ExecutionState,
     // Component Execution
     system: System,
-    segment_id: Uuid,
+    collection_id: Uuid,
     // Dependencies
     log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // Result Channel
-    result_channel: Option<tokio::sync::oneshot::Sender<Result<(), Box<dyn ChromaError>>>>,
+    result_channel:
+        Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
+}
+
+// TODO: we need to improve this response
+#[derive(Debug)]
+pub struct CompactionResponse {
+    id: Uuid,
+    task: Task,
+    message: String,
 }
 
 impl CompactOrchestrator {
     pub fn new(
+        task: Task,
         system: System,
-        segment_id: Uuid,
+        collection_id: Uuid,
         log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
-        result_channel: Option<tokio::sync::oneshot::Sender<Result<(), Box<dyn ChromaError>>>>,
+        result_channel: Option<
+            tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
+        >,
     ) -> Self {
         CompactOrchestrator {
+            id: Uuid::new_v4(),
+            task,
             state: ExecutionState::Pending,
             system,
-            segment_id,
+            collection_id,
             log,
-            sysdb,
             dispatcher,
             result_channel,
-        }
-    }
-
-    /// Get the collection id for a segment id.
-    /// TODO: This can be cached
-    async fn get_collection_id_for_segment_id(&mut self, segment_id: Uuid) -> Option<Uuid> {
-        let segments = self
-            .sysdb
-            .get_segments(Some(segment_id), None, None, None)
-            .await;
-        match segments {
-            Ok(segments) => match segments.get(0) {
-                Some(segment) => segment.collection,
-                None => None,
-            },
-            Err(e) => {
-                // Log an error and return
-                return None;
-            }
         }
     }
 
     async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
-        let collection_id = match self.get_collection_id_for_segment_id(self.segment_id).await {
-            Some(collection_id) => collection_id,
-            None => {
-                // Log an error and reply + return
-                return;
-            }
-        };
+        let collection_id = self.collection_id;
         let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
         let end_timestamp = match end_timestamp {
             // TODO: change protobuf definition to use u64 instead of i64
@@ -123,7 +114,7 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn group(
+    async fn partition(
         &mut self,
         records: DataChunk,
         self_address: Box<dyn Receiver<PartitionResult>>,
@@ -148,6 +139,15 @@ impl CompactOrchestrator {
         for record in records {
             // TODO: implement write
         }
+    }
+
+    pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.result_channel = Some(tx);
+        let mut handle = self.system.clone().start_component(self);
+        let result = rx.await;
+        handle.stop();
+        result.unwrap()
     }
 }
 
@@ -187,7 +187,7 @@ impl Handler<PullLogsResult> for CompactOrchestrator {
                 return;
             }
         };
-        self.group(records, ctx.sender.as_receiver()).await;
+        self.partition(records, ctx.sender.as_receiver()).await;
     }
 }
 
@@ -214,5 +214,19 @@ impl Handler<PartitionResult> for CompactOrchestrator {
             }
         };
         // TODO: implement write records
+        // For now, we will return to execution state to the compaction manager
+        let result_channel = match self.result_channel.take() {
+            Some(tx) => tx,
+            None => {
+                // Log an error
+                return;
+            }
+        };
+        let response = CompactionResponse {
+            id: self.id,
+            task: self.task.clone(),
+            message: "Compaction Complete".to_string(),
+        };
+        let _ = result_channel.send(Ok(response));
     }
 }
