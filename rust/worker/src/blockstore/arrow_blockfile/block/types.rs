@@ -1,7 +1,7 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::chroma_proto;
 use crate::errors::{ChromaError, ErrorCodes};
-use crate::types::{EmbeddingRecord, MetadataValue, UpdateMetadataValue};
+use crate::types::{EmbeddingRecord, MetadataValue, UpdateMetadata, UpdateMetadataValue};
 use arrow::array::{
     ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
     Float32Builder, GenericByteBuilder, StructArray, StructBuilder, UInt32Array, UInt32Builder,
@@ -207,9 +207,23 @@ impl Block {
                                     let metadata = match records
                                         .column(2)
                                         .as_any()
-                                        .downcast_ref::<StringArray>()
+                                        .downcast_ref::<BinaryArray>()
                                     {
-                                        Some(metadata) => Some(metadata.value(i).to_string()),
+                                        Some(metadata) => {
+                                            let binary = metadata.value(i);
+                                            let proto =
+                                                chroma_proto::UpdateMetadata::decode(binary);
+                                            match proto {
+                                                Ok(proto) => {
+                                                    match TryInto::<UpdateMetadata>::try_into(proto)
+                                                    {
+                                                        Ok(metadata) => Some(metadata),
+                                                        Err(_) => None,
+                                                    }
+                                                }
+                                                Err(_) => None,
+                                            }
+                                        }
                                         None => None,
                                     };
                                     return Some(Value::EmbeddingRecordValue(EmbeddingRecord {
@@ -218,7 +232,7 @@ impl Block {
                                         operation: crate::types::Operation::Add, // TODO: THIS IS WRONG, WE NEED A NEW TYPE
                                         embedding: Some(vec![1.0, 2.0, 3.0]), // TODO: populate this
                                         encoding: None,                       // TODO: populate this
-                                        metadata: None,
+                                        metadata,
                                         collection_id: Uuid::parse_str(
                                             "00000000-0000-0000-0000-000000000000",
                                         )

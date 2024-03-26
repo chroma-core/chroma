@@ -24,6 +24,8 @@ pub(crate) enum BlockfileError {
     TransactionInProgress,
     #[error("Transaction not in progress")]
     TransactionNotInProgress,
+    #[error("Other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send>),
 }
 
 impl ChromaError for BlockfileError {
@@ -35,6 +37,7 @@ impl ChromaError for BlockfileError {
             BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
                 ErrorCodes::FailedPrecondition
             }
+            BlockfileError::Other(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -282,42 +285,42 @@ pub(crate) enum ValueType {
 
 pub(crate) trait Blockfile: BlockfileClone {
     // ===== Transaction methods =====
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+    fn begin_transaction(&mut self) -> Result<(), Box<BlockfileError>>;
 
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+    fn commit_transaction(&mut self) -> Result<(), Box<BlockfileError>>;
 
     // ===== Data methods =====
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>>;
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<BlockfileError>>;
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
-    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>>;
+    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<BlockfileError>>;
 
     fn get_gt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
     fn get_lt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
     fn get_gte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
     fn get_lte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 }
 
 pub(crate) trait BlockfileClone {
@@ -353,7 +356,7 @@ impl HashMapBlockfile {
 }
 
 impl Blockfile for HashMapBlockfile {
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<BlockfileError>> {
         match self.map.read().get(&key) {
             Some(value) => Ok(value.clone()),
             None => Err(Box::new(BlockfileError::NotFoundError)),
@@ -363,7 +366,7 @@ impl Blockfile for HashMapBlockfile {
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (key, value) in self.map.read().iter() {
             if key.prefix == prefix {
@@ -373,7 +376,7 @@ impl Blockfile for HashMapBlockfile {
         Ok(result)
     }
 
-    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>> {
+    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<BlockfileError>> {
         self.map.write().insert(key, value);
         Ok(())
     }
@@ -382,7 +385,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key > key {
@@ -396,7 +399,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key >= key {
@@ -410,7 +413,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key < key {
@@ -424,7 +427,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key <= key {
@@ -434,11 +437,11 @@ impl Blockfile for HashMapBlockfile {
         Ok(result)
     }
 
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    fn begin_transaction(&mut self) -> Result<(), Box<BlockfileError>> {
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    fn commit_transaction(&mut self) -> Result<(), Box<BlockfileError>> {
         Ok(())
     }
 }
