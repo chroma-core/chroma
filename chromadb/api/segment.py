@@ -14,7 +14,12 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 from chromadb import __version__
-from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+from chromadb.errors import (
+    InvalidCollectionException,
+    InvalidDimensionException,
+    CollectionAlreadyExistsError,
+    CollectionNotFoundError,
+)
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
@@ -165,16 +170,19 @@ class SegmentAPI(ServerAPI):
         check_index_name(name)
 
         id = uuid4()
+        try:
+            coll, created = self._sysdb.create_collection(
+                id=id,
+                name=name,
+                metadata=metadata,
+                dimension=None,
+                get_or_create=get_or_create,
+                tenant=tenant,
+                database=database,
+            )
+        except UniqueConstraintError as e:
+            raise CollectionAlreadyExistsError(f"Collection {name} already exists.")
 
-        coll, created = self._sysdb.create_collection(
-            id=id,
-            name=name,
-            metadata=metadata,
-            dimension=None,
-            get_or_create=get_or_create,
-            tenant=tenant,
-            database=database,
-        )
 
         # TODO: wrap sysdb call in try except and log error if it fails
         if created:
@@ -263,7 +271,7 @@ class SegmentAPI(ServerAPI):
                 database=existing[0]["database"],
             )
         else:
-            raise ValueError(f"Collection {name} does not exist.")
+            raise CollectionNotFoundError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -349,7 +357,7 @@ class SegmentAPI(ServerAPI):
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
         else:
-            raise ValueError(f"Collection {name} does not exist.")
+            raise CollectionNotFoundError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @rate_limit(subject="collection_id", resource=Resource.ADD_PER_MINUTE)
@@ -835,7 +843,7 @@ class SegmentAPI(ServerAPI):
         if collection_id not in self._collection_cache:
             collections = self._sysdb.get_collections(id=collection_id)
             if not collections:
-                raise InvalidCollectionException(
+                raise CollectionNotFoundError(
                     f"Collection {collection_id} does not exist."
                 )
             self._collection_cache[collection_id] = collections[0]
