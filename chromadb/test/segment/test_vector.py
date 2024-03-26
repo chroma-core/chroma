@@ -211,6 +211,23 @@ def test_insert_with_db_max_seq_persist(
         with segment._db.tx() as cur:
             result = cur.execute(sql, params).fetchone()
             assert _decode_seq_id(result[0]) == 5
+        t2 = Table("segment_metadata")
+        q2 = (
+            segment._db.querybuilder()
+            .from_(t2)
+            .select(t2.key, t2.int_value)
+            .where(t2.segment_id == ParameterValue(segment._db.uuid_to_db(segment._id)))
+        )
+        sql2, params2 = get_sql(q2)
+        with segment._db.tx() as cur:
+            metadata = cur.execute(sql2, params2).fetchall()
+            assert len(metadata) >= 3
+            kdict = {r[0]: r[1] for r in metadata}
+            assert "max_seq_id" in kdict.keys()
+            assert "total_elements_added" in kdict.keys()
+            assert "dimensionality" in kdict.keys()
+            assert "id_label_seq_id_tuple_list" in kdict.keys()
+            assert kdict["max_seq_id"] == 5
 
 
 def approx_equal(a: float, b: float, epsilon: float = 0.0001) -> bool:
