@@ -39,8 +39,11 @@ enum ExecutionState {
     PullLogs,
     Partition,
     Write,
+    Flush,
     Finished,
 }
+
+#[derive(Debug)]
 pub struct CompactOrchestrator {
     id: Uuid,
     task: Task,

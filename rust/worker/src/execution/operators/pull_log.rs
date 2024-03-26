@@ -198,51 +198,51 @@ mod tests {
         // Pull all logs from collection 1
         let input = PullLogsInput::new(collection_uuid_1, 0, 1, None, None);
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 2);
+        assert_eq!(output.logs().len(), 2);
 
         // Pull all logs from collection 1 with a large batch size
         let input = PullLogsInput::new(collection_uuid_1, 0, 100, None, None);
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 2);
+        assert_eq!(output.logs().len(), 2);
 
         // Pull logs from collection 1 with a limit
         let input = PullLogsInput::new(collection_uuid_1, 0, 1, Some(1), None);
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 1);
+        assert_eq!(output.logs().len(), 1);
 
         // Pull logs from collection 1 with an end timestamp
         let input = PullLogsInput::new(collection_uuid_1, 0, 1, None, Some(1));
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 1);
+        assert_eq!(output.logs().len(), 1);
 
         // Pull logs from collection 1 with an end timestamp
         let input = PullLogsInput::new(collection_uuid_1, 0, 1, None, Some(2));
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 2);
+        assert_eq!(output.logs().len(), 2);
 
         // Pull logs from collection 1 with an end timestamp and a limit
         let input = PullLogsInput::new(collection_uuid_1, 0, 1, Some(1), Some(2));
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 1);
+        assert_eq!(output.logs().len(), 1);
 
         // Pull logs from collection 1 with a limit and a large batch size
         let input = PullLogsInput::new(collection_uuid_1, 0, 100, Some(1), None);
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 1);
+        assert_eq!(output.logs().len(), 1);
 
         // Pull logs from collection 1 with an end timestamp and a large batch size
         let input = PullLogsInput::new(collection_uuid_1, 0, 100, None, Some(1));
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 1);
+        assert_eq!(output.logs().len(), 1);
 
         // Pull logs from collection 1 with an end timestamp and a large batch size
         let input = PullLogsInput::new(collection_uuid_1, 0, 100, None, Some(2));
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 2);
+        assert_eq!(output.logs().len(), 2);
 
         // Pull logs from collection 1 with an end timestamp and a limit and a large batch size
         let input = PullLogsInput::new(collection_uuid_1, 0, 100, Some(1), Some(2));
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.logs().visible_len(), 1);
+        assert_eq!(output.logs().len(), 1);
     }
 }
