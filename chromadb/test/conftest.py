@@ -29,7 +29,7 @@ from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
-from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
 
 root_logger = logging.getLogger()
@@ -528,18 +528,18 @@ class ProducerFn(Protocol):
         self,
         producer: Producer,
         topic: str,
-        embeddings: Iterator[SubmitEmbeddingRecord],
+        embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
         ...
 
 
 def produce_n_single(
     producer: Producer,
     topic: str,
-    embeddings: Iterator[SubmitEmbeddingRecord],
+    embeddings: Iterator[OperationRecord],
     n: int,
-) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
     submitted_embeddings = []
     seq_ids = []
     for _ in range(n):
@@ -553,9 +553,9 @@ def produce_n_single(
 def produce_n_batch(
     producer: Producer,
     topic: str,
-    embeddings: Iterator[SubmitEmbeddingRecord],
+    embeddings: Iterator[OperationRecord],
     n: int,
-) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
     submitted_embeddings = []
     seq_ids: Sequence[SeqId] = []
     for _ in range(n):

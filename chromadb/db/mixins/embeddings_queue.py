@@ -7,7 +7,7 @@ from chromadb.ingest import (
     ConsumerCallbackFn,
 )
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     EmbeddingRecord,
     SeqId,
     ScalarEncoding,
@@ -114,9 +114,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     @trace_method("SqlEmbeddingsQueue.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
-    def submit_embedding(
-        self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> SeqId:
+    def submit_embedding(self, topic_name: str, embedding: OperationRecord) -> SeqId:
         if not self._running:
             raise RuntimeError("Component not running")
 
@@ -125,7 +123,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @trace_method("SqlEmbeddingsQueue.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
     def submit_embeddings(
-        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+        self, topic_name: str, embeddings: Sequence[OperationRecord]
     ) -> Sequence[SeqId]:
         if not self._running:
             raise RuntimeError("Component not running")
@@ -265,7 +263,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         OpenTelemetryGranularity.ALL,
     )
     def _prepare_vector_encoding_metadata(
-        self, embedding: SubmitEmbeddingRecord
+        self, embedding: OperationRecord
     ) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
         if embedding["embedding"]:
             encoding_type = cast(ScalarEncoding, embedding["encoding"])

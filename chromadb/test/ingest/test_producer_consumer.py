@@ -20,7 +20,7 @@ from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     Operation,
     EmbeddingRecord,
     ScalarEncoding,
@@ -71,8 +71,8 @@ def producer_consumer(
 
 
 @pytest.fixture(scope="module")
-def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
-    def create_record(i: int) -> SubmitEmbeddingRecord:
+def sample_embeddings() -> Iterator[OperationRecord]:
+    def create_record(i: int) -> OperationRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
         metadata: Optional[Dict[str, Union[str, int, float]]]
         if i % 2 == 0:
@@ -80,7 +80,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
         else:
             metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
 
-        record = SubmitEmbeddingRecord(
+        record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,
             encoding=ScalarEncoding.FLOAT32,
@@ -131,7 +131,7 @@ def assert_approx_equal(a: Sequence[float], b: Sequence[float]) -> None:
 
 
 def assert_records_match(
-    inserted_records: Sequence[SubmitEmbeddingRecord],
+    inserted_records: Sequence[OperationRecord],
     consumed_records: Sequence[EmbeddingRecord],
 ) -> None:
     """Given a list of inserted and consumed records, make sure they match"""
@@ -154,7 +154,7 @@ def full_topic_name(topic_name: str) -> str:
 @pytest.mark.asyncio
 async def test_backfill(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer, consumer = producer_consumer
@@ -174,7 +174,7 @@ async def test_backfill(
 @pytest.mark.asyncio
 async def test_notifications(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
@@ -183,7 +183,7 @@ async def test_notifications(
 
     producer.create_topic(topic_name)
 
-    embeddings: List[SubmitEmbeddingRecord] = []
+    embeddings: List[OperationRecord] = []
 
     consume_fn = CapturingConsumeFn()
 
@@ -200,7 +200,7 @@ async def test_notifications(
 @pytest.mark.asyncio
 async def test_multiple_topics(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
@@ -210,8 +210,8 @@ async def test_multiple_topics(
     producer.create_topic(topic_name_1)
     producer.create_topic(topic_name_2)
 
-    embeddings_1: List[SubmitEmbeddingRecord] = []
-    embeddings_2: List[SubmitEmbeddingRecord] = []
+    embeddings_1: List[OperationRecord] = []
+    embeddings_2: List[OperationRecord] = []
 
     consume_fn_1 = CapturingConsumeFn()
     consume_fn_2 = CapturingConsumeFn()
@@ -236,7 +236,7 @@ async def test_multiple_topics(
 @pytest.mark.asyncio
 async def test_start_seq_id(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer, consumer = producer_consumer
@@ -267,7 +267,7 @@ async def test_start_seq_id(
 @pytest.mark.asyncio
 async def test_end_seq_id(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer, consumer = producer_consumer
@@ -300,7 +300,7 @@ async def test_end_seq_id(
 @pytest.mark.asyncio
 async def test_submit_batch(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
@@ -322,7 +322,7 @@ async def test_submit_batch(
 @pytest.mark.asyncio
 async def test_multiple_topics_batch(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer, consumer = producer_consumer
@@ -339,7 +339,7 @@ async def test_multiple_topics_batch(
             start=consumer.min_seqid(),
         )
 
-    embeddings_n: List[List[SubmitEmbeddingRecord]] = [[] for _ in range(N_TOPICS)]
+    embeddings_n: List[List[OperationRecord]] = [[] for _ in range(N_TOPICS)]
 
     PRODUCE_BATCH_SIZE = 10
     N_TO_PRODUCE = 100
@@ -362,7 +362,7 @@ async def test_multiple_topics_batch(
 @pytest.mark.asyncio
 async def test_max_batch_size(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()

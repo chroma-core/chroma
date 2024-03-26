@@ -13,7 +13,7 @@ from chromadb.types import (
     Segment,
     SegmentScope,
     SeqId,
-    SubmitEmbeddingRecord,
+    OperationRecord,
     UpdateMetadata,
     Vector,
     VectorEmbeddingRecord,
@@ -238,7 +238,7 @@ def to_proto_operation(operation: Operation) -> proto.Operation:
 
 
 def to_proto_submit(
-    submit_record: SubmitEmbeddingRecord,
+    submit_record: OperationRecord,
 ) -> proto.SubmitEmbeddingRecord:
     vector = None
     if submit_record["embedding"] is not None and submit_record["encoding"] is not None:

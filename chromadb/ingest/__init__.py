@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import Callable, Optional, Sequence
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     EmbeddingRecord,
     SeqId,
     Vector,
@@ -46,15 +46,13 @@ class Producer(Component):
         pass
 
     @abstractmethod
-    def submit_embedding(
-        self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> SeqId:
+    def submit_embedding(self, topic_name: str, embedding: OperationRecord) -> SeqId:
         """Add an embedding record to the given topic. Returns the SeqID of the record."""
         pass
 
     @abstractmethod
     def submit_embeddings(
-        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+        self, topic_name: str, embeddings: Sequence[OperationRecord]
     ) -> Sequence[SeqId]:
         """Add a batch of embedding records to the given topic. Returns the SeqIDs of
         the records. The returned SeqIDs will be in the same order as the given

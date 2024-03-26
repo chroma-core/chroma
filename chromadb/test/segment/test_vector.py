@@ -3,7 +3,7 @@ from typing import Generator, List, Callable, Iterator, Type, cast
 from chromadb.config import System, Settings
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     VectorQuery,
     Operation,
     ScalarEncoding,
@@ -78,14 +78,14 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
 
 
 @pytest.fixture(scope="function")
-def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
+def sample_embeddings() -> Iterator[OperationRecord]:
     """Generate a sequence of embeddings with the property that for each embedding
     (other than the first and last), it's nearest neighbor is the previous in the
     sequence, and it's second nearest neighbor is the subsequent"""
 
-    def create_record(i: int) -> SubmitEmbeddingRecord:
+    def create_record(i: int) -> OperationRecord:
         vector = [i**1.1, i**1.1]
-        record = SubmitEmbeddingRecord(
+        record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,
             encoding=ScalarEncoding.FLOAT32,
@@ -130,7 +130,7 @@ def sync(segment: VectorReader, seq_id: SeqId) -> None:
 
 def test_insert_and_count(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -169,7 +169,7 @@ def approx_equal_vector(a: Vector, b: Vector, epsilon: float = 0.0001) -> bool:
 
 def test_get_vectors(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -213,7 +213,7 @@ def test_get_vectors(
 
 def test_ann_query(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -277,7 +277,7 @@ def test_ann_query(
 
 def test_delete(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -296,7 +296,7 @@ def test_delete(
     sync(segment, seq_ids[-1])
     assert segment.count() == 5
 
-    delete_record = SubmitEmbeddingRecord(
+    delete_record = OperationRecord(
         id=embeddings[0]["id"],
         embedding=None,
         encoding=None,
@@ -359,7 +359,7 @@ def _test_update(
     producer: Producer,
     topic: str,
     segment: VectorReader,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     operation: Operation,
 ) -> None:
     """Tests the common code paths between update & upsert"""
@@ -376,7 +376,7 @@ def _test_update(
     seq_ids.append(
         producer.submit_embedding(
             topic,
-            SubmitEmbeddingRecord(
+            OperationRecord(
                 id=embeddings[0]["id"],
                 embedding=[10.0, 10.0],
                 encoding=ScalarEncoding.FLOAT32,
@@ -419,7 +419,7 @@ def _test_update(
 
 def test_update(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -434,7 +434,7 @@ def test_update(
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPDATE)
 
     # test updating a nonexistent record
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="no_such_record",
         embedding=[10.0, 10.0],
         encoding=ScalarEncoding.FLOAT32,
@@ -457,7 +457,7 @@ def test_update(
 
 def test_upsert(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -472,7 +472,7 @@ def test_upsert(
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPSERT)
 
     # test updating a nonexistent record
-    upsert_record = SubmitEmbeddingRecord(
+    upsert_record = OperationRecord(
         id="no_such_record",
         embedding=[42, 42],
         encoding=ScalarEncoding.FLOAT32,
@@ -509,7 +509,7 @@ def test_delete_without_add(
 
     assert segment.count() == 0
 
-    delete_record = SubmitEmbeddingRecord(
+    delete_record = OperationRecord(
         id="not_in_db",
         embedding=None,
         encoding=None,
@@ -526,7 +526,7 @@ def test_delete_without_add(
 
 def test_delete_with_local_segment_storage(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -545,7 +545,7 @@ def test_delete_with_local_segment_storage(
     sync(segment, seq_ids[-1])
     assert segment.count() == 5
 
-    delete_record = SubmitEmbeddingRecord(
+    delete_record = OperationRecord(
         id=embeddings[0]["id"],
         embedding=None,
         encoding=None,
@@ -602,7 +602,7 @@ def test_delete_with_local_segment_storage(
 
 def test_reset_state_ignored_for_allow_reset_false(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -621,7 +621,7 @@ def test_reset_state_ignored_for_allow_reset_false(
     sync(segment, seq_ids[-1])
     assert segment.count() == 5
 
-    delete_record = SubmitEmbeddingRecord(
+    delete_record = OperationRecord(
         id=embeddings[0]["id"],
         embedding=None,
         encoding=None,

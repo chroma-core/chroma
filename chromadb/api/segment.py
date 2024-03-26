@@ -123,10 +123,12 @@ class SegmentAPI(ServerAPI):
             name=name,
             tenant=tenant,
         )
+
     @trace_method("SegmentAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
+
     @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
@@ -136,6 +138,7 @@ class SegmentAPI(ServerAPI):
         self._sysdb.create_tenant(
             name=name,
         )
+
     @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> t.Tenant:
@@ -803,7 +806,7 @@ class SegmentAPI(ServerAPI):
     # used for channel assignment in the distributed version of the system.
     @trace_method("SegmentAPI._validate_embedding_record", OpenTelemetryGranularity.ALL)
     def _validate_embedding_record(
-        self, collection: t.Collection, record: t.SubmitEmbeddingRecord
+        self, collection: t.Collection, record: t.OperationRecord
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
@@ -850,7 +853,7 @@ def _records(
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
     uris: Optional[URIs] = None,
-) -> Generator[t.SubmitEmbeddingRecord, None, None]:
+) -> Generator[t.OperationRecord, None, None]:
     """Convert parallel lists of embeddings, metadatas and documents to a sequence of
     SubmitEmbeddingRecords"""
 
@@ -877,7 +880,7 @@ def _records(
             else:
                 metadata = {"chroma:uri": uri}
 
-        record = t.SubmitEmbeddingRecord(
+        record = t.OperationRecord(
             id=id,
             embedding=embeddings[i] if embeddings else None,
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now

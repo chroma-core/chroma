@@ -10,7 +10,7 @@ from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     MetadataEmbeddingRecord,
     Operation,
     ScalarEncoding,
@@ -63,8 +63,8 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
 
 
 @pytest.fixture(scope="function")
-def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
-    def create_record(i: int) -> SubmitEmbeddingRecord:
+def sample_embeddings() -> Iterator[OperationRecord]:
+    def create_record(i: int) -> OperationRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
         metadata: Optional[Dict[str, Union[str, int, float, bool]]]
         if i == 0:
@@ -82,7 +82,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
                 metadata["bool_key"] = False
             metadata["chroma:document"] = _build_document(i)
 
-        record = SubmitEmbeddingRecord(
+        record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,
             encoding=ScalarEncoding.FLOAT32,
@@ -145,7 +145,7 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 
 def test_insert_and_count(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -171,7 +171,7 @@ def test_insert_and_count(
 
 
 def assert_equiv_records(
-    expected: Sequence[SubmitEmbeddingRecord], actual: Sequence[MetadataEmbeddingRecord]
+    expected: Sequence[OperationRecord], actual: Sequence[MetadataEmbeddingRecord]
 ) -> None:
     assert len(expected) == len(actual)
     sorted_expected = sorted(expected, key=lambda r: r["id"])
@@ -183,7 +183,7 @@ def assert_equiv_records(
 
 def test_get(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -285,7 +285,7 @@ def test_get(
 
 def test_fulltext(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -380,7 +380,7 @@ def test_fulltext(
 
 def test_delete(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -400,7 +400,7 @@ def test_delete(
     assert_equiv_records(embeddings[:1], results)
 
     # Delete by ID
-    delete_embedding = SubmitEmbeddingRecord(
+    delete_embedding = OperationRecord(
         id="embedding_0",
         embedding=None,
         encoding=None,
@@ -433,9 +433,7 @@ def test_delete(
     results = segment.get_metadata(ids=["embedding_0"])
 
 
-def test_update(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
-) -> None:
+def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) -> None:
     producer = system.instance(Producer)
     system.reset_state()
     topic = str(segment_definition["topic"])
@@ -446,7 +444,7 @@ def test_update(
     _test_update(sample_embeddings, producer, segment, topic, Operation.UPDATE)
 
     # Update nonexisting ID
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="no_such_id",
         metadata={"foo": "bar"},
         embedding=None,
@@ -463,7 +461,7 @@ def test_update(
 
 def test_upsert(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -476,7 +474,7 @@ def test_upsert(
     _test_update(sample_embeddings, producer, segment, topic, Operation.UPSERT)
 
     # upsert previously nonexisting ID
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="no_such_id",
         metadata={"foo": "bar"},
         embedding=None,
@@ -496,7 +494,7 @@ def test_upsert(
 
 
 def _test_update(
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     producer: Producer,
     segment: MetadataReader,
     topic: str,
@@ -516,7 +514,7 @@ def _test_update(
     assert_equiv_records(embeddings[:1], results)
 
     # Update embedding with no metadata
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"chroma:document": "foo bar"},
         embedding=None,
@@ -532,7 +530,7 @@ def _test_update(
     assert results[0]["metadata"] == {"chroma:document": "foo bar"}
 
     # Update and overrwrite key
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"chroma:document": "biz buz"},
         embedding=None,
@@ -550,7 +548,7 @@ def _test_update(
     assert len(results) == 0
 
     # Update and add key
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"baz": 42},
         embedding=None,
@@ -564,7 +562,7 @@ def _test_update(
     assert results[0]["metadata"] == {"chroma:document": "biz buz", "baz": 42}
 
     # Update and delete key
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"chroma:document": None},
         embedding=None,
@@ -582,7 +580,7 @@ def _test_update(
 
 def test_limit(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -626,7 +624,7 @@ def test_limit(
 
 def test_delete_segment(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
@@ -682,9 +680,9 @@ def test_delete_segment(
 
 
 def test_delete_single_fts_record(
-        system: System,
-        sample_embeddings: Iterator[SubmitEmbeddingRecord],
-        produce_fns: ProducerFn,
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -704,7 +702,7 @@ def test_delete_single_fts_record(
     _id = segment._id
     _db = system.instance(SqliteDB)
     # Delete by ID
-    delete_embedding = SubmitEmbeddingRecord(
+    delete_embedding = OperationRecord(
         id="embedding_0",
         embedding=None,
         encoding=None,

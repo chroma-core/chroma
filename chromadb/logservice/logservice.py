@@ -12,7 +12,7 @@ from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, Reco
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     SeqId,
 )
 from chromadb.config import System
@@ -78,9 +78,7 @@ class LogService(Producer, Consumer):
 
     @trace_method("LogService.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
-    def submit_embedding(
-        self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> SeqId:
+    def submit_embedding(self, topic_name: str, embedding: OperationRecord) -> SeqId:
         if not self._running:
             raise RuntimeError("Component not running")
 
@@ -89,7 +87,7 @@ class LogService(Producer, Consumer):
     @trace_method("LogService.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
     def submit_embeddings(
-        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+        self, topic_name: str, embeddings: Sequence[OperationRecord]
     ) -> Sequence[SeqId]:
         logger.info(f"Submitting {len(embeddings)} embeddings to {topic_name}")
 
@@ -100,7 +98,7 @@ class LogService(Producer, Consumer):
             return []
 
         # push records to the log service
-        collection_id_to_embeddings: Dict[UUID, list[SubmitEmbeddingRecord]] = {}
+        collection_id_to_embeddings: Dict[UUID, list[OperationRecord]] = {}
         for embedding in embeddings:
             collection_id = cast(UUID, embedding.get("collection_id"))
             if collection_id is None:
@@ -115,7 +113,7 @@ class LogService(Producer, Consumer):
             counts.append(
                 self.push_logs(
                     collection_id,
-                    cast(Sequence[SubmitEmbeddingRecord], protos_to_submit),
+                    cast(Sequence[OperationRecord], protos_to_submit),
                 )
             )
 
@@ -152,9 +150,7 @@ class LogService(Producer, Consumer):
     def max_batch_size(self) -> int:
         return sys.maxsize
 
-    def push_logs(
-        self, collection_id: UUID, records: Sequence[SubmitEmbeddingRecord]
-    ) -> int:
+    def push_logs(self, collection_id: UUID, records: Sequence[OperationRecord]) -> int:
         request = PushLogsRequest(collection_id=str(collection_id), records=records)
         response = self._log_service_stub.PushLogs(request)
         return response.record_count  # type: ignore

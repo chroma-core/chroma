@@ -108,7 +108,7 @@ class EmbeddingRecord(TypedDict):
     collection_id: Optional[UUID]
 
 
-class SubmitEmbeddingRecord(TypedDict):
+class OperationRecord(TypedDict):
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
