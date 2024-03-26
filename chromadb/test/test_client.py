@@ -91,9 +91,8 @@ def test_persistent_client_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=tempfile.gettempdir() + "/test_server-"+uuid.uuid4().hex,
-        settings=Settings(
-        ),
+        path=tempfile.gettempdir() + "/test_server-" + uuid.uuid4().hex,
+        settings=Settings(),
     )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
@@ -106,9 +105,7 @@ def test_persistent_client_close() -> None:
     open_files = current_process.open_files()
     print("OPEN FILES", open_files)
     filtered_open_files = [
-        file
-        for file in open_files
-        if re.search(temp_persist_dir, file.path)
+        file for file in open_files if re.search(temp_persist_dir, file.path)
     ]
     print("FILTERED OPEN FILES", filtered_open_files)
     assert len(filtered_open_files) > 0
@@ -117,8 +114,8 @@ def test_persistent_client_close() -> None:
     post_filtered_open_files = [
         file
         for file in open_files
-        if re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path)
-        or re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path)
+        if re.search(temp_persist_dir + ".*chroma.sqlite3", file.path)
+        or re.search(temp_persist_dir + ".*data_level0.bin", file.path)
     ]
     assert len(post_filtered_open_files) == 0
 
@@ -129,7 +126,7 @@ def test_persistent_client_double_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=tempfile.gettempdir() + "/test_server-"+uuid.uuid4().hex,
+        path=tempfile.gettempdir() + "/test_server-" + uuid.uuid4().hex,
         settings=Settings(),
     )
     current_process = psutil.Process()
@@ -142,8 +139,8 @@ def test_persistent_client_double_close() -> None:
     filtered_open_files = [
         file
         for file in open_files
-        if re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path)
-        or re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path)
+        if re.search(temp_persist_dir + ".*chroma.sqlite3", file.path)
+        or re.search(temp_persist_dir + ".*data_level0.bin", file.path)
     ]
     assert len(filtered_open_files) > 0
     persistent_api.close()
@@ -165,7 +162,7 @@ def test_persistent_client_use_after_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=tempfile.gettempdir() + "/test_server-"+uuid.uuid4().hex,
+        path=tempfile.gettempdir() + "/test_server-" + uuid.uuid4().hex,
         settings=Settings(),
     )
     current_process = psutil.Process()
