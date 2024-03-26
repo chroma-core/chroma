@@ -761,6 +761,10 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         """
 
         self._model_name = model_name
+        self._model_provider = self._model_name.split('.')[0]
+        
+        if self._model_provider not in ["amazon", "cohere"]:
+            raise ValueError(f"Model {self._model_name} is not supported. You can find the full list of supported foundation models in Amazon Bedrock at https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html")
 
         self._client = session.client(
             service_name="bedrock-runtime",
@@ -770,9 +774,28 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         accept = "application/json"
         content_type = "application/json"
-        embeddings = []
-        for text in input:
-            input_body = {"inputText": text}
+        if self._model_provider == "amazon":
+            embeddings = []
+            for text in input:
+                input_body = {
+                    "inputText": text
+                }
+                body = json.dumps(input_body)
+                response = self._client.invoke_model(
+                    body=body,
+                    modelId=self._model_name,
+                    accept=accept,
+                    contentType=content_type,
+                )
+                embedding = json.load(response.get("body")).get("embedding")
+                embeddings.append(embedding)
+        elif self._model_provider == "cohere":
+            # See Amazon Bedrock User Guide > Cohere Embed models for more information
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed.html
+            input_body = {
+                "texts": input,
+                "input_type": "search_document"
+            }
             body = json.dumps(input_body)
             response = self._client.invoke_model(
                 body=body,
@@ -780,8 +803,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 accept=accept,
                 contentType=content_type,
             )
-            embedding = json.load(response.get("body")).get("embedding")
-            embeddings.append(embedding)
+            embeddings = json.load(response.get("body")).get("embeddings")
         return embeddings
 
 
