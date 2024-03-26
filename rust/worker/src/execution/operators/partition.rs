@@ -6,6 +6,11 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug)]
+/// The partition Operator takes a DataChunk and presents a copy-free
+/// view of N partitions by breaking the data into partitions by max_partition_size. It will group operations 
+/// on the same key into the same partition. Due to this, the max_partition_size is a 
+/// soft-limit, since if there are more operations to a key than max_partition_size we cannot
+/// partition the data.
 pub struct PartitionOperator {}
 
 /// The input to the partition operator.
