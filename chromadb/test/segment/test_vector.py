@@ -596,8 +596,7 @@ def test_delete_with_local_segment_storage(
         assert not os.path.exists(segment._get_storage_folder())
         segment.delete()  # should not raise
     elif isinstance(segment, LocalHnswSegment):
-        with pytest.raises(NotImplementedError):
-            segment.delete()
+        segment.delete()
 
 
 def test_reset_state_ignored_for_allow_reset_false(

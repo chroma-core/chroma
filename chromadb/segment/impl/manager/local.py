@@ -132,6 +132,26 @@ class LocalSegmentManager(SegmentManager):
         return [vector_segment, metadata_segment]
 
     @trace_method(
+        "LocalSegmentManager._delete_segments",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
+    def _delete_segment(
+        self, collection_id: UUID, segment: Segment, loaded: bool
+    ) -> None:
+        instance = self.get_segment(
+            collection_id,
+            type=MetadataReader
+            if SegmentType(segment["type"]) == SegmentType.SQLITE
+            else VectorReader,
+        )
+        if loaded:
+            instance.delete()
+        else:
+            self._cls(segment).offline_delete(
+                segment=segment, persistent_dir=self._system.settings.persist_directory
+            )
+
+    @trace_method(
         "LocalSegmentManager.delete_segments",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
@@ -139,13 +159,10 @@ class LocalSegmentManager(SegmentManager):
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
         for segment in segments:
+            self._delete_segment(
+                collection_id, segment, segment["id"] in self._instances
+            )
             if segment["id"] in self._instances:
-                if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
-                    instance = self.get_segment(collection_id, VectorReader)
-                    instance.delete()
-                elif segment["type"] == SegmentType.SQLITE.value:
-                    instance = self.get_segment(collection_id, MetadataReader)
-                    instance.delete()
                 del self._instances[segment["id"]]
             if segment["scope"] is SegmentScope.VECTOR:
                 self.segment_cache[SegmentScope.VECTOR].pop(collection_id)

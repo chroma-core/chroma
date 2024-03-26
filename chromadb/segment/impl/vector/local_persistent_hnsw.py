@@ -1,8 +1,13 @@
 import os
+import platform
 import shutil
+import subprocess
+
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
+
+from tenacity import retry, stop_after_attempt, wait_random
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
@@ -34,6 +39,11 @@ from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
 
 logger = logging.getLogger(__name__)
+
+
+@retry(stop=stop_after_attempt(3), reraise=True, wait=wait_random(min=2, max=5))
+def remove_index_dir_win(data_path: str) -> None:
+    shutil.rmtree(data_path, ignore_errors=False)
 
 
 class PersistentData:
@@ -126,6 +136,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._label_to_id,
                 self._id_to_seq_id,
             )
+
+    @trace_method("PersistentLocalHnswSegment.stop", OpenTelemetryGranularity.ALL)
+    @override
+    def stop(self) -> None:
+        super().stop()
+        # TODO do we need to flush brute force index here too?
+        self.close_persistent_index()
 
     @staticmethod
     @override
@@ -437,7 +454,24 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         data_path = self._get_storage_folder()
         if os.path.exists(data_path):
             self.close_persistent_index()
-            shutil.rmtree(data_path, ignore_errors=False)
+            if platform.system() == "Windows":
+                os.system('rmdir /S /Q "{}"'.format(data_path))
+                try:
+                    shutil.rmtree(data_path, ignore_errors=False)
+                except Exception:
+                    command = f"PowerShell -Command \"Move-Item '{data_path}' -Destination 'C:\\$Recycle.Bin'\""
+                    subprocess.run(command, shell=True)
+            else:
+                shutil.rmtree(data_path, ignore_errors=True)
+
+    @classmethod
+    @override
+    def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
+        data_path = os.path.join(persistent_dir, str(segment["id"]))
+        if platform.system() == "Windows":
+            remove_index_dir_win(data_path)
+        else:
+            shutil.rmtree(data_path, ignore_errors=True)
 
     @staticmethod
     def get_file_handle_count() -> int:

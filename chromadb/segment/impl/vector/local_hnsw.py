@@ -321,7 +321,3 @@ class LocalHnswSegment(VectorReader):
                     batch.apply(record, label is not None)
 
             self._apply_batch(batch)
-
-    @override
-    def delete(self) -> None:
-        raise NotImplementedError()
