@@ -19,15 +19,12 @@ struct RecordSegment {
     current_max_offset_id: AtomicU32,
 }
 
-struct Record {
-    // A record is a representation of a materialized EmbeddingRecord.
-    // The naming in the current codebase is confusing and should be amended
-    // An "EmbeddingRecord" is a log operation. A "Record" is a materialized EmbeddingRecord,
-    // meaning it is the value we want to store. Given that we want to avoid
-    // copying the data from the log record (EmbeddingRecord) to the materialized record (Record),
-    // the write path Record implementation wraps the EmbeddingRecord and only materializes the
-    // data when it is accessed.
-    entry: EmbeddingRecord,
+struct StoredRecord<'a> {
+    segment_offset_id: u32,
+    record: &'a Option<EmbeddingRecord>,
+    embedding: Option<Vec<f32>>,
+    metadata: Option<crate::types::Metadata>,
+    document: Option<String>,
 }
 
 impl RecordSegment {
@@ -77,6 +74,8 @@ impl SegmentWriter for RecordSegment {
         mut records: Vec<Box<EmbeddingRecord>>,
         mut offset_ids: Vec<Option<u32>>,
     ) {
+        // TODO: Once this uses log chunk, we should expect invalid ADDs to already be filtered out
+        // we also then can assume that UPSERTs have been converted to ADDs or UPDATEs
         for (record, offset_id) in records.drain(..).zip(offset_ids.drain(..)) {
             match record.operation {
                 Operation::Add => {
@@ -87,9 +86,13 @@ impl SegmentWriter for RecordSegment {
                     ));
                     // See if its a KeyNotFound error
                     match res {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            // This is an error, but due to decoupled read/write, we silently ignore it
+                            return;
+                        }
                         Err(e) => match *e {
                             crate::blockstore::BlockfileError::NotFoundError => {}
+                            // TODO: don't panic here
                             _ => panic!("Unexpected error"),
                         },
                     }
@@ -112,7 +115,25 @@ impl SegmentWriter for RecordSegment {
                     );
                 }
                 // TODO: support other operations
-                Operation::Upsert => {}
+                Operation::Upsert => {
+                    // Check if the key already exists
+                    let res = self.user_id_to_id.get(BlockfileKey::new(
+                        "".to_string(),
+                        Key::String(record.id.clone()),
+                    ));
+                    // See if its a KeyNotFound error
+                    match res {
+                        Ok(_) => {
+                            // This is an error, but due to decoupled read/write, we silently ignore it
+                            return;
+                        }
+                        Err(e) => match *e {
+                            crate::blockstore::BlockfileError::NotFoundError => {}
+                            // TODO: don't panic
+                            _ => panic!("Unexpected error"),
+                        },
+                    }
+                }
                 Operation::Update => {}
                 Operation::Delete => {}
             }
@@ -145,24 +166,28 @@ impl OffsetIdAssigner for RecordSegment {
         // TODO: this should happen in a transaction
         let mut offset_ids = Vec::new();
         for record in records {
-            // Only ADD and UPSERT (if an add) assign an offset id
+            // Only ADD and UPSERT assign an offset id if the key doesn't exist
             let id = match record.operation {
-                Operation::Add => Some(
-                    self.current_max_offset_id
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                ),
-                Operation::Upsert => {
-                    // TODO: support empty prefixes in blockfile keys
-                    let exists = self
-                        .user_id_to_id
-                        .get(BlockfileKey::new("".to_string(), Key::String(record.id)));
-                    // TODO: I think not-found should be a None not an error
-                    match exists {
-                        Ok(_) => None,
-                        Err(_) => Some(
-                            self.current_max_offset_id
-                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                        ),
+                Operation::Add | Operation::Upsert => {
+                    // Check if the key already exists
+                    let res = self.user_id_to_id.get(BlockfileKey::new(
+                        "".to_string(),
+                        Key::String(record.id.clone()),
+                    ));
+                    // See if its a KeyNotFound error
+                    match res {
+                        Ok(_) => {
+                            // This is an error, but due to decoupled read/write, we silently ignore it
+                            None
+                        }
+                        Err(e) => match *e {
+                            crate::blockstore::BlockfileError::NotFoundError => Some(
+                                self.current_max_offset_id
+                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                            ),
+                            // TODO: don't panic here
+                            _ => panic!("Unexpected error"),
+                        },
                     }
                 }
                 _ => None,
