@@ -560,6 +560,10 @@ mod test {
                 "chroma:document".to_string(),
                 UpdateMetadataValue::Str("test".to_string()),
             );
+            metadata.insert(
+                "random_float".to_string(),
+                UpdateMetadataValue::Float(random::<f64>()),
+            );
             let value = Value::EmbeddingRecordValue(EmbeddingRecord {
                 seq_id: BigInt::from(0),
                 embedding: Some(vec![1.0, 2.0, 3.0]),

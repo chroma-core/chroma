@@ -82,10 +82,14 @@ impl ChromaError for ArrowBlockfileError {
 }
 
 impl Blockfile for ArrowBlockfile {
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<BlockfileError>> {
         let target_block_id = self.sparse_index.lock().get_target_block_id(&key);
         let target_block = match self.block_provider.get_block(&target_block_id) {
-            None => return Err(Box::new(ArrowBlockfileError::BlockNotFoundError)),
+            None => {
+                return Err(Box::new(BlockfileError::Other(Box::new(
+                    ArrowBlockfileError::BlockNotFoundError,
+                ))))
+            }
             Some(block) => block,
         };
         let value = target_block.get(&key);
@@ -140,7 +144,7 @@ impl Blockfile for ArrowBlockfile {
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         unimplemented!();
     }
 
@@ -148,7 +152,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         unimplemented!();
     }
 
@@ -156,7 +160,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         unimplemented!();
     }
 
@@ -164,7 +168,7 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         unimplemented!();
     }
 
@@ -172,15 +176,11 @@ impl Blockfile for ArrowBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         unimplemented!();
     }
 
-    fn set(
-        &mut self,
-        key: BlockfileKey,
-        value: Value,
-    ) -> Result<(), Box<dyn crate::errors::ChromaError>> {
+    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<BlockfileError>> {
         // TODO: value must be smaller than the block size except for position lists, which are a special case
         // where we split the value across multiple blocks
         if !self.in_transaction() {
@@ -245,7 +245,11 @@ impl Blockfile for ArrowBlockfile {
         let delta = match transaction_state.get_delta_for_block(&target_block_id) {
             None => {
                 let target_block = match self.block_provider.get_block(&target_block_id) {
-                    None => return Err(Box::new(ArrowBlockfileError::BlockNotFoundError)),
+                    None => {
+                        return Err(Box::new(BlockfileError::Other(Box::new(
+                            ArrowBlockfileError::BlockNotFoundError,
+                        ))));
+                    }
                     Some(block) => block,
                 };
                 let delta = BlockDelta::from(target_block);
@@ -284,7 +288,7 @@ impl Blockfile for ArrowBlockfile {
         Ok(())
     }
 
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
+    fn begin_transaction(&mut self) -> Result<(), Box<BlockfileError>> {
         if self.in_transaction() {
             return Err(Box::new(BlockfileError::TransactionInProgress));
         }
@@ -292,7 +296,7 @@ impl Blockfile for ArrowBlockfile {
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
+    fn commit_transaction(&mut self) -> Result<(), Box<BlockfileError>> {
         if !self.in_transaction() {
             return Err(Box::new(BlockfileError::TransactionNotInProgress));
         }
@@ -311,13 +315,17 @@ impl Blockfile for ArrowBlockfile {
                     match delta.source_block.apply_delta(&delta) {
                         Ok(_) => {}
                         Err(err) => {
-                            return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::BlockError(*err),
+                            ))));
                         }
                     }
                     match delta.source_block.commit() {
                         Ok(_) => {}
                         Err(err) => {
-                            return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::BlockError(*err),
+                            ))));
                         }
                     }
                 }
@@ -325,13 +333,17 @@ impl Blockfile for ArrowBlockfile {
                     match delta.source_block.apply_delta(&delta) {
                         Ok(_) => {}
                         Err(err) => {
-                            return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::BlockError(*err),
+                            ))));
                         }
                     }
                     match delta.source_block.commit() {
                         Ok(_) => {}
                         Err(err) => {
-                            return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::BlockError(*err),
+                            ))));
                         }
                     }
                 }
@@ -343,12 +355,18 @@ impl Blockfile for ArrowBlockfile {
                     match new_block.apply_delta(&delta) {
                         Ok(_) => {}
                         Err(err) => {
-                            return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::BlockError(*err),
+                            ))));
                         }
                     }
                     let new_min_key = match delta.get_min_key() {
                         // This should never happen. We don't panic here because we want to return a proper error
-                        None => return Err(Box::new(ArrowBlockfileError::NoSplitKeyFound)),
+                        None => {
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::NoSplitKeyFound,
+                            ))))
+                        }
                         Some(key) => key,
                     };
                     let mut transaction_sparse_index = transaction_state.sparse_index.lock();
@@ -374,7 +392,9 @@ impl Blockfile for ArrowBlockfile {
                     match new_block.commit() {
                         Ok(_) => {}
                         Err(err) => {
-                            return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
+                            return Err(Box::new(BlockfileError::Other(Box::new(
+                                ArrowBlockfileError::BlockError(*err),
+                            ))));
                         }
                     }
                 }
@@ -444,8 +464,13 @@ impl ArrowBlockfile {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use crate::types::{EmbeddingRecord, Operation, UpdateMetadataValue};
+
     use super::*;
     use arrow::array::Int32Array;
+    use num_bigint::BigInt;
 
     #[test]
     fn test_blockfile() {
@@ -698,6 +723,59 @@ mod tests {
             Ok(_) => {}
             Err(err) => {
                 panic!("Expected key2 to be found, got error: {:?}", err);
+            }
+        }
+    }
+    fn test_embedding_record() {
+        let block_provider = ArrowBlockProvider::new();
+        let mut blockfile =
+            ArrowBlockfile::new(KeyType::Uint, ValueType::EmbeddingRecord, block_provider);
+
+        blockfile.begin_transaction().unwrap();
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::Uint(i as u32));
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "chroma:document".to_string(),
+                UpdateMetadataValue::Str(format!("document_{:04}", i)),
+            );
+            metadata.insert("index".to_string(), UpdateMetadataValue::Float(i as f64));
+            blockfile
+                .set(
+                    key,
+                    Value::EmbeddingRecordValue(EmbeddingRecord {
+                        id: format!("{:04}", i),
+                        seq_id: BigInt::from(i),
+                        embedding: None,
+                        encoding: None,
+                        metadata: Some(metadata),
+                        operation: Operation::Add,
+                        collection_id: Uuid::new_v4(),
+                    }),
+                )
+                .unwrap();
+        }
+        blockfile.commit_transaction().unwrap();
+
+        for i in 0..n {
+            let key = BlockfileKey::new("key".to_string(), Key::Uint(i as u32));
+            let res = blockfile.get(key).unwrap();
+            match res {
+                Value::EmbeddingRecordValue(record) => {
+                    let metadata = record.metadata.unwrap();
+                    assert_eq!(record.id, format!("{:04}", i));
+                    assert_eq!(metadata.len(), 2);
+                    assert_eq!(
+                        metadata.get("chroma:document").unwrap(),
+                        &UpdateMetadataValue::Str(format!("document_{:04}", i))
+                    );
+                    assert_eq!(
+                        metadata.get("index").unwrap(),
+                        &UpdateMetadataValue::Float(i as f64)
+                    );
+                }
+                _ => panic!("Unexpected value type"),
             }
         }
     }

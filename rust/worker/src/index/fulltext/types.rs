@@ -64,8 +64,14 @@ impl FullTextIndex for BlockfileFullTextIndex {
         if self.in_transaction {
             return Err(Box::new(FullTextIndexError::AlreadyInTransaction));
         }
-        self.posting_lists_blockfile.begin_transaction()?;
-        self.frequencies_blockfile.begin_transaction()?;
+        match self.posting_lists_blockfile.begin_transaction() {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
+        match self.frequencies_blockfile.begin_transaction() {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
         self.in_transaction = true;
         Ok(())
     }
@@ -88,8 +94,14 @@ impl FullTextIndex for BlockfileFullTextIndex {
             self.frequencies_blockfile
                 .set(blockfilekey, Value::IntValue(value));
         }
-        self.posting_lists_blockfile.commit_transaction()?;
-        self.frequencies_blockfile.commit_transaction()?;
+        match self.posting_lists_blockfile.commit_transaction() {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
+        match self.frequencies_blockfile.commit_transaction() {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
         self.uncommitted.clear();
         Ok(())
     }

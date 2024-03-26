@@ -19,6 +19,17 @@ struct RecordSegment {
     current_max_offset_id: AtomicU32,
 }
 
+struct Record {
+    // A record is a representation of a materialized EmbeddingRecord.
+    // The naming in the current codebase is confusing and should be amended
+    // An "EmbeddingRecord" is a log operation. A "Record" is a materialized EmbeddingRecord,
+    // meaning it is the value we want to store. Given that we want to avoid
+    // copying the data from the log record (EmbeddingRecord) to the materialized record (Record),
+    // the write path Record implementation wraps the EmbeddingRecord and only materializes the
+    // data when it is accessed.
+    entry: EmbeddingRecord,
+}
+
 impl RecordSegment {
     pub fn new(mut blockfile_provider: Box<dyn BlockfileProvider>) -> Self {
         // TODO: file naming etc should be better here (use segment prefix etc.)
@@ -69,6 +80,20 @@ impl SegmentWriter for RecordSegment {
         for (record, offset_id) in records.drain(..).zip(offset_ids.drain(..)) {
             match record.operation {
                 Operation::Add => {
+                    // Check if the key already exists
+                    let res = self.user_id_to_id.get(BlockfileKey::new(
+                        "".to_string(),
+                        Key::String(record.id.clone()),
+                    ));
+                    // See if its a KeyNotFound error
+                    match res {
+                        Ok(_) => {}
+                        Err(e) => match *e {
+                            crate::blockstore::BlockfileError::NotFoundError => {}
+                            _ => panic!("Unexpected error"),
+                        },
+                    }
+
                     // TODO: error handling
                     let id = offset_id.unwrap();
                     // TODO: Support empty prefixes in blockfile keys
