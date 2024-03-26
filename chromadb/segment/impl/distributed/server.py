@@ -16,7 +16,6 @@ from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.types import EmbeddingRecord
 from chromadb.segment.distributed import MemberlistProvider, Memberlist
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
-from chromadb.ingest.impl.pulsar_admin import PulsarAdmin
 import logging
 import os
 
@@ -51,7 +50,6 @@ class SegmentServer(VectorReaderServicer):
         self._memberlist_provider = system.require(MemberlistProvider)
         self._memberlist_provider.set_memberlist_name("query-service-memberlist")
         self._assignment_policy = system.require(CollectionAssignmentPolicy)
-        self._create_pulsar_topics()
         self._consumer = system.require(Consumer)
 
         # Init data
@@ -112,15 +110,6 @@ class SegmentServer(VectorReaderServicer):
             f"First record: {embedding_records[0]} is for collection {embedding_records[0]['collection_id']}"
         )
         return None
-
-    def _create_pulsar_topics(self) -> None:
-        """This creates the pulsar topics used by the system.
-        HACK: THIS IS COMPLETELY A HACK AND WILL BE REPLACED
-        BY A PROPER TOPIC MANAGEMENT SYSTEM IN THE COORDINATOR"""
-        topics = self._assignment_policy.get_topics()
-        admin = PulsarAdmin(self._system)
-        for topic in topics:
-            admin.create_topic(topic)
 
     def QueryVectors(
         self, request: proto.QueryVectorsRequest, context: Any

@@ -57,9 +57,9 @@ class Segment(TypedDict):
 
 
 # SeqID can be one of three types of value in our current and future plans:
-# 1. A Pulsar MessageID encoded as a 192-bit integer
-# 2. A Pulsar MessageIndex (a 64-bit integer)
-# 3. A SQL RowID (a 64-bit integer)
+# 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
+# 2. A Pulsar MessageIndex (a 64-bit integer) -  This is no longer used as we removed pulsar
+# 3. A SQL RowID (a 64-bit integer) - This is used by both sqlite and the new log-service
 
 # All three of these types can be expressed as a Python int, so that is the type we
 # use in the internal Python API. However, care should be taken that the larger 192-bit
