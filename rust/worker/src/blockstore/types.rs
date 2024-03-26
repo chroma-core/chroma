@@ -1,7 +1,10 @@
 use super::positional_posting_list_value::PositionalPostingList;
+use crate::chroma_proto;
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::types::EmbeddingRecord;
 use arrow::array::{Array, Int32Array};
 use parking_lot::RwLock;
+use prost::Message;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
@@ -21,6 +24,8 @@ pub(crate) enum BlockfileError {
     TransactionInProgress,
     #[error("Transaction not in progress")]
     TransactionNotInProgress,
+    #[error("Other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send>),
 }
 
 impl ChromaError for BlockfileError {
@@ -32,6 +37,7 @@ impl ChromaError for BlockfileError {
             BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
                 ErrorCodes::FailedPrecondition
             }
+            BlockfileError::Other(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -182,6 +188,7 @@ pub(crate) enum Value {
     IntValue(i32),
     UintValue(u32),
     RoaringBitmapValue(RoaringBitmap),
+    EmbeddingRecordValue(EmbeddingRecord),
 }
 
 impl Clone for Value {
@@ -207,6 +214,7 @@ impl Clone for Value {
             Value::PositionalPostingListValue(list) => {
                 Value::PositionalPostingListValue(list.clone())
             }
+            Value::EmbeddingRecordValue(record) => Value::EmbeddingRecordValue(record.clone()),
             Value::StringValue(s) => Value::StringValue(s.clone()),
             Value::RoaringBitmapValue(bitmap) => Value::RoaringBitmapValue(bitmap.clone()),
             Value::IntValue(i) => Value::IntValue(*i),
@@ -222,6 +230,27 @@ impl Value {
             Value::PositionalPostingListValue(list) => {
                 unimplemented!("Size of positional posting list")
             }
+            Value::EmbeddingRecordValue(record) => {
+                let user_id_size = record.id.len();
+                let embedding_size = match &record.embedding {
+                    Some(embedding) => embedding.len(),
+                    None => 0,
+                };
+                let metadata_size = match &record.metadata {
+                    Some(metadata) => {
+                        let as_proto: chroma_proto::UpdateMetadata = metadata.clone().into();
+                        as_proto.encoded_len()
+                    }
+                    None => 0,
+                };
+                let document_size = match record.get_document() {
+                    Some(document) => document.len(),
+                    None => 0,
+                };
+                // user_id_size + embedding_size + metadata_size + document_size
+                // just uid metadata and document for now
+                user_id_size + metadata_size + document_size
+            }
             Value::StringValue(s) => s.len(),
             Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
             Value::IntValue(_) | Value::UintValue(_) => 4,
@@ -235,6 +264,7 @@ impl From<&Value> for ValueType {
             Value::Int32ArrayValue(_) => ValueType::Int32Array,
             Value::PositionalPostingListValue(_) => ValueType::PositionalPostingList,
             Value::RoaringBitmapValue(_) => ValueType::RoaringBitmap,
+            Value::EmbeddingRecordValue(_) => ValueType::EmbeddingRecord,
             Value::StringValue(_) => ValueType::String,
             Value::IntValue(_) => ValueType::Int,
             Value::UintValue(_) => ValueType::Uint,
@@ -246,6 +276,7 @@ impl From<&Value> for ValueType {
 pub(crate) enum ValueType {
     Int32Array,
     PositionalPostingList,
+    EmbeddingRecord,
     RoaringBitmap,
     String,
     Int,
@@ -254,42 +285,42 @@ pub(crate) enum ValueType {
 
 pub(crate) trait Blockfile: BlockfileClone {
     // ===== Transaction methods =====
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+    fn begin_transaction(&mut self) -> Result<(), Box<BlockfileError>>;
 
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+    fn commit_transaction(&mut self) -> Result<(), Box<BlockfileError>>;
 
     // ===== Data methods =====
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>>;
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<BlockfileError>>;
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
-    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>>;
+    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<BlockfileError>>;
 
     fn get_gt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
     fn get_lt(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
     fn get_gte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 
     fn get_lte(
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>>;
 }
 
 pub(crate) trait BlockfileClone {
@@ -325,7 +356,7 @@ impl HashMapBlockfile {
 }
 
 impl Blockfile for HashMapBlockfile {
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
+    fn get(&self, key: BlockfileKey) -> Result<Value, Box<BlockfileError>> {
         match self.map.read().get(&key) {
             Some(value) => Ok(value.clone()),
             None => Err(Box::new(BlockfileError::NotFoundError)),
@@ -335,7 +366,7 @@ impl Blockfile for HashMapBlockfile {
     fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (key, value) in self.map.read().iter() {
             if key.prefix == prefix {
@@ -345,7 +376,7 @@ impl Blockfile for HashMapBlockfile {
         Ok(result)
     }
 
-    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>> {
+    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<BlockfileError>> {
         self.map.write().insert(key, value);
         Ok(())
     }
@@ -354,7 +385,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key > key {
@@ -368,7 +399,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key >= key {
@@ -382,7 +413,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key < key {
@@ -396,7 +427,7 @@ impl Blockfile for HashMapBlockfile {
         &self,
         prefix: String,
         key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(BlockfileKey, Value)>, Box<BlockfileError>> {
         let mut result = Vec::new();
         for (k, v) in self.map.read().iter() {
             if k.prefix == prefix && k.key <= key {
@@ -406,11 +437,11 @@ impl Blockfile for HashMapBlockfile {
         Ok(result)
     }
 
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    fn begin_transaction(&mut self) -> Result<(), Box<BlockfileError>> {
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    fn commit_transaction(&mut self) -> Result<(), Box<BlockfileError>> {
         Ok(())
     }
 }

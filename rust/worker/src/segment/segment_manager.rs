@@ -5,7 +5,6 @@ use crate::{
     types::VectorQueryResult,
 };
 use async_trait::async_trait;
-use k8s_openapi::api::node;
 use num_bigint::BigInt;
 use parking_lot::{
     MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard, RwLockWriteGuard,

@@ -1,12 +1,12 @@
 use crate::types::EmbeddingRecord;
 
-trait SegmentWriter {
-    fn begin_transaction(&self);
-    fn write_records(&self, records: Vec<Box<EmbeddingRecord>>, offset_ids: Vec<u32>);
-    fn commit_transaction(&self);
+pub(super) trait SegmentWriter {
+    fn begin_transaction(&mut self);
+    fn write_records(&mut self, records: Vec<Box<EmbeddingRecord>>, offset_ids: Vec<Option<u32>>);
+    fn commit_transaction(&mut self);
     fn rollback_transaction(&self);
 }
 
-trait OffsetIdAssigner: SegmentWriter {
-    fn assign_offset_ids(&self, records: Vec<Box<EmbeddingRecord>>) -> Vec<u32>;
+pub(super) trait OffsetIdAssigner: SegmentWriter {
+    fn assign_offset_ids(&self, records: Vec<Box<EmbeddingRecord>>) -> Vec<Option<u32>>;
 }

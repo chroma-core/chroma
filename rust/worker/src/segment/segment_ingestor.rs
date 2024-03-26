@@ -2,15 +2,13 @@
 // Its designed to consume from a async_channel that guarantees exclusive consumption
 // They are spawned onto a dedicated thread runtime since ingesting is cpu bound
 
-use async_trait::async_trait;
-use std::{fmt::Debug, sync::Arc};
-
+use super::segment_manager::SegmentManager;
 use crate::{
     system::{Component, ComponentContext, ComponentRuntime, Handler},
     types::EmbeddingRecord,
 };
-
-use super::segment_manager::{self, SegmentManager};
+use async_trait::async_trait;
+use std::fmt::Debug;
 
 pub(crate) struct SegmentIngestor {
     segment_manager: SegmentManager,

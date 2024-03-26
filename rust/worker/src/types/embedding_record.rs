@@ -1,14 +1,13 @@
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
-    ScalarEncodingConversionError, SeqId, UpdateMetadata, UpdateMetadataValueConversionError,
+    ScalarEncodingConversionError, SeqId, UpdateMetadata, UpdateMetadataValue,
+    UpdateMetadataValueConversionError,
 };
 use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
-
 use chroma_proto::RecordLog;
-use chroma_proto::SubmitEmbeddingRecord;
 use num_bigint::BigInt;
 use thiserror::Error;
 use uuid::Uuid;
@@ -22,6 +21,22 @@ pub(crate) struct EmbeddingRecord {
     pub(crate) metadata: Option<UpdateMetadata>,
     pub(crate) operation: Operation,
     pub(crate) collection_id: Uuid,
+}
+
+impl EmbeddingRecord {
+    pub(crate) fn get_document(&self) -> Option<&str> {
+        // The document is stored in a metadata field with the key "chroma:document".
+        // This is not the most clear design, but it is an artifact of how the python code was written.
+        // We should consider changing this in the future. FOr now, we abstract out getting the document with a
+        // gettter method.
+        match &self.metadata {
+            Some(metadata) => match metadata.get("chroma:document") {
+                Some(UpdateMetadataValue::Str(document)) => Some(document),
+                _ => None,
+            },
+            None => None,
+        }
+    }
 }
 
 pub(crate) type SubmitEmbeddingRecordWithSeqId = (chroma_proto::SubmitEmbeddingRecord, SeqId);

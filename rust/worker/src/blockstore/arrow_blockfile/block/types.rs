@@ -1,15 +1,21 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
+use crate::chroma_proto;
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::types::{EmbeddingRecord, MetadataValue, UpdateMetadata, UpdateMetadataValue};
 use arrow::array::{
-    BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
-    GenericByteBuilder, UInt32Array, UInt32Builder,
+    ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
+    Float32Builder, GenericByteBuilder, StructArray, StructBuilder, UInt32Array, UInt32Builder,
+    UInt8Builder,
 };
+use arrow::datatypes::Fields;
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
+use num_bigint::BigInt;
 use parking_lot::RwLock;
+use prost::Message;
 use std::io::Error;
 use std::sync::Arc;
 use thiserror::Error;
@@ -180,6 +186,59 @@ impl Block {
                                             .value(i),
                                     ))
                                 }
+                                ValueType::EmbeddingRecord => {
+                                    let records =
+                                        value.as_any().downcast_ref::<StructArray>().unwrap();
+                                    let id = records
+                                        .column(0)
+                                        .as_any()
+                                        .downcast_ref::<StringArray>()
+                                        .unwrap()
+                                        .value(i)
+                                        .to_string();
+                                    let document = match records
+                                        .column(1)
+                                        .as_any()
+                                        .downcast_ref::<StringArray>()
+                                    {
+                                        Some(document) => Some(document.value(i).to_string()),
+                                        None => None,
+                                    };
+                                    let metadata = match records
+                                        .column(2)
+                                        .as_any()
+                                        .downcast_ref::<BinaryArray>()
+                                    {
+                                        Some(metadata) => {
+                                            let binary = metadata.value(i);
+                                            let proto =
+                                                chroma_proto::UpdateMetadata::decode(binary);
+                                            match proto {
+                                                Ok(proto) => {
+                                                    match TryInto::<UpdateMetadata>::try_into(proto)
+                                                    {
+                                                        Ok(metadata) => Some(metadata),
+                                                        Err(_) => None,
+                                                    }
+                                                }
+                                                Err(_) => None,
+                                            }
+                                        }
+                                        None => None,
+                                    };
+                                    return Some(Value::EmbeddingRecordValue(EmbeddingRecord {
+                                        id,
+                                        seq_id: BigInt::from(0), // TODO: THIS IS WRONG, WE NEED A NEW TYPE
+                                        operation: crate::types::Operation::Add, // TODO: THIS IS WRONG, WE NEED A NEW TYPE
+                                        embedding: Some(vec![1.0, 2.0, 3.0]), // TODO: populate this
+                                        encoding: None,                       // TODO: populate this
+                                        metadata,
+                                        collection_id: Uuid::parse_str(
+                                            "00000000-0000-0000-0000-000000000000",
+                                        )
+                                        .unwrap(),
+                                    }));
+                                }
                                 // TODO: Add support for other types
                                 _ => unimplemented!(),
                             }
@@ -307,6 +366,16 @@ enum ValueBuilder {
     StringValueBuilder(StringBuilder),
     RoaringBitmapBuilder(BinaryBuilder),
     UintValueBuilder(UInt32Builder),
+    EmbeddingRecordBuilder(EmbeddingRecordValueBuilder),
+}
+
+/// A struct used to build the embedding record value
+/// We use this as opposed to StructBuilder because StructBuilder does not
+/// give us the ability to manage the size/capacity of the buffers we are using
+struct EmbeddingRecordValueBuilder {
+    user_id_builder: StringBuilder,
+    document_builder: StringBuilder,
+    metadata_builder: BinaryBuilder,
 }
 
 /// BlockDataBuilder is used to build a block. It is used to add data to a block and then build the BlockData once all data has been added.
@@ -332,11 +401,26 @@ pub(super) struct BlockBuilderOptions {
     pub(super) prefix_data_capacity: usize,
     pub(super) key_data_capacity: usize,
     pub(super) total_value_count: usize,
+    pub(super) value_options: BlockBuilderValueOptions,
+}
+
+pub(super) enum BlockBuilderValueOptions {
+    FlatValue(BlockBuilderFlatValueOptions),
+    EmbeddingValue(BlockBuilderEmbeddingValueOptions),
+}
+
+pub(super) struct BlockBuilderFlatValueOptions {
     pub(super) total_value_capacity: usize,
 }
 
+pub(super) struct BlockBuilderEmbeddingValueOptions {
+    pub(super) total_user_id_capacity: usize,
+    pub(super) total_document_capacity: usize,
+    pub(super) total_metadata_capacity: usize,
+}
+
 impl BlockBuilderOptions {
-    pub(super) fn new(
+    pub(super) fn new_flat_value(
         item_count: usize,
         prefix_data_capacity: usize,
         key_data_capacity: usize,
@@ -348,28 +432,61 @@ impl BlockBuilderOptions {
             prefix_data_capacity,
             key_data_capacity,
             total_value_count,
-            total_value_capacity,
+            value_options: BlockBuilderValueOptions::FlatValue(BlockBuilderFlatValueOptions {
+                total_value_capacity,
+            }),
         }
     }
 
-    pub(super) fn default() -> Self {
+    pub(super) fn new_embedding_value(
+        item_count: usize,
+        prefix_data_capacity: usize,
+        key_data_capacity: usize,
+        total_user_id_capacity: usize,
+        total_document_capacity: usize,
+        total_metadata_capacity: usize,
+    ) -> Self {
         Self {
-            item_count: 1024,
-            prefix_data_capacity: 1024,
-            key_data_capacity: 1024,
-            total_value_count: 1024,
-            total_value_capacity: 1024,
+            item_count,
+            prefix_data_capacity,
+            key_data_capacity,
+            total_value_count: 0,
+            value_options: BlockBuilderValueOptions::EmbeddingValue(
+                BlockBuilderEmbeddingValueOptions {
+                    total_user_id_capacity,
+                    total_document_capacity,
+                    total_metadata_capacity,
+                },
+            ),
         }
     }
 }
 
 impl BlockDataBuilder {
+    /// Creates a new BlockDataBuilder
+    /// ## Panics
+    /// Panics if the key and value types are not compatible with the options.
     pub(super) fn new(
         key_type: KeyType,
         value_type: ValueType,
-        options: Option<BlockBuilderOptions>,
+        options: BlockBuilderOptions,
     ) -> Self {
-        let options = options.unwrap_or(BlockBuilderOptions::default());
+        // Ensure key and value types are compatible with the options. Downstream code can
+        // then unwrap the options and use them without further checks.
+        match &options.value_options {
+            BlockBuilderValueOptions::FlatValue(_) => match value_type {
+                ValueType::Int32Array
+                | ValueType::String
+                | ValueType::Uint
+                | ValueType::RoaringBitmap => {}
+                _ => panic!("Invalid value type for flat value options"),
+            },
+            BlockBuilderValueOptions::EmbeddingValue(_) => match value_type {
+                ValueType::EmbeddingRecord => {}
+                _ => panic!("Invalid value type for embedding value options"),
+            },
+        }
+
         let prefix_builder =
             StringBuilder::with_capacity(options.item_count, options.prefix_data_capacity);
         let key_builder = match key_type {
@@ -394,16 +511,52 @@ impl BlockDataBuilder {
                     options.item_count,
                 ))
             }
-            ValueType::String => ValueBuilder::StringValueBuilder(StringBuilder::with_capacity(
-                options.item_count,
-                options.total_value_capacity,
-            )),
+            ValueType::String => {
+                let value_options = match &options.value_options {
+                    BlockBuilderValueOptions::FlatValue(options) => options,
+                    _ => panic!("Invalid value options for string value"),
+                };
+                ValueBuilder::StringValueBuilder(StringBuilder::with_capacity(
+                    options.item_count,
+                    value_options.total_value_capacity,
+                ))
+            }
             ValueType::Uint => {
                 ValueBuilder::UintValueBuilder(UInt32Builder::with_capacity(options.item_count))
             }
-            ValueType::RoaringBitmap => ValueBuilder::RoaringBitmapBuilder(
-                BinaryBuilder::with_capacity(options.item_count, options.total_value_capacity),
-            ),
+            ValueType::RoaringBitmap => {
+                let value_options = match &options.value_options {
+                    BlockBuilderValueOptions::FlatValue(options) => options,
+                    _ => panic!("Invalid value options for roaring bitmap value"),
+                };
+                ValueBuilder::RoaringBitmapBuilder(BinaryBuilder::with_capacity(
+                    options.item_count,
+                    value_options.total_value_capacity,
+                ))
+            }
+            ValueType::EmbeddingRecord => {
+                let value_options = match &options.value_options {
+                    BlockBuilderValueOptions::EmbeddingValue(options) => options,
+                    _ => panic!("Invalid value options for embedding record value"),
+                };
+                let user_id_builder = StringBuilder::with_capacity(
+                    options.item_count,
+                    value_options.total_user_id_capacity,
+                );
+                let document_builder = StringBuilder::with_capacity(
+                    options.item_count,
+                    value_options.total_document_capacity,
+                );
+                let metadata_builder = BinaryBuilder::with_capacity(
+                    options.item_count,
+                    value_options.total_metadata_capacity,
+                );
+                ValueBuilder::EmbeddingRecordBuilder(EmbeddingRecordValueBuilder {
+                    user_id_builder,
+                    document_builder,
+                    metadata_builder,
+                })
+            }
             // TODO: Implement the other value types
             _ => unimplemented!(),
         };
@@ -416,6 +569,8 @@ impl BlockDataBuilder {
     }
 
     /// Adds a key, value pair to the block. The key must be greater than the last key added to the block otherwise an error is returned.
+    /// TOOD: value builders should likely not take ownership of the value, and instead clone them into the arrow datastruct since that
+    /// must occur anyway.
     pub(super) fn add(
         &mut self,
         key: BlockfileKey,
@@ -489,6 +644,27 @@ impl BlockDataBuilder {
                 }
                 _ => unreachable!("Invalid value type for block"),
             },
+            ValueBuilder::EmbeddingRecordBuilder(ref mut builder) => match value {
+                Value::EmbeddingRecordValue(embedding_record) => {
+                    builder
+                        .user_id_builder
+                        .append_value(embedding_record.id.clone());
+                    builder
+                        .document_builder
+                        .append_option(embedding_record.get_document());
+                    match embedding_record.metadata {
+                        Some(metadata) => {
+                            let proto: chroma_proto::UpdateMetadata = metadata.into();
+                            let bytes = proto.encode_to_vec();
+                            builder.metadata_builder.append_value(bytes);
+                        }
+                        None => {
+                            builder.metadata_builder.append_null();
+                        }
+                    }
+                }
+                _ => unreachable!("Invalid value type for block"),
+            },
         }
 
         Ok(())
@@ -546,6 +722,35 @@ impl BlockDataBuilder {
             ValueBuilder::RoaringBitmapBuilder(ref mut builder) => {
                 value_field = Field::new("value", DataType::Binary, true);
                 let arr = builder.finish();
+                (&arr as &dyn Array).slice(0, arr.len())
+            }
+            ValueBuilder::EmbeddingRecordBuilder(ref mut builder) => {
+                value_field = Field::new(
+                    "value",
+                    DataType::Struct(Fields::from(vec![
+                        Field::new("user_id", DataType::Utf8, true),
+                        Field::new("document", DataType::Utf8, true),
+                        Field::new("metadata", DataType::Binary, true),
+                    ])),
+                    true,
+                );
+                let user_id_arr = builder.user_id_builder.finish();
+                let document_arr = builder.document_builder.finish();
+                let metadata_arr = builder.metadata_builder.finish();
+                let arr = StructArray::from(vec![
+                    (
+                        Arc::new(Field::new("user_id", DataType::Utf8, true)),
+                        Arc::new(user_id_arr) as ArrayRef,
+                    ),
+                    (
+                        Arc::new(Field::new("document", DataType::Utf8, true)),
+                        Arc::new(document_arr) as ArrayRef,
+                    ),
+                    (
+                        Arc::new(Field::new("metadata", DataType::Binary, true)),
+                        Arc::new(metadata_arr) as ArrayRef,
+                    ),
+                ]);
                 (&arr as &dyn Array).slice(0, arr.len())
             }
         };
@@ -617,13 +822,13 @@ mod test {
         let mut block_builder = BlockDataBuilder::new(
             KeyType::String,
             ValueType::Int32Array,
-            Some(BlockBuilderOptions::new(
+            BlockBuilderOptions::new_flat_value(
                 num_entries,
                 prefix_bytes,
                 key_bytes,
                 num_entries,         // 2 int32s per entry
                 num_entries * 2 * 4, // 2 int32s per entry
-            )),
+            ),
         );
 
         for i in 0..num_entries {
@@ -647,7 +852,7 @@ mod test {
         let mut block_builder = BlockDataBuilder::new(
             KeyType::String,
             ValueType::Int32Array,
-            Some(BlockBuilderOptions::default()),
+            BlockBuilderOptions::new_flat_value(1024, 1024, 1024, 1024, 1024),
         );
 
         block_builder

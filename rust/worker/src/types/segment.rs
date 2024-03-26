@@ -11,6 +11,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SegmentType {
     HnswDistributed,
+    Record,
 }
 
 #[derive(Clone, Debug, PartialEq)]
