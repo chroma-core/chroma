@@ -19,6 +19,7 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    OptimizationStats,
 )
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
@@ -169,6 +170,10 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def heartbeat(self) -> int:
         return self._server.heartbeat()
+
+    @override
+    def optimize(self) -> OptimizationStats:
+        return self._server.optimize()
 
     @override
     def list_collections(

@@ -21,6 +21,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    OptimizationStats,
 )
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
@@ -37,6 +38,11 @@ class BaseAPI(ABC):
             int: The current time in nanoseconds since epoch
 
         """
+        pass
+
+    @abstractmethod
+    def optimize(self) -> OptimizationStats:
+        """Optimize the database."""
         pass
 
     #

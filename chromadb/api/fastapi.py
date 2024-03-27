@@ -29,6 +29,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    OptimizationStats,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -628,6 +629,13 @@ class FastAPI(ServerAPI):
             raise_chroma_error(resp)
             self._max_batch_size = cast(int, json.loads(resp.text)["max_batch_size"])
         return self._max_batch_size
+
+    @trace_method("FastAPI.optimize", OpenTelemetryGranularity.OPERATION)
+    @override
+    def optimize(self) -> OptimizationStats:
+        resp = self._session.post(self._api_url + "/optimize")
+        raise_chroma_error(resp)
+        return cast(OptimizationStats, json.loads(resp.text))
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

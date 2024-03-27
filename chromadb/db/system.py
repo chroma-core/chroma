@@ -11,6 +11,7 @@ from chromadb.types import (
     OptionalArgument,
     Unspecified,
     UpdateMetadata,
+    SystemOptimizationStats,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component
 
@@ -52,6 +53,12 @@ class SysDB(Component):
     @abstractmethod
     def delete_segment(self, id: UUID) -> None:
         """Create a new segment in the System database."""
+        pass
+
+    @abstractmethod
+    def optimize_system(self) -> SystemOptimizationStats:
+        """Optimizes the system database. This may involve reorganizing data, updating statistics, etc.
+        This should be an online operation."""
         pass
 
     @abstractmethod
