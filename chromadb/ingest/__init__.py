@@ -45,7 +45,7 @@ class Producer(Component):
     def submit_embedding(
         self, collection_id: UUID, embedding: OperationRecord
     ) -> SeqId:
-        """Add an embedding record to the given topic. Returns the SeqID of the record."""
+        """Add an embedding record to the given collections log. Returns the SeqID of the record."""
         pass
 
     @abstractmethod

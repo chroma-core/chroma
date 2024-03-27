@@ -35,7 +35,7 @@ from chromadb.types import (
 
 
 class SqlSysDB(SqlDB, SysDB):
-    # Used only to delete topics on collection deletion.
+    # Used only to delete log streams on collection deletion.
     # TODO: refactor to remove this dependency into a separate interface
     _producer: Producer
 
@@ -433,7 +433,9 @@ class SqlSysDB(SqlDB, SysDB):
 
             # apply limit and offset
             if limit is not None:
-                collections = collections[offset : offset + limit]
+                if offset is None:
+                    offset = 0
+                collections = collections[offset: offset + limit]
             else:
                 collections = collections[offset:]
 

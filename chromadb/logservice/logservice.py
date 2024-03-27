@@ -67,7 +67,7 @@ class LogService(Producer, Consumer):
     def reset_state(self) -> None:
         super().reset_state()
 
-    @trace_method("LogService.delete_topic", OpenTelemetryGranularity.ALL)
+    @trace_method("LogService.delete_log", OpenTelemetryGranularity.ALL)
     @override
     def delete_log(self, collection_id: UUID) -> None:
         raise NotImplementedError("Not implemented")

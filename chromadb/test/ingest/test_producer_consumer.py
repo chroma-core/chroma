@@ -145,10 +145,6 @@ def assert_records_match(
             assert_approx_equal(inserted["embedding"], consumed["embedding"])
 
 
-# def full_topic_name(topic_name: str) -> str:
-#     return create_topic_name("default", "default", topic_name)
-
-
 @pytest.mark.asyncio
 async def test_backfill(
     producer_consumer: Tuple[Producer, Consumer],
@@ -193,7 +189,7 @@ async def test_notifications(
 
 
 @pytest.mark.asyncio
-async def test_multiple_topics(
+async def test_multiple_collections(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[OperationRecord],
 ) -> None:
@@ -310,7 +306,7 @@ async def test_submit_batch(
 
 
 @pytest.mark.asyncio
-async def test_multiple_topics_batch(
+async def test_multiple_collections_batch(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,

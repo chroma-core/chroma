@@ -85,9 +85,12 @@ DEFAULT_DATABASE = "default_database"
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
-    # Legacy config has to be kept around because pydantic will error
+    # Legacy config that has to be kept around because pydantic will error
     # on nonexisting keys
     chroma_db_impl: Optional[str] = None
+    chroma_collection_assignment_policy_impl: str = (
+        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
+    )
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
     chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
