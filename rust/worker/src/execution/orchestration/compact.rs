@@ -83,7 +83,7 @@ impl CompactOrchestrator {
     async fn get_collection_id_for_segment_id(&mut self, segment_id: Uuid) -> Option<Uuid> {
         let segments = self
             .sysdb
-            .get_segments(Some(segment_id), None, None, None, None)
+            .get_segments(Some(segment_id), None, None, None)
             .await;
         match segments {
             Ok(segments) => match segments.get(0) {

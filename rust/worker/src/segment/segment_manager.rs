@@ -206,7 +206,6 @@ impl SegmentManager {
                         None,
                         None,
                         Some(SegmentScope::VECTOR),
-                        None,
                         Some(collection_uuid.clone()),
                     )
                     .await;

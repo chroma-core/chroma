@@ -99,12 +99,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
         let mut result = Vec::new();
         loop {
             let logs = client_clone
-                .read(
-                    input.collection_id.to_string(),
-                    offset,
-                    batch_size,
-                    input.end_timestamp,
-                )
+                .read(input.collection_id, offset, batch_size, input.end_timestamp)
                 .await;
 
             let mut logs = match logs {

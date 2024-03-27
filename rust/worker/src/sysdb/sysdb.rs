@@ -20,7 +20,6 @@ pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
-        topic: Option<String>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
@@ -31,7 +30,6 @@ pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        topic: Option<String>,
         collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError>;
 }
@@ -107,7 +105,6 @@ impl SysDb for GrpcSysDb {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
-        topic: Option<String>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
@@ -127,7 +124,6 @@ impl SysDb for GrpcSysDb {
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
-                topic: topic,
                 name: name,
                 tenant: if tenant.is_some() {
                     tenant.unwrap()
@@ -171,7 +167,6 @@ impl SysDb for GrpcSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        topic: Option<String>,
         collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
@@ -189,7 +184,6 @@ impl SysDb for GrpcSysDb {
                 } else {
                     None
                 },
-                topic: topic,
                 collection: if collection.is_some() {
                     Some(collection.unwrap().to_string())
                 } else {
