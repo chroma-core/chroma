@@ -1,4 +1,4 @@
--- CREATE SCHEMA "public";
+CREATE SCHEMA "public";
 
 -- Create "collection_metadata" table
 CREATE TABLE "public"."collection_metadata" (
