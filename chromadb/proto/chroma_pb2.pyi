@@ -56,7 +56,7 @@ class FilePaths(_message.Message):
     def __init__(self, paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Segment(_message.Message):
-    __slots__ = ["id", "type", "scope", "topic", "collection", "metadata", "file_paths"]
+    __slots__ = ["id", "type", "scope", "collection", "metadata", "file_paths"]
     class FilePathsEntry(_message.Message):
         __slots__ = ["key", "value"]
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -67,24 +67,21 @@ class Segment(_message.Message):
     ID_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     FILE_PATHS_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
     scope: SegmentScope
-    topic: str
     collection: str
     metadata: UpdateMetadata
     file_paths: _containers.MessageMap[str, FilePaths]
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
 
 class Collection(_message.Message):
-    __slots__ = ["id", "name", "topic", "metadata", "dimension", "tenant", "database", "logPosition", "version"]
+    __slots__ = ["id", "name", "metadata", "dimension", "tenant", "database", "logPosition", "version"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
@@ -93,14 +90,13 @@ class Collection(_message.Message):
     VERSION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
-    topic: str
     metadata: UpdateMetadata
     dimension: int
     tenant: str
     database: str
     logPosition: int
     version: int
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., logPosition: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., logPosition: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
 
 class Database(_message.Message):
     __slots__ = ["id", "name", "tenant"]
@@ -141,19 +137,17 @@ class UpdateMetadata(_message.Message):
     metadata: _containers.MessageMap[str, UpdateMetadataValue]
     def __init__(self, metadata: _Optional[_Mapping[str, UpdateMetadataValue]] = ...) -> None: ...
 
-class SubmitEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "vector", "metadata", "operation", "collection_id"]
+class OperationRecord(_message.Message):
+    __slots__ = ["id", "vector", "metadata", "operation"]
     ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     OPERATION_FIELD_NUMBER: _ClassVar[int]
-    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     id: str
     vector: Vector
     metadata: UpdateMetadata
     operation: Operation
-    collection_id: str
-    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ..., collection_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
 
 class VectorEmbeddingRecord(_message.Message):
     __slots__ = ["id", "seq_id", "vector"]

@@ -7,7 +7,7 @@ import "chromadb/proto/chroma.proto";
 
 message PushLogsRequest {
   string collection_id = 1;
-  repeated SubmitEmbeddingRecord records = 2;
+  repeated OperationRecord records = 2;
 }
 
 message PushLogsResponse {
@@ -23,7 +23,7 @@ message PullLogsRequest {
 
 message RecordLog {
   int64 log_id = 1;
-  SubmitEmbeddingRecord record = 2;
+  OperationRecord record = 2;
 }
 
 message PullLogsResponse {

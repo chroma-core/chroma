@@ -48,9 +48,6 @@ type Config struct {
 	WorkerMemberlistName string
 	WorkerPodLabel       string
 
-	// Assignment policy config can be "simple" or "rendezvous"
-	AssignmentPolicy string
-
 	// Watcher config
 	WatchInterval time.Duration
 
@@ -88,22 +85,6 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	ctx := context.Background()
 	s := &Server{
 		healthServer: health.NewServer(),
-	}
-
-	var assignmentPolicy coordinator.CollectionAssignmentPolicy
-	if config.AssignmentPolicy == "simple" {
-		log.Info("Using simple assignment policy")
-		assignmentPolicy = coordinator.NewSimpleAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
-	} else if config.AssignmentPolicy == "rendezvous" {
-		log.Info("Using rendezvous assignment policy")
-		//err := utils.CreateTopics(config.PulsarAdminURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
-		//if err != nil {
-		//	log.Error("Failed to create topics", zap.Error(err))
-		//	return nil, err
-		//}
-		assignmentPolicy = coordinator.NewRendezvousAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
-	} else {
-		return nil, errors.New("invalid assignment policy, only simple and rendezvous are supported")
 	}
 
 	var notificationStore notification.NotificationStore
@@ -145,7 +126,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		defer producer.Close()
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, assignmentPolicy, db, notificationStore, notifier)
+	coordinator, err := coordinator.NewCoordinator(ctx, db, notificationStore, notifier)
 	if err != nil {
 		return nil, err
 	}

@@ -2,13 +2,14 @@ package coordinator
 
 import (
 	"context"
+	"sort"
+	"strconv"
+	"testing"
+
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"gorm.io/gorm"
-	"sort"
-	"strconv"
-	"testing"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
@@ -48,9 +49,8 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.ID = types.NewUniqueID()
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
-	assignmentPolicy := NewMockAssignmentPolicy(suite.sampleCollections)
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, assignmentPolicy, suite.db, nil, nil)
+	c, err := NewCoordinator(ctx, suite.db, nil, nil)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -59,7 +59,6 @@ func (suite *APIsTestSuite) SetupTest() {
 		_, errCollectionCreation := c.CreateCollection(ctx, &model.CreateCollection{
 			ID:           collection.ID,
 			Name:         collection.Name,
-			Topic:        collection.Topic,
 			Metadata:     collection.Metadata,
 			Dimension:    collection.Dimension,
 			TenantID:     collection.TenantID,
@@ -82,8 +81,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	assignmentPolicy := NewSimpleAssignmentPolicy("test-tenant", "test-topic")
-	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
+	c, err := NewCoordinator(ctx, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -110,15 +108,13 @@ func testCollection(t *rapid.T) {
 			if err != nil {
 				if err == common.ErrCollectionNameEmpty && collection.Name == "" {
 					t.Logf("expected error for empty collection name")
-				} else if err == common.ErrCollectionTopicEmpty {
-					t.Logf("expected error for empty collection topic")
 				} else {
 					t.Fatalf("error creating collection: %v", err)
 				}
 			}
 			if err == nil {
 				// verify the correctness
-				collectionList, err := c.GetCollections(ctx, collection.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
+				collectionList, err := c.GetCollections(ctx, collection.ID, nil, common.DefaultTenant, common.DefaultDatabase)
 				if err != nil {
 					t.Fatalf("error getting collections: %v", err)
 				}
@@ -138,8 +134,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	assignmentPolicy := NewSimpleAssignmentPolicy("test-tenant", "test-topic")
-	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
+	c, err := NewCoordinator(ctx, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -153,7 +148,6 @@ func testSegment(t *rapid.T) {
 	metadata.Set("int_value", intValue)
 	metadata.Set("float_value", floatValue)
 
-	testTopic := "test-segment-topic"
 	t.Repeat(map[string]func(*rapid.T){
 		"create_segment": func(t *rapid.T) {
 			segment := rapid.Custom[*model.CreateSegment](func(t *rapid.T) *model.CreateSegment {
@@ -161,7 +155,6 @@ func testSegment(t *rapid.T) {
 					ID:           types.MustParse(rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "segment_id")),
 					Type:         "test-segment-type",
 					Scope:        "test-segment-scope",
-					Topic:        &testTopic,
 					Metadata:     nil,
 					CollectionID: types.MustParse(rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "collection_id")),
 				}
@@ -236,7 +229,6 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 		{
 			ID:           types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
 			Name:         "test_collection_1",
-			Topic:        "test_topic_1",
 			Metadata:     metadata1,
 			Dimension:    &dimension,
 			TenantID:     tenantID,
@@ -245,7 +237,6 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 		{
 			ID:           types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
 			Name:         "test_collection_2",
-			Topic:        "test_topic_2",
 			Metadata:     metadata2,
 			Dimension:    nil,
 			TenantID:     tenantID,
@@ -254,7 +245,6 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 		{
 			ID:           types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
 			Name:         "test_collection_3",
-			Topic:        "test_topic_3",
 			Metadata:     metadata3,
 			Dimension:    nil,
 			TenantID:     tenantID,
@@ -264,28 +254,9 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 	return sampleCollections
 }
 
-type MockAssignmentPolicy struct {
-	collections []*model.Collection
-}
-
-func NewMockAssignmentPolicy(collecions []*model.Collection) *MockAssignmentPolicy {
-	return &MockAssignmentPolicy{
-		collections: collecions,
-	}
-}
-
-func (m *MockAssignmentPolicy) AssignCollection(collectionID types.UniqueID) (string, error) {
-	for _, collection := range m.collections {
-		if collection.ID == collectionID {
-			return collection.Topic, nil
-		}
-	}
-	return "", common.ErrCollectionNotFound
-}
-
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
-	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, suite.databaseName)
+	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 
 	sort.Slice(results, func(i, j int) bool {
@@ -304,38 +275,16 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	// Find by name
 	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, nil, suite.tenantName, suite.databaseName)
-		suite.NoError(err)
-		suite.Equal([]*model.Collection{collection}, result)
-	}
-
-	// Find by topic
-	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, &collection.Topic, suite.tenantName, suite.databaseName)
+		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName)
 		suite.NoError(err)
 		suite.Equal([]*model.Collection{collection}, result)
 	}
 
 	// Find by id
 	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, nil, suite.tenantName, suite.databaseName)
+		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, suite.tenantName, suite.databaseName)
 		suite.NoError(err)
 		suite.Equal([]*model.Collection{collection}, result)
-	}
-
-	// Find by id and topic (positive case)
-	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, &collection.Topic, suite.tenantName, suite.databaseName)
-		suite.NoError(err)
-		suite.Equal([]*model.Collection{collection}, result)
-	}
-
-	// find by id and topic (negative case)
-	for _, collection := range suite.sampleCollections {
-		otherTopic := "other topic"
-		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, &otherTopic, suite.tenantName, suite.databaseName)
-		suite.NoError(err)
-		suite.Empty(result)
 	}
 
 	// Delete
@@ -348,13 +297,13 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
 	suite.NoError(err)
 
-	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, suite.databaseName)
+	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 
 	suite.NotContains(results, c1)
 	suite.Len(results, len(suite.sampleCollections)-1)
 	suite.ElementsMatch(results, suite.sampleCollections[1:])
-	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, nil, suite.tenantName, suite.databaseName)
+	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Empty(byIDResult)
 
@@ -368,7 +317,6 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	coll := &model.Collection{
 		Name:         suite.sampleCollections[0].Name,
 		ID:           suite.sampleCollections[0].ID,
-		Topic:        suite.sampleCollections[0].Topic,
 		Metadata:     suite.sampleCollections[0].Metadata,
 		Dimension:    suite.sampleCollections[0].Dimension,
 		TenantID:     suite.sampleCollections[0].TenantID,
@@ -380,16 +328,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, nil, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
-
-	// Update topic
-	coll.Topic = "new_topic"
-	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Topic: &coll.Topic})
-	suite.NoError(err)
-	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, &coll.Topic, suite.tenantName, suite.databaseName)
+	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 
@@ -399,7 +338,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, nil, suite.tenantName, suite.databaseName)
+	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 
@@ -410,7 +349,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, nil, suite.tenantName, suite.databaseName)
+	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 
@@ -419,7 +358,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, nil, suite.tenantName, suite.databaseName)
+	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 }
@@ -440,7 +379,6 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[0].ID,
 		Name:         suite.sampleCollections[0].Name,
-		Topic:        suite.sampleCollections[0].Topic,
 		Metadata:     suite.sampleCollections[0].Metadata,
 		Dimension:    suite.sampleCollections[0].Dimension,
 		TenantID:     suite.sampleCollections[0].TenantID,
@@ -453,7 +391,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 		Name: &newName1,
 	})
 	suite.NoError(err)
-	result, err := suite.coordinator.GetCollections(ctx, suite.sampleCollections[1].ID, nil, nil, suite.tenantName, suite.databaseName)
+	result, err := suite.coordinator.GetCollections(ctx, suite.sampleCollections[1].ID, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newName1, result[0].Name)
@@ -465,7 +403,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	})
 	suite.NoError(err)
 	//suite.Equal(newName0, collection.Name)
-	result, err = suite.coordinator.GetCollections(ctx, suite.sampleCollections[0].ID, nil, nil, suite.tenantName, newDatabaseName)
+	result, err = suite.coordinator.GetCollections(ctx, suite.sampleCollections[0].ID, nil, suite.tenantName, newDatabaseName)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newName0, result[0].Name)
@@ -495,7 +433,6 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		_, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 			ID:           collection.ID,
 			Name:         collection.Name,
-			Topic:        collection.Topic,
 			Metadata:     collection.Metadata,
 			Dimension:    collection.Dimension,
 			TenantID:     collection.TenantID,
@@ -504,7 +441,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		suite.NoError(err)
 		suite.sampleCollections[index] = collection
 	}
-	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, newDatabaseName)
+	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName)
 	suite.NoError(err)
 	suite.Equal(len(suite.sampleCollections), len(result))
 	sort.Slice(result, func(i, j int) bool {
@@ -512,7 +449,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 	})
 	suite.Equal(suite.sampleCollections, result)
 
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, suite.databaseName)
+	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Equal(len(suite.sampleCollections), len(result))
 
@@ -565,7 +502,6 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[0].ID,
 		Name:         suite.sampleCollections[0].Name,
-		Topic:        suite.sampleCollections[0].Topic,
 		Metadata:     suite.sampleCollections[0].Metadata,
 		Dimension:    suite.sampleCollections[0].Dimension,
 		TenantID:     newTenantName,
@@ -579,7 +515,6 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[1].ID,
 		Name:         suite.sampleCollections[1].Name,
-		Topic:        suite.sampleCollections[1].Topic,
 		Metadata:     suite.sampleCollections[1].Metadata,
 		Dimension:    suite.sampleCollections[1].Dimension,
 		TenantID:     suite.tenantName,
@@ -591,7 +526,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected := []*model.Collection{suite.sampleCollections[0]}
 	expected[0].TenantID = newTenantName
 	expected[0].DatabaseName = newDatabaseName
-	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, newTenantName, newDatabaseName)
+	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, newDatabaseName)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(expected[0], result[0])
@@ -599,14 +534,14 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected = []*model.Collection{suite.sampleCollections[1]}
 	expected[0].TenantID = suite.tenantName
 	expected[0].DatabaseName = newDatabaseName
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, suite.tenantName, newDatabaseName)
+	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(expected[0], result[0])
 
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, nil, newTenantName, suite.databaseName)
+	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Nil(result)
 
@@ -704,13 +639,10 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 	metadata3.Set("test_int", &model.SegmentMetadataValueInt64Type{Value: 3})
 	metadata3.Set("test_float", &model.SegmentMetadataValueFloat64Type{Value: 3.3})
 
-	testTopic2 := "test_topic_2"
-	testTopic3 := "test_topic_3"
 	sampleSegments := []*model.Segment{
 		{
 			ID:           types.MustParse("00000000-d7d7-413b-92e1-731098a6e492"),
 			Type:         "test_type_a",
-			Topic:        nil,
 			Scope:        "VECTOR",
 			CollectionID: sampleCollections[0].ID,
 			Metadata:     metadata1,
@@ -719,7 +651,6 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 		{
 			ID:           types.MustParse("11111111-d7d7-413b-92e1-731098a6e492"),
 			Type:         "test_type_b",
-			Topic:        &testTopic2,
 			Scope:        "VECTOR",
 			CollectionID: sampleCollections[1].ID,
 			Metadata:     metadata2,
@@ -728,7 +659,6 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 		{
 			ID:           types.MustParse("22222222-d7d7-413b-92e1-731098a6e492"),
 			Type:         "test_type_b",
-			Topic:        &testTopic3,
 			Scope:        "METADATA",
 			CollectionID: types.NilUniqueID(),
 			Metadata:     metadata3, // This segment is not assigned to any collection
@@ -747,7 +677,6 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 		errSegmentCreation := c.CreateSegment(ctx, &model.CreateSegment{
 			ID:           segment.ID,
 			Type:         segment.Type,
-			Topic:        segment.Topic,
 			Scope:        segment.Scope,
 			CollectionID: segment.CollectionID,
 			Metadata:     segment.Metadata,
@@ -757,7 +686,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	var results []*model.Segment
 	for _, segment := range sampleSegments {
-		result, err := c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+		result, err := c.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
 		suite.NoError(err)
 		suite.Equal([]*model.Segment{segment}, result)
 		results = append(results, result...)
@@ -771,7 +700,6 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	err := c.CreateSegment(ctx, &model.CreateSegment{
 		ID:           sampleSegments[0].ID,
 		Type:         sampleSegments[0].Type,
-		Topic:        sampleSegments[0].Topic,
 		Scope:        sampleSegments[0].Scope,
 		CollectionID: sampleSegments[0].CollectionID,
 		Metadata:     sampleSegments[0].Metadata,
@@ -780,34 +708,34 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	// Find by id
 	for _, segment := range sampleSegments {
-		result, err := c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+		result, err := c.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
 		suite.NoError(err)
 		suite.Equal([]*model.Segment{segment}, result)
 	}
 
 	// Find by type
 	testTypeA := "test_type_a"
-	result, err := c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, nil, types.NilUniqueID())
+	result, err := c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Equal(sampleSegments[:1], result)
 
 	testTypeB := "test_type_b"
-	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, nil, types.NilUniqueID())
+	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.ElementsMatch(sampleSegments[1:], result)
 
 	// Find by collection ID
-	result, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, nil, suite.sampleCollections[0].ID)
+	result, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, suite.sampleCollections[0].ID)
 	suite.NoError(err)
 	suite.Equal(sampleSegments[:1], result)
 
 	// Find by type and collection ID (positive case)
-	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, nil, suite.sampleCollections[0].ID)
+	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, suite.sampleCollections[0].ID)
 	suite.NoError(err)
 	suite.Equal(sampleSegments[:1], result)
 
 	// Find by type and collection ID (negative case)
-	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, nil, suite.sampleCollections[0].ID)
+	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, suite.sampleCollections[0].ID)
 	suite.NoError(err)
 	suite.Empty(result)
 
@@ -816,7 +744,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	err = c.DeleteSegment(ctx, s1.ID)
 	suite.NoError(err)
 
-	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, nil, types.NilUniqueID())
+	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.NotContains(results, s1)
 	suite.Len(results, len(sampleSegments)-1)
@@ -833,8 +761,6 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 }
 
 func (suite *APIsTestSuite) TestUpdateSegment() {
-	testTopic := "test_topic_a"
-
 	metadata := model.NewSegmentMetadata[model.SegmentMetadataValueType]()
 	metadata.Set("test_str", &model.SegmentMetadataValueStringType{Value: "str1"})
 	metadata.Set("test_int", &model.SegmentMetadataValueInt64Type{Value: 1})
@@ -844,7 +770,6 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ID:           types.UniqueID(uuid.New()),
 		Type:         "test_type_a",
 		Scope:        "VECTOR",
-		Topic:        &testTopic,
 		CollectionID: suite.sampleCollections[0].ID,
 		Metadata:     metadata,
 		FilePaths:    map[string][]string{},
@@ -854,39 +779,13 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	errSegmentCreation := suite.coordinator.CreateSegment(ctx, &model.CreateSegment{
 		ID:           segment.ID,
 		Type:         segment.Type,
-		Topic:        segment.Topic,
 		Scope:        segment.Scope,
 		CollectionID: segment.CollectionID,
 		Metadata:     segment.Metadata,
 	})
 	suite.NoError(errSegmentCreation)
 
-	// Update topic to new value
 	collectionID := segment.CollectionID.String()
-	newTopic := "new_topic"
-	segment.Topic = &newTopic
-	_, err := suite.coordinator.UpdateSegment(ctx, &model.UpdateSegment{
-		Collection: &collectionID,
-		ID:         segment.ID,
-		Topic:      segment.Topic,
-	})
-	suite.NoError(err)
-	result, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	suite.NoError(err)
-	suite.Equal([]*model.Segment{segment}, result)
-
-	// Update topic to None
-	segment.Topic = nil
-	_, err = suite.coordinator.UpdateSegment(ctx, &model.UpdateSegment{
-		Collection: &collectionID,
-		ID:         segment.ID,
-		Topic:      segment.Topic,
-		ResetTopic: true,
-	})
-	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
-	suite.NoError(err)
-	suite.Equal([]*model.Segment{segment}, result)
 
 	// TODO: revisit why we need this
 	// Update collection to new value
@@ -913,12 +812,12 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 
 	// Add a new metadata key
 	segment.Metadata.Set("test_str2", &model.SegmentMetadataValueStringType{Value: "str2"})
-	_, err = suite.coordinator.UpdateSegment(ctx, &model.UpdateSegment{
+	_, err := suite.coordinator.UpdateSegment(ctx, &model.UpdateSegment{
 		Collection: &collectionID,
 		ID:         segment.ID,
 		Metadata:   segment.Metadata})
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+	result, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 
@@ -929,7 +828,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ID:         segment.ID,
 		Metadata:   segment.Metadata})
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 
@@ -942,7 +841,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ID:         segment.ID,
 		Metadata:   newMetadata})
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 
@@ -955,7 +854,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ResetMetadata: true},
 	)
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
+	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 }

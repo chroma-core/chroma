@@ -43,7 +43,6 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 	segmentID := req.Id
 	segmentType := req.Type
 	scope := req.Scope
-	topic := req.Topic
 	collectionID := req.Collection
 	res := &coordinatorpb.GetSegmentsResponse{}
 
@@ -67,7 +66,7 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 		scopeString := scope.String()
 		scopeValue = &scopeString
 	}
-	segments, err := s.coordinator.GetSegments(ctx, parsedSegmentID, segmentType, scopeValue, topic, parsedCollectionID)
+	segments, err := s.coordinator.GetSegments(ctx, parsedSegmentID, segmentType, scopeValue, parsedCollectionID)
 	if err != nil {
 		log.Error("get segments error", zap.Error(err))
 		res.Status = failResponseWithError(err, errorCode)
@@ -112,16 +111,10 @@ func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSeg
 	res := &coordinatorpb.UpdateSegmentResponse{}
 	updateSegment := &model.UpdateSegment{
 		ID:              types.MustParse(req.Id),
-		ResetTopic:      req.GetResetTopic(),
 		ResetCollection: req.GetResetCollection(),
 		ResetMetadata:   req.GetResetMetadata(),
 	}
-	topic := req.GetTopic()
-	if topic == "" {
-		updateSegment.Topic = nil
-	} else {
-		updateSegment.Topic = &topic
-	}
+
 	collection := req.GetCollection()
 	if collection == "" {
 		updateSegment.Collection = nil

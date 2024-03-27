@@ -35,7 +35,7 @@ DEFAULT_CAPACITY = 1000
 class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
-    _topic: Optional[str]
+    _collection: Optional[UUID]
     _subscription: UUID
     _settings: Settings
     _params: HnswParams
@@ -56,7 +56,7 @@ class LocalHnswSegment(VectorReader):
     def __init__(self, system: System, segment: Segment):
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
-        self._topic = segment["topic"]
+        self._collection = segment["collection"]
         self._settings = system.settings
         self._params = HnswParams(segment["metadata"] or {})
 
@@ -84,10 +84,10 @@ class LocalHnswSegment(VectorReader):
     @override
     def start(self) -> None:
         super().start()
-        if self._topic:
+        if self._collection:
             seq_id = self.max_seqid()
             self._subscription = self._consumer.subscribe(
-                self._topic, self._write_records, start=seq_id
+                self._collection, self._write_records, start=seq_id
             )
 
     @trace_method("LocalHnswSegment.stop", OpenTelemetryGranularity.ALL)

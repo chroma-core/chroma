@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
+use uuid::Uuid;
 
 // CollectionInfo is a struct that contains information about a collection for the
 // compacting process. It contains information about the collection id, the first log id,
@@ -34,11 +35,11 @@ pub(crate) struct CollectionRecord {
 pub(crate) trait Log: Send + Sync + LogClone + Debug {
     async fn read(
         &mut self,
-        collection_id: String,
+        collection_id: Uuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError>;
+    ) -> Result<Vec<EmbeddingRecord>, PullLogsError>;
 
     async fn get_collections_with_new_data(
         &mut self,
@@ -117,17 +118,17 @@ impl Configurable for GrpcLog {
 impl Log for GrpcLog {
     async fn read(
         &mut self,
-        collection_id: String,
+        collection_id: Uuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => -1,
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
-            collection_id,
+            collection_id: collection_id.to_string(),
             start_from_id: offset,
             batch_size,
             end_timestamp,
@@ -138,7 +139,7 @@ impl Log for GrpcLog {
                 let logs = response.into_inner().records;
                 let mut result = Vec::new();
                 for log in logs {
-                    let embedding_record = log.try_into();
+                    let embedding_record = (log, collection_id).try_into();
                     match embedding_record {
                         Ok(embedding_record) => {
                             result.push(embedding_record);
@@ -227,7 +228,7 @@ pub(crate) struct LogRecord {
     pub(crate) collection_id: String,
     pub(crate) log_id: i64,
     pub(crate) log_id_ts: i64,
-    pub(crate) record: Box<EmbeddingRecord>,
+    pub(crate) record: EmbeddingRecord,
 }
 
 impl Debug for LogRecord {
@@ -264,17 +265,17 @@ impl InMemoryLog {
 impl Log for InMemoryLog {
     async fn read(
         &mut self,
-        collection_id: String,
+        collection_id: Uuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
 
-        let logs = match self.logs.get(&collection_id) {
+        let logs = match self.logs.get(&collection_id.to_string()) {
             Some(logs) => logs,
             None => return Ok(Vec::new()),
         };

@@ -1,10 +1,11 @@
 package dao
 
 import (
+	"testing"
+
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
-	"testing"
 
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"gorm.io/gorm"
@@ -42,8 +43,7 @@ func (suite *CollectionDbTestSuite) TearDownSuite() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collectionName := "test_collection_get_collections"
-	collectionTopic := "test_collection_topic"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, collectionTopic, 128, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	suite.NoError(err)
 
 	testKey := "test"
@@ -65,30 +65,23 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 		suite.NoError(err)
 		suite.Equal(collectionID, scanedCollectionID)
 	}
-	collections, err := suite.collectionDb.GetCollections(nil, nil, nil, suite.tenantName, suite.databaseName)
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 	suite.Equal(collectionName, *collections[0].Collection.Name)
-	suite.Equal(collectionTopic, *collections[0].Collection.Topic)
 	suite.Len(collections[0].CollectionMetadata, 1)
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 
 	// Test when filtering by ID
-	collections, err = suite.collectionDb.GetCollections(nil, nil, nil, suite.tenantName, suite.databaseName)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test when filtering by name
-	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, nil, suite.tenantName, suite.databaseName)
-	suite.NoError(err)
-	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
-
-	// Test when filtering by topic
-	collections, err = suite.collectionDb.GetCollections(nil, nil, &collectionTopic, suite.tenantName, suite.databaseName)
+	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
@@ -100,10 +93,9 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion() {
 	collectionName := "test_collection_get_collections"
-	collectionTopic := "test_topic"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, collectionTopic, 128, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	// verify default values
-	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, nil, "", "")
+	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "")
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(int64(0), collections[0].Collection.LogPosition)
@@ -113,7 +105,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion
 	version, err := suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(10), 0)
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
-	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, nil, "", "")
+	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "")
 	suite.Len(collections, 1)
 	suite.Equal(int64(10), collections[0].Collection.LogPosition)
 	suite.Equal(int32(1), collections[0].Collection.Version)

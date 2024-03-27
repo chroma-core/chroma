@@ -1,22 +1,21 @@
 package testutils
 
 import (
+	"strconv"
+
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"gorm.io/gorm"
-	"strconv"
 )
 
 func CreateCollections(db *gorm.DB, collectionIds ...types.UniqueID) error {
 	// create test collections
 	for index, collectionId := range collectionIds {
 		collectionName := "collection" + strconv.Itoa(index+1)
-		collectionTopic := "topic" + strconv.Itoa(index+1)
 		var collectionDimension int32 = 6
 		collection := &dbmodel.Collection{
 			ID:         collectionId.String(),
 			Name:       &collectionName,
-			Topic:      &collectionTopic,
 			Dimension:  &collectionDimension,
 			DatabaseID: types.NewUniqueID().String(),
 		}

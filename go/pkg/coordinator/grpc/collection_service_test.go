@@ -2,6 +2,11 @@ package grpc
 
 import (
 	"context"
+	"reflect"
+	"strconv"
+	"testing"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/coordinator"
@@ -16,10 +21,6 @@ import (
 	"gorm.io/gorm"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"pgregory.net/rapid"
-	"reflect"
-	"strconv"
-	"testing"
-	"time"
 )
 
 type CollectionServiceTestSuite struct {
@@ -36,7 +37,6 @@ func (suite *CollectionServiceTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
-		AssignmentPolicy:          "simple",
 		SystemCatalogProvider:     "database",
 		NotificationStoreProvider: "memory",
 		NotifierProvider:          "memory",
@@ -68,12 +68,10 @@ func (suite *CollectionServiceTestSuite) TearDownSuite() {
 // Collection created should have the right metadata, the metadata should be a flat map, with keys as strings and values as strings, ints, or floats
 // Collection created should have the right name
 // Collection created should have the right ID
-// Collection created should have the right topic
 // Collection created should have the right timestamp
 func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
-		AssignmentPolicy:          "simple",
 		SystemCatalogProvider:     "memory",
 		NotificationStoreProvider: "memory",
 		NotifierProvider:          "memory",
@@ -112,10 +110,6 @@ func testCollection(t *rapid.T) {
 				if err == common.ErrCollectionNameEmpty && createCollectionRequest.Name == "" {
 					t.Logf("expected error for empty collection name")
 					collectionsWithErrors = append(collectionsWithErrors, res.Collection)
-				} else if err == common.ErrCollectionTopicEmpty {
-					t.Logf("expected error for empty collection topic")
-					collectionsWithErrors = append(collectionsWithErrors, res.Collection)
-					// TODO: check the topic name not empty
 				} else {
 					t.Fatalf("error creating collection: %v", err)
 					collectionsWithErrors = append(collectionsWithErrors, res.Collection)
@@ -185,7 +179,6 @@ func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, co
 	suite.Len(collectionsInDB.Collections, 1)
 	suite.Equal(collection.Id, collection.Id)
 	suite.Equal(collection.Name, collection.Name)
-	suite.Equal(collection.Topic, collection.Topic)
 	suite.Equal(collection.LogPosition, collection.LogPosition)
 	suite.Equal(collection.Version, collection.Version)
 
@@ -203,8 +196,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	log.Info("TestServer_FlushCollectionCompaction")
 	// create test collection
 	collectionName := "collection_service_test_flush_collection_compaction"
-	collectionTopic := "collection_service_test_flush_collection_compaction_topic"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, collectionTopic, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	suite.NoError(err)
 
 	// flush collection compaction

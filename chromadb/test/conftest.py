@@ -17,6 +17,7 @@ from typing import (
     Tuple,
     Callable,
 )
+from uuid import UUID
 
 import hypothesis
 import pytest
@@ -29,7 +30,7 @@ from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
-from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
 
 root_logger = logging.getLogger()
@@ -527,24 +528,24 @@ class ProducerFn(Protocol):
     def __call__(
         self,
         producer: Producer,
-        topic: str,
-        embeddings: Iterator[SubmitEmbeddingRecord],
+        collection_id: UUID,
+        embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
         ...
 
 
 def produce_n_single(
     producer: Producer,
-    topic: str,
-    embeddings: Iterator[SubmitEmbeddingRecord],
+    collection_id: UUID,
+    embeddings: Iterator[OperationRecord],
     n: int,
-) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
     submitted_embeddings = []
     seq_ids = []
     for _ in range(n):
         e = next(embeddings)
-        seq_id = producer.submit_embedding(topic, e)
+        seq_id = producer.submit_embedding(collection_id, e)
         submitted_embeddings.append(e)
         seq_ids.append(seq_id)
     return submitted_embeddings, seq_ids
@@ -552,16 +553,16 @@ def produce_n_single(
 
 def produce_n_batch(
     producer: Producer,
-    topic: str,
-    embeddings: Iterator[SubmitEmbeddingRecord],
+    collection_id: UUID,
+    embeddings: Iterator[OperationRecord],
     n: int,
-) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
     submitted_embeddings = []
     seq_ids: Sequence[SeqId] = []
     for _ in range(n):
         e = next(embeddings)
         submitted_embeddings.append(e)
-    seq_ids = producer.submit_embeddings(topic, submitted_embeddings)
+    seq_ids = producer.submit_embeddings(collection_id, submitted_embeddings)
     return submitted_embeddings, seq_ids
 
 

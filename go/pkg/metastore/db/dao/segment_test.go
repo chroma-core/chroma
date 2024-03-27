@@ -1,13 +1,14 @@
 package dao
 
 import (
+	"strconv"
+	"testing"
+
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"strconv"
-	"testing"
 
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -31,13 +32,11 @@ func (suite *SegmentDbTestSuite) SetupSuite() {
 func (suite *SegmentDbTestSuite) TestSegmentDb_GetSegments() {
 	uniqueID := types.NewUniqueID()
 	collectionID := uniqueID.String()
-	testTopic := "test_segment_topic"
 	segment := &dbmodel.Segment{
 		ID:           uniqueID.String(),
 		CollectionID: &collectionID,
 		Type:         "test_type",
 		Scope:        "test_scope",
-		Topic:        &testTopic,
 	}
 	err := suite.db.Create(segment).Error
 	suite.NoError(err)
@@ -53,44 +52,37 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_GetSegments() {
 	suite.NoError(err)
 
 	// Test when all parameters are nil
-	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, nil, types.NilUniqueID())
+	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
 	suite.Equal(segment.CollectionID, segments[0].Segment.CollectionID)
 	suite.Equal(segment.Type, segments[0].Segment.Type)
 	suite.Equal(segment.Scope, segments[0].Segment.Scope)
-	suite.Equal(segment.Topic, segments[0].Segment.Topic)
 	suite.Len(segments[0].SegmentMetadata, 1)
 	suite.Equal(metadata.Key, segments[0].SegmentMetadata[0].Key)
 	suite.Equal(metadata.StrValue, segments[0].SegmentMetadata[0].StrValue)
 
 	// Test when filtering by ID
-	segments, err = suite.segmentDb.GetSegments(types.MustParse(segment.ID), nil, nil, nil, types.NilUniqueID())
+	segments, err = suite.segmentDb.GetSegments(types.MustParse(segment.ID), nil, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
 
 	// Test when filtering by type
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), &segment.Type, nil, nil, types.NilUniqueID())
+	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), &segment.Type, nil, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
 
 	// Test when filtering by scope
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, &segment.Scope, nil, types.NilUniqueID())
-	suite.NoError(err)
-	suite.Len(segments, 1)
-	suite.Equal(segment.ID, segments[0].Segment.ID)
-
-	// Test when filtering by topic
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, segment.Topic, types.NilUniqueID())
+	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, &segment.Scope, types.NilUniqueID())
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
 
 	// Test when filtering by collection ID
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, nil, types.MustParse(*segment.CollectionID))
+	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.MustParse(*segment.CollectionID))
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
@@ -106,10 +98,10 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_RegisterFilePath() {
 	// create a collection for testing
 	databaseId := types.NewUniqueID().String()
 	collectionName := "test_segment_register_file_paths"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, "test_topic", 128, databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, databaseId)
 	suite.NoError(err)
 
-	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, nil, types.MustParse(collectionID))
+	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.MustParse(collectionID))
 	suite.NoError(err)
 
 	// create entries to flush
@@ -140,7 +132,7 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_RegisterFilePath() {
 	suite.NoError(err)
 
 	// verify file paths registered
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, nil, types.MustParse(collectionID))
+	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.MustParse(collectionID))
 	suite.NoError(err)
 	for _, segment := range segments {
 		suite.Contains(segmentsFilePaths, segment.Segment.ID)

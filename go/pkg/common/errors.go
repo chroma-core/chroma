@@ -17,7 +17,6 @@ var (
 	ErrCollectionNotFound                    = errors.New("collection not found")
 	ErrCollectionIDFormat                    = errors.New("collection id format error")
 	ErrCollectionNameEmpty                   = errors.New("collection name is empty")
-	ErrCollectionTopicEmpty                  = errors.New("collection topic is empty")
 	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")
 	ErrCollectionDeleteNonExistingCollection = errors.New("delete non existing collection")
 	ErrCollectionLogPositionStale            = errors.New("collection log position Stale")
@@ -30,7 +29,6 @@ var (
 
 	// Segment errors
 	ErrSegmentIDFormat                  = errors.New("segment id format error")
-	ErrInvalidTopicUpdate               = errors.New("invalid topic update, reset topic true and topic value not empty")
 	ErrInvalidCollectionUpdate          = errors.New("invalid collection update, reset collection true and collection value not empty")
 	ErrSegmentUniqueConstraintViolation = errors.New("unique constraint violation")
 	ErrSegmentDeleteNonExistingSegment  = errors.New("delete non existing segment")

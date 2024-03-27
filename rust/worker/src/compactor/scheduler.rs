@@ -72,7 +72,7 @@ impl Scheduler {
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None, None)
+                .get_collections(collection_id, None, None, None)
                 .await;
 
             match result {
@@ -206,15 +206,11 @@ mod tests {
         fn filter_collections(
             collection: &Collection,
             collection_id: Option<Uuid>,
-            topic: Option<String>,
             name: Option<String>,
             tenant: Option<String>,
             database: Option<String>,
         ) -> bool {
             if collection_id.is_some() && collection_id.unwrap() != collection.id {
-                return false;
-            }
-            if topic.is_some() && topic.unwrap() != collection.topic {
                 return false;
             }
             if name.is_some() && name.unwrap() != collection.name {
@@ -235,7 +231,6 @@ mod tests {
         async fn get_collections(
             &mut self,
             collection_id: Option<Uuid>,
-            topic: Option<String>,
             name: Option<String>,
             tenant: Option<String>,
             database: Option<String>,
@@ -245,7 +240,6 @@ mod tests {
                 if !TestSysDb::filter_collections(
                     &collection,
                     collection_id,
-                    topic.clone(),
                     name.clone(),
                     tenant.clone(),
                     database.clone(),
@@ -262,7 +256,6 @@ mod tests {
             id: Option<Uuid>,
             r#type: Option<String>,
             scope: Option<SegmentScope>,
-            topic: Option<String>,
             collection: Option<Uuid>,
         ) -> Result<Vec<Segment>, GetSegmentsError> {
             Ok(Vec::new())
@@ -281,7 +274,7 @@ mod tests {
                 collection_id: collection_id_1.clone(),
                 log_id: 1,
                 log_id_ts: 1,
-                record: Box::new(EmbeddingRecord {
+                record: EmbeddingRecord {
                     id: "embedding_id_1".to_string(),
                     seq_id: BigInt::from(1),
                     embedding: None,
@@ -289,7 +282,7 @@ mod tests {
                     metadata: None,
                     operation: Operation::Add,
                     collection_id: collection_uuid_1,
-                }),
+                },
             }),
         );
 
@@ -301,7 +294,7 @@ mod tests {
                 collection_id: collection_id_2.clone(),
                 log_id: 2,
                 log_id_ts: 2,
-                record: Box::new(EmbeddingRecord {
+                record: EmbeddingRecord {
                     id: "embedding_id_2".to_string(),
                     seq_id: BigInt::from(2),
                     embedding: None,
@@ -309,7 +302,7 @@ mod tests {
                     metadata: None,
                     operation: Operation::Add,
                     collection_id: collection_uuid_2,
-                }),
+                },
             }),
         );
 
@@ -318,7 +311,6 @@ mod tests {
         let collection_1 = Collection {
             id: collection_uuid_1,
             name: "collection_1".to_string(),
-            topic: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
             tenant: "tenant_1".to_string(),
@@ -330,7 +322,6 @@ mod tests {
         let collection_2 = Collection {
             id: collection_uuid_2,
             name: "collection_2".to_string(),
-            topic: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
             tenant: "tenant_2".to_string(),

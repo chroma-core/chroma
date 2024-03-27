@@ -1,8 +1,7 @@
-use crate::{
-    execution::operator::Operator,
-    log::log::{Log, PullLogsError},
-    types::EmbeddingRecord,
-};
+use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::operator::Operator;
+use crate::log::log::Log;
+use crate::log::log::PullLogsError;
 use async_trait::async_trait;
 use uuid::Uuid;
 
@@ -65,22 +64,22 @@ impl PullLogsInput {
 /// The output of the pull logs operator.
 #[derive(Debug)]
 pub struct PullLogsOutput {
-    logs: Vec<Box<EmbeddingRecord>>,
+    logs: DataChunk,
 }
 
 impl PullLogsOutput {
     /// Create a new pull logs output.
     /// # Parameters
     /// * `logs` - The logs that were read.
-    pub fn new(logs: Vec<Box<EmbeddingRecord>>) -> Self {
+    pub fn new(logs: DataChunk) -> Self {
         PullLogsOutput { logs }
     }
 
     /// Get the log entries that were read by an invocation of the pull logs operator.
     /// # Returns
     /// The log entries that were read.
-    pub fn logs(&self) -> &Vec<Box<EmbeddingRecord>> {
-        &self.logs
+    pub fn logs(&self) -> DataChunk {
+        self.logs.clone()
     }
 }
 
@@ -100,12 +99,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
         let mut result = Vec::new();
         loop {
             let logs = client_clone
-                .read(
-                    input.collection_id.to_string(),
-                    offset,
-                    batch_size,
-                    input.end_timestamp,
-                )
+                .read(input.collection_id, offset, batch_size, input.end_timestamp)
                 .await;
 
             let mut logs = match logs {
@@ -139,7 +133,9 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
         }
-        Ok(PullLogsOutput::new(result))
+        // Convert to DataChunk
+        let data_chunk = DataChunk::new(result.into());
+        Ok(PullLogsOutput::new(data_chunk))
     }
 }
 
@@ -166,7 +162,7 @@ mod tests {
                 collection_id: collection_id_1.clone(),
                 log_id: 1,
                 log_id_ts: 1,
-                record: Box::new(EmbeddingRecord {
+                record: EmbeddingRecord {
                     id: "embedding_id_1".to_string(),
                     seq_id: BigInt::from(1),
                     embedding: None,
@@ -174,7 +170,7 @@ mod tests {
                     metadata: None,
                     operation: Operation::Add,
                     collection_id: collection_uuid_1,
-                }),
+                },
             }),
         );
         log.add_log(
@@ -183,7 +179,7 @@ mod tests {
                 collection_id: collection_id_1.clone(),
                 log_id: 2,
                 log_id_ts: 2,
-                record: Box::new(EmbeddingRecord {
+                record: EmbeddingRecord {
                     id: "embedding_id_2".to_string(),
                     seq_id: BigInt::from(2),
                     embedding: None,
@@ -191,7 +187,7 @@ mod tests {
                     metadata: None,
                     operation: Operation::Add,
                     collection_id: collection_uuid_1,
-                }),
+                },
             }),
         );
 

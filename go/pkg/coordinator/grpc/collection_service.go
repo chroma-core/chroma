@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -97,7 +98,6 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetCollectionsRequest) (*coordinatorpb.GetCollectionsResponse, error) {
 	collectionID := req.Id
 	collectionName := req.Name
-	collectionTopic := req.Topic
 	tenantID := req.Tenant
 	databaseName := req.Database
 
@@ -110,7 +110,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		return res, nil
 	}
 
-	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, collectionTopic, tenantID, databaseName)
+	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
 		res.Status = failResponseWithError(err, errorCode)
@@ -169,7 +169,6 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	updateCollection := &model.UpdateCollection{
 		ID:        parsedCollectionID,
 		Name:      req.Name,
-		Topic:     req.Topic,
 		Dimension: req.Dimension,
 	}
 
