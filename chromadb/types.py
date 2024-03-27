@@ -98,13 +98,6 @@ class LogRecord(TypedDict):
     operation_record: OperationRecord
 
 
-class DataRecord(TypedDict):
-    id: str
-    embedding: Optional[Vector]
-    encoding: Optional[ScalarEncoding]
-    metadata: Optional[Metadata]
-
-
 class VectorQuery(TypedDict):
     """A KNN/ANN query"""
 
