@@ -7,8 +7,8 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
 };
 
+use chroma_proto::OperationRecord;
 use chroma_proto::RecordLog;
-use chroma_proto::SubmitEmbeddingRecord;
 use num_bigint::BigInt;
 use thiserror::Error;
 use uuid::Uuid;
@@ -24,7 +24,8 @@ pub(crate) struct EmbeddingRecord {
     pub(crate) collection_id: Uuid,
 }
 
-pub(crate) type SubmitEmbeddingRecordWithSeqId = (chroma_proto::SubmitEmbeddingRecord, SeqId);
+pub(crate) type OperationRecordWithSeqIdAndCollectionId =
+    (chroma_proto::OperationRecord, SeqId, Uuid);
 
 #[derive(Error, Debug)]
 pub(crate) enum EmbeddingRecordConversionError {
@@ -50,22 +51,18 @@ impl_base_convert_error!(EmbeddingRecordConversionError, {
     EmbeddingRecordConversionError::VectorConversionError(inner) => inner.code(),
 });
 
-impl TryFrom<SubmitEmbeddingRecordWithSeqId> for EmbeddingRecord {
+impl TryFrom<OperationRecordWithSeqIdAndCollectionId> for EmbeddingRecord {
     type Error = EmbeddingRecordConversionError;
 
     fn try_from(
-        proto_submit_with_seq_id: SubmitEmbeddingRecordWithSeqId,
+        proto_submit_with_seq_id: OperationRecordWithSeqIdAndCollectionId,
     ) -> Result<Self, Self::Error> {
         let proto_submit = proto_submit_with_seq_id.0;
         let seq_id = proto_submit_with_seq_id.1;
+        let collection_id = proto_submit_with_seq_id.2;
         let op = match proto_submit.operation.try_into() {
             Ok(op) => op,
             Err(e) => return Err(EmbeddingRecordConversionError::OperationConversionError(e)),
-        };
-
-        let collection_uuid = match Uuid::try_parse(&proto_submit.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => return Err(EmbeddingRecordConversionError::InvalidUuid),
         };
 
         let (embedding, encoding) = match proto_submit.vector {
@@ -96,15 +93,19 @@ impl TryFrom<SubmitEmbeddingRecordWithSeqId> for EmbeddingRecord {
             encoding: encoding,
             metadata: metadata,
             operation: op,
-            collection_id: collection_uuid,
+            collection_id: collection_id,
         })
     }
 }
 
-impl TryFrom<RecordLog> for EmbeddingRecord {
+type RecordLogWithCollectionId = (RecordLog, Uuid);
+
+impl TryFrom<RecordLogWithCollectionId> for EmbeddingRecord {
     type Error = EmbeddingRecordConversionError;
 
-    fn try_from(record_log: RecordLog) -> Result<Self, Self::Error> {
+    fn try_from(record_log_collection_id: RecordLogWithCollectionId) -> Result<Self, Self::Error> {
+        let record_log = record_log_collection_id.0;
+        let collection_uuid = record_log_collection_id.1;
         let proto_submit = record_log
             .record
             .ok_or(EmbeddingRecordConversionError::DecodeError(
@@ -115,11 +116,6 @@ impl TryFrom<RecordLog> for EmbeddingRecord {
         let op = match proto_submit.operation.try_into() {
             Ok(op) => op,
             Err(e) => return Err(EmbeddingRecordConversionError::OperationConversionError(e)),
-        };
-
-        let collection_uuid = match Uuid::try_parse(&proto_submit.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => return Err(EmbeddingRecordConversionError::InvalidUuid),
         };
 
         let (embedding, encoding) = match proto_submit.vector {
@@ -281,6 +277,7 @@ mod tests {
     use std::collections::HashMap;
 
     use num_bigint::BigInt;
+    use uuid::uuid;
 
     use super::*;
     use crate::{chroma_proto, types::UpdateMetadataValue};
@@ -311,15 +308,18 @@ mod tests {
             encoding: chroma_proto::ScalarEncoding::Float32 as i32,
             dimension: 3,
         };
-        let proto_submit = chroma_proto::SubmitEmbeddingRecord {
+        let proto_submit = chroma_proto::OperationRecord {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             vector: Some(proto_vector),
             metadata: Some(metadata),
             operation: chroma_proto::Operation::Add as i32,
-            collection_id: "00000000-0000-0000-0000-000000000000".to_string(),
         };
-        let converted_embedding_record: EmbeddingRecord =
-            EmbeddingRecord::try_from((proto_submit, BigInt::from(42))).unwrap();
+        let converted_embedding_record: EmbeddingRecord = EmbeddingRecord::try_from((
+            proto_submit,
+            BigInt::from(42),
+            uuid!("00000000-0000-0000-0000-000000000000"),
+        ))
+        .unwrap();
         assert_eq!(converted_embedding_record.id, Uuid::nil().to_string());
         assert_eq!(converted_embedding_record.seq_id, BigInt::from(42));
         assert_eq!(
@@ -353,18 +353,19 @@ mod tests {
             encoding: chroma_proto::ScalarEncoding::Float32 as i32,
             dimension: 3,
         };
-        let proto_submit = chroma_proto::SubmitEmbeddingRecord {
+        let proto_submit = chroma_proto::OperationRecord {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             vector: Some(proto_vector),
             metadata: Some(metadata),
             operation: chroma_proto::Operation::Add as i32,
-            collection_id: "00000000-0000-0000-0000-000000000000".to_string(),
         };
         let record_log = chroma_proto::RecordLog {
             log_id: 42,
             record: Some(proto_submit),
         };
-        let converted_embedding_record = EmbeddingRecord::try_from(record_log).unwrap();
+        let converted_embedding_record =
+            EmbeddingRecord::try_from((record_log, uuid!("00000000-0000-0000-0000-000000000000")))
+                .unwrap();
         assert_eq!(converted_embedding_record.id, Uuid::nil().to_string());
         assert_eq!(converted_embedding_record.seq_id, BigInt::from(42));
         assert_eq!(

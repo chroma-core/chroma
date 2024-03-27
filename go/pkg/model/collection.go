@@ -7,7 +7,6 @@ import (
 type Collection struct {
 	ID           types.UniqueID
 	Name         string
-	Topic        string
 	Dimension    *int32
 	Metadata     *CollectionMetadata[CollectionMetadataValueType]
 	TenantID     string
@@ -20,7 +19,6 @@ type Collection struct {
 type CreateCollection struct {
 	ID           types.UniqueID
 	Name         string
-	Topic        string
 	Dimension    *int32
 	Metadata     *CollectionMetadata[CollectionMetadataValueType]
 	GetOrCreate  bool
@@ -39,7 +37,6 @@ type DeleteCollection struct {
 type UpdateCollection struct {
 	ID            types.UniqueID
 	Name          *string
-	Topic         *string
 	Dimension     *int32
 	Metadata      *CollectionMetadata[CollectionMetadataValueType]
 	ResetMetadata bool
@@ -62,14 +59,11 @@ type FlushCollectionInfo struct {
 	TenantLastCompactionTime int64
 }
 
-func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string, collectionTopic *string) bool {
+func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string) bool {
 	if collectionID != types.NilUniqueID() && collectionID != collection.ID {
 		return false
 	}
 	if collectionName != nil && *collectionName != collection.Name {
-		return false
-	}
-	if collectionTopic != nil && *collectionTopic != collection.Topic {
 		return false
 	}
 	return true

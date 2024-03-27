@@ -97,25 +97,25 @@ func (_m *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) 
 	return r0
 }
 
-// GetCollections provides a mock function with given fields: ctx, collectionID, collectionName, collectionTopic
-func (_m *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string) ([]*model.Collection, error) {
-	ret := _m.Called(ctx, collectionID, collectionName, collectionTopic)
+// GetCollections provides a mock function with given fields: ctx, collectionID, collectionName
+func (_m *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string) ([]*model.Collection, error) {
+	ret := _m.Called(ctx, collectionID, collectionName)
 
 	var r0 []*model.Collection
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, *string) ([]*model.Collection, error)); ok {
-		return rf(ctx, collectionID, collectionName, collectionTopic)
+	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string) ([]*model.Collection, error)); ok {
+		return rf(ctx, collectionID, collectionName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, *string) []*model.Collection); ok {
-		r0 = rf(ctx, collectionID, collectionName, collectionTopic)
+	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string) []*model.Collection); ok {
+		r0 = rf(ctx, collectionID, collectionName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*model.Collection)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.UniqueID, *string, *string) error); ok {
-		r1 = rf(ctx, collectionID, collectionName, collectionTopic)
+	if rf, ok := ret.Get(1).(func(context.Context, types.UniqueID, *string) error); ok {
+		r1 = rf(ctx, collectionID, collectionName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -123,25 +123,25 @@ func (_m *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return r0, r1
 }
 
-// GetSegments provides a mock function with given fields: ctx, segmentID, segmentType, scope, topic, collectionID, ts
-func (_m *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID, ts int64) ([]*model.Segment, error) {
-	ret := _m.Called(ctx, segmentID, segmentType, scope, topic, collectionID, ts)
+// GetSegments provides a mock function with given fields: ctx, segmentID, segmentType, scope, collectionID, ts
+func (_m *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID, ts int64) ([]*model.Segment, error) {
+	ret := _m.Called(ctx, segmentID, segmentType, scope, collectionID, ts)
 
 	var r0 []*model.Segment
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, *string, *string, types.UniqueID, int64) ([]*model.Segment, error)); ok {
-		return rf(ctx, segmentID, segmentType, scope, topic, collectionID, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, *string, types.UniqueID, int64) ([]*model.Segment, error)); ok {
+		return rf(ctx, segmentID, segmentType, scope, collectionID, ts)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, *string, *string, types.UniqueID, int64) []*model.Segment); ok {
-		r0 = rf(ctx, segmentID, segmentType, scope, topic, collectionID, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, *string, types.UniqueID, int64) []*model.Segment); ok {
+		r0 = rf(ctx, segmentID, segmentType, scope, collectionID, ts)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*model.Segment)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.UniqueID, *string, *string, *string, types.UniqueID, int64) error); ok {
-		r1 = rf(ctx, segmentID, segmentType, scope, topic, collectionID, ts)
+	if rf, ok := ret.Get(1).(func(context.Context, types.UniqueID, *string, *string, types.UniqueID, int64) error); ok {
+		r1 = rf(ctx, segmentID, segmentType, scope, collectionID, ts)
 	} else {
 		r1 = ret.Error(1)
 	}

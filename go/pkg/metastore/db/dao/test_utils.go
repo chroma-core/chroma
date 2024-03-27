@@ -1,12 +1,13 @@
 package dao
 
 import (
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"time"
 )
 
 const SegmentType = "urn:chroma:segment/vector/hnsw-distributed"
@@ -51,7 +52,7 @@ func CleanUpTestDatabase(db *gorm.DB, tenantName string, databaseName string) er
 	collectionDb := &collectionDb{
 		db: db,
 	}
-	collections, err := collectionDb.GetCollections(nil, nil, nil, tenantName, databaseName)
+	collections, err := collectionDb.GetCollections(nil, nil, tenantName, databaseName)
 	log.Info("clean up test database", zap.Int("collections", len(collections)))
 	if err != nil {
 		return err
@@ -105,8 +106,8 @@ func CleanUpTestTenant(db *gorm.DB, tenantName string) error {
 	return nil
 }
 
-func CreateTestCollection(db *gorm.DB, collectionName string, topic string, dimension int32, databaseID string) (string, error) {
-	log.Info("create test collection", zap.String("collectionName", collectionName), zap.String("topic", topic), zap.Int32("dimension", dimension), zap.String("databaseID", databaseID))
+func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, databaseID string) (string, error) {
+	log.Info("create test collection", zap.String("collectionName", collectionName), zap.Int32("dimension", dimension), zap.String("databaseID", databaseID))
 	collectionDb := &collectionDb{
 		db: db,
 	}
@@ -118,7 +119,6 @@ func CreateTestCollection(db *gorm.DB, collectionName string, topic string, dime
 	err := collectionDb.Insert(&dbmodel.Collection{
 		ID:         collectionId,
 		Name:       &collectionName,
-		Topic:      &topic,
 		Dimension:  &dimension,
 		DatabaseID: databaseID,
 	})
@@ -165,7 +165,7 @@ func CleanUpTestCollection(db *gorm.DB, collectionId string) error {
 	if err != nil {
 		return err
 	}
-	segments, err := segmentDb.GetSegments(types.NilUniqueID(), nil, nil, nil, types.MustParse(collectionId))
+	segments, err := segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.MustParse(collectionId))
 	if err != nil {
 		return err
 	}

@@ -53,7 +53,6 @@ func TestConvertCollectionToProto(t *testing.T) {
 	collection := &model.Collection{
 		ID:        types.NewUniqueID(),
 		Name:      "test_collection",
-		Topic:     "test_topic",
 		Dimension: &dimention,
 		Metadata: &model.CollectionMetadata[model.CollectionMetadataValueType]{
 			Metadata: map[string]model.CollectionMetadataValueType{
@@ -67,7 +66,6 @@ func TestConvertCollectionToProto(t *testing.T) {
 	assert.NotNil(t, collectionpb)
 	assert.Equal(t, collection.ID.String(), collectionpb.Id)
 	assert.Equal(t, collection.Name, collectionpb.Name)
-	assert.Equal(t, collection.Topic, collectionpb.Topic)
 	assert.Equal(t, collection.Dimension, collectionpb.Dimension)
 	assert.NotNil(t, collectionpb.Metadata)
 	assert.Equal(t, "value1", collectionpb.Metadata.Metadata["key1"].GetStringValue())
@@ -182,12 +180,10 @@ func TestConvertSegmentToProto(t *testing.T) {
 	assert.Nil(t, segmentpb)
 
 	// Test case 2: segment is not nil
-	testTopic := "test_topic"
 	segment := &model.Segment{
 		ID:        types.NewUniqueID(),
 		Type:      "test_type",
 		Scope:     "METADATA",
-		Topic:     &testTopic,
 		Metadata:  nil,
 		FilePaths: map[string][]string{},
 	}
@@ -196,7 +192,6 @@ func TestConvertSegmentToProto(t *testing.T) {
 	assert.Equal(t, segment.ID.String(), segmentpb.Id)
 	assert.Equal(t, segment.Type, segmentpb.Type)
 	assert.Equal(t, coordinatorpb.SegmentScope_METADATA, segmentpb.Scope)
-	assert.Equal(t, segment.Topic, segmentpb.Topic)
 	assert.Nil(t, segmentpb.Collection)
 	assert.Nil(t, segmentpb.Metadata)
 }

@@ -2,6 +2,9 @@ package grpc
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/coordinator"
@@ -15,8 +18,6 @@ import (
 	codes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
-	"testing"
-	"time"
 )
 
 type TenantDatabaseServiceTestSuite struct {
@@ -30,7 +31,6 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
-		AssignmentPolicy:          "simple",
 		SystemCatalogProvider:     "database",
 		NotificationStoreProvider: "memory",
 		NotifierProvider:          "memory",

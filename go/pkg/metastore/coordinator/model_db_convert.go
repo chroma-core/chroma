@@ -17,7 +17,6 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 		collection := &model.Collection{
 			ID:           types.MustParse(collectionAndMetadata.Collection.ID),
 			Name:         *collectionAndMetadata.Collection.Name,
-			Topic:        *collectionAndMetadata.Collection.Topic,
 			Dimension:    collectionAndMetadata.Collection.Dimension,
 			TenantID:     collectionAndMetadata.TenantID,
 			DatabaseName: collectionAndMetadata.DatabaseName,
@@ -98,7 +97,6 @@ func convertSegmentToModel(segmentAndMetadataList []*dbmodel.SegmentAndMetadata)
 			ID:    types.MustParse(segmentAndMetadata.Segment.ID),
 			Type:  segmentAndMetadata.Segment.Type,
 			Scope: segmentAndMetadata.Segment.Scope,
-			Topic: segmentAndMetadata.Segment.Topic,
 			Ts:    segmentAndMetadata.Segment.Ts,
 		}
 		if segmentAndMetadata.Segment.CollectionID != nil {

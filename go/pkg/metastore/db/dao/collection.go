@@ -3,10 +3,11 @@ package dao
 import (
 	"database/sql"
 	"errors"
+	"strings"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
-	"strings"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -25,14 +26,14 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, topic *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
 	var getCollectionInput strings.Builder
 	getCollectionInput.WriteString("GetCollections input: ")
 
 	var collections []*dbmodel.CollectionAndMetadata
 
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.topic, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.id")
@@ -50,10 +51,6 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 	if id != nil {
 		query = query.Where("collections.id = ?", *id)
 		getCollectionInput.WriteString("collections.id: " + *id + ", ")
-	}
-	if topic != nil {
-		query = query.Where("collections.topic = ?", *topic)
-		getCollectionInput.WriteString("collections.topic: " + *topic + ", ")
 	}
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
@@ -77,7 +74,6 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 			logPosition          int64
 			version              int32
 			collectionName       string
-			collectionTopic      string
 			collectionDimension  sql.NullInt32
 			collectionDatabaseID string
 			databaseName         string
@@ -88,7 +84,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 			floatValue           sql.NullFloat64
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionTopic, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
@@ -101,7 +97,6 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 				Collection: &dbmodel.Collection{
 					ID:          collectionID,
 					Name:        &collectionName,
-					Topic:       &collectionTopic,
 					DatabaseID:  collectionDatabaseID,
 					LogPosition: logPosition,
 					Version:     version,
@@ -185,9 +180,6 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	ret := map[string]interface{}{}
 	if in.Name != nil {
 		ret["name"] = *in.Name
-	}
-	if in.Topic != nil {
-		ret["topic"] = *in.Topic
 	}
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension

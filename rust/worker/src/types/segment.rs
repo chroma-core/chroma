@@ -18,7 +18,6 @@ pub(crate) struct Segment {
     pub(crate) id: Uuid,
     pub(crate) r#type: SegmentType,
     pub(crate) scope: SegmentScope,
-    pub(crate) topic: Option<String>,
     pub(crate) collection: Option<Uuid>,
     pub(crate) metadata: Option<Metadata>,
     pub(crate) file_path: HashMap<String, Vec<String>>,
@@ -94,7 +93,6 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             id: segment_uuid,
             r#type: segment_type,
             scope: scope,
-            topic: proto_segment.topic,
             collection: collection_uuid,
             metadata: segment_metadata,
             file_path: file_paths,
@@ -124,7 +122,6 @@ mod tests {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
             scope: chroma_proto::SegmentScope::Vector as i32,
-            topic: Some("test".to_string()),
             collection: Some("00000000-0000-0000-0000-000000000000".to_string()),
             metadata: Some(metadata),
             file_paths: HashMap::new(),
@@ -133,7 +130,6 @@ mod tests {
         assert_eq!(converted_segment.id, Uuid::nil());
         assert_eq!(converted_segment.r#type, SegmentType::HnswDistributed);
         assert_eq!(converted_segment.scope, SegmentScope::VECTOR);
-        assert_eq!(converted_segment.topic, Some("test".to_string()));
         assert_eq!(converted_segment.collection, Some(Uuid::nil()));
         let metadata = converted_segment.metadata.unwrap();
         assert_eq!(metadata.len(), 1);

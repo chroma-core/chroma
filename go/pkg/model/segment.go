@@ -8,7 +8,6 @@ type Segment struct {
 	ID           types.UniqueID
 	Type         string
 	Scope        string
-	Topic        *string
 	CollectionID types.UniqueID
 	Metadata     *SegmentMetadata[SegmentMetadataValueType]
 	Ts           types.Timestamp
@@ -19,7 +18,6 @@ type CreateSegment struct {
 	ID           types.UniqueID
 	Type         string
 	Scope        string
-	Topic        *string
 	CollectionID types.UniqueID
 	Metadata     *SegmentMetadata[SegmentMetadataValueType]
 	Ts           types.Timestamp
@@ -27,7 +25,6 @@ type CreateSegment struct {
 
 type UpdateSegment struct {
 	ID              types.UniqueID
-	Topic           *string
 	ResetTopic      bool
 	Collection      *string
 	ResetCollection bool
@@ -40,7 +37,6 @@ type GetSegments struct {
 	ID           types.UniqueID
 	Type         *string
 	Scope        *string
-	Topic        *string
 	CollectionID types.UniqueID
 }
 
@@ -58,10 +54,6 @@ func FilterSegments(segment *Segment, segmentID types.UniqueID, segmentType *str
 	}
 
 	if scope != nil && segment.Scope != *scope {
-		return false
-	}
-
-	if topic != nil && *segment.Topic != *topic {
 		return false
 	}
 

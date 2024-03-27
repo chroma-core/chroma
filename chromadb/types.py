@@ -26,7 +26,6 @@ class SegmentScope(Enum):
 class Collection(TypedDict):
     id: UUID
     name: str
-    topic: str
     metadata: Optional[Metadata]
     dimension: Optional[int]
     tenant: str
@@ -47,9 +46,6 @@ class Segment(TypedDict):
     id: UUID
     type: NamespacedName
     scope: SegmentScope
-    # If a segment has a topic, it implies that this segment is a consumer of the topic
-    # and indexes the contents of the topic.
-    topic: Optional[str]
     # If a segment has a collection, it implies that this segment implements the full
     # collection and can be used to service queries (for it's given scope.)
     collection: Optional[UUID]
@@ -108,13 +104,12 @@ class EmbeddingRecord(TypedDict):
     collection_id: Optional[UUID]
 
 
-class SubmitEmbeddingRecord(TypedDict):
+class OperationRecord(TypedDict):
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
-    collection_id: UUID  # The collection the operation is being performed on
 
 
 class VectorQuery(TypedDict):

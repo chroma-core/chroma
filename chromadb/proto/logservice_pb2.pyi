@@ -17,14 +17,12 @@ class PushLogsRequest(_message.Message):
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
-    records: _containers.RepeatedCompositeFieldContainer[
-        _chroma_pb2.SubmitEmbeddingRecord
-    ]
+    records: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.OperationRecord]
     def __init__(
         self,
         collection_id: _Optional[str] = ...,
         records: _Optional[
-            _Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]
+            _Iterable[_Union[_chroma_pb2.OperationRecord, _Mapping]]
         ] = ...,
     ) -> None: ...
 
@@ -57,11 +55,11 @@ class RecordLog(_message.Message):
     LOG_ID_FIELD_NUMBER: _ClassVar[int]
     RECORD_FIELD_NUMBER: _ClassVar[int]
     log_id: int
-    record: _chroma_pb2.SubmitEmbeddingRecord
+    record: _chroma_pb2.OperationRecord
     def __init__(
         self,
         log_id: _Optional[int] = ...,
-        record: _Optional[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]] = ...,
+        record: _Optional[_Union[_chroma_pb2.OperationRecord, _Mapping]] = ...,
     ) -> None: ...
 
 class PullLogsResponse(_message.Message):

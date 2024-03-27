@@ -2,7 +2,6 @@ from concurrent import futures
 from typing import Any, Dict, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.ingest import CollectionAssignmentPolicy
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
@@ -38,7 +37,7 @@ from chromadb.proto.coordinator_pb2 import (
     UpdateCollectionRequest,
     UpdateCollectionResponse,
     UpdateSegmentRequest,
-    UpdateSegmentResponse
+    UpdateSegmentResponse,
 )
 from chromadb.proto.coordinator_pb2_grpc import (
     SysDBServicer,
@@ -55,7 +54,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
 
     _server: grpc.Server
     _server_port: int
-    _assignment_policy: CollectionAssignmentPolicy
     _segments: Dict[str, Segment] = {}
     _tenants_to_databases_to_collections: Dict[
         str, Dict[str, Dict[str, Collection]]
@@ -64,7 +62,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
 
     def __init__(self, system: System):
         self._server_port = system.settings.require("chroma_server_grpc_port")
-        self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         return super().__init__(system)
 
     @overrides
@@ -203,7 +200,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
             if request.HasField("scope")
             else None
         )
-        target_topic = request.topic if request.HasField("topic") else None
         target_collection = (
             UUID(hex=request.collection) if request.HasField("collection") else None
         )
@@ -215,8 +211,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
             if target_type and segment["type"] != target_type:
                 continue
             if target_scope and segment["scope"] != target_scope:
-                continue
-            if target_topic and segment["topic"] != target_topic:
                 continue
             if target_collection and segment["collection"] != target_collection:
                 continue
@@ -238,10 +232,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
             )
         else:
             segment = self._segments[id_to_update.hex]
-            if request.HasField("topic"):
-                segment["topic"] = request.topic
-            if request.HasField("reset_topic") and request.reset_topic:
-                segment["topic"] = None
             if request.HasField("collection"):
                 segment["collection"] = UUID(hex=request.collection)
             if request.HasField("reset_collection") and request.reset_collection:
@@ -326,7 +316,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
             name=request.name,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
-            topic=self._assignment_policy.assign_collection(id),
             database=database,
             tenant=tenant,
         )
@@ -368,7 +357,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self, request: GetCollectionsRequest, context: grpc.ServicerContext
     ) -> GetCollectionsResponse:
         target_id = UUID(hex=request.id) if request.HasField("id") else None
-        target_topic = request.topic if request.HasField("topic") else None
         target_name = request.name if request.HasField("name") else None
 
         tenant = request.tenant
@@ -386,8 +374,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
         found_collections = []
         for collection in collections.values():
             if target_id and collection["id"] != target_id:
-                continue
-            if target_topic and collection["topic"] != target_topic:
                 continue
             if target_name and collection["name"] != target_name:
                 continue
@@ -418,8 +404,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
             )
         else:
             collection = collections[id_to_update.hex]
-            if request.HasField("topic"):
-                collection["topic"] = request.topic
             if request.HasField("name"):
                 collection["name"] = request.name
             if request.HasField("dimension"):
