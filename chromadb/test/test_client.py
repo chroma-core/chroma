@@ -103,7 +103,7 @@ def test_persistent_client_close() -> None:
     open_files = current_process.open_files()
     print("OPEN FILES", open_files)
     filtered_open_files = [
-        file for file in open_files if re.search(temp_persist_dir, file.path)
+        file for file in open_files if re.search(re.escape(temp_persist_dir), file.path)
     ]
     print("FILTERED OPEN FILES", filtered_open_files)
     assert len(filtered_open_files) > 0
@@ -112,8 +112,8 @@ def test_persistent_client_close() -> None:
     post_filtered_open_files = [
         file
         for file in open_files
-        if re.search(temp_persist_dir + ".*chroma.sqlite3", file.path)
-        or re.search(temp_persist_dir + ".*data_level0.bin", file.path)
+        if re.search(re.escape(temp_persist_dir + ".*chroma.sqlite3"), file.path)
+        or re.search(re.escape(temp_persist_dir + ".*data_level0.bin"), file.path)
     ]
     assert len(post_filtered_open_files) == 0
 
