@@ -257,12 +257,6 @@ mod tests {
             if collection_id.is_some() && collection_id.unwrap() != collection.id {
                 return false;
             }
-<<<<<<< HEAD
-=======
-            if topic.is_some() && topic.unwrap() != collection.topic {
-                return false;
-            }
->>>>>>> 49f6a61d (Compaction manager)
             if name.is_some() && name.unwrap() != collection.name {
                 return false;
             }
