@@ -91,7 +91,7 @@ def test_persistent_client_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=tempfile.gettempdir() + "/test_server-" + uuid.uuid4().hex,
+        path=os.path.join(tempfile.gettempdir(),"test_server-" + uuid.uuid4().hex),
         settings=Settings(),
     )
     current_process = psutil.Process()
