@@ -17,6 +17,7 @@ from typing import (
     Tuple,
     Callable,
 )
+from uuid import UUID
 
 import hypothesis
 import pytest
@@ -527,7 +528,7 @@ class ProducerFn(Protocol):
     def __call__(
         self,
         producer: Producer,
-        topic: str,
+        collection_id: UUID,
         embeddings: Iterator[OperationRecord],
         n: int,
     ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
@@ -536,7 +537,7 @@ class ProducerFn(Protocol):
 
 def produce_n_single(
     producer: Producer,
-    topic: str,
+    collection_id: UUID,
     embeddings: Iterator[OperationRecord],
     n: int,
 ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
@@ -544,7 +545,7 @@ def produce_n_single(
     seq_ids = []
     for _ in range(n):
         e = next(embeddings)
-        seq_id = producer.submit_embedding(topic, e)
+        seq_id = producer.submit_embedding(collection_id, e)
         submitted_embeddings.append(e)
         seq_ids.append(seq_id)
     return submitted_embeddings, seq_ids
@@ -552,7 +553,7 @@ def produce_n_single(
 
 def produce_n_batch(
     producer: Producer,
-    topic: str,
+    collection_id: UUID,
     embeddings: Iterator[OperationRecord],
     n: int,
 ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
@@ -561,7 +562,7 @@ def produce_n_batch(
     for _ in range(n):
         e = next(embeddings)
         submitted_embeddings.append(e)
-    seq_ids = producer.submit_embeddings(topic, submitted_embeddings)
+    seq_ids = producer.submit_embeddings(collection_id, submitted_embeddings)
     return submitted_embeddings, seq_ids
 
 
