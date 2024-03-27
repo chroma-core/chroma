@@ -112,8 +112,8 @@ def test_persistent_client_close() -> None:
     post_filtered_open_files = [
         file
         for file in open_files
-        if re.search(re.escape(temp_persist_dir + ".*chroma.sqlite3"), file.path)
-        or re.search(re.escape(temp_persist_dir + ".*data_level0.bin"), file.path)
+        if re.search(re.escape(temp_persist_dir)+ ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir)+ ".*data_level0.bin", file.path)
     ]
     assert len(post_filtered_open_files) == 0
 
