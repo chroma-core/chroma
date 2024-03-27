@@ -258,7 +258,6 @@ def from_proto_vector_embedding_record(
 ) -> VectorEmbeddingRecord:
     return VectorEmbeddingRecord(
         id=embedding_record.id,
-        seq_id=from_proto_seq_id(embedding_record.seq_id),
         embedding=from_proto_vector(embedding_record.vector)[0],
     )
 
@@ -269,7 +268,6 @@ def to_proto_vector_embedding_record(
 ) -> proto.VectorEmbeddingRecord:
     return proto.VectorEmbeddingRecord(
         id=embedding_record["id"],
-        seq_id=to_proto_seq_id(embedding_record["seq_id"]),
         vector=to_proto_vector(embedding_record["embedding"], encoding),
     )
 
@@ -279,7 +277,6 @@ def from_proto_vector_query_result(
 ) -> VectorQueryResult:
     return VectorQueryResult(
         id=vector_query_result.id,
-        seq_id=from_proto_seq_id(vector_query_result.seq_id),
         distance=vector_query_result.distance,
         embedding=from_proto_vector(vector_query_result.vector)[0],
     )

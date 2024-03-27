@@ -75,13 +75,11 @@ Vector = Union[Sequence[float], Sequence[int]]
 
 class VectorEmbeddingRecord(TypedDict):
     id: str
-    seq_id: SeqId
     embedding: Vector
 
 
 class MetadataEmbeddingRecord(TypedDict):
     id: str
-    seq_id: SeqId
     metadata: Optional[Metadata]
 
 
@@ -112,7 +110,6 @@ class VectorQueryResult(TypedDict):
     """A KNN/ANN query result"""
 
     id: str
-    seq_id: SeqId
     distance: float
     embedding: Optional[Vector]
 

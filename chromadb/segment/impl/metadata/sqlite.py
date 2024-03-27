@@ -252,7 +252,6 @@ class SqliteMetadataSegment(MetadataReader):
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
-            seq_id=_decode_seq_id(seq_id),
             metadata=metadata or None,
         )
 
