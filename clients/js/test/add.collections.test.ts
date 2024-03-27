@@ -81,7 +81,7 @@ if (!process.env.COHERE_API_KEY) {
 }
 
 if (!process.env.VOYAGE_API_KEY) {
-  test.skip("it should add VoyageAI embeddings ", async () => {
+  test.skip("it should add VoyageAI embeddings", async () => {
   });
 } else {
   test("it should add VoyageAI embeddings", async () => {
