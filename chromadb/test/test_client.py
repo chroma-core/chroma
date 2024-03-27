@@ -96,9 +96,7 @@ def test_persistent_client_close() -> None:
     )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
-    temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
-        "\\", "\\\\"
-    )
+    temp_persist_dir = persistent_api.get_settings().persist_directory
     col1 = persistent_api.create_collection("test1" + uuid.uuid4().hex)
     col.add(ids=["1"], documents=["test"])
     col1.add(ids=["1"], documents=["test1"])
@@ -131,9 +129,7 @@ def test_persistent_client_double_close() -> None:
     )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test" + uuid.uuid4().hex)
-    temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
-        "\\", "\\\\"
-    )
+    temp_persist_dir = persistent_api.get_settings().persist_directory
     col.add(ids=["1"], documents=["test"])
     open_files = current_process.open_files()
     filtered_open_files = [
@@ -167,9 +163,7 @@ def test_persistent_client_use_after_close() -> None:
     )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test" + uuid.uuid4().hex)
-    temp_persist_dir = persistent_api.get_settings().persist_directory.replace(
-        "\\", "\\\\"
-    )
+    temp_persist_dir = persistent_api.get_settings().persist_directory
     col.add(ids=["1"], documents=["test"])
     open_files = current_process.open_files()
     assert any(
