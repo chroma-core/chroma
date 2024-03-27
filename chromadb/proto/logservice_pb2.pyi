@@ -2,13 +2,7 @@ from chromadb.proto import chroma_pb2 as _chroma_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import (
-    ClassVar as _ClassVar,
-    Iterable as _Iterable,
-    Mapping as _Mapping,
-    Optional as _Optional,
-    Union as _Union,
-)
+from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -18,13 +12,7 @@ class PushLogsRequest(_message.Message):
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
     records: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.OperationRecord]
-    def __init__(
-        self,
-        collection_id: _Optional[str] = ...,
-        records: _Optional[
-            _Iterable[_Union[_chroma_pb2.OperationRecord, _Mapping]]
-        ] = ...,
-    ) -> None: ...
+    def __init__(self, collection_id: _Optional[str] = ..., records: _Optional[_Iterable[_Union[_chroma_pb2.OperationRecord, _Mapping]]] = ...) -> None: ...
 
 class PushLogsResponse(_message.Message):
     __slots__ = ["record_count"]
@@ -42,13 +30,7 @@ class PullLogsRequest(_message.Message):
     start_from_offset: int
     batch_size: int
     end_timestamp: int
-    def __init__(
-        self,
-        collection_id: _Optional[str] = ...,
-        start_from_offset: _Optional[int] = ...,
-        batch_size: _Optional[int] = ...,
-        end_timestamp: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, collection_id: _Optional[str] = ..., start_from_offset: _Optional[int] = ..., batch_size: _Optional[int] = ..., end_timestamp: _Optional[int] = ...) -> None: ...
 
 class LogRecord(_message.Message):
     __slots__ = ["log_offset", "record"]
@@ -56,19 +38,13 @@ class LogRecord(_message.Message):
     RECORD_FIELD_NUMBER: _ClassVar[int]
     log_offset: int
     record: _chroma_pb2.OperationRecord
-    def __init__(
-        self,
-        log_offset: _Optional[int] = ...,
-        record: _Optional[_Union[_chroma_pb2.OperationRecord, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, log_offset: _Optional[int] = ..., record: _Optional[_Union[_chroma_pb2.OperationRecord, _Mapping]] = ...) -> None: ...
 
 class PullLogsResponse(_message.Message):
     __slots__ = ["records"]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     records: _containers.RepeatedCompositeFieldContainer[LogRecord]
-    def __init__(
-        self, records: _Optional[_Iterable[_Union[LogRecord, _Mapping]]] = ...
-    ) -> None: ...
+    def __init__(self, records: _Optional[_Iterable[_Union[LogRecord, _Mapping]]] = ...) -> None: ...
 
 class CollectionInfo(_message.Message):
     __slots__ = ["collection_id", "first_log_offset", "first_log_ts"]
@@ -78,12 +54,7 @@ class CollectionInfo(_message.Message):
     collection_id: str
     first_log_offset: int
     first_log_ts: int
-    def __init__(
-        self,
-        collection_id: _Optional[str] = ...,
-        first_log_offset: _Optional[int] = ...,
-        first_log_ts: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, collection_id: _Optional[str] = ..., first_log_offset: _Optional[int] = ..., first_log_ts: _Optional[int] = ...) -> None: ...
 
 class GetAllCollectionInfoToCompactRequest(_message.Message):
     __slots__ = []
@@ -93,9 +64,4 @@ class GetAllCollectionInfoToCompactResponse(_message.Message):
     __slots__ = ["all_collection_info"]
     ALL_COLLECTION_INFO_FIELD_NUMBER: _ClassVar[int]
     all_collection_info: _containers.RepeatedCompositeFieldContainer[CollectionInfo]
-    def __init__(
-        self,
-        all_collection_info: _Optional[
-            _Iterable[_Union[CollectionInfo, _Mapping]]
-        ] = ...,
-    ) -> None: ...
+    def __init__(self, all_collection_info: _Optional[_Iterable[_Union[CollectionInfo, _Mapping]]] = ...) -> None: ...

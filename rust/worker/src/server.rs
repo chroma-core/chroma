@@ -114,14 +114,12 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
 
         let mut proto_records = Vec::new();
         for record in records {
-            let sed_id_bytes = record.seq_id.to_bytes_le();
             let dim = record.vector.len();
             let proto_vector = (record.vector, ScalarEncoding::FLOAT32, dim).try_into();
             match proto_vector {
                 Ok(proto_vector) => {
                     let proto_record = chroma_proto::VectorEmbeddingRecord {
                         id: record.id,
-                        seq_id: sed_id_bytes.1,
                         vector: Some(proto_vector),
                     };
                     proto_records.push(proto_record);
@@ -213,7 +211,6 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             for query_result in result_set {
                 let proto_result = chroma_proto::VectorQueryResult {
                     id: query_result.id,
-                    seq_id: query_result.seq_id.to_bytes_le().1,
                     distance: query_result.distance,
                     vector: match query_result.vector {
                         Some(vector) => {

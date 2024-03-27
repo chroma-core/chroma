@@ -14,13 +14,8 @@ use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub(crate) struct EmbeddingRecord {
-    pub(crate) id: String,
-    pub(crate) seq_id: SeqId,
-    pub(crate) embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now
-    pub(crate) encoding: Option<ScalarEncoding>,
-    pub(crate) metadata: Option<UpdateMetadata>,
-    pub(crate) operation: Operation,
-    pub(crate) collection_id: Uuid,
+    pub(crate) log_offset: i64,
+    pub(crate) operation_record: OperationRecord,
 }
 
 pub(crate) type OperationRecordWithSeqIdAndCollectionId =
