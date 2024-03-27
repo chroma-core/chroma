@@ -42,25 +42,25 @@ func (_m *ISegmentDb) DeleteSegmentByID(id string) error {
 	return r0
 }
 
-// GetSegments provides a mock function with given fields: id, segmentType, scope, topic, collectionID
-func (_m *ISegmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error) {
-	ret := _m.Called(id, segmentType, scope, topic, collectionID)
+// GetSegments provides a mock function with given fields: id, segmentType, scope, collectionID
+func (_m *ISegmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error) {
+	ret := _m.Called(id, segmentType, scope, collectionID)
 
 	var r0 []*dbmodel.SegmentAndMetadata
 	var r1 error
-	if rf, ok := ret.Get(0).(func(types.UniqueID, *string, *string, *string, types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error)); ok {
-		return rf(id, segmentType, scope, topic, collectionID)
+	if rf, ok := ret.Get(0).(func(types.UniqueID, *string, *string, types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error)); ok {
+		return rf(id, segmentType, scope, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(types.UniqueID, *string, *string, *string, types.UniqueID) []*dbmodel.SegmentAndMetadata); ok {
-		r0 = rf(id, segmentType, scope, topic, collectionID)
+	if rf, ok := ret.Get(0).(func(types.UniqueID, *string, *string, types.UniqueID) []*dbmodel.SegmentAndMetadata); ok {
+		r0 = rf(id, segmentType, scope, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.SegmentAndMetadata)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(types.UniqueID, *string, *string, *string, types.UniqueID) error); ok {
-		r1 = rf(id, segmentType, scope, topic, collectionID)
+	if rf, ok := ret.Get(1).(func(types.UniqueID, *string, *string, types.UniqueID) error); ok {
+		r1 = rf(id, segmentType, scope, collectionID)
 	} else {
 		r1 = ret.Error(1)
 	}

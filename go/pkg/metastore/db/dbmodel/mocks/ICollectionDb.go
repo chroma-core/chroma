@@ -58,7 +58,7 @@ func (_m *ICollectionDb) DeleteCollectionByID(collectionID string) (int, error) 
 	return r0, r1
 }
 
-// GetCollections provides a mock function with given fields: collectionID, collectionName, collectionTopic, tenantID, databaseName
+// GetCollections provides a mock function with given fields: collectionID, collectionName, tenantID, databaseName
 func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
 	ret := _m.Called(collectionID, collectionName, tenantID, databaseName)
 
