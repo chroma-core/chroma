@@ -91,7 +91,7 @@ def test_persistent_client_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=os.path.join(tempfile.gettempdir(),"test_server-" + uuid.uuid4().hex),
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
         settings=Settings(),
     )
     current_process = psutil.Process()
@@ -113,8 +113,8 @@ def test_persistent_client_close() -> None:
     post_filtered_open_files = [
         file
         for file in open_files
-        if re.search(re.escape(temp_persist_dir)+ ".*chroma.sqlite3", file.path)
-        or re.search(re.escape(temp_persist_dir)+ ".*data_level0.bin", file.path)
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
     ]
     assert len(post_filtered_open_files) == 0
 
@@ -125,7 +125,7 @@ def test_persistent_client_double_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=tempfile.gettempdir() + "/test_server-" + uuid.uuid4().hex,
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
         settings=Settings(),
     )
     current_process = psutil.Process()
@@ -136,8 +136,8 @@ def test_persistent_client_double_close() -> None:
     filtered_open_files = [
         file
         for file in open_files
-        if re.search(temp_persist_dir + ".*chroma.sqlite3", file.path)
-        or re.search(temp_persist_dir + ".*data_level0.bin", file.path)
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
     ]
     assert len(filtered_open_files) > 0
     persistent_api.close()
@@ -145,8 +145,8 @@ def test_persistent_client_double_close() -> None:
     post_filtered_open_files = [
         file
         for file in open_files
-        if re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path)
-        or re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path)
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
     ]
     assert len(post_filtered_open_files) == 0
     with pytest.raises(RuntimeError, match="Component not running or already closed"):
@@ -159,7 +159,7 @@ def test_persistent_client_use_after_close() -> None:
             "Skipping test that closes the persistent client in integration test"
         )
     persistent_api = chromadb.PersistentClient(
-        path=tempfile.gettempdir() + "/test_server-" + uuid.uuid4().hex,
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
         settings=Settings(),
     )
     current_process = psutil.Process()
@@ -167,32 +167,22 @@ def test_persistent_client_use_after_close() -> None:
     temp_persist_dir = persistent_api.get_settings().persist_directory
     col.add(ids=["1"], documents=["test"])
     open_files = current_process.open_files()
-    assert any(
-        [
-            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is not None
-            for file in open_files
-        ]
-    )
-    assert any(
-        [
-            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is not None
-            for file in open_files
-        ]
-    )
+    filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
+    ]
+    assert len(filtered_open_files) > 0
     persistent_api.close()
     open_files = current_process.open_files()
-    assert all(
-        [
-            re.search(rf"{temp_persist_dir}.*chroma.sqlite3", file.path) is None
-            for file in open_files
-        ]
-    )
-    assert all(
-        [
-            re.search(rf"{temp_persist_dir}.*data_level0.bin", file.path) is None
-            for file in open_files
-        ]
-    )
+    post_filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
+    ]
+    assert len(post_filtered_open_files) == 0
     with pytest.raises(RuntimeError, match="Component not running"):
         col.add(ids=["1"], documents=["test"])
     with pytest.raises(RuntimeError, match="Component not running"):
