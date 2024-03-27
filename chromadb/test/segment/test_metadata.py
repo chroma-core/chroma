@@ -217,7 +217,7 @@ def test_get(
 
     # Get all records
     results = segment.get_metadata()
-    assert seq_ids == [r["seq_id"] for r in results]
+    assert seq_ids == [r["log_offset"] for r in results]
     assert_equiv_records(embeddings, results)
 
     # get by ID
