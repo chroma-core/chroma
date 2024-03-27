@@ -20,7 +20,7 @@ from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union, cast, Literal
 import numpy as np
 import numpy.typing as npt
 import importlib
@@ -59,7 +59,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
-        device: str = "cpu",
+        device: Optional[Literal["cpu", "cuda", "mps"]] = "cpu",
         normalize_embeddings: bool = False,
         **kwargs: Any
     ):
@@ -67,7 +67,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Args:
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
-            device (str, optional): Device used for computation, defaults to "cpu"
+            device (str, optional): Device ("cpu" / "cuda" / "mps") that should be used for computation. 
+                If None, checks if a "cuda" can be used. Defaults to "cpu".
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
