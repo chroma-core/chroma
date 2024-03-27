@@ -179,7 +179,7 @@ def test_insert_and_count(
 
 def test_insert_with_db_persist(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -189,10 +189,14 @@ def test_insert_with_db_persist(
     segment_definition = create_random_segment_definition(
         extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
     )
-    topic = str(segment_definition["topic"])
-
+    collection_id = segment_definition["collection"]
+    # We know that the segment definition has a collection_id
+    collection_id = cast(uuid.UUID, collection_id)
     max_id = produce_fns(
-        producer=producer, topic=topic, n=5, embeddings=sample_embeddings
+        collection_id=collection_id,
+        producer=producer,
+        n=5,
+        embeddings=sample_embeddings,
     )[1][-1]
 
     segment = vector_reader(system, segment_definition)
@@ -234,7 +238,7 @@ def test_insert_with_db_persist(
 
 def test_migrate_metadatafile(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
     produce_fns: ProducerFn,
 ) -> None:
@@ -244,10 +248,14 @@ def test_migrate_metadatafile(
     segment_definition = create_random_segment_definition(
         extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
     )
-    topic = str(segment_definition["topic"])
-
+    collection_id = segment_definition["collection"]
+    # We know that the segment definition has a collection_id
+    collection_id = cast(uuid.UUID, collection_id)
     max_id = produce_fns(
-        producer=producer, topic=topic, n=5, embeddings=sample_embeddings
+        collection_id=collection_id,
+        producer=producer,
+        n=5,
+        embeddings=sample_embeddings,
     )[1][-1]
 
     segment = vector_reader(system, segment_definition)
