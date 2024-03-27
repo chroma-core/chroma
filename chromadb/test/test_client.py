@@ -102,6 +102,7 @@ def test_persistent_client_close() -> None:
     col1.add(ids=["1"], documents=["test1"])
     open_files = current_process.open_files()
     print("OPEN FILES", open_files)
+    print(re.escape(temp_persist_dir))
     filtered_open_files = [
         file for file in open_files if re.search(re.escape(temp_persist_dir), file.path)
     ]
