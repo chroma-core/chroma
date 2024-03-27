@@ -8,7 +8,7 @@ from chromadb.ingest import (
     ConsumerCallbackFn,
 )
 from chromadb.proto.convert import to_proto_submit
-from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, RecordLog
+from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, LogRecord
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
@@ -149,7 +149,7 @@ class LogService(Producer, Consumer):
 
     def pull_logs(
         self, collection_id: UUID, start_id: int, batch_size: int
-    ) -> Sequence[RecordLog]:
+    ) -> Sequence[LogRecord]:
         request = PullLogsRequest(
             collection_id=str(collection_id),
             start_from_id=start_id,

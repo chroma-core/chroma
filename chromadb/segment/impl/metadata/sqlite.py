@@ -266,11 +266,11 @@ class SqliteMetadataSegment(MetadataReader):
             .into(t)
             .columns(t.segment_id, t.embedding_id, t.seq_id)
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["id"]))
+            .where(t.embedding_id == ParameterValue(record["operation_record"]["id"]))
         ).insert(
             ParameterValue(self._db.uuid_to_db(self._id)),
-            ParameterValue(record["id"]),
-            ParameterValue(_encode_seq_id(record["seq_id"])),
+            ParameterValue(record["operation_record"]["id"]),
+            ParameterValue(_encode_seq_id(record["log_offset"])),
         )
         sql, params = get_sql(q)
         sql = sql + "RETURNING id"
@@ -282,13 +282,15 @@ class SqliteMetadataSegment(MetadataReader):
                 # Cast here because the OpenTel decorators obfuscate the type
                 return cast(None, self._update_record(cur, record))
             else:
-                logger.warning(f"Insert of existing embedding ID: {record['id']}")
+                logger.warning(
+                    f"Insert of existing embedding ID: {record['operation_record']['id']}"
+                )
                 # We are trying to add for a record that already exists. Fail the call.
                 # We don't throw an exception since this is in principal an async path
                 return
 
-        if record["metadata"]:
-            self._update_metadata(cur, id, record["metadata"])
+        if record["operation_record"]["metadata"]:
+            self._update_metadata(cur, id, record["operation_record"]["metadata"])
 
     @trace_method(
         "SqliteMetadataSegment._update_metadata", OpenTelemetryGranularity.ALL
@@ -410,7 +412,7 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .from_(t)
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["id"]))
+            .where(t.embedding_id == ParameterValue(record["operation_record"]["id"]))
             .delete()
         )
         q_fts = (
@@ -425,7 +427,10 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(
                         t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
                     )
-                    .where(t.embedding_id == ParameterValue(record["id"]))
+                    .where(
+                        t.embedding_id
+                        == ParameterValue(record["operation_record"]["id"])
+                    )
                 )
             )
         )
@@ -434,7 +439,9 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
+            logger.warning(
+                f"Delete of nonexisting embedding ID: {record['operation_record']['id']}"
+            )
         else:
             id = result[0]
 
@@ -458,19 +465,21 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .update(t)
-            .set(t.seq_id, ParameterValue(_encode_seq_id(record["seq_id"])))
+            .set(t.seq_id, ParameterValue(_encode_seq_id(record["log_offset"])))
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["id"]))
+            .where(t.embedding_id == ParameterValue(record["operation_record"]["id"]))
         )
         sql, params = get_sql(q)
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
+            logger.warning(
+                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
+            )
         else:
             id = result[0]
-            if record["metadata"]:
-                self._update_metadata(cur, id, record["metadata"])
+            if record["operation_record"]["metadata"]:
+                self._update_metadata(cur, id, record["operation_record"]["metadata"])
 
     @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
     def _write_metadata(self, records: Sequence[LogRecord]) -> None:
@@ -484,20 +493,20 @@ class SqliteMetadataSegment(MetadataReader):
                     .columns("segment_id", "seq_id")
                     .insert(
                         ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(_encode_seq_id(record["seq_id"])),
+                        ParameterValue(_encode_seq_id(record["log_offset"])),
                     )
                 )
                 sql, params = get_sql(q)
                 sql = sql.replace("INSERT", "INSERT OR REPLACE")
                 cur.execute(sql, params)
 
-                if record["operation"] == Operation.ADD:
+                if record["operation_record"]["operation"] == Operation.ADD:
                     self._insert_record(cur, record, False)
-                elif record["operation"] == Operation.UPSERT:
+                elif record["operation_record"]["operation"] == Operation.UPSERT:
                     self._insert_record(cur, record, True)
-                elif record["operation"] == Operation.DELETE:
+                elif record["operation_record"]["operation"] == Operation.DELETE:
                     self._delete_record(cur, record)
-                elif record["operation"] == Operation.UPDATE:
+                elif record["operation_record"]["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
     @trace_method(

@@ -189,13 +189,14 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 # We allow notifying consumers out of order relative to one call to
                 # submit_embeddings so we do not reorder the records before submitting them
                 embedding_record = LogRecord(
-                    id=id,
-                    seq_id=seq_id,
-                    embedding=submit_embedding_record["embedding"],
-                    encoding=submit_embedding_record["encoding"],
-                    metadata=submit_embedding_record["metadata"],
-                    operation=submit_embedding_record["operation"],
-                    collection_id=collection_id,
+                    log_offset=seq_id,
+                    operation_record=OperationRecord(
+                        id=id,
+                        embedding=submit_embedding_record["embedding"],
+                        encoding=submit_embedding_record["encoding"],
+                        metadata=submit_embedding_record["metadata"],
+                        operation=submit_embedding_record["operation"],
+                    ),
                 )
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
@@ -319,12 +320,14 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     subscription,
                     [
                         LogRecord(
-                            seq_id=row[0],
-                            operation=_operation_codes_inv[row[1]],
-                            id=row[2],
-                            embedding=vector,
-                            encoding=encoding,
-                            metadata=json.loads(row[5]) if row[5] else None,
+                            log_offset=row[0],
+                            operation_record=OperationRecord(
+                                operation=_operation_codes_inv[row[1]],
+                                id=row[2],
+                                embedding=vector,
+                                encoding=encoding,
+                                metadata=json.loads(row[5]) if row[5] else None,
+                            ),
                         )
                     ],
                 )
@@ -366,9 +369,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         should_unsubscribe = False
         filtered_embeddings = []
         for embedding in embeddings:
-            if embedding["seq_id"] <= sub.start:
+            if embedding["log_offset"] <= sub.start:
                 continue
-            if embedding["seq_id"] > sub.end:
+            if embedding["log_offset"] > sub.end:
                 should_unsubscribe = True
                 break
             filtered_embeddings.append(embedding)

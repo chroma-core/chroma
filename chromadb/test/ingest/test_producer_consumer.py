@@ -135,14 +135,16 @@ def assert_records_match(
     """Given a list of inserted and consumed records, make sure they match"""
     assert len(consumed_records) == len(inserted_records)
     for inserted, consumed in zip(inserted_records, consumed_records):
-        assert inserted["id"] == consumed["id"]
-        assert inserted["operation"] == consumed["operation"]
-        assert inserted["encoding"] == consumed["encoding"]
-        assert inserted["metadata"] == consumed["metadata"]
+        assert inserted["id"] == consumed["operation_record"]["id"]
+        assert inserted["operation"] == consumed["operation_record"]["operation"]
+        assert inserted["encoding"] == consumed["operation_record"]["encoding"]
+        assert inserted["metadata"] == consumed["operation_record"]["metadata"]
 
         if inserted["embedding"] is not None:
-            assert consumed["embedding"] is not None
-            assert_approx_equal(inserted["embedding"], consumed["embedding"])
+            assert consumed["operation_record"]["embedding"] is not None
+            assert_approx_equal(
+                inserted["embedding"], consumed["operation_record"]["embedding"]
+            )
 
 
 @pytest.mark.asyncio
@@ -243,7 +245,7 @@ async def test_start_seq_id(
     results_1 = await consume_fn_1.get(5)
     assert_records_match(embeddings, results_1)
 
-    start = consume_fn_1.embeddings[-1]["seq_id"]
+    start = consume_fn_1.embeddings[-1]["log_offset"]
     consumer.subscribe(collection, consume_fn_2, start=start)
     second_embeddings = produce_fns(producer, collection, sample_embeddings, 5)[0]
     assert isinstance(embeddings, list)
@@ -273,7 +275,7 @@ async def test_end_seq_id(
     results_1 = await consume_fn_1.get(10)
     assert_records_match(embeddings, results_1)
 
-    end = consume_fn_1.embeddings[-5]["seq_id"]
+    end = consume_fn_1.embeddings[-5]["log_offset"]
     consumer.subscribe(collection, consume_fn_2, start=consumer.min_seqid(), end=end)
 
     results_2 = await consume_fn_2.get(6)

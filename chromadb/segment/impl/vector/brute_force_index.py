@@ -68,9 +68,9 @@ class BruteForceIndex:
             )
 
         for i, record in enumerate(records):
-            id = record["id"]
-            vector = record["embedding"]
-            self.id_to_seq_id[id] = record["seq_id"]
+            id = record["operation_record"]["id"]
+            vector = record["operation_record"]["embedding"]
+            self.id_to_seq_id[id] = record["log_offset"]
             if id in self.deleted_ids:
                 self.deleted_ids.remove(id)
 
@@ -88,7 +88,7 @@ class BruteForceIndex:
 
     def delete(self, records: List[LogRecord]) -> None:
         for record in records:
-            id = record["id"]
+            id = record["operation_record"]["id"]
             if id in self.id_to_index:
                 index = self.id_to_index[id]
                 self.deleted_ids.add(id)
