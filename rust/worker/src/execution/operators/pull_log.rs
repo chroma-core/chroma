@@ -160,8 +160,8 @@ mod tests {
             collection_id_1.clone(),
             Box::new(LogRecord {
                 collection_id: collection_id_1.clone(),
-                log_id: 1,
-                log_id_ts: 1,
+                log_offset: 1,
+                log_ts: 1,
                 record: EmbeddingRecord {
                     id: "embedding_id_1".to_string(),
                     seq_id: BigInt::from(1),
@@ -177,8 +177,8 @@ mod tests {
             collection_id_1.clone(),
             Box::new(LogRecord {
                 collection_id: collection_id_1.clone(),
-                log_id: 2,
-                log_id_ts: 2,
+                log_offset: 2,
+                log_ts: 2,
                 record: EmbeddingRecord {
                     id: "embedding_id_2".to_string(),
                     seq_id: BigInt::from(2),

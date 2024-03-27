@@ -6,9 +6,8 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
-
+use chroma_proto::LogRecord;
 use chroma_proto::OperationRecord;
-use chroma_proto::RecordLog;
 use num_bigint::BigInt;
 use thiserror::Error;
 use uuid::Uuid;
@@ -98,7 +97,7 @@ impl TryFrom<OperationRecordWithSeqIdAndCollectionId> for EmbeddingRecord {
     }
 }
 
-type RecordLogWithCollectionId = (RecordLog, Uuid);
+type RecordLogWithCollectionId = (LogRecord, Uuid);
 
 impl TryFrom<RecordLogWithCollectionId> for EmbeddingRecord {
     type Error = EmbeddingRecordConversionError;
@@ -112,7 +111,7 @@ impl TryFrom<RecordLogWithCollectionId> for EmbeddingRecord {
                 ConversionError::DecodeError,
             ))?;
 
-        let seq_id = BigInt::from(record_log.log_id);
+        let seq_id = BigInt::from(record_log.log_offset);
         let op = match proto_submit.operation.try_into() {
             Ok(op) => op,
             Err(e) => return Err(EmbeddingRecordConversionError::OperationConversionError(e)),
@@ -359,8 +358,8 @@ mod tests {
             metadata: Some(metadata),
             operation: chroma_proto::Operation::Add as i32,
         };
-        let record_log = chroma_proto::RecordLog {
-            log_id: 42,
+        let record_log = chroma_proto::LogRecord {
+            log_offset: 42,
             record: Some(proto_submit),
         };
         let converted_embedding_record =
