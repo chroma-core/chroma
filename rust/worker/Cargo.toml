@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "worker"
-path = "src/bin/worker.rs"
+name = "query_service"
+path = "src/bin/query_service.rs"
 
 [dependencies]
 tonic = "0.10"
@@ -38,6 +38,11 @@ aws-config = { version = "1.1.2", features = ["behavior-version-latest"] }
 arrow = "50.0.0"
 roaring = "0.10.3"
 tantivy = "0.21.1"
+
+[dev-dependencies]
+proptest = "1.4.0"
+proptest-state-machine = "0.1.0"
+"rand" = "0.8.5"
 
 [build-dependencies]
 tonic-build = "0.10"

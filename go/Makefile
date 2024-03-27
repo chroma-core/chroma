@@ -4,7 +4,8 @@ build:
 	go build -v -o bin/logservice ./cmd/logservice/
 
 test: build
-	go test -cover -race ./...
+	go test -race -cover ./...
+
 
 lint:
 	#brew install golangci-lint

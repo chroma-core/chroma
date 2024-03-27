@@ -62,7 +62,16 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        **kwargs: Any
     ):
+        """Initialize SentenceTransformerEmbeddingFunction.
+
+        Args:
+            model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
+            device (str, optional): Device used for computation, defaults to "cpu"
+            normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
+            **kwargs: Additional arguments to pass to the SentenceTransformer model.
+        """
         if model_name not in self.models:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -70,7 +79,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(model_name, device=device)
+            self.models[model_name] = SentenceTransformer(model_name, device=device, **kwargs)
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
@@ -733,7 +742,10 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
 class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
-        self, model_name: str = "ViT-B-32", checkpoint: str = "laion2b_s34b_b79k"
+        self,
+        model_name: str = "ViT-B-32",
+        checkpoint: str = "laion2b_s34b_b79k",
+        device: Optional[str] = "cpu",
     ) -> None:
         try:
             import open_clip
@@ -759,6 +771,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             model_name=model_name, pretrained=checkpoint
         )
         self._model = model
+        self._model.to(device)
         self._preprocess = preprocess
         self._tokenizer = open_clip.get_tokenizer(model_name=model_name)
 

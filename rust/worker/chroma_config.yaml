@@ -16,16 +16,24 @@ worker:
             hasher: Murmur3
     memberlist_provider:
         CustomResource:
-            memberlist_name: "worker-memberlist"
+            memberlist_name: "query-service-memberlist"
             queue_size: 100
     ingest:
         queue_size: 10000
     sysdb:
         Grpc:
-            host: "coordinator.chroma"
+            host: "sysdb.chroma"
             port: 50051
     segment_manager:
         storage_path: "./tmp/segment_manager/"
     storage:
         S3:
             bucket: "chroma-storage"
+    log:
+        Grpc:
+            host: "logservice.chroma"
+            port: 50051
+    dispatcher:
+        num_worker_threads: 4
+        dispatcher_queue_size: 100
+        worker_queue_size: 100
