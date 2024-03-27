@@ -9,7 +9,6 @@ import (
 type Collection struct {
 	ID          string          `gorm:"id;primaryKey"`
 	Name        *string         `gorm:"name;unique"`
-	Topic       *string         `gorm:"topic"`
 	Dimension   *int32          `gorm:"dimension"`
 	DatabaseID  string          `gorm:"database_id"`
 	Ts          types.Timestamp `gorm:"ts;type:bigint;default:0"`
@@ -33,7 +32,7 @@ type CollectionAndMetadata struct {
 
 //go:generate mockery --name=ICollectionDb
 type ICollectionDb interface {
-	GetCollections(collectionID *string, collectionName *string, collectionTopic *string, tenantID string, databaseName string) ([]*CollectionAndMetadata, error)
+	GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string) ([]*CollectionAndMetadata, error)
 	DeleteCollectionByID(collectionID string) (int, error)
 	Insert(in *Collection) error
 	Update(in *Collection) error

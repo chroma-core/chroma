@@ -59,8 +59,8 @@ func (_m *ICollectionDb) DeleteCollectionByID(collectionID string) (int, error) 
 }
 
 // GetCollections provides a mock function with given fields: collectionID, collectionName, collectionTopic, tenantID, databaseName
-func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, collectionTopic *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
-	ret := _m.Called(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
+	ret := _m.Called(collectionID, collectionName, tenantID, databaseName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollections")
@@ -68,19 +68,19 @@ func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *st
 
 	var r0 []*dbmodel.CollectionAndMetadata
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*string, *string, *string, string, string) ([]*dbmodel.CollectionAndMetadata, error)); ok {
-		return rf(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+	if rf, ok := ret.Get(0).(func(*string, *string, string, string) ([]*dbmodel.CollectionAndMetadata, error)); ok {
+		return rf(collectionID, collectionName, tenantID, databaseName)
 	}
-	if rf, ok := ret.Get(0).(func(*string, *string, *string, string, string) []*dbmodel.CollectionAndMetadata); ok {
-		r0 = rf(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+	if rf, ok := ret.Get(0).(func(*string, *string, string, string) []*dbmodel.CollectionAndMetadata); ok {
+		r0 = rf(collectionID, collectionName, tenantID, databaseName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.CollectionAndMetadata)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*string, *string, *string, string, string) error); ok {
-		r1 = rf(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+	if rf, ok := ret.Get(1).(func(*string, *string, string, string) error); ok {
+		r1 = rf(collectionID, collectionName, tenantID, databaseName)
 	} else {
 		r1 = ret.Error(1)
 	}

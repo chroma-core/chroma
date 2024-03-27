@@ -72,28 +72,25 @@ func encodeVector(dimension int32, vector []float32, encoding coordinatorpb.Scal
 	}
 }
 
-func GetTestEmbeddingRecords(collectionId string) (recordsToSubmit []*coordinatorpb.SubmitEmbeddingRecord) {
+func GetTestEmbeddingRecords(collectionId string) (recordsToSubmit []*coordinatorpb.OperationRecord) {
 	testVector1 := []float32{1.0, 2.0, 3.0}
 	testVector2 := []float32{1.2, 2.24, 3.2}
 	testVector3 := []float32{7.0, 8.0, 9.0}
-	recordsToSubmit = make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
-	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.SubmitEmbeddingRecord{
-		Id:           types.NewUniqueID().String(),
-		Vector:       encodeVector(10, testVector1, coordinatorpb.ScalarEncoding_FLOAT32),
-		Operation:    coordinatorpb.Operation_ADD,
-		CollectionId: collectionId,
+	recordsToSubmit = make([]*coordinatorpb.OperationRecord, 0)
+	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.OperationRecord{
+		Id:        types.NewUniqueID().String(),
+		Vector:    encodeVector(10, testVector1, coordinatorpb.ScalarEncoding_FLOAT32),
+		Operation: coordinatorpb.Operation_ADD,
 	})
-	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.SubmitEmbeddingRecord{
-		Id:           types.NewUniqueID().String(),
-		Vector:       encodeVector(6, testVector2, coordinatorpb.ScalarEncoding_FLOAT32),
-		Operation:    coordinatorpb.Operation_UPDATE,
-		CollectionId: collectionId,
+	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.OperationRecord{
+		Id:        types.NewUniqueID().String(),
+		Vector:    encodeVector(6, testVector2, coordinatorpb.ScalarEncoding_FLOAT32),
+		Operation: coordinatorpb.Operation_UPDATE,
 	})
-	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.SubmitEmbeddingRecord{
-		Id:           types.NewUniqueID().String(),
-		Vector:       encodeVector(10, testVector3, coordinatorpb.ScalarEncoding_FLOAT32),
-		Operation:    coordinatorpb.Operation_ADD,
-		CollectionId: collectionId,
+	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.OperationRecord{
+		Id:        types.NewUniqueID().String(),
+		Vector:    encodeVector(10, testVector3, coordinatorpb.ScalarEncoding_FLOAT32),
+		Operation: coordinatorpb.Operation_ADD,
 	})
 	return recordsToSubmit
 }
@@ -116,13 +113,12 @@ func (suite *RecordLogServiceTestSuite) TestServer_PushLogs() {
 	for index := range recordLogs {
 		suite.Equal(int64(index+1), recordLogs[index].ID)
 		suite.Equal(suite.collectionId.String(), *recordLogs[index].CollectionID)
-		record := &coordinatorpb.SubmitEmbeddingRecord{}
+		record := &coordinatorpb.OperationRecord{}
 		if unmarshalErr := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
 			suite.NoError(unmarshalErr)
 		}
 		suite.Equal(recordsToSubmit[index].Id, record.Id)
 		suite.Equal(recordsToSubmit[index].Operation, record.Operation)
-		suite.Equal("", record.CollectionId)
 		suite.Equal(recordsToSubmit[index].Metadata, record.Metadata)
 		suite.Equal(recordsToSubmit[index].Vector.Dimension, record.Vector.Dimension)
 		suite.Equal(recordsToSubmit[index].Vector.Encoding, record.Vector.Encoding)
@@ -134,9 +130,9 @@ func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 	// push some records
 	recordsToSubmit := GetTestEmbeddingRecords(suite.collectionId.String())
 	// deep clone the records since PushLogs will mutate the records and we need a source of truth
-	recordsToSubmit_sot := make([]*coordinatorpb.SubmitEmbeddingRecord, len(recordsToSubmit))
+	recordsToSubmit_sot := make([]*coordinatorpb.OperationRecord, len(recordsToSubmit))
 	for i := range recordsToSubmit {
-		recordsToSubmit_sot[i] = proto.Clone(recordsToSubmit[i]).(*coordinatorpb.SubmitEmbeddingRecord)
+		recordsToSubmit_sot[i] = proto.Clone(recordsToSubmit[i]).(*coordinatorpb.OperationRecord)
 	}
 	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: suite.collectionId.String(),
@@ -158,7 +154,6 @@ func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 		suite.Equal(int64(index+1), pullResponse.Records[index].LogId)
 		suite.Equal(recordsToSubmit_sot[index].Id, pullResponse.Records[index].Record.Id)
 		suite.Equal(recordsToSubmit_sot[index].Operation, pullResponse.Records[index].Record.Operation)
-		suite.Equal(recordsToSubmit_sot[index].CollectionId, pullResponse.Records[index].Record.CollectionId)
 		suite.Equal(recordsToSubmit_sot[index].Metadata, pullResponse.Records[index].Record.Metadata)
 		suite.Equal(recordsToSubmit_sot[index].Vector.Dimension, pullResponse.Records[index].Record.Vector.Dimension)
 		suite.Equal(recordsToSubmit_sot[index].Vector.Encoding, pullResponse.Records[index].Record.Vector.Encoding)
@@ -171,7 +166,7 @@ func (suite *RecordLogServiceTestSuite) TestServer_Bad_CollectionId() {
 	// push some records
 	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: "badId",
-		Records:      []*coordinatorpb.SubmitEmbeddingRecord{},
+		Records:      []*coordinatorpb.OperationRecord{},
 	}
 	_, err := suite.s.PushLogs(context.Background(), &pushRequest)
 	suite.Error(err)

@@ -28,9 +28,6 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
-		// We remove the collection id for space reasons, as its double stored in the wrapping database RecordLog object.
-		// PullLogs will rehydrate the collection id from the database.
-		record.CollectionId = ""
 		data, err := proto.Marshal(record)
 		if err != nil {
 			log.Error("marshaling error", zap.Error(err))
@@ -66,7 +63,7 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for index := range recordLogs {
-		record := &coordinatorpb.SubmitEmbeddingRecord{}
+		record := &coordinatorpb.OperationRecord{}
 		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
 			log.Error("Unmarshal error", zap.Error(err))
 			grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("records", "marshaling error")
@@ -75,8 +72,6 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
-		// Here we rehydrate the collection id from the database since in PushLogs we removed it for space reasons.
-		record.CollectionId = *recordLogs[index].CollectionID
 		recordLog := &logservicepb.RecordLog{
 			LogId:  recordLogs[index].ID,
 			Record: record,
