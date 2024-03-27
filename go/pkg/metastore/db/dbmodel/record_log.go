@@ -6,7 +6,7 @@ import (
 
 type RecordLog struct {
 	CollectionID *string `gorm:"collection_id;primaryKey;autoIncrement:false"`
-	ID           int64   `gorm:"id;primaryKey;autoIncrement:false"`
+	LogOffset    int64   `gorm:"log_offset;primaryKey;autoIncrement:false"`
 	Timestamp    int64   `gorm:"timestamp;"`
 	Record       *[]byte `gorm:"record;type:bytea"`
 }

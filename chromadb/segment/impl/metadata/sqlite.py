@@ -19,7 +19,7 @@ from chromadb.types import (
     Where,
     WhereDocument,
     MetadataEmbeddingRecord,
-    EmbeddingRecord,
+    LogRecord,
     SeqId,
     Operation,
     UpdateMetadata,
@@ -257,9 +257,7 @@ class SqliteMetadataSegment(MetadataReader):
         )
 
     @trace_method("SqliteMetadataSegment._insert_record", OpenTelemetryGranularity.ALL)
-    def _insert_record(
-        self, cur: Cursor, record: EmbeddingRecord, upsert: bool
-    ) -> None:
+    def _insert_record(self, cur: Cursor, record: LogRecord, upsert: bool) -> None:
         """Add or update a single EmbeddingRecord into the DB"""
 
         t = Table("embeddings")
@@ -404,7 +402,7 @@ class SqliteMetadataSegment(MetadataReader):
                 insert_into_fulltext_search()
 
     @trace_method("SqliteMetadataSegment._delete_record", OpenTelemetryGranularity.ALL)
-    def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
+    def _delete_record(self, cur: Cursor, record: LogRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
         t = Table("embeddings")
         fts_t = Table("embedding_fulltext_search")
@@ -454,7 +452,7 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
     @trace_method("SqliteMetadataSegment._update_record", OpenTelemetryGranularity.ALL)
-    def _update_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
+    def _update_record(self, cur: Cursor, record: LogRecord) -> None:
         """Update a single EmbeddingRecord in the DB"""
         t = Table("embeddings")
         q = (
@@ -475,7 +473,7 @@ class SqliteMetadataSegment(MetadataReader):
                 self._update_metadata(cur, id, record["metadata"])
 
     @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
-    def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_metadata(self, records: Sequence[LogRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
         with self._db.tx() as cur:

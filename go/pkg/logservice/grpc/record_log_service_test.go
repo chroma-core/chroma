@@ -111,7 +111,7 @@ func (suite *RecordLogServiceTestSuite) TestServer_PushLogs() {
 	suite.db.Where("collection_id = ?", types.FromUniqueID(suite.collectionId)).Find(&recordLogs)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.collectionId.String(), *recordLogs[index].CollectionID)
 		record := &coordinatorpb.OperationRecord{}
 		if unmarshalErr := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
@@ -151,7 +151,7 @@ func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 	suite.NoError(err)
 	suite.Len(pullResponse.Records, 3)
 	for index := range pullResponse.Records {
-		suite.Equal(int64(index+1), pullResponse.Records[index].LogId)
+		suite.Equal(int64(index+1), pullResponse.Records[index].LogOffset)
 		suite.Equal(recordsToSubmit_sot[index].Id, pullResponse.Records[index].Record.Id)
 		suite.Equal(recordsToSubmit_sot[index].Operation, pullResponse.Records[index].Record.Operation)
 		suite.Equal(recordsToSubmit_sot[index].Metadata, pullResponse.Records[index].Record.Metadata)

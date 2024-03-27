@@ -2,7 +2,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 import numpy as np
 import numpy.typing as npt
 from chromadb.types import (
-    EmbeddingRecord,
+    LogRecord,
     VectorEmbeddingRecord,
     VectorQuery,
     VectorQueryResult,
@@ -59,7 +59,7 @@ class BruteForceIndex:
         self.free_indices = list(range(self.size))
         self.vectors.fill(0)
 
-    def upsert(self, records: List[EmbeddingRecord]) -> None:
+    def upsert(self, records: List[LogRecord]) -> None:
         if len(records) + len(self) > self.size:
             raise Exception(
                 "Index with capacity {} and {} current entries cannot add {} records".format(
@@ -86,7 +86,7 @@ class BruteForceIndex:
                 self.index_to_id[next_index] = id
                 self.vectors[next_index] = vector
 
-    def delete(self, records: List[EmbeddingRecord]) -> None:
+    def delete(self, records: List[LogRecord]) -> None:
         for record in records:
             id = record["id"]
             if id in self.id_to_index:

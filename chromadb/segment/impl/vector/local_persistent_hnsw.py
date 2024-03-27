@@ -17,7 +17,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import (
-    EmbeddingRecord,
+    LogRecord,
     Metadata,
     Operation,
     Segment,
@@ -222,7 +222,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         "PersistentLocalHnswSegment._write_records", OpenTelemetryGranularity.ALL
     )
     @override
-    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_records(self, records: Sequence[LogRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")

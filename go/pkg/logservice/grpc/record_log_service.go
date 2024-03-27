@@ -56,7 +56,7 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 	if err != nil {
 		return nil, err
 	}
-	records := make([]*logservicepb.RecordLog, 0)
+	records := make([]*logservicepb.LogRecord, 0)
 	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize), req.GetEndTimestamp())
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
@@ -72,9 +72,9 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
-		recordLog := &logservicepb.RecordLog{
-			LogId:  recordLogs[index].ID,
-			Record: record,
+		recordLog := &logservicepb.LogRecord{
+			LogOffset: recordLogs[index].LogOffset,
+			Record:    record,
 		}
 		records = append(records, recordLog)
 	}
@@ -95,7 +95,7 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 	for _, recordLog := range recordLogs {
 		collectionInfo := &logservicepb.CollectionInfo{
 			CollectionId: *recordLog.CollectionID,
-			FirstLogId:   recordLog.ID,
+			FirstLogId:   recordLog.LogOffset,
 			FirstLogIdTs: recordLog.Timestamp,
 		}
 		res.AllCollectionInfo = append(res.AllCollectionInfo, collectionInfo)

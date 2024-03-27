@@ -3,11 +3,10 @@ package dbcore
 import (
 	"context"
 	"fmt"
-	"github.com/chroma-core/chroma/go/pkg/types"
-	"os"
 	"reflect"
-	"strconv"
 	"time"
+
+	"github.com/chroma-core/chroma/go/pkg/types"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -187,8 +186,10 @@ func CreateTestTables(db *gorm.DB) {
 }
 
 func GetDBConfigForTesting() DBConfig {
-	dbAddress := os.Getenv("POSTGRES_HOST")
-	dbPort, _ := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
+	// dbAddress := os.Getenv("POSTGRES_HOST")
+	dbAddress := "localhost"
+	// dbPort, _ := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
+	dbPort := 5432
 	return DBConfig{
 		Username:     "chroma",
 		Password:     "chroma",

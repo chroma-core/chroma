@@ -53,7 +53,7 @@ message Collection {
   optional int32 dimension = 5;
   string tenant = 6;
   string database = 7;
-  int64 logPosition = 8;
+  int64 log_position = 8;
   int32 version = 9;
 }
 
@@ -79,7 +79,7 @@ message UpdateMetadata {
     map<string, UpdateMetadataValue> metadata = 1;
 }
 
-// Represents an operation on the log
+// Represents an operation the user submits
 message OperationRecord {
     string id = 1;
     optional Vector vector = 2;

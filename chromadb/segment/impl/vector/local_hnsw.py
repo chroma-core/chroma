@@ -12,7 +12,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import (
-    EmbeddingRecord,
+    LogRecord,
     VectorEmbeddingRecord,
     VectorQuery,
     VectorQueryResult,
@@ -283,7 +283,7 @@ class LocalHnswSegment(VectorReader):
             self._max_seq_id = batch.max_seq_id
 
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
-    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_records(self, records: Sequence[LogRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")

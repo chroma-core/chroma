@@ -85,31 +85,24 @@ class MetadataEmbeddingRecord(TypedDict):
     metadata: Optional[Metadata]
 
 
-class EmbeddingRecord(TypedDict):
-    id: str
-    seq_id: SeqId
-    embedding: Optional[Vector]
-    encoding: Optional[ScalarEncoding]
-    metadata: Optional[UpdateMetadata]
-    operation: Operation
-    # The collection the operation is being performed on
-    # This is optional because in the single node version,
-    # topics are 1:1 with collections. So consumers of the ingest queue
-    # implicitly know this mapping. However, in the multi-node version,
-    # topics are shared between collections, so we need to explicitly
-    # specify the collection.
-    # For backwards compatability reasons, we can't make this a required field on
-    # single node, since data written with older versions of the code won't be able to
-    # populate it.
-    collection_id: Optional[UUID]
-
-
 class OperationRecord(TypedDict):
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
+
+
+class LogRecord(TypedDict):
+    log_offset: int
+    operation_record: OperationRecord
+
+
+class DataRecord(TypedDict):
+    id: str
+    embedding: Optional[Vector]
+    encoding: Optional[ScalarEncoding]
+    metadata: Optional[Metadata]
 
 
 class VectorQuery(TypedDict):

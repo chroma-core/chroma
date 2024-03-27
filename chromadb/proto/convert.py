@@ -6,7 +6,7 @@ import chromadb.proto.chroma_pb2 as proto
 from chromadb.utils.messageid import bytes_to_int, int_to_bytes
 from chromadb.types import (
     Collection,
-    EmbeddingRecord,
+    LogRecord,
     Metadata,
     Operation,
     ScalarEncoding,
@@ -112,17 +112,18 @@ def to_proto_update_metadata(metadata: UpdateMetadata) -> proto.UpdateMetadata:
 
 
 def from_proto_submit(
-    submit_embedding_record: proto.OperationRecord, seq_id: SeqId
-) -> EmbeddingRecord:
-    embedding, encoding = from_proto_vector(submit_embedding_record.vector)
-    record = EmbeddingRecord(
-        id=submit_embedding_record.id,
-        seq_id=seq_id,
-        embedding=embedding,
-        encoding=encoding,
-        metadata=from_proto_update_metadata(submit_embedding_record.metadata),
-        operation=from_proto_operation(submit_embedding_record.operation),
-        collection_id=UUID(hex=submit_embedding_record.collection_id),
+    operation_record: proto.OperationRecord, seq_id: SeqId
+) -> LogRecord:
+    embedding, encoding = from_proto_vector(operation_record.vector)
+    record = LogRecord(
+        log_offset=seq_id,
+        operation_record=OperationRecord(
+            id=operation_record.id,
+            embedding=embedding,
+            encoding=encoding,
+            metadata=from_proto_update_metadata(operation_record.metadata),
+            operation=from_proto_operation(operation_record.operation),
+        ),
     )
     return record
 

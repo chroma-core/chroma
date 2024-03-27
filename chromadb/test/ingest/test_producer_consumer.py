@@ -22,7 +22,7 @@ from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     OperationRecord,
     Operation,
-    EmbeddingRecord,
+    LogRecord,
     ScalarEncoding,
 )
 from chromadb.config import System, Settings
@@ -92,7 +92,7 @@ def sample_embeddings() -> Iterator[OperationRecord]:
 
 
 class CapturingConsumeFn:
-    embeddings: List[EmbeddingRecord]
+    embeddings: List[LogRecord]
     waiters: List[Tuple[int, Event]]
 
     def __init__(self) -> None:
@@ -104,14 +104,14 @@ class CapturingConsumeFn:
         self.waiters = []
         self._loop = asyncio.get_event_loop()
 
-    def __call__(self, embeddings: Sequence[EmbeddingRecord]) -> None:
+    def __call__(self, embeddings: Sequence[LogRecord]) -> None:
         self.embeddings.extend(embeddings)
         for n, event in self.waiters:
             if len(self.embeddings) >= n:
                 # event.set() is not thread safe, so we need to call it in the main event loop
                 self._loop.call_soon_threadsafe(event.set)
 
-    async def get(self, n: int, timeout_secs: int = 10) -> Sequence[EmbeddingRecord]:
+    async def get(self, n: int, timeout_secs: int = 10) -> Sequence[LogRecord]:
         "Wait until at least N embeddings are available, then return all embeddings"
         if len(self.embeddings) >= n:
             return self.embeddings[:n]
@@ -130,7 +130,7 @@ def assert_approx_equal(a: Sequence[float], b: Sequence[float]) -> None:
 
 def assert_records_match(
     inserted_records: Sequence[OperationRecord],
-    consumed_records: Sequence[EmbeddingRecord],
+    consumed_records: Sequence[LogRecord],
 ) -> None:
     """Given a list of inserted and consumed records, make sure they match"""
     assert len(consumed_records) == len(inserted_records)

@@ -9,7 +9,7 @@ from chromadb.ingest import (
 )
 from chromadb.types import (
     OperationRecord,
-    EmbeddingRecord,
+    LogRecord,
     ScalarEncoding,
     SeqId,
     Operation,
@@ -188,7 +188,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 submit_embedding_record = embeddings[id_to_idx[id]]
                 # We allow notifying consumers out of order relative to one call to
                 # submit_embeddings so we do not reorder the records before submitting them
-                embedding_record = EmbeddingRecord(
+                embedding_record = LogRecord(
                     id=id,
                     seq_id=seq_id,
                     embedding=submit_embedding_record["embedding"],
@@ -318,7 +318,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 self._notify_one(
                     subscription,
                     [
-                        EmbeddingRecord(
+                        LogRecord(
                             seq_id=row[0],
                             operation=_operation_codes_inv[row[1]],
                             id=row[2],
@@ -353,16 +353,14 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             return int(cur.fetchone()[0]) + 1
 
     @trace_method("SqlEmbeddingsQueue._notify_all", OpenTelemetryGranularity.ALL)
-    def _notify_all(self, topic: str, embeddings: Sequence[EmbeddingRecord]) -> None:
+    def _notify_all(self, topic: str, embeddings: Sequence[LogRecord]) -> None:
         """Send a notification to each subscriber of the given topic."""
         if self._running:
             for sub in self._subscriptions[topic]:
                 self._notify_one(sub, embeddings)
 
     @trace_method("SqlEmbeddingsQueue._notify_one", OpenTelemetryGranularity.ALL)
-    def _notify_one(
-        self, sub: Subscription, embeddings: Sequence[EmbeddingRecord]
-    ) -> None:
+    def _notify_one(self, sub: Subscription, embeddings: Sequence[LogRecord]) -> None:
         """Send a notification to a single subscriber."""
         # Filter out any embeddings that are not in the subscription range
         should_unsubscribe = False
