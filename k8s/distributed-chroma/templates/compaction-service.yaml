@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compaction-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compaction-service
+  template:
+    metadata:
+      labels:
+        app: compaction-service
+        member-type: compaction-service
+    spec:
+      serviceAccountName: compaction-service-serviceaccount
+      containers:
+        - name: compaction-service
+          image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+          volumeMounts:
+            - name: chroma
+              mountPath: /index_data
+          env:
+            - name: CHROMA_compaction-service__PULSAR_URL
+              value: pulsar://pulsar.chroma:6650
+            - name: CHROMA_compaction-service__MY_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: compaction-service
+      volumes:
+        - name: chroma
+          emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: compaction-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: compaction-service-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: compaction-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

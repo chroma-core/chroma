@@ -28,6 +28,13 @@ docker_build(
   dockerfile='./rust/worker/Dockerfile'
 )
 
+docker_build(
+  'local:compaction-service',
+  '.',
+  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+  dockerfile='./rust/worker/Dockerfile.compactor'
+)
+
 k8s_yaml(
   helm(
     'k8s/distributed-chroma',
@@ -78,6 +85,9 @@ k8s_resource(
     'query-service-query-service-memberlist-binding:clusterrolebinding',
     'query-service-memberlist-readerwriter-binding:clusterrolebinding',
 
+    'compaction-service-serviceaccount:serviceaccount',
+    'compaction-service-serviceaccount-rolebinding:RoleBinding',
+
     'test-memberlist:MemberList',
     'test-memberlist-reader:ClusterRole',
     'test-memberlist-reader-binding:ClusterRoleBinding',
@@ -95,6 +105,7 @@ k8s_resource('logservice', resource_deps=['sysdb-migration'], labels=["chroma"],
 k8s_resource('sysdb', resource_deps=['pulsar', 'sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('frontend-service', resource_deps=['pulsar', 'sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service', resource_deps=['sysdb', 'pulsar'], labels=["chroma"])
+k8s_resource('compaction-service', resource_deps=['sysdb', 'pulsar'], labels=["chroma"])
 
 # I have no idea why these need their own lines but the others don't.
 k8s_resource(objects=['query-service:service'], new_name='query-service-service', resource_deps=['query-service'], labels=["chroma"])
