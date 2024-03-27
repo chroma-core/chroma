@@ -2,7 +2,17 @@ import os
 import shutil
 import tempfile
 import pytest
-from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
+from typing import (
+    Generator,
+    List,
+    Callable,
+    Iterator,
+    Dict,
+    Optional,
+    Union,
+    Sequence,
+    cast,
+)
 
 from chromadb.api.types import validate_metadata
 from chromadb.config import System, Settings
@@ -88,7 +98,6 @@ def sample_embeddings() -> Iterator[OperationRecord]:
             encoding=ScalarEncoding.FLOAT32,
             metadata=metadata,
             operation=Operation.ADD,
-            collection_id=uuid.UUID(int=0),
         )
         return record
 
@@ -118,8 +127,7 @@ segment_definition = Segment(
     id=uuid.uuid4(),
     type="test_type",
     scope=SegmentScope.METADATA,
-    topic="persistent://test/test/test_topic_1",
-    collection=None,
+    collection=uuid.UUID(int=0),
     metadata=None,
 )
 
@@ -127,8 +135,7 @@ segment_definition2 = Segment(
     id=uuid.uuid4(),
     type="test_type",
     scope=SegmentScope.METADATA,
-    topic="persistent://test/test/test_topic_2",
-    collection=None,
+    collection=uuid.UUID(int=1),
     metadata=None,
 )
 
@@ -151,9 +158,11 @@ def test_insert_and_count(
     producer = system.instance(Producer)
     system.reset_state()
 
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
-    max_id = produce_fns(producer, topic, sample_embeddings, 3)[1][-1]
+    max_id = produce_fns(producer, collection_id, sample_embeddings, 3)[1][-1]
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -163,7 +172,7 @@ def test_insert_and_count(
     assert segment.count() == 3
 
     for i in range(3):
-        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+        max_id = producer.submit_embedding(collection_id, next(sample_embeddings))
 
     sync(segment, max_id)
 
@@ -188,9 +197,11 @@ def test_get(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
-    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -290,12 +301,14 @@ def test_fulltext(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    max_id = produce_fns(producer, topic, sample_embeddings, 100)[1][-1]
+    max_id = produce_fns(producer, collection_id, sample_embeddings, 100)[1][-1]
 
     sync(segment, max_id)
 
@@ -385,12 +398,14 @@ def test_delete(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
     max_id = seq_ids[-1]
 
     sync(segment, max_id)
@@ -406,11 +421,10 @@ def test_delete(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
-        -1
-    ]
+    max_id = produce_fns(
+        producer, collection_id, (delete_embedding for _ in range(1)), 1
+    )[1][-1]
 
     sync(segment, max_id)
 
@@ -418,16 +432,16 @@ def test_delete(
     assert segment.get_metadata(ids=["embedding_0"]) == []
 
     # Delete is idempotent
-    max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
-        -1
-    ]
+    max_id = produce_fns(
+        producer, collection_id, (delete_embedding for _ in range(1)), 1
+    )[1][-1]
 
     sync(segment, max_id)
     assert segment.count() == 9
     assert segment.get_metadata(ids=["embedding_0"]) == []
 
     # re-add
-    max_id = producer.submit_embedding(topic, embeddings[0])
+    max_id = producer.submit_embedding(collection_id, embeddings[0])
     sync(segment, max_id)
     assert segment.count() == 10
     results = segment.get_metadata(ids=["embedding_0"])
@@ -436,12 +450,14 @@ def test_delete(
 def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    _test_update(sample_embeddings, producer, segment, topic, Operation.UPDATE)
+    _test_update(sample_embeddings, producer, segment, collection_id, Operation.UPDATE)
 
     # Update nonexisting ID
     update_record = OperationRecord(
@@ -450,9 +466,8 @@ def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) ->
         embedding=None,
         encoding=None,
         operation=Operation.UPDATE,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["no_such_id"])
     assert len(results) == 0
@@ -466,12 +481,14 @@ def test_upsert(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    _test_update(sample_embeddings, producer, segment, topic, Operation.UPSERT)
+    _test_update(sample_embeddings, producer, segment, collection_id, Operation.UPSERT)
 
     # upsert previously nonexisting ID
     update_record = OperationRecord(
@@ -480,11 +497,10 @@ def test_upsert(
         embedding=None,
         encoding=None,
         operation=Operation.UPSERT,
-        collection_id=uuid.UUID(int=0),
     )
     max_id = produce_fns(
         producer=producer,
-        topic=topic,
+        collection_id=collection_id,
         embeddings=(update_record for _ in range(1)),
         n=1,
     )[1][-1]
@@ -497,7 +513,7 @@ def _test_update(
     sample_embeddings: Iterator[OperationRecord],
     producer: Producer,
     segment: MetadataReader,
-    topic: str,
+    collection_id: uuid.UUID,
     op: Operation,
 ) -> None:
     """test code common between update and upsert paths"""
@@ -506,7 +522,7 @@ def _test_update(
 
     max_id = 0
     for e in embeddings:
-        max_id = producer.submit_embedding(topic, e)
+        max_id = producer.submit_embedding(collection_id, e)
 
     sync(segment, max_id)
 
@@ -520,9 +536,8 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"chroma:document": "foo bar"}
@@ -536,9 +551,8 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"chroma:document": "biz buz"}
@@ -554,9 +568,8 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"chroma:document": "biz buz", "baz": 42}
@@ -568,9 +581,8 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"baz": 42}
@@ -586,11 +598,11 @@ def test_limit(
     producer = system.instance(Producer)
     system.reset_state()
 
-    topic = str(segment_definition["topic"])
-    max_id = produce_fns(producer, topic, sample_embeddings, 3)[1][-1]
+    collection_id = cast(uuid.UUID, segment_definition["collection"])
+    max_id = produce_fns(producer, collection_id, sample_embeddings, 3)[1][-1]
 
-    topic2 = str(segment_definition2["topic"])
-    max_id2 = produce_fns(producer, topic2, sample_embeddings, 3)[1][-1]
+    collection_id_2 = cast(uuid.UUID, segment_definition2["collection"])
+    max_id2 = produce_fns(producer, collection_id_2, sample_embeddings, 3)[1][-1]
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -604,7 +616,7 @@ def test_limit(
     assert segment.count() == 3
 
     for i in range(3):
-        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+        max_id = producer.submit_embedding(collection_id, next(sample_embeddings))
 
     sync(segment, max_id)
 
@@ -629,12 +641,14 @@ def test_delete_segment(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
     max_id = seq_ids[-1]
 
     sync(segment, max_id)
@@ -686,12 +700,14 @@ def test_delete_single_fts_record(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
     max_id = seq_ids[-1]
 
     sync(segment, max_id)
@@ -708,11 +724,10 @@ def test_delete_single_fts_record(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
-        -1
-    ]
+    max_id = produce_fns(
+        producer, collection_id, (delete_embedding for _ in range(1)), 1
+    )[1][-1]
     t = Table("embeddings")
 
     sync(segment, max_id)

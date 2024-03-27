@@ -45,7 +45,7 @@ class SqliteMetadataSegment(MetadataReader):
     _db: SqliteDB
     _id: UUID
     _opentelemetry_client: OpenTelemetryClient
-    _topic: Optional[str]
+    _collection_id: Optional[UUID]
     _subscription: Optional[UUID]
 
     def __init__(self, system: System, segment: Segment):
@@ -53,15 +53,17 @@ class SqliteMetadataSegment(MetadataReader):
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
         self._opentelemetry_client = system.require(OpenTelemetryClient)
-        self._topic = segment["topic"]
+        self._collection_id = segment["collection"]
 
     @trace_method("SqliteMetadataSegment.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
-        if self._topic:
+        if self._collection_id:
             seq_id = self.max_seqid()
             self._subscription = self._consumer.subscribe(
-                self._topic, self._write_metadata, start=seq_id
+                collection_id=self._collection_id,
+                consume_fn=self._write_metadata,
+                start=seq_id,
             )
 
     @trace_method("SqliteMetadataSegment.stop", OpenTelemetryGranularity.ALL)
@@ -279,7 +281,8 @@ class SqliteMetadataSegment(MetadataReader):
         except sqlite3.IntegrityError:
             # Can't use INSERT OR REPLACE here because it changes the primary key.
             if upsert:
-                return self._update_record(cur, record)
+                # Cast here because the OpenTel decorators obfuscate the type
+                return cast(None, self._update_record(cur, record))
             else:
                 logger.warning(f"Insert of existing embedding ID: {record['id']}")
                 # We are trying to add for a record that already exists. Fail the call.
