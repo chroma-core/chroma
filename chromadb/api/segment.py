@@ -52,7 +52,6 @@ from chromadb.telemetry.product.events import (
 )
 
 import chromadb.types as t
-
 from typing import Any, Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
@@ -377,7 +376,6 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.ADD,
             ids=ids,
-            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -385,7 +383,7 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
             CollectionAddEvent(
@@ -420,7 +418,6 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.UPDATE,
             ids=ids,
-            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -428,7 +425,7 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
             CollectionUpdateEvent(
@@ -465,7 +462,6 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.UPSERT,
             ids=ids,
-            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -473,7 +469,7 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         return True
 
@@ -635,12 +631,10 @@ class SegmentAPI(ServerAPI):
             return []
 
         records_to_submit = []
-        for r in _records(
-            operation=t.Operation.DELETE, ids=ids_to_delete, collection_id=collection_id
-        ):
+        for r in _records(operation=t.Operation.DELETE, ids=ids_to_delete):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
             CollectionDeleteEvent(
@@ -848,7 +842,6 @@ class SegmentAPI(ServerAPI):
 def _records(
     operation: t.Operation,
     ids: IDs,
-    collection_id: UUID,
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
@@ -886,7 +879,6 @@ def _records(
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
             operation=operation,
-            collection_id=collection_id,
         )
         yield record
 

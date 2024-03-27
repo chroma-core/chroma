@@ -112,7 +112,7 @@ def to_proto_update_metadata(metadata: UpdateMetadata) -> proto.UpdateMetadata:
 
 
 def from_proto_submit(
-    submit_embedding_record: proto.SubmitEmbeddingRecord, seq_id: SeqId
+    submit_embedding_record: proto.OperationRecord, seq_id: SeqId
 ) -> EmbeddingRecord:
     embedding, encoding = from_proto_vector(submit_embedding_record.vector)
     record = EmbeddingRecord(
@@ -132,7 +132,6 @@ def from_proto_segment(segment: proto.Segment) -> Segment:
         id=UUID(hex=segment.id),
         type=segment.type,
         scope=from_proto_segment_scope(segment.scope),
-        topic=segment.topic if segment.HasField("topic") else None,
         collection=None
         if not segment.HasField("collection")
         else UUID(hex=segment.collection),
@@ -147,7 +146,6 @@ def to_proto_segment(segment: Segment) -> proto.Segment:
         id=segment["id"].hex,
         type=segment["type"],
         scope=to_proto_segment_scope(segment["scope"]),
-        topic=segment["topic"],
         collection=None if segment["collection"] is None else segment["collection"].hex,
         metadata=None
         if segment["metadata"] is None
@@ -195,7 +193,6 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
-        topic=collection.topic,
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,
@@ -211,7 +208,6 @@ def to_proto_collection(collection: Collection) -> proto.Collection:
     return proto.Collection(
         id=collection["id"].hex,
         name=collection["name"],
-        topic=collection["topic"],
         metadata=None
         if collection["metadata"] is None
         else to_proto_update_metadata(collection["metadata"]),
@@ -239,7 +235,7 @@ def to_proto_operation(operation: Operation) -> proto.Operation:
 
 def to_proto_submit(
     submit_record: OperationRecord,
-) -> proto.SubmitEmbeddingRecord:
+) -> proto.OperationRecord:
     vector = None
     if submit_record["embedding"] is not None and submit_record["encoding"] is not None:
         vector = to_proto_vector(submit_record["embedding"], submit_record["encoding"])
@@ -248,12 +244,11 @@ def to_proto_submit(
     if submit_record["metadata"] is not None:
         metadata = to_proto_update_metadata(submit_record["metadata"])
 
-    return proto.SubmitEmbeddingRecord(
+    return proto.OperationRecord(
         id=submit_record["id"],
         vector=vector,
         metadata=metadata,
         operation=to_proto_operation(submit_record["operation"]),
-        collection_id=submit_record["collection_id"].hex,
     )
 
 

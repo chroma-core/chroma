@@ -10,7 +10,6 @@ message Status {
 }
 
 // Types here should mirror chromadb/types.py
-
 enum Operation {
     ADD = 0;
     UPDATE = 1;
@@ -42,9 +41,6 @@ message Segment {
     string id = 1;
     string type = 2;
     SegmentScope scope = 3;
-    optional string topic = 4; // TODO should channel <> segment binding exist here?
-    // If a segment has a collection, it implies that this segment implements the full
-    // collection and can be used to service queries (for it's given scope.)
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
     map<string,FilePaths> file_paths = 7;
@@ -53,7 +49,6 @@ message Segment {
 message Collection {
   string id = 1;
   string name = 2;
-  string topic = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
   string tenant = 6;
@@ -84,12 +79,12 @@ message UpdateMetadata {
     map<string, UpdateMetadataValue> metadata = 1;
 }
 
-message SubmitEmbeddingRecord {
+// Represents an operation on the log
+message OperationRecord {
     string id = 1;
     optional Vector vector = 2;
     optional UpdateMetadata metadata = 3;
     Operation operation = 4;
-    string collection_id = 5;
 }
 
 message VectorEmbeddingRecord {

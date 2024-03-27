@@ -71,7 +71,6 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
-    "chromadb.ingest.CollectionAssignmentPolicy": "chroma_collection_assignment_policy_impl",  # noqa
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
@@ -109,9 +108,6 @@ class Settings(BaseSettings):  # type: ignore
     # Distributed architecture specific components
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
-    chroma_collection_assignment_policy_impl: str = (
-        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
-    )
     worker_memberlist_name: str = "query-service-memberlist"
     chroma_coordinator_host = "localhost"
 
