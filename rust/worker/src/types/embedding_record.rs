@@ -101,7 +101,7 @@ impl TryFrom<SubmitEmbeddingRecordWithSeqId> for EmbeddingRecord {
     }
 }
 
-impl TryFrom<RecordLog> for Box<EmbeddingRecord> {
+impl TryFrom<RecordLog> for EmbeddingRecord {
     type Error = EmbeddingRecordConversionError;
 
     fn try_from(record_log: RecordLog) -> Result<Self, Self::Error> {
@@ -143,7 +143,7 @@ impl TryFrom<RecordLog> for Box<EmbeddingRecord> {
             None => None,
         };
 
-        Ok(Box::new(EmbeddingRecord {
+        Ok(EmbeddingRecord {
             id: proto_submit.id,
             seq_id: seq_id,
             embedding: embedding,
@@ -151,7 +151,7 @@ impl TryFrom<RecordLog> for Box<EmbeddingRecord> {
             metadata: metadata,
             operation: op,
             collection_id: collection_uuid,
-        }))
+        })
     }
 }
 
@@ -364,7 +364,7 @@ mod tests {
             log_id: 42,
             record: Some(proto_submit),
         };
-        let converted_embedding_record = Box::<EmbeddingRecord>::try_from(record_log).unwrap();
+        let converted_embedding_record = EmbeddingRecord::try_from(record_log).unwrap();
         assert_eq!(converted_embedding_record.id, Uuid::nil().to_string());
         assert_eq!(converted_embedding_record.seq_id, BigInt::from(42));
         assert_eq!(

@@ -38,7 +38,7 @@ pub(crate) trait Log: Send + Sync + LogClone + Debug {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError>;
+    ) -> Result<Vec<EmbeddingRecord>, PullLogsError>;
 
     async fn get_collections_with_new_data(
         &mut self,
@@ -121,7 +121,7 @@ impl Log for GrpcLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => -1,
@@ -227,7 +227,7 @@ pub(crate) struct LogRecord {
     pub(crate) collection_id: String,
     pub(crate) log_id: i64,
     pub(crate) log_id_ts: i64,
-    pub(crate) record: Box<EmbeddingRecord>,
+    pub(crate) record: EmbeddingRecord,
 }
 
 impl Debug for LogRecord {
@@ -268,7 +268,7 @@ impl Log for InMemoryLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<Box<EmbeddingRecord>>, PullLogsError> {
+    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
