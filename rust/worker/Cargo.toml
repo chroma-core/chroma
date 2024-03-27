@@ -7,6 +7,10 @@ edition = "2021"
 name = "query_service"
 path = "src/bin/query_service.rs"
 
+[[bin]]
+name = "compaction_service"
+path = "src/bin/compaction_service.rs"
+
 [dependencies]
 tonic = "0.10"
 prost = "0.12"

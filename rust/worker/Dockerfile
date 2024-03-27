@@ -21,20 +21,41 @@ RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1
     && unzip -o $PROTOC_ZIP -d /usr/local 'include/*' \
     && rm -f $PROTOC_ZIP
 
+FROM builder as query_service_builder
 # We need to replace the query node's real main() with a dummy at the expected location.
 RUN mkdir -p rust/worker/src/bin/ && echo "fn main() {}" > rust/worker/src/bin/query_service.rs
-RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin query_service --release; else cargo build --bin query_service; fi
 RUN rm -rf rust/
 
 COPY rust/ rust/
 RUN touch rust/worker/src/bin/query_service.rs
-RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --release; else cargo build; fi
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin query_service --release; else cargo build --bin query_service; fi
 RUN if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service .; else mv target/debug/query_service .; fi
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim as query_service
 
-COPY --from=builder /chroma/query_service .
-COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
+COPY --from=query_service_builder /chroma/query_service .
+COPY --from=query_service_builder /chroma/rust/worker/chroma_config.yaml .
 RUN apt-get update && apt-get install -y libssl-dev
 
 ENTRYPOINT [ "./query_service" ]
+
+FROM builder as compaction_service_builder
+
+# We need to replace the compaction node's real main() with a dummy at the expected location.
+RUN mkdir -p rust/worker/src/bin/ && echo "fn main() {}" > rust/worker/src/bin/compaction_service.rs
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin compaction_service --release; else cargo build --bin compaction_service; fi
+RUN rm -rf rust/
+
+COPY rust/ rust/
+RUN touch rust/worker/src/bin/compaction_service.rs
+RUN if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin compaction_service --release; else cargo build --bin compaction_service; fi
+RUN if [ "$RELEASE_MODE" = "1" ]; then mv target/release/compaction_service .; else mv target/debug/compaction_service .; fi
+
+FROM debian:bookworm-slim as compaction_service
+
+COPY --from=compaction_service_builder /chroma/compaction_service .
+COPY --from=compaction_service_builder /chroma/rust/worker/chroma_config.yaml .
+RUN apt-get update && apt-get install -y libssl-dev
+
+ENTRYPOINT [ "./compaction_service" ]
