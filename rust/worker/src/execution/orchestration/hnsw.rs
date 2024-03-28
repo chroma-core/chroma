@@ -225,7 +225,6 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
                 for (index, distance) in output.indices.iter().zip(output.distances.iter()) {
                     let query_result = VectorQueryResult {
                         id: index.to_string(),
-                        seq_id: BigInt::from(0),
                         distance: *distance,
                         vector: None,
                     };

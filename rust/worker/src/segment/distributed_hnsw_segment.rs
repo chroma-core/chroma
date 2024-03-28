@@ -104,11 +104,7 @@ impl DistributedHNSWSegment {
             let vector = index.get(*internal_id);
             match vector {
                 Some(vector) => {
-                    let record = VectorEmbeddingRecord {
-                        id: id,
-                        seq_id: BigInt::from(0),
-                        vector,
-                    };
+                    let record = VectorEmbeddingRecord { id: id, vector };
                     records.push(Box::new(record));
                 }
                 None => {

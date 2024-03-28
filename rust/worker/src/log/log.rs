@@ -144,8 +144,8 @@ impl Log for GrpcLog {
                 for log_record_proto in logs {
                     let log_record = log_record_proto.try_into();
                     match log_record {
-                        Ok(embedding_record) => {
-                            result.push(embedding_record);
+                        Ok(log_record) => {
+                            result.push(log_record);
                         }
                         Err(err) => {
                             return Err(PullLogsError::ConversionError(err));
