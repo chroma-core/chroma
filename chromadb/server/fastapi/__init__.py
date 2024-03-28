@@ -509,6 +509,9 @@ class FastAPI(chromadb.server.Server):
         return await to_thread.run_sync(  # type: ignore
             self._api.get_collection,
             collection_name,
+            None,
+            None,
+            None,
             tenant,
             database,
             limiter=self._capacity_limiter,
@@ -534,7 +537,7 @@ class FastAPI(chromadb.server.Server):
 
         return await to_thread.run_sync(  # type: ignore
             process_update_collection,
-            request.body(),
+            await request.body(),
             limiter=self._capacity_limiter,
         )
 
@@ -691,8 +694,6 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def delete(self, collection_id: str, request: Request) -> List[UUID]:
-        raw_body = await request.body()
-
         def process_delete(raw_body: bytes) -> List[str]:
             delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
             return self._api._delete(
@@ -706,7 +707,7 @@ class FastAPI(chromadb.server.Server):
             List[UUID],
             await to_thread.run_sync(
                 process_delete,
-                raw_body,
+                await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
@@ -753,8 +754,6 @@ class FastAPI(chromadb.server.Server):
     async def get_nearest_neighbors(
         self, collection_id: str, request: Request
     ) -> QueryResult:
-        raw_body = await request.body()  # we don't block main thread here
-
         def process_query(raw_body: bytes) -> QueryResult:
             query = QueryEmbedding.model_validate(orjson.loads(raw_body))
             return self._api._query(
@@ -770,7 +769,7 @@ class FastAPI(chromadb.server.Server):
             QueryResult,
             await to_thread.run_sync(  # we don't block main thread here
                 process_query,
-                raw_body,
+                await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
