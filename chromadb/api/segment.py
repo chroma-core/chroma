@@ -1,3 +1,5 @@
+from functools import cached_property
+
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
@@ -789,7 +791,7 @@ class SegmentAPI(ServerAPI):
     def get_settings(self) -> Settings:
         return self._settings
 
-    @property
+    @cached_property
     @override
     def max_batch_size(self) -> int:
         return self._producer.max_batch_size
