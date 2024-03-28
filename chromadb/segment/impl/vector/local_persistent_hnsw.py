@@ -327,9 +327,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
             for label, vector in zip(hnsw_labels, vectors):
                 id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
                 results[id_to_index[id]] = VectorEmbeddingRecord(
-                    id=id, seq_id=seq_id, embedding=vector
+                    id=id, embedding=vector
                 )
 
         return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord

@@ -1,12 +1,10 @@
-use num_bigint::BigInt;
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use crate::errors::ChromaError;
+use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
+use crate::types::{LogRecord, Operation, Segment, VectorEmbeddingRecord};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-
-use crate::errors::ChromaError;
-use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
-use crate::types::{EmbeddingRecord, Operation, Segment, VectorEmbeddingRecord};
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
@@ -54,21 +52,21 @@ impl DistributedHNSWSegment {
         )?))
     }
 
-    pub(crate) fn write_records(&self, records: Vec<Box<EmbeddingRecord>>) {
-        for record in records {
-            let op = Operation::try_from(record.operation);
+    pub(crate) fn write_records(&self, log_records: Vec<Box<LogRecord>>) {
+        for log_record in log_records {
+            let op = Operation::try_from(log_record.record.operation);
             match op {
                 Ok(Operation::Add) => {
                     // TODO: make lock xor lock
-                    match &record.embedding {
+                    match &log_record.record.embedding {
                         Some(vector) => {
                             let next_id = self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             self.user_id_to_id
                                 .write()
-                                .insert(record.id.clone(), next_id);
+                                .insert(log_record.record.id.clone(), next_id);
                             self.id_to_user_id
                                 .write()
-                                .insert(next_id, record.id.clone());
+                                .insert(next_id, log_record.record.id.clone());
                             println!("Segment adding item: {}", next_id);
                             self.index.read().add(next_id, &vector);
                         }
@@ -103,11 +101,7 @@ impl DistributedHNSWSegment {
             let vector = index.get(*internal_id);
             match vector {
                 Some(vector) => {
-                    let record = VectorEmbeddingRecord {
-                        id: id,
-                        seq_id: BigInt::from(0),
-                        vector,
-                    };
+                    let record = VectorEmbeddingRecord { id: id, vector };
                     records.push(Box::new(record));
                 }
                 None => {

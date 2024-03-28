@@ -39,10 +39,10 @@ def verify_records(
     test_func: Callable,  # type: ignore
     operation: int,
 ) -> None:
-    start_id = 1
+    start_offset = 1
     for batch_records in test_records_map.values():
         test_func(**batch_records)
-        pushed_records = logservice.pull_logs(collection.id, start_id, 100)
+        pushed_records = logservice.pull_logs(collection.id, start_offset, 100)
         assert len(pushed_records) == len(batch_records["ids"])
         for i, record in enumerate(pushed_records):
             assert record.record.id == batch_records["ids"][i]
@@ -70,7 +70,7 @@ def verify_records(
                     == batch_records["documents"][i]
                 )
             assert len(record.record.metadata.metadata) == metadata_count
-        start_id += len(pushed_records)
+        start_offset += len(pushed_records)
 
 
 @skip_if_not_cluster()

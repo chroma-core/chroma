@@ -113,7 +113,6 @@ class BruteForceIndex:
             VectorEmbeddingRecord(
                 id=id,
                 embedding=self.vectors[self.id_to_index[id]].tolist(),
-                seq_id=self.id_to_seq_id[id],
             )
             for id in target_ids
         ]
@@ -145,7 +144,6 @@ class BruteForceIndex:
                             VectorQueryResult(
                                 id=id,
                                 distance=distances[i][j].item(),
-                                seq_id=self.id_to_seq_id[id],
                                 embedding=self.vectors[j].tolist(),
                             )
                         )

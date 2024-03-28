@@ -105,9 +105,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) kube_namespace: String,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
-    pub(crate) ingest: crate::ingest::config::IngestConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
-    pub(crate) segment_manager: crate::segment::config::SegmentManagerConfig,
     pub(crate) storage: crate::storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
@@ -151,14 +149,10 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
-                    ingest:
-                        queue_size: 100
                     sysdb:
                         Grpc:
                             host: "localhost"
                             port: 50051
-                    segment_manager:
-                        storage_path: "/tmp"
                     storage:
                         S3:
                             bucket: "chroma"
@@ -203,14 +197,10 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
-                    ingest:
-                        queue_size: 100
                     sysdb:
                         Grpc:
                             host: "localhost"
                             port: 50051
-                    segment_manager:
-                        storage_path: "/tmp"
                     storage:
                         S3:
                             bucket: "chroma"
@@ -271,14 +261,10 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
-                    ingest:
-                        queue_size: 100
                     sysdb:
                         Grpc:
                             host: "localhost"
                             port: 50051
-                    segment_manager:
-                        storage_path: "/tmp"
                     storage:
                         S3:
                             bucket: "chroma"
@@ -319,14 +305,10 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
-                    ingest:
-                        queue_size: 100
                     sysdb:
                         Grpc:
                             host: "localhost"
                             port: 50051
-                    segment_manager:
-                        storage_path: "/tmp"
                     storage:
                         S3:
                             bucket: "chroma"

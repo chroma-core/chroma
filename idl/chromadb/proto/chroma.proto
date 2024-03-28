@@ -89,13 +89,11 @@ message OperationRecord {
 
 message VectorEmbeddingRecord {
     string id = 1;
-    bytes seq_id = 2;
     Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
 }
 
 message VectorQueryResult {
     string id = 1;
-    bytes seq_id = 2;
     float distance = 3;
     optional Vector vector = 4;
 }

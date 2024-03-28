@@ -148,11 +148,11 @@ class LogService(Producer, Consumer):
         return response.record_count  # type: ignore
 
     def pull_logs(
-        self, collection_id: UUID, start_id: int, batch_size: int
+        self, collection_id: UUID, start_offset: int, batch_size: int
     ) -> Sequence[LogRecord]:
         request = PullLogsRequest(
             collection_id=str(collection_id),
-            start_from_id=start_id,
+            start_from_offset=start_offset,
             batch_size=batch_size,
             end_timestamp=-1,
         )

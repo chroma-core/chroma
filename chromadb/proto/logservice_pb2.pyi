@@ -33,19 +33,19 @@ class PushLogsResponse(_message.Message):
     def __init__(self, record_count: _Optional[int] = ...) -> None: ...
 
 class PullLogsRequest(_message.Message):
-    __slots__ = ["collection_id", "start_from_id", "batch_size", "end_timestamp"]
+    __slots__ = ["collection_id", "start_from_offset", "batch_size", "end_timestamp"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
-    START_FROM_ID_FIELD_NUMBER: _ClassVar[int]
+    START_FROM_OFFSET_FIELD_NUMBER: _ClassVar[int]
     BATCH_SIZE_FIELD_NUMBER: _ClassVar[int]
     END_TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
-    start_from_id: int
+    start_from_offset: int
     batch_size: int
     end_timestamp: int
     def __init__(
         self,
         collection_id: _Optional[str] = ...,
-        start_from_id: _Optional[int] = ...,
+        start_from_offset: _Optional[int] = ...,
         batch_size: _Optional[int] = ...,
         end_timestamp: _Optional[int] = ...,
     ) -> None: ...
@@ -71,18 +71,18 @@ class PullLogsResponse(_message.Message):
     ) -> None: ...
 
 class CollectionInfo(_message.Message):
-    __slots__ = ["collection_id", "first_log_id", "first_log_id_ts"]
+    __slots__ = ["collection_id", "first_log_offset", "first_log_ts"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
-    FIRST_LOG_ID_FIELD_NUMBER: _ClassVar[int]
-    FIRST_LOG_ID_TS_FIELD_NUMBER: _ClassVar[int]
+    FIRST_LOG_OFFSET_FIELD_NUMBER: _ClassVar[int]
+    FIRST_LOG_TS_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
-    first_log_id: int
-    first_log_id_ts: int
+    first_log_offset: int
+    first_log_ts: int
     def __init__(
         self,
         collection_id: _Optional[str] = ...,
-        first_log_id: _Optional[int] = ...,
-        first_log_id_ts: _Optional[int] = ...,
+        first_log_offset: _Optional[int] = ...,
+        first_log_ts: _Optional[int] = ...,
     ) -> None: ...
 
 class GetAllCollectionInfoToCompactRequest(_message.Message):
