@@ -1,12 +1,12 @@
 from typing import Dict, List, Set, cast
 
-from chromadb.types import EmbeddingRecord, Operation, SeqId, Vector
+from chromadb.types import LogRecord, Operation, SeqId, Vector
 
 
 class Batch:
     """Used to model the set of changes as an atomic operation"""
 
-    _ids_to_records: Dict[str, EmbeddingRecord]
+    _ids_to_records: Dict[str, LogRecord]
     _deleted_ids: Set[str]
     _written_ids: Set[str]
     _upsert_add_ids: Set[str]  # IDs that are being added in an upsert
@@ -37,9 +37,12 @@ class Batch:
 
     def get_written_vectors(self, ids: List[str]) -> List[Vector]:
         """Get the list of vectors to write in this batch"""
-        return [cast(Vector, self._ids_to_records[id]["embedding"]) for id in ids]
+        return [
+            cast(Vector, self._ids_to_records[id]["operation_record"]["embedding"])
+            for id in ids
+        ]
 
-    def get_record(self, id: str) -> EmbeddingRecord:
+    def get_record(self, id: str) -> LogRecord:
         """Get the record for a given ID"""
         return self._ids_to_records[id]
 
@@ -51,24 +54,33 @@ class Batch:
     def delete_count(self) -> int:
         return len(self._deleted_ids)
 
-    def apply(self, record: EmbeddingRecord, exists_already: bool = False) -> None:
+    def apply(self, record: LogRecord, exists_already: bool = False) -> None:
         """Apply an embedding record to this batch. Records passed to this method are assumed to be validated for correctness.
         For example, a delete or update presumes the ID exists in the index. An add presumes the ID does not exist in the index.
         The exists_already flag should be set to True if the ID does exist in the index, and False otherwise.
         """
 
-        id = record["id"]
-        if record["operation"] == Operation.DELETE:
+        id = record["operation_record"]["id"]
+        if record["operation_record"]["operation"] == Operation.DELETE:
             # If the ID was previously written, remove it from the written set
             # And update the add/update/delete counts
             if id in self._written_ids:
                 self._written_ids.remove(id)
-                if self._ids_to_records[id]["operation"] == Operation.ADD:
+                if (
+                    self._ids_to_records[id]["operation_record"]["operation"]
+                    == Operation.ADD
+                ):
                     self.add_count -= 1
-                elif self._ids_to_records[id]["operation"] == Operation.UPDATE:
+                elif (
+                    self._ids_to_records[id]["operation_record"]["operation"]
+                    == Operation.UPDATE
+                ):
                     self.update_count -= 1
                     self._deleted_ids.add(id)
-                elif self._ids_to_records[id]["operation"] == Operation.UPSERT:
+                elif (
+                    self._ids_to_records[id]["operation_record"]["operation"]
+                    == Operation.UPSERT
+                ):
                     if id in self._upsert_add_ids:
                         self.add_count -= 1
                         self._upsert_add_ids.remove(id)
@@ -92,15 +104,15 @@ class Batch:
                 self._deleted_ids.remove(id)
 
             # Update the add/update counts
-            if record["operation"] == Operation.UPSERT:
+            if record["operation_record"]["operation"] == Operation.UPSERT:
                 if not exists_already:
                     self.add_count += 1
                     self._upsert_add_ids.add(id)
                 else:
                     self.update_count += 1
-            elif record["operation"] == Operation.ADD:
+            elif record["operation_record"]["operation"] == Operation.ADD:
                 self.add_count += 1
-            elif record["operation"] == Operation.UPDATE:
+            elif record["operation_record"]["operation"] == Operation.UPDATE:
                 self.update_count += 1
 
-        self.max_seq_id = max(self.max_seq_id, record["seq_id"])
+        self.max_seq_id = max(self.max_seq_id, record["log_offset"])

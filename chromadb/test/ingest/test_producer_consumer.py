@@ -22,7 +22,7 @@ from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     OperationRecord,
     Operation,
-    EmbeddingRecord,
+    LogRecord,
     ScalarEncoding,
 )
 from chromadb.config import System, Settings
@@ -92,7 +92,7 @@ def sample_embeddings() -> Iterator[OperationRecord]:
 
 
 class CapturingConsumeFn:
-    embeddings: List[EmbeddingRecord]
+    embeddings: List[LogRecord]
     waiters: List[Tuple[int, Event]]
 
     def __init__(self) -> None:
@@ -104,14 +104,14 @@ class CapturingConsumeFn:
         self.waiters = []
         self._loop = asyncio.get_event_loop()
 
-    def __call__(self, embeddings: Sequence[EmbeddingRecord]) -> None:
+    def __call__(self, embeddings: Sequence[LogRecord]) -> None:
         self.embeddings.extend(embeddings)
         for n, event in self.waiters:
             if len(self.embeddings) >= n:
                 # event.set() is not thread safe, so we need to call it in the main event loop
                 self._loop.call_soon_threadsafe(event.set)
 
-    async def get(self, n: int, timeout_secs: int = 10) -> Sequence[EmbeddingRecord]:
+    async def get(self, n: int, timeout_secs: int = 10) -> Sequence[LogRecord]:
         "Wait until at least N embeddings are available, then return all embeddings"
         if len(self.embeddings) >= n:
             return self.embeddings[:n]
@@ -130,19 +130,21 @@ def assert_approx_equal(a: Sequence[float], b: Sequence[float]) -> None:
 
 def assert_records_match(
     inserted_records: Sequence[OperationRecord],
-    consumed_records: Sequence[EmbeddingRecord],
+    consumed_records: Sequence[LogRecord],
 ) -> None:
     """Given a list of inserted and consumed records, make sure they match"""
     assert len(consumed_records) == len(inserted_records)
     for inserted, consumed in zip(inserted_records, consumed_records):
-        assert inserted["id"] == consumed["id"]
-        assert inserted["operation"] == consumed["operation"]
-        assert inserted["encoding"] == consumed["encoding"]
-        assert inserted["metadata"] == consumed["metadata"]
+        assert inserted["id"] == consumed["operation_record"]["id"]
+        assert inserted["operation"] == consumed["operation_record"]["operation"]
+        assert inserted["encoding"] == consumed["operation_record"]["encoding"]
+        assert inserted["metadata"] == consumed["operation_record"]["metadata"]
 
         if inserted["embedding"] is not None:
-            assert consumed["embedding"] is not None
-            assert_approx_equal(inserted["embedding"], consumed["embedding"])
+            assert consumed["operation_record"]["embedding"] is not None
+            assert_approx_equal(
+                inserted["embedding"], consumed["operation_record"]["embedding"]
+            )
 
 
 @pytest.mark.asyncio
@@ -243,7 +245,7 @@ async def test_start_seq_id(
     results_1 = await consume_fn_1.get(5)
     assert_records_match(embeddings, results_1)
 
-    start = consume_fn_1.embeddings[-1]["seq_id"]
+    start = consume_fn_1.embeddings[-1]["log_offset"]
     consumer.subscribe(collection, consume_fn_2, start=start)
     second_embeddings = produce_fns(producer, collection, sample_embeddings, 5)[0]
     assert isinstance(embeddings, list)
@@ -273,7 +275,7 @@ async def test_end_seq_id(
     results_1 = await consume_fn_1.get(10)
     assert_records_match(embeddings, results_1)
 
-    end = consume_fn_1.embeddings[-5]["seq_id"]
+    end = consume_fn_1.embeddings[-5]["log_offset"]
     consumer.subscribe(collection, consume_fn_2, start=consumer.min_seqid(), end=end)
 
     results_2 = await consume_fn_2.get(6)

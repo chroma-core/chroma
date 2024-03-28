@@ -13,13 +13,16 @@ use std::fmt::Debug;
 use thiserror::Error;
 use uuid::Uuid;
 
-// CollectionInfo is a struct that contains information about a collection for the
-// compacting process. It contains information about the collection id, the first log id,
-// and the first log id timestamp since last compaction.
+/// CollectionInfo is a struct that contains information about a collection for the
+/// compacting process.
+/// Fields:
+/// - collection_id: the id of the collection that needs to be compacted
+/// - first_log_offset: the offset of the first log entry in the collection that needs to be compacted
+/// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
 pub(crate) struct CollectionInfo {
     pub(crate) collection_id: String,
-    pub(crate) first_log_id: i64,
-    pub(crate) first_log_id_ts: i64,
+    pub(crate) first_log_offset: i64,
+    pub(crate) first_log_ts: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -129,7 +132,7 @@ impl Log for GrpcLog {
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
             collection_id: collection_id.to_string(),
-            start_from_id: offset,
+            start_from_offset: offset,
             batch_size,
             end_timestamp,
         });
@@ -174,8 +177,8 @@ impl Log for GrpcLog {
                 for collection in collections {
                     result.push(CollectionInfo {
                         collection_id: collection.collection_id,
-                        first_log_id: collection.first_log_id,
-                        first_log_id_ts: collection.first_log_id_ts,
+                        first_log_offset: collection.first_log_offset,
+                        first_log_ts: collection.first_log_ts,
                     });
                 }
                 Ok(result)
@@ -226,8 +229,8 @@ impl ChromaError for GetCollectionsWithNewDataError {
 #[derive(Clone)]
 pub(crate) struct LogRecord {
     pub(crate) collection_id: String,
-    pub(crate) log_id: i64,
-    pub(crate) log_id_ts: i64,
+    pub(crate) log_offset: i64,
+    pub(crate) log_ts: i64,
     pub(crate) record: EmbeddingRecord,
 }
 
@@ -235,8 +238,8 @@ impl Debug for LogRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogRecord")
             .field("collection_id", &self.collection_id)
-            .field("log_id", &self.log_id)
-            .field("log_id_ts", &self.log_id_ts)
+            .field("log_offset", &self.log_offset)
+            .field("log_ts", &self.log_ts)
             .field("record", &self.record)
             .finish()
     }
@@ -281,7 +284,7 @@ impl Log for InMemoryLog {
         };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
-            if i < logs.len() as i64 && logs[i as usize].log_id_ts <= end_timestamp {
+            if i < logs.len() as i64 && logs[i as usize].log_ts <= end_timestamp {
                 result.push(logs[i as usize].record.clone());
             }
         }
@@ -296,13 +299,13 @@ impl Log for InMemoryLog {
             if log_record.is_empty() {
                 continue;
             }
-            // sort the logs by log_id
+            // sort the logs by log_offset
             let mut logs = log_record.clone();
-            logs.sort_by(|a, b| a.log_id.cmp(&b.log_id));
+            logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {
                 collection_id: collection_id.clone(),
-                first_log_id: logs[0].log_id,
-                first_log_id_ts: logs[0].log_id_ts,
+                first_log_offset: logs[0].log_offset,
+                first_log_ts: logs[0].log_ts,
             });
         }
         Ok(collections)

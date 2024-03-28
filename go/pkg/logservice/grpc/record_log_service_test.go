@@ -111,7 +111,7 @@ func (suite *RecordLogServiceTestSuite) TestServer_PushLogs() {
 	suite.db.Where("collection_id = ?", types.FromUniqueID(suite.collectionId)).Find(&recordLogs)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.collectionId.String(), *recordLogs[index].CollectionID)
 		record := &coordinatorpb.OperationRecord{}
 		if unmarshalErr := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
@@ -143,15 +143,15 @@ func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 
 	// pull the records
 	pullRequest := logservicepb.PullLogsRequest{
-		CollectionId: suite.collectionId.String(),
-		StartFromId:  0,
-		BatchSize:    10,
+		CollectionId:    suite.collectionId.String(),
+		StartFromOffset: 0,
+		BatchSize:       10,
 	}
 	pullResponse, err := suite.s.PullLogs(context.Background(), &pullRequest)
 	suite.NoError(err)
 	suite.Len(pullResponse.Records, 3)
 	for index := range pullResponse.Records {
-		suite.Equal(int64(index+1), pullResponse.Records[index].LogId)
+		suite.Equal(int64(index+1), pullResponse.Records[index].LogOffset)
 		suite.Equal(recordsToSubmit_sot[index].Id, pullResponse.Records[index].Record.Id)
 		suite.Equal(recordsToSubmit_sot[index].Operation, pullResponse.Records[index].Record.Operation)
 		suite.Equal(recordsToSubmit_sot[index].Metadata, pullResponse.Records[index].Record.Metadata)
@@ -178,9 +178,9 @@ func (suite *RecordLogServiceTestSuite) TestServer_Bad_CollectionId() {
 	// pull the records
 	// pull the records
 	pullRequest := logservicepb.PullLogsRequest{
-		CollectionId: "badId",
-		StartFromId:  0,
-		BatchSize:    10,
+		CollectionId:    "badId",
+		StartFromOffset: 0,
+		BatchSize:       10,
 	}
 	_, err = suite.s.PullLogs(context.Background(), &pullRequest)
 	suite.Error(err)
@@ -207,9 +207,9 @@ func (suite *RecordLogServiceTestSuite) TestServer_GetAllCollectionInfoToCompact
 	suite.NoError(err)
 	suite.Len(response.AllCollectionInfo, 1)
 	suite.Equal(suite.collectionId.String(), response.AllCollectionInfo[0].CollectionId)
-	suite.Equal(int64(1), response.AllCollectionInfo[0].FirstLogId)
-	suite.True(response.AllCollectionInfo[0].FirstLogIdTs > startTime)
-	suite.True(response.AllCollectionInfo[0].FirstLogIdTs < time.Now().UnixNano())
+	suite.Equal(int64(1), response.AllCollectionInfo[0].FirstLogOffset)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs > startTime)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs < time.Now().UnixNano())
 
 	// move log position
 	testutils.MoveLogPosition(suite.db, suite.collectionId, 2)
@@ -220,9 +220,9 @@ func (suite *RecordLogServiceTestSuite) TestServer_GetAllCollectionInfoToCompact
 	suite.NoError(err)
 	suite.Len(response.AllCollectionInfo, 1)
 	suite.Equal(suite.collectionId.String(), response.AllCollectionInfo[0].CollectionId)
-	suite.Equal(int64(3), response.AllCollectionInfo[0].FirstLogId)
-	suite.True(response.AllCollectionInfo[0].FirstLogIdTs > startTime)
-	suite.True(response.AllCollectionInfo[0].FirstLogIdTs < time.Now().UnixNano())
+	suite.Equal(int64(3), response.AllCollectionInfo[0].FirstLogOffset)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs > startTime)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs < time.Now().UnixNano())
 }
 
 func TestRecordLogServiceTestSuite(t *testing.T) {

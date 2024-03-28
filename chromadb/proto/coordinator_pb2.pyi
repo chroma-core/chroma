@@ -90,18 +90,16 @@ class DeleteSegmentResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class GetSegmentsRequest(_message.Message):
-    __slots__ = ["id", "type", "scope", "topic", "collection"]
+    __slots__ = ["id", "type", "scope", "collection"]
     ID_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
     scope: _chroma_pb2.SegmentScope
-    topic: str
     collection: str
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[_chroma_pb2.SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[_chroma_pb2.SegmentScope, str]] = ..., collection: _Optional[str] = ...) -> None: ...
 
 class GetSegmentsResponse(_message.Message):
     __slots__ = ["segments", "status"]
@@ -112,22 +110,18 @@ class GetSegmentsResponse(_message.Message):
     def __init__(self, segments: _Optional[_Iterable[_Union[_chroma_pb2.Segment, _Mapping]]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class UpdateSegmentRequest(_message.Message):
-    __slots__ = ["id", "topic", "reset_topic", "collection", "reset_collection", "metadata", "reset_metadata"]
+    __slots__ = ["id", "collection", "reset_collection", "metadata", "reset_metadata"]
     ID_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
-    RESET_TOPIC_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     RESET_COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     RESET_METADATA_FIELD_NUMBER: _ClassVar[int]
     id: str
-    topic: str
-    reset_topic: bool
     collection: str
     reset_collection: bool
     metadata: _chroma_pb2.UpdateMetadata
     reset_metadata: bool
-    def __init__(self, id: _Optional[str] = ..., topic: _Optional[str] = ..., reset_topic: bool = ..., collection: _Optional[str] = ..., reset_collection: bool = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ..., reset_collection: bool = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class UpdateSegmentResponse(_message.Message):
     __slots__ = ["status"]
@@ -180,18 +174,16 @@ class DeleteCollectionResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class GetCollectionsRequest(_message.Message):
-    __slots__ = ["id", "name", "topic", "tenant", "database"]
+    __slots__ = ["id", "name", "tenant", "database"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
-    topic: str
     tenant: str
     database: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
 
 class GetCollectionsResponse(_message.Message):
     __slots__ = ["collections", "status"]
@@ -202,20 +194,18 @@ class GetCollectionsResponse(_message.Message):
     def __init__(self, collections: _Optional[_Iterable[_Union[_chroma_pb2.Collection, _Mapping]]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class UpdateCollectionRequest(_message.Message):
-    __slots__ = ["id", "topic", "name", "dimension", "metadata", "reset_metadata"]
+    __slots__ = ["id", "name", "dimension", "metadata", "reset_metadata"]
     ID_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     RESET_METADATA_FIELD_NUMBER: _ClassVar[int]
     id: str
-    topic: str
     name: str
     dimension: int
     metadata: _chroma_pb2.UpdateMetadata
     reset_metadata: bool
-    def __init__(self, id: _Optional[str] = ..., topic: _Optional[str] = ..., name: _Optional[str] = ..., dimension: _Optional[int] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., dimension: _Optional[int] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class UpdateCollectionResponse(_message.Message):
     __slots__ = ["status"]

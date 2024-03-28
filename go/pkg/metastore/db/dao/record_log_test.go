@@ -65,7 +65,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
 	suite.db.Where("collection_id = ?", types.FromUniqueID(suite.collectionId1)).Find(&recordLogs)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index], *recordLogs[index].Record)
 	}
 
@@ -80,7 +80,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
 	suite.db.Where("collection_id = ?", types.FromUniqueID(suite.collectionId1)).Find(&recordLogs)
 	suite.Len(recordLogs, 5)
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index], *recordLogs[index].Record)
 	}
 
@@ -95,7 +95,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PushLogs() {
 	suite.db.Where("collection_id = ?", types.FromUniqueID(suite.collectionId2)).Find(&recordLogs)
 	suite.Len(recordLogs, 5)
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index], *recordLogs[index].Record)
 	}
 }
@@ -121,7 +121,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	suite.NoError(err)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index], *recordLogs[index].Record)
 	}
 
@@ -131,7 +131,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	suite.Len(recordLogs, 5)
 
 	for index := range recordLogs {
-		suite.Equal(int64(index+1), recordLogs[index].ID)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index], *recordLogs[index].Record)
 	}
 
@@ -140,7 +140,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	suite.NoError(err)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		suite.Equal(int64(index+3), recordLogs[index].ID)
+		suite.Equal(int64(index+3), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index+2], *recordLogs[index].Record)
 	}
 
@@ -149,7 +149,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_PullLogsFromID() {
 	suite.NoError(err)
 	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		suite.Equal(int64(index+3), recordLogs[index].ID)
+		suite.Equal(int64(index+3), recordLogs[index].LogOffset)
 		suite.Equal(suite.records[index+2], *recordLogs[index].Record)
 	}
 }
@@ -165,7 +165,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() 
 	suite.NoError(err)
 	suite.Len(collectionInfos, 1)
 	suite.Equal(suite.collectionId1.String(), *collectionInfos[0].CollectionID)
-	suite.Equal(int64(1), collectionInfos[0].ID)
+	suite.Equal(int64(1), collectionInfos[0].LogOffset)
 
 	// move log position
 	testutils.MoveLogPosition(suite.db, suite.collectionId1, 2)
@@ -175,7 +175,7 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() 
 	suite.NoError(err)
 	suite.Len(collectionInfos, 1)
 	suite.Equal(suite.collectionId1.String(), *collectionInfos[0].CollectionID)
-	suite.Equal(int64(3), collectionInfos[0].ID)
+	suite.Equal(int64(3), collectionInfos[0].LogOffset)
 
 	// push some logs
 	count, err = suite.Db.PushLogs(suite.collectionId2, suite.records)
@@ -187,9 +187,9 @@ func (suite *RecordLogDbTestSuite) TestRecordLogDb_GetAllCollectionsToCompact() 
 	suite.NoError(err)
 	suite.Len(collectionInfos, 2)
 	suite.Equal(suite.collectionId1.String(), *collectionInfos[0].CollectionID)
-	suite.Equal(int64(3), collectionInfos[0].ID)
+	suite.Equal(int64(3), collectionInfos[0].LogOffset)
 	suite.Equal(suite.collectionId2.String(), *collectionInfos[1].CollectionID)
-	suite.Equal(int64(1), collectionInfos[1].ID)
+	suite.Equal(int64(1), collectionInfos[1].LogOffset)
 }
 
 func TestRecordLogDbTestSuite(t *testing.T) {
