@@ -572,6 +572,11 @@ class FastAPI(ServerAPI):
         include: Include = ["metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
+
+        def cast_to_float(embedding):
+	        return [float(e) for e in embedding]
+        query_embeddings = [cast_to_float(embedding) for embedding in query_embeddings]
+        
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/query",
             data=json.dumps(
