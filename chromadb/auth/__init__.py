@@ -159,11 +159,11 @@ class ServerAuthenticationRequest(EnforceOverrides, ABC, Generic[T]):
 
 class ServerAuthenticationResponse(EnforceOverrides, ABC):
     @abstractmethod
-    def success(self) -> bool:
+    async def success(self) -> bool:
         ...
 
     @abstractmethod
-    def get_user_identity(self) -> Optional[UserIdentity]:
+    async def get_user_identity(self) -> Optional[UserIdentity]:
         ...
 
 
@@ -180,11 +180,11 @@ class SimpleServerAuthenticationResponse(ServerAuthenticationResponse):
         self._user_identity = user_identity
 
     @override
-    def success(self) -> bool:
+    async def success(self) -> bool:
         return self._auth_success
 
     @override
-    def get_user_identity(self) -> Optional[UserIdentity]:
+    async def get_user_identity(self) -> Optional[UserIdentity]:
         return self._user_identity
 
 
@@ -204,13 +204,13 @@ class ChromaAuthMiddleware(Component):
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(
+    async def authenticate(
         self, request: ServerAuthenticationRequest[T]
     ) -> ServerAuthenticationResponse:
         ...
 
     @abstractmethod
-    def ignore_operation(self, verb: str, path: str) -> bool:
+    async def ignore_operation(self, verb: str, path: str) -> bool:
         ...
 
     @abstractmethod
@@ -414,6 +414,11 @@ class ServerAuthorizationProvider(Component):
 
     @abstractmethod
     def authorize(self, context: AuthorizationContext) -> bool:
+        pass
+
+    @abstractmethod
+    async def aauthorize(self, context: AuthorizationContext) -> bool:
+        """Asynchronous version of authorize"""
         pass
 
 
