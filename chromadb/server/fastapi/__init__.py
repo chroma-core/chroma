@@ -323,10 +323,10 @@ class FastAPI(chromadb.server.Server):
             },
         )
 
-    def heartbeat(self) -> Dict[str, int]:
+    async def heartbeat(self) -> Dict[str, int]:
         return self.root()
 
-    def version(self) -> str:
+    async def version(self) -> str:
         return self._api.get_version()
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
@@ -339,10 +339,18 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def create_database(
-        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
+    async def create_database(
+        self, request: Request, tenant: str = DEFAULT_TENANT
     ) -> None:
-        return self._api.create_database(database.name, tenant)
+        def process_create_tenant(raw_body: bytes) -> None:
+            create = CreateDatabase.model_validate(orjson.loads(raw_body))
+            return self._api.create_database(create.name, tenant)
+
+        return await to_thread.run_sync(  # type: ignore
+            process_create_tenant,
+            await request.body(),
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -355,8 +363,15 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
-        return self._api.get_database(database, tenant)
+    async def get_database(
+        self, database: str, tenant: str = DEFAULT_TENANT
+    ) -> Database:
+        return await to_thread.run_sync(  # type: ignore
+            self._api.get_database,
+            database,
+            tenant,
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -365,8 +380,16 @@ class FastAPI(chromadb.server.Server):
             type=AuthzResourceTypes.TENANT,
         ),
     )
-    def create_tenant(self, tenant: CreateTenant) -> None:
-        return self._api.create_tenant(tenant.name)
+    async def create_tenant(self, request: Request) -> None:
+        def process_create_tenant(raw_body: bytes) -> None:
+            create = CreateTenant.model_validate(orjson.loads(raw_body))
+            return self._api.create_tenant(create.name)
+
+        return await to_thread.run_sync(  # type: ignore
+            process_create_tenant,
+            await request.body(),
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -376,8 +399,12 @@ class FastAPI(chromadb.server.Server):
             type=AuthzResourceTypes.TENANT,
         ),
     )
-    def get_tenant(self, tenant: str) -> Tenant:
-        return self._api.get_tenant(tenant)
+    async def get_tenant(self, tenant: str) -> Tenant:
+        return await to_thread.run_sync(  # type: ignore
+            self._api.get_tenant,
+            tenant,
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -390,15 +417,20 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def list_collections(
+    async def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
-        return self._api.list_collections(
-            limit=limit, offset=offset, tenant=tenant, database=database
+        return await to_thread.run_sync(  # type: ignore
+            self._api.list_collections,
+            limit,
+            offset,
+            tenant,
+            database,
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
@@ -412,12 +444,17 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def count_collections(
+    async def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        return self._api.count_collections(tenant=tenant, database=database)
+        return await to_thread.run_sync(  # type: ignore
+            self._api.count_collections,
+            tenant,
+            database,
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -430,18 +467,26 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def create_collection(
+    async def create_collection(
         self,
-        collection: CreateCollection,
+        request: Request,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        return self._api.create_collection(
-            name=collection.name,
-            metadata=collection.metadata,
-            get_or_create=collection.get_or_create,
-            tenant=tenant,
-            database=database,
+        def process_create_collection(raw_body: bytes) -> Collection:
+            create = CreateCollection.model_validate(orjson.loads(raw_body))
+            return self._api.create_collection(
+                name=create.name,
+                metadata=create.metadata,
+                get_or_create=create.get_or_create,
+                tenant=tenant,
+                database=database,
+            )
+
+        return await to_thread.run_sync(  # type: ignore
+            process_create_collection,
+            await request.body(),
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -455,14 +500,18 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def get_collection(
+    async def get_collection(
         self,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        return self._api.get_collection(
-            collection_name, tenant=tenant, database=database
+        return await to_thread.run_sync(  # type: ignore
+            self._api.get_collection,
+            collection_name,
+            tenant,
+            database,
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
@@ -474,13 +523,19 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    def update_collection(
-        self, collection_id: str, collection: UpdateCollection
-    ) -> None:
-        return self._api._modify(
-            id=_uuid(collection_id),
-            new_name=collection.new_name,
-            new_metadata=collection.new_metadata,
+    async def update_collection(self, collection_id: str, request: Request) -> None:
+        def process_update_collection(raw_body: bytes) -> None:
+            update = UpdateCollection.model_validate(orjson.loads(raw_body))
+            return self._api._modify(
+                id=_uuid(collection_id),
+                new_name=update.new_name,
+                new_metadata=update.new_metadata,
+            )
+
+        return await to_thread.run_sync(  # type: ignore
+            process_update_collection,
+            request.body(),
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
@@ -494,13 +549,19 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def delete_collection(
+    async def delete_collection(
         self,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        return self._api.delete_collection(collection_name, tenant, database)
+        return await to_thread.run_sync(  # type: ignore
+            self._api.delete_collection,
+            collection_name,
+            tenant,
+            database,
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -659,8 +720,12 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    def count(self, collection_id: str) -> int:
-        return self._api._count(_uuid(collection_id))
+    async def count(self, collection_id: str) -> int:
+        return await to_thread.run_sync(  # type: ignore
+            self._api._count,
+            _uuid(collection_id),
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -670,8 +735,11 @@ class FastAPI(chromadb.server.Server):
             type=AuthzResourceTypes.DB,
         ),
     )
-    def reset(self) -> bool:
-        return self._api.reset()
+    async def reset(self) -> bool:
+        return await to_thread.run_sync(  # type: ignore
+            self._api.reset,
+            limiter=self._capacity_limiter,
+        )
 
     @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -708,7 +776,13 @@ class FastAPI(chromadb.server.Server):
         )
         return nnresult
 
-    def pre_flight_checks(self) -> Dict[str, Any]:
-        return {
-            "max_batch_size": self._api.max_batch_size,
-        }
+    async def pre_flight_checks(self) -> Dict[str, Any]:
+        def process_pre_flight_checks(_: Any) -> Dict[str, Any]:
+            return {
+                "max_batch_size": self._api.max_batch_size,
+            }
+
+        return await to_thread.run_sync(  # type: ignore
+            process_pre_flight_checks,
+            limiter=self._capacity_limiter,
+        )
