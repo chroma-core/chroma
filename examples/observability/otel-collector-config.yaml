@@ -3,7 +3,11 @@ receivers:
     protocols:
       grpc:
       http:
-
+processors:
+  batch:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 90
 exporters:
   logging:
   zipkin:
@@ -13,4 +17,5 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
+      processors: [batch, memory_limiter]
       exporters: [zipkin]
