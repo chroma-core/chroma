@@ -72,6 +72,7 @@ k8s_resource(
     'pod-watcher:Role',
     'memberlists.chroma.cluster:CustomResourceDefinition',
     'query-service-memberlist:MemberList',
+    'compaction-service-memberlist:MemberList',
 
     'sysdb-serviceaccount:serviceaccount',
     'sysdb-serviceaccount-rolebinding:RoleBinding',
@@ -87,6 +88,9 @@ k8s_resource(
 
     'compaction-service-serviceaccount:serviceaccount',
     'compaction-service-serviceaccount-rolebinding:RoleBinding',
+    'compaction-service-memberlist-readerwriter:ClusterRole',
+    'compaction-service-compaction-service-memberlist-binding:clusterrolebinding',
+    'compaction-service-memberlist-readerwriter-binding:clusterrolebinding',
 
     'test-memberlist:MemberList',
     'test-memberlist-reader:ClusterRole',

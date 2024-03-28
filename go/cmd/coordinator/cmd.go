@@ -54,9 +54,15 @@ func init() {
 
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
-	Cmd.Flags().StringVar(&conf.WorkerMemberlistName, "worker-memberlist-name", "query-service-memberlist", "Worker memberlist name")
-	Cmd.Flags().StringVar(&conf.WorkerPodLabel, "worker-pod-label", "query-service", "Worker pod label")
+
+	// Query service memberlist
+	Cmd.Flags().StringVar(&conf.QueryServiceMemberlistName, "query-memberlist-name", "query-service-memberlist", "Query service memberlist name")
+	Cmd.Flags().StringVar(&conf.QueryServicePodLabel, "query-pod-label", "query-service", "Query pod label")
 	Cmd.Flags().DurationVar(&conf.WatchInterval, "watch-interval", 60*time.Second, "Watch interval")
+
+	// Compaction service Memberlist
+	Cmd.Flags().StringVar(&conf.CompactionServiceMemberlistName, "compaction-memberlist-name", "compaction-service-memberlist", "Compaction memberlist name")
+	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
 }
 
 func exec(*cobra.Command, []string) {
