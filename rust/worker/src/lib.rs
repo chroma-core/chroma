@@ -6,7 +6,6 @@ mod distance;
 mod errors;
 mod execution;
 mod index;
-mod ingest;
 mod log;
 mod memberlist;
 mod segment;
@@ -27,13 +26,6 @@ mod chroma_proto {
 pub async fn query_service_entrypoint() {
     let config = config::RootConfig::load();
     let system: system::System = system::System::new();
-    let segment_manager = match segment::SegmentManager::try_from_config(&config.worker).await {
-        Ok(segment_manager) => segment_manager,
-        Err(err) => {
-            println!("Failed to create segment manager component: {:?}", err);
-            return;
-        }
-    };
     let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
     {
         Ok(dispatcher) => dispatcher,
@@ -50,7 +42,6 @@ pub async fn query_service_entrypoint() {
             return;
         }
     };
-    worker_server.set_segment_manager(segment_manager.clone());
     worker_server.set_system(system);
     worker_server.set_dispatcher(dispatcher_handle.receiver());
 
@@ -79,23 +70,6 @@ pub async fn worker_entrypoint() {
             }
         };
 
-    let segment_manager = match segment::SegmentManager::try_from_config(&config.worker).await {
-        Ok(segment_manager) => segment_manager,
-        Err(err) => {
-            println!("Failed to create segment manager component: {:?}", err);
-            return;
-        }
-    };
-
-    let mut segment_ingestor_receivers =
-        Vec::with_capacity(config.worker.num_indexing_threads as usize);
-    for _ in 0..config.worker.num_indexing_threads {
-        let segment_ingestor = segment::SegmentIngestor::new(segment_manager.clone());
-        let segment_ingestor_handle = system.start_component(segment_ingestor);
-        let recv = segment_ingestor_handle.receiver();
-        segment_ingestor_receivers.push(recv);
-    }
-
     let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
         Ok(worker_server) => worker_server,
         Err(err) => {
@@ -103,7 +77,6 @@ pub async fn worker_entrypoint() {
             return;
         }
     };
-    worker_server.set_segment_manager(segment_manager.clone());
 
     // Boot the system
     // memberlist -> (This is broken for now until we have compaction manager) NUM_THREADS x segment_ingestor -> segment_manager

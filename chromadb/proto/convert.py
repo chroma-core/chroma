@@ -3,7 +3,6 @@ from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
-from chromadb.utils.messageid import bytes_to_int, int_to_bytes
 from chromadb.types import (
     Collection,
     LogRecord,
@@ -117,7 +116,7 @@ def from_proto_submit(
     embedding, encoding = from_proto_vector(operation_record.vector)
     record = LogRecord(
         log_offset=seq_id,
-        operation_record=OperationRecord(
+        record=OperationRecord(
             id=operation_record.id,
             embedding=embedding,
             encoding=encoding,
@@ -258,7 +257,6 @@ def from_proto_vector_embedding_record(
 ) -> VectorEmbeddingRecord:
     return VectorEmbeddingRecord(
         id=embedding_record.id,
-        seq_id=from_proto_seq_id(embedding_record.seq_id),
         embedding=from_proto_vector(embedding_record.vector)[0],
     )
 
@@ -269,7 +267,6 @@ def to_proto_vector_embedding_record(
 ) -> proto.VectorEmbeddingRecord:
     return proto.VectorEmbeddingRecord(
         id=embedding_record["id"],
-        seq_id=to_proto_seq_id(embedding_record["seq_id"]),
         vector=to_proto_vector(embedding_record["embedding"], encoding),
     )
 
@@ -279,15 +276,6 @@ def from_proto_vector_query_result(
 ) -> VectorQueryResult:
     return VectorQueryResult(
         id=vector_query_result.id,
-        seq_id=from_proto_seq_id(vector_query_result.seq_id),
         distance=vector_query_result.distance,
         embedding=from_proto_vector(vector_query_result.vector)[0],
     )
-
-
-def to_proto_seq_id(seq_id: SeqId) -> bytes:
-    return int_to_bytes(seq_id)
-
-
-def from_proto_seq_id(seq_id: bytes) -> SeqId:
-    return bytes_to_int(seq_id)

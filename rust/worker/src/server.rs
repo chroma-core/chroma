@@ -7,7 +7,6 @@ use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::HnswQueryOrchestrator;
 use crate::log::log::Log;
-use crate::segment::SegmentManager;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{Receiver, System};
 use crate::types::ScalarEncoding;
@@ -19,7 +18,6 @@ pub struct WorkerServer {
     // System
     system: Option<System>,
     // Component dependencies
-    segment_manager: Option<SegmentManager>,
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Service dependencies
     log: Box<dyn Log>,
@@ -43,7 +41,6 @@ impl Configurable for WorkerServer {
             }
         };
         Ok(WorkerServer {
-            segment_manager: None,
             dispatcher: None,
             system: None,
             sysdb,
@@ -66,10 +63,6 @@ impl WorkerServer {
         println!("Worker shutting down");
 
         Ok(())
-    }
-
-    pub(crate) fn set_segment_manager(&mut self, segment_manager: SegmentManager) {
-        self.segment_manager = Some(segment_manager);
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
@@ -95,48 +88,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             }
         };
 
-        let segment_manager = match self.segment_manager {
-            Some(ref segment_manager) => segment_manager,
-            None => {
-                return Err(Status::internal("No segment manager found"));
-            }
-        };
-
-        let records = match segment_manager
-            .get_records(&segment_uuid, request.ids)
-            .await
-        {
-            Ok(records) => records,
-            Err(e) => {
-                return Err(Status::internal(format!("Error getting records: {}", e)));
-            }
-        };
-
-        let mut proto_records = Vec::new();
-        for record in records {
-            let sed_id_bytes = record.seq_id.to_bytes_le();
-            let dim = record.vector.len();
-            let proto_vector = (record.vector, ScalarEncoding::FLOAT32, dim).try_into();
-            match proto_vector {
-                Ok(proto_vector) => {
-                    let proto_record = chroma_proto::VectorEmbeddingRecord {
-                        id: record.id,
-                        seq_id: sed_id_bytes.1,
-                        vector: Some(proto_vector),
-                    };
-                    proto_records.push(proto_record);
-                }
-                Err(e) => {
-                    return Err(Status::internal(format!("Error converting vector: {}", e)));
-                }
-            }
-        }
-
-        let resp = chroma_proto::GetVectorsResponse {
-            records: proto_records,
-        };
-
-        Ok(Response::new(resp))
+        Err(Status::unimplemented("Not yet implemented"))
     }
 
     async fn query_vectors(
@@ -148,13 +100,6 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             Ok(uuid) => uuid,
             Err(_) => {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
-            }
-        };
-
-        let segment_manager = match self.segment_manager {
-            Some(ref segment_manager) => segment_manager,
-            None => {
-                return Err(Status::internal("No segment manager found"));
             }
         };
 
@@ -213,7 +158,6 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             for query_result in result_set {
                 let proto_result = chroma_proto::VectorQueryResult {
                     id: query_result.id,
-                    seq_id: query_result.seq_id.to_bytes_le().1,
                     distance: query_result.distance,
                     vector: match query_result.vector {
                         Some(vector) => {

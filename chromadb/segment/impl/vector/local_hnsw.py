@@ -49,6 +49,9 @@ class LocalHnswSegment(VectorReader):
 
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, str]
+    # Note: As of the time of writing, this mapping is no longer needed.
+    # We merely keep it around for easy compatibility with the old code and
+    # debugging purposes.
     _id_to_seq_id: Dict[str, SeqId]
 
     _opentelemtry_client: OpenTelemetryClient
@@ -116,10 +119,7 @@ class LocalHnswSegment(VectorReader):
 
             for label, vector in zip(labels, vectors):
                 id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
-                results.append(
-                    VectorEmbeddingRecord(id=id, seq_id=seq_id, embedding=vector)
-                )
+                results.append(VectorEmbeddingRecord(id=id, embedding=vector))
 
         return results
 
@@ -168,7 +168,6 @@ class LocalHnswSegment(VectorReader):
                     result_labels[result_i], distances[result_i]
                 ):
                     id = self._label_to_id[label]
-                    seq_id = self._id_to_seq_id[id]
                     if query["include_embeddings"]:
                         embedding = self._index.get_items([label])[0]
                     else:
@@ -176,7 +175,6 @@ class LocalHnswSegment(VectorReader):
                     results.append(
                         VectorQueryResult(
                             id=id,
-                            seq_id=seq_id,
                             distance=distance.item(),
                             embedding=embedding,
                         )

@@ -150,26 +150,22 @@ class OperationRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
 
 class VectorEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "seq_id", "vector"]
+    __slots__ = ["id", "vector"]
     ID_FIELD_NUMBER: _ClassVar[int]
-    SEQ_ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     id: str
-    seq_id: bytes
     vector: Vector
-    def __init__(self, id: _Optional[str] = ..., seq_id: _Optional[bytes] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class VectorQueryResult(_message.Message):
-    __slots__ = ["id", "seq_id", "distance", "vector"]
+    __slots__ = ["id", "distance", "vector"]
     ID_FIELD_NUMBER: _ClassVar[int]
-    SEQ_ID_FIELD_NUMBER: _ClassVar[int]
     DISTANCE_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     id: str
-    seq_id: bytes
     distance: float
     vector: Vector
-    def __init__(self, id: _Optional[str] = ..., seq_id: _Optional[bytes] = ..., distance: _Optional[float] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., distance: _Optional[float] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class VectorQueryResults(_message.Message):
     __slots__ = ["results"]

@@ -5358,7 +5358,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "murmur3",
- "num-bigint",
  "num_cpus",
  "parking_lot",
  "proptest",

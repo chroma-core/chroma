@@ -1,33 +1,31 @@
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
-    ScalarEncodingConversionError, SeqId, UpdateMetadata, UpdateMetadataValueConversionError,
+    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValueConversionError,
 };
 use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
-use chroma_proto::LogRecord;
-use chroma_proto::OperationRecord;
-use num_bigint::BigInt;
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-pub(crate) struct EmbeddingRecord {
+pub(crate) struct OperationRecord {
     pub(crate) id: String,
-    pub(crate) seq_id: SeqId,
-    pub(crate) embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now
+    pub(crate) embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now so this ignores the encoding
     pub(crate) encoding: Option<ScalarEncoding>,
     pub(crate) metadata: Option<UpdateMetadata>,
     pub(crate) operation: Operation,
-    pub(crate) collection_id: Uuid,
 }
 
-pub(crate) type OperationRecordWithSeqIdAndCollectionId =
-    (chroma_proto::OperationRecord, SeqId, Uuid);
+#[derive(Clone, Debug)]
+pub(crate) struct LogRecord {
+    pub(crate) log_offset: i64,
+    pub(crate) record: OperationRecord,
+}
 
 #[derive(Error, Debug)]
-pub(crate) enum EmbeddingRecordConversionError {
+pub(crate) enum RecordConversionError {
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -42,110 +40,67 @@ pub(crate) enum EmbeddingRecordConversionError {
     VectorConversionError(#[from] VectorConversionError),
 }
 
-impl_base_convert_error!(EmbeddingRecordConversionError, {
-    EmbeddingRecordConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
-    EmbeddingRecordConversionError::OperationConversionError(inner) => inner.code(),
-    EmbeddingRecordConversionError::ScalarEncodingConversionError(inner) => inner.code(),
-    EmbeddingRecordConversionError::UpdateMetadataValueConversionError(inner) => inner.code(),
-    EmbeddingRecordConversionError::VectorConversionError(inner) => inner.code(),
+impl_base_convert_error!(RecordConversionError, {
+    RecordConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
+    RecordConversionError::OperationConversionError(inner) => inner.code(),
+    RecordConversionError::ScalarEncodingConversionError(inner) => inner.code(),
+    RecordConversionError::UpdateMetadataValueConversionError(inner) => inner.code(),
+    RecordConversionError::VectorConversionError(inner) => inner.code(),
 });
 
-impl TryFrom<OperationRecordWithSeqIdAndCollectionId> for EmbeddingRecord {
-    type Error = EmbeddingRecordConversionError;
+impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
+    type Error = RecordConversionError;
 
     fn try_from(
-        proto_submit_with_seq_id: OperationRecordWithSeqIdAndCollectionId,
+        operation_record_proto: chroma_proto::OperationRecord,
     ) -> Result<Self, Self::Error> {
-        let proto_submit = proto_submit_with_seq_id.0;
-        let seq_id = proto_submit_with_seq_id.1;
-        let collection_id = proto_submit_with_seq_id.2;
-        let op = match proto_submit.operation.try_into() {
+        let operation = match operation_record_proto.operation.try_into() {
             Ok(op) => op,
-            Err(e) => return Err(EmbeddingRecordConversionError::OperationConversionError(e)),
+            Err(e) => return Err(RecordConversionError::OperationConversionError(e)),
         };
 
-        let (embedding, encoding) = match proto_submit.vector {
+        let (embedding, encoding) = match operation_record_proto.vector {
             Some(proto_vector) => match proto_vector.try_into() {
                 Ok((embedding, encoding)) => (Some(embedding), Some(encoding)),
-                Err(e) => return Err(EmbeddingRecordConversionError::VectorConversionError(e)),
+                Err(e) => return Err(RecordConversionError::VectorConversionError(e)),
             },
             // If there is no vector, there is no encoding
             None => (None, None),
         };
 
-        let metadata: Option<UpdateMetadata> = match proto_submit.metadata {
+        let metadata: Option<UpdateMetadata> = match operation_record_proto.metadata {
             Some(proto_metadata) => match proto_metadata.try_into() {
                 Ok(metadata) => Some(metadata),
-                Err(e) => {
-                    return Err(
-                        EmbeddingRecordConversionError::UpdateMetadataValueConversionError(e),
-                    )
-                }
+                Err(e) => return Err(RecordConversionError::UpdateMetadataValueConversionError(e)),
             },
             None => None,
         };
 
-        Ok(EmbeddingRecord {
-            id: proto_submit.id,
-            seq_id: seq_id,
-            embedding: embedding,
-            encoding: encoding,
-            metadata: metadata,
-            operation: op,
-            collection_id: collection_id,
+        Ok(OperationRecord {
+            id: operation_record_proto.id,
+            embedding,
+            encoding,
+            metadata,
+            operation,
         })
     }
 }
 
-type RecordLogWithCollectionId = (LogRecord, Uuid);
+impl TryFrom<chroma_proto::LogRecord> for LogRecord {
+    type Error = RecordConversionError;
 
-impl TryFrom<RecordLogWithCollectionId> for EmbeddingRecord {
-    type Error = EmbeddingRecordConversionError;
-
-    fn try_from(record_log_collection_id: RecordLogWithCollectionId) -> Result<Self, Self::Error> {
-        let record_log = record_log_collection_id.0;
-        let collection_uuid = record_log_collection_id.1;
-        let proto_submit = record_log
-            .record
-            .ok_or(EmbeddingRecordConversionError::DecodeError(
-                ConversionError::DecodeError,
-            ))?;
-
-        let seq_id = BigInt::from(record_log.log_offset);
-        let op = match proto_submit.operation.try_into() {
-            Ok(op) => op,
-            Err(e) => return Err(EmbeddingRecordConversionError::OperationConversionError(e)),
+    fn try_from(log_record_proto: chroma_proto::LogRecord) -> Result<Self, Self::Error> {
+        let record = match log_record_proto.record {
+            Some(proto_record) => OperationRecord::try_from(proto_record)?,
+            None => {
+                return Err(RecordConversionError::DecodeError(
+                    ConversionError::DecodeError,
+                ))
+            }
         };
-
-        let (embedding, encoding) = match proto_submit.vector {
-            Some(proto_vector) => match proto_vector.try_into() {
-                Ok((embedding, encoding)) => (Some(embedding), Some(encoding)),
-                Err(e) => return Err(EmbeddingRecordConversionError::VectorConversionError(e)),
-            },
-            // If there is no vector, there is no encoding
-            None => (None, None),
-        };
-
-        let metadata: Option<UpdateMetadata> = match proto_submit.metadata {
-            Some(proto_metadata) => match proto_metadata.try_into() {
-                Ok(metadata) => Some(metadata),
-                Err(e) => {
-                    return Err(
-                        EmbeddingRecordConversionError::UpdateMetadataValueConversionError(e),
-                    )
-                }
-            },
-            None => None,
-        };
-
-        Ok(EmbeddingRecord {
-            id: proto_submit.id,
-            seq_id: seq_id,
-            embedding: embedding,
-            encoding: encoding,
-            metadata: metadata,
-            operation: op,
-            collection_id: collection_uuid,
+        Ok(LogRecord {
+            log_offset: log_record_proto.log_offset,
+            record,
         })
     }
 }
@@ -253,7 +208,6 @@ Vector Embedding Record
 #[derive(Debug)]
 pub(crate) struct VectorEmbeddingRecord {
     pub(crate) id: String,
-    pub(crate) seq_id: SeqId,
     pub(crate) vector: Vec<f32>,
 }
 
@@ -266,20 +220,15 @@ Vector Query Result
 #[derive(Debug)]
 pub(crate) struct VectorQueryResult {
     pub(crate) id: String,
-    pub(crate) seq_id: SeqId,
     pub(crate) distance: f32,
     pub(crate) vector: Option<Vec<f32>>,
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use num_bigint::BigInt;
-    use uuid::uuid;
-
     use super::*;
     use crate::{chroma_proto, types::UpdateMetadataValue};
+    use std::collections::HashMap;
 
     fn as_byte_view(input: &[f32]) -> Vec<u8> {
         unsafe {
@@ -292,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_embedding_record_try_from() {
+    fn test_operation_record_try_from() {
         let mut metadata = chroma_proto::UpdateMetadata {
             metadata: HashMap::new(),
         };
@@ -313,31 +262,24 @@ mod tests {
             metadata: Some(metadata),
             operation: chroma_proto::Operation::Add as i32,
         };
-        let converted_embedding_record: EmbeddingRecord = EmbeddingRecord::try_from((
-            proto_submit,
-            BigInt::from(42),
-            uuid!("00000000-0000-0000-0000-000000000000"),
-        ))
-        .unwrap();
-        assert_eq!(converted_embedding_record.id, Uuid::nil().to_string());
-        assert_eq!(converted_embedding_record.seq_id, BigInt::from(42));
+        let converted_operation_record = OperationRecord::try_from(proto_submit).unwrap();
+        assert_eq!(converted_operation_record.id, Uuid::nil().to_string());
         assert_eq!(
-            converted_embedding_record.embedding,
+            converted_operation_record.embedding,
             Some(vec![1.0, 2.0, 3.0])
         );
         assert_eq!(
-            converted_embedding_record.encoding,
+            converted_operation_record.encoding,
             Some(ScalarEncoding::FLOAT32)
         );
-        let metadata = converted_embedding_record.metadata.unwrap();
+        let metadata = converted_operation_record.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &UpdateMetadataValue::Int(42));
-        assert_eq!(converted_embedding_record.operation, Operation::Add);
-        assert_eq!(converted_embedding_record.collection_id, Uuid::nil());
+        assert_eq!(converted_operation_record.operation, Operation::Add);
     }
 
     #[test]
-    fn test_embedding_record_try_from_record_log() {
+    fn test_log_record_try_from_record_log() {
         let mut metadata = chroma_proto::UpdateMetadata {
             metadata: HashMap::new(),
         };
@@ -362,23 +304,20 @@ mod tests {
             log_offset: 42,
             record: Some(proto_submit),
         };
-        let converted_embedding_record =
-            EmbeddingRecord::try_from((record_log, uuid!("00000000-0000-0000-0000-000000000000")))
-                .unwrap();
-        assert_eq!(converted_embedding_record.id, Uuid::nil().to_string());
-        assert_eq!(converted_embedding_record.seq_id, BigInt::from(42));
+        let converted_log_record = LogRecord::try_from(record_log).unwrap();
+        assert_eq!(converted_log_record.record.id, Uuid::nil().to_string());
+        assert_eq!(converted_log_record.log_offset, 42);
         assert_eq!(
-            converted_embedding_record.embedding,
+            converted_log_record.record.embedding,
             Some(vec![1.0, 2.0, 3.0])
         );
         assert_eq!(
-            converted_embedding_record.encoding,
+            converted_log_record.record.encoding,
             Some(ScalarEncoding::FLOAT32)
         );
-        let metadata = converted_embedding_record.metadata.unwrap();
+        let metadata = converted_log_record.record.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &UpdateMetadataValue::Int(42));
-        assert_eq!(converted_embedding_record.operation, Operation::Add);
-        assert_eq!(converted_embedding_record.collection_id, Uuid::nil());
+        assert_eq!(converted_log_record.record.operation, Operation::Add);
     }
 }
