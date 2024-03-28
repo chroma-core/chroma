@@ -108,3 +108,8 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
             f" on [{context.resource}]"
         )
         return policy_decision
+
+    @override
+    async def aauthorize(self, context: AuthorizationContext) -> bool:
+        # since we're doing hash lookups, we can reuse existing authorize sunc method
+        return self.authorize(context)  # type: ignore

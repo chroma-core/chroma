@@ -67,7 +67,7 @@ class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
         self._auth_success = auth_success
 
     @override
-    def success(self) -> bool:
+    async def success(self) -> bool:
         return self._auth_success
 
 
@@ -95,7 +95,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         "FastAPIChromaAuthMiddleware.authenticate", OpenTelemetryGranularity.ALL
     )
     @override
-    def authenticate(
+    async def authenticate(
         self, request: ServerAuthenticationRequest[Any]
     ) -> ServerAuthenticationResponse:
         return self._auth_provider.authenticate(request)
@@ -104,7 +104,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         "FastAPIChromaAuthMiddleware.ignore_operation", OpenTelemetryGranularity.ALL
     )
     @override
-    def ignore_operation(self, verb: str, path: str) -> bool:
+    async def ignore_operation(self, verb: str, path: str) -> bool:
         if (
             path in self._ignore_auth_paths.keys()
             and verb.upper() in self._ignore_auth_paths[path]
@@ -138,18 +138,18 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if self._middleware.ignore_operation(request.method, request.url.path):
+        if await self._middleware.ignore_operation(request.method, request.url.path):
             logger.debug(
                 f"Skipping auth for path {request.url.path} and method {request.method}"
             )
             return await call_next(request)
-        response = self._middleware.authenticate(
+        response = await self._middleware.authenticate(
             FastAPIServerAuthenticationRequest(request)
         )
-        if not response or not response.success():
+        if not response or not await response.success():
             return fastapi_json_response(AuthorizationError("Unauthorized"))
 
-        request.state.user_identity = response.get_user_identity()
+        request.state.user_identity = await response.get_user_identity()
         return await call_next(request)
 
 
@@ -216,8 +216,12 @@ def authz_context(
                     )
 
                     if _provider:
-                        # TODO this will block the event loop if it takes too long - refactor for async
-                        a_authz_responses.append(_provider.authorize(_context))
+                        if asyncio.iscoroutinefunction(f):
+                            a_authz_responses.append(
+                                await _provider.aauthorize(_context)
+                            )
+                        else:
+                            a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
                 # In a multi-tenant environment, we may want to allow users to send
