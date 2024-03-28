@@ -6,7 +6,6 @@ mod distance;
 mod errors;
 mod execution;
 mod index;
-mod ingest;
 mod log;
 mod memberlist;
 mod segment;
