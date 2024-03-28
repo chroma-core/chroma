@@ -776,7 +776,7 @@ class FastAPI(chromadb.server.Server):
         return nnresult
 
     async def pre_flight_checks(self) -> Dict[str, Any]:
-        def process_pre_flight_checks(_: Any) -> Dict[str, Any]:
+        def process_pre_flight_checks() -> Dict[str, Any]:
             return {
                 "max_batch_size": self._api.max_batch_size,
             }
