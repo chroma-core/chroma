@@ -85,10 +85,10 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         let mut heap = BinaryHeap::with_capacity(input.k);
         let data_chunk = &input.data;
         for data in data_chunk.iter() {
-            let embedding_record = data.0;
+            let log_record = data.0;
             let index = data.1;
 
-            let embedding = match &embedding_record.embedding {
+            let embedding = match &log_record.record.embedding {
                 Some(embedding) => embedding,
                 None => {
                     continue;
@@ -126,8 +126,9 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
 
 #[cfg(test)]
 mod tests {
-    use crate::types::EmbeddingRecord;
+    use crate::types::LogRecord;
     use crate::types::Operation;
+    use crate::types::OperationRecord;
     use num_bigint::BigInt;
     use uuid::Uuid;
 
@@ -137,32 +138,35 @@ mod tests {
     async fn test_brute_force_knn_l2sqr() {
         let operator = BruteForceKnnOperator {};
         let data = vec![
-            EmbeddingRecord {
-                id: "embedding_id_1".to_string(),
-                seq_id: BigInt::from(0),
-                embedding: Some(vec![0.0, 0.0, 0.0]),
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: Uuid::new_v4(),
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![0.0, 0.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_2".to_string(),
-                seq_id: BigInt::from(1),
-                embedding: Some(vec![0.0, 1.0, 1.0]),
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: Uuid::new_v4(),
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(vec![0.0, 1.0, 1.0]),
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_3".to_string(),
-                seq_id: BigInt::from(2),
-                embedding: Some(vec![7.0, 8.0, 9.0]),
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: Uuid::new_v4(),
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
         ];
         let data_chunk = DataChunk::new(data.into());
@@ -191,34 +195,36 @@ mod tests {
 
         let norm_2 = (0.0_f32.powi(2) + -1.0_f32.powi(2) + 6.0_f32.powi(2)).sqrt();
         let data_2 = vec![0.0 / norm_2, -1.0 / norm_2, 6.0 / norm_2];
-
         let data = vec![
-            EmbeddingRecord {
-                id: "embedding_id_1".to_string(),
-                seq_id: BigInt::from(0),
-                embedding: Some(vec![0.0, 1.0, 0.0]),
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: Uuid::new_v4(),
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![0.0, 1.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_2".to_string(),
-                seq_id: BigInt::from(1),
-                embedding: Some(data_1.clone()),
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: Uuid::new_v4(),
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(data_1.clone()),
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_3".to_string(),
-                seq_id: BigInt::from(2),
-                embedding: Some(data_2.clone()),
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: Uuid::new_v4(),
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(data_2.clone()),
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
         ];
         let data_chunk = DataChunk::new(data.into());
@@ -244,14 +250,15 @@ mod tests {
     async fn test_data_less_than_k() {
         // If we have less data than k, we should return all the data, sorted by distance.
         let operator = BruteForceKnnOperator {};
-        let data = vec![EmbeddingRecord {
-            id: "embedding_id_1".to_string(),
-            seq_id: BigInt::from(0),
-            embedding: Some(vec![0.0, 0.0, 0.0]),
-            encoding: None,
-            metadata: None,
-            operation: Operation::Add,
-            collection_id: Uuid::new_v4(),
+        let data = vec![LogRecord {
+            log_offset: 1,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: Some(vec![0.0, 0.0, 0.0]),
+                encoding: None,
+                metadata: None,
+                operation: Operation::Add,
+            },
         }];
 
         let data_chunk = DataChunk::new(data.into());

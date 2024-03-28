@@ -173,12 +173,13 @@ mod tests {
     use super::*;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
-    use crate::log::log::LogRecord;
+    use crate::log::log::InternalLogRecord;
     use crate::sysdb::sysdb::GetCollectionsError;
     use crate::sysdb::sysdb::GetSegmentsError;
     use crate::types::Collection;
-    use crate::types::EmbeddingRecord;
+    use crate::types::LogRecord;
     use crate::types::Operation;
+    use crate::types::OperationRecord;
     use crate::types::Segment;
     use crate::types::SegmentScope;
     use num_bigint::BigInt;
@@ -270,18 +271,19 @@ mod tests {
         let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
             collection_id_1.clone(),
-            Box::new(LogRecord {
+            Box::new(InternalLogRecord {
                 collection_id: collection_id_1.clone(),
                 log_offset: 1,
                 log_ts: 1,
-                record: EmbeddingRecord {
-                    id: "embedding_id_1".to_string(),
-                    seq_id: BigInt::from(1),
-                    embedding: None,
-                    encoding: None,
-                    metadata: None,
-                    operation: Operation::Add,
-                    collection_id: collection_uuid_1,
+                record: LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        operation: Operation::Add,
+                    },
                 },
             }),
         );
@@ -290,18 +292,19 @@ mod tests {
         let collection_id_2 = collection_uuid_2.to_string();
         log.add_log(
             collection_id_2.clone(),
-            Box::new(LogRecord {
+            Box::new(InternalLogRecord {
                 collection_id: collection_id_2.clone(),
                 log_offset: 2,
                 log_ts: 2,
-                record: EmbeddingRecord {
-                    id: "embedding_id_2".to_string(),
-                    seq_id: BigInt::from(2),
-                    embedding: None,
-                    encoding: None,
-                    metadata: None,
-                    operation: Operation::Add,
-                    collection_id: collection_uuid_2,
+                record: LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        operation: Operation::Add,
+                    },
                 },
             }),
         );

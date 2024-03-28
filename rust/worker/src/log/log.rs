@@ -5,8 +5,8 @@ use crate::config::WorkerConfig;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
-use crate::types::EmbeddingRecord;
-use crate::types::EmbeddingRecordConversionError;
+use crate::types::LogRecord;
+use crate::types::RecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -42,7 +42,7 @@ pub(crate) trait Log: Send + Sync + LogClone + Debug {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<EmbeddingRecord>, PullLogsError>;
+    ) -> Result<Vec<LogRecord>, PullLogsError>;
 
     async fn get_collections_with_new_data(
         &mut self,
@@ -125,7 +125,7 @@ impl Log for GrpcLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
+    ) -> Result<Vec<LogRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => -1,
@@ -141,9 +141,9 @@ impl Log for GrpcLog {
             Ok(response) => {
                 let logs = response.into_inner().records;
                 let mut result = Vec::new();
-                for log in logs {
-                    let embedding_record = (log, collection_id).try_into();
-                    match embedding_record {
+                for log_record_proto in logs {
+                    let log_record = log_record_proto.try_into();
+                    match log_record {
                         Ok(embedding_record) => {
                             result.push(embedding_record);
                         }
@@ -197,7 +197,7 @@ pub(crate) enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]
-    ConversionError(#[from] EmbeddingRecordConversionError),
+    ConversionError(#[from] RecordConversionError),
 }
 
 impl ChromaError for PullLogsError {
@@ -225,16 +225,17 @@ impl ChromaError for GetCollectionsWithNewDataError {
     }
 }
 
-// This is used for testing only
+// This is used for testing only, it represents a log record that is stored in memory
+// internal to a mock log implementation
 #[derive(Clone)]
-pub(crate) struct LogRecord {
+pub(crate) struct InternalLogRecord {
     pub(crate) collection_id: String,
     pub(crate) log_offset: i64,
     pub(crate) log_ts: i64,
-    pub(crate) record: EmbeddingRecord,
+    pub(crate) record: LogRecord,
 }
 
-impl Debug for LogRecord {
+impl Debug for InternalLogRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogRecord")
             .field("collection_id", &self.collection_id)
@@ -248,7 +249,7 @@ impl Debug for LogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
-    logs: HashMap<String, Vec<Box<LogRecord>>>,
+    logs: HashMap<String, Vec<Box<InternalLogRecord>>>,
 }
 
 impl InMemoryLog {
@@ -258,7 +259,7 @@ impl InMemoryLog {
         }
     }
 
-    pub fn add_log(&mut self, collection_id: String, log: Box<LogRecord>) {
+    pub fn add_log(&mut self, collection_id: String, log: Box<InternalLogRecord>) {
         let logs = self.logs.entry(collection_id).or_insert(Vec::new());
         logs.push(log);
     }
@@ -272,7 +273,7 @@ impl Log for InMemoryLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
+    ) -> Result<Vec<LogRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,

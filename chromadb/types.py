@@ -93,7 +93,7 @@ class OperationRecord(TypedDict):
 
 class LogRecord(TypedDict):
     log_offset: int
-    operation_record: OperationRecord
+    record: OperationRecord
 
 
 class VectorQuery(TypedDict):

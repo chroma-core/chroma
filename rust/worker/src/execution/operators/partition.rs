@@ -7,8 +7,8 @@ use thiserror::Error;
 
 #[derive(Debug)]
 /// The partition Operator takes a DataChunk and presents a copy-free
-/// view of N partitions by breaking the data into partitions by max_partition_size. It will group operations 
-/// on the same key into the same partition. Due to this, the max_partition_size is a 
+/// view of N partitions by breaking the data into partitions by max_partition_size. It will group operations
+/// on the same key into the same partition. Due to this, the max_partition_size is a
 /// soft-limit, since if there are more operations to a key than max_partition_size we cannot
 /// partition the data.
 pub struct PartitionOperator {}
@@ -69,9 +69,9 @@ impl PartitionOperator {
     pub fn partition(&self, records: &DataChunk, partition_size: usize) -> Vec<DataChunk> {
         let mut map = HashMap::new();
         for data in records.iter() {
-            let record = data.0;
+            let log_record = data.0;
             let index = data.1;
-            let key = record.id.clone();
+            let key = log_record.record.id.clone();
             map.entry(key).or_insert_with(Vec::new).push(index);
         }
         let mut result = Vec::new();
@@ -134,8 +134,7 @@ impl Operator<PartitionInput, PartitionOutput> for PartitionOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::EmbeddingRecord;
-    use crate::types::Operation;
+    use crate::types::{LogRecord, Operation, OperationRecord};
     use num_bigint::BigInt;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -143,38 +142,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_operator() {
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let data = vec![
-            EmbeddingRecord {
-                id: "embedding_id_1".to_string(),
-                seq_id: BigInt::from(1),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: collection_uuid_1,
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_2".to_string(),
-                seq_id: BigInt::from(2),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: collection_uuid_1,
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_1".to_string(),
-                seq_id: BigInt::from(3),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: collection_uuid_2,
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
         ];
-        let data: Arc<[EmbeddingRecord]> = data.into();
+        let data: Arc<[LogRecord]> = data.into();
 
         // Test group size is larger than the number of records
         let chunk = DataChunk::new(data.clone());
