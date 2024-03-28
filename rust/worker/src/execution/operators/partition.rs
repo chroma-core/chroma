@@ -135,10 +135,7 @@ impl Operator<PartitionInput, PartitionOutput> for PartitionOperator {
 mod tests {
     use super::*;
     use crate::types::{LogRecord, Operation, OperationRecord};
-    use num_bigint::BigInt;
-    use std::str::FromStr;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_partition_operator() {

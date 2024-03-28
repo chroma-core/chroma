@@ -1,13 +1,10 @@
-use num_bigint::BigInt;
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use crate::errors::ChromaError;
+use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
+use crate::types::{LogRecord, Operation, Segment, VectorEmbeddingRecord};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-
-use crate::errors::ChromaError;
-use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
-use crate::log::log::Log;
-use crate::types::{LogRecord, Operation, Segment, VectorEmbeddingRecord};
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,

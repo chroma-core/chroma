@@ -182,7 +182,6 @@ mod tests {
     use crate::types::OperationRecord;
     use crate::types::Segment;
     use crate::types::SegmentScope;
-    use num_bigint::BigInt;
     use std::collections::HashMap;
     use std::str::FromStr;
     use std::time::Duration;

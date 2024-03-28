@@ -25,7 +25,6 @@ num_cpus = "1.16.0"
 pulsar = "6.1.0"
 murmur3 = "0.5.2"
 thiserror = "1.0.50"
-num-bigint = "0.4.4"
 tempfile = "3.8.1"
 schemars = "0.8.16"
 kube = { version = "0.87.1", features = ["runtime", "derive"] }

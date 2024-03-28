@@ -129,7 +129,6 @@ mod tests {
     use crate::types::LogRecord;
     use crate::types::Operation;
     use crate::types::OperationRecord;
-    use num_bigint::BigInt;
     use uuid::Uuid;
 
     use super::*;

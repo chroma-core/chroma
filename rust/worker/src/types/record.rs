@@ -1,6 +1,6 @@
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
-    ScalarEncodingConversionError, SeqId, UpdateMetadata, UpdateMetadataValueConversionError,
+    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValueConversionError,
 };
 use crate::{
     chroma_proto,

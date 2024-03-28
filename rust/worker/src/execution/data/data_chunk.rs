@@ -110,7 +110,6 @@ mod tests {
     use super::*;
     use crate::types::LogRecord;
     use crate::types::Operation;
-    use num_bigint::BigInt;
     use std::str::FromStr;
     use uuid::Uuid;
 
