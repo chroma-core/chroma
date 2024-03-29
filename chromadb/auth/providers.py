@@ -45,7 +45,7 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         OpenTelemetryGranularity.ALL,
     )
     @override
-    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+    async def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if len(_creds) != 2:
             logger.error(
@@ -54,8 +54,7 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
             )
             return False
         if "username" not in _creds or "password" not in _creds:
-            logger.error(
-                "Returned credentials do not contain username or password")
+            logger.error("Returned credentials do not contain username or password")
             return False
         _usr_check = bool(
             _creds["username"].get_secret_value()
@@ -67,7 +66,7 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         )
 
     @override
-    def get_user_identity(
+    async def get_user_identity(
         self, credentials: AbstractCredentials[T]
     ) -> Optional[SimpleUserIdentity]:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
@@ -173,8 +172,7 @@ class RequestsClientAuthProtocolAdapter(
                 ].get_secret_value()
             else:
                 for header in _header_info:
-                    injection_context.headers[header[0]
-                                              ] = header[1].get_secret_value()
+                    injection_context.headers[header[0]] = header[1].get_secret_value()
         else:
             raise ValueError(
                 f"Unsupported auth type: {self._auth_header.get_auth_info_type()}"
@@ -189,8 +187,7 @@ class ConfigurationClientAuthCredentialsProvider(
     def __init__(self, system: System) -> None:
         super().__init__(system)
         system.settings.require("chroma_client_auth_credentials")
-        self._creds = SecretStr(
-            str(system.settings.chroma_client_auth_credentials))
+        self._creds = SecretStr(str(system.settings.chroma_client_auth_credentials))
 
     @override
     def get_credentials(self) -> SecretStr:
