@@ -55,6 +55,11 @@ queryService:
     repository: 'local'
     tag: 'query-service'
 
+compactionService:
+  image:
+    repository: 'local'
+    tag: 'compaction-service'
+
 sysdbMigration:
   image:
     repository: 'local'
