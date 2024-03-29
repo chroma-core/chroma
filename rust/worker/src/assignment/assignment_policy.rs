@@ -1,7 +1,4 @@
-use crate::{
-    config::{Configurable, WorkerConfig},
-    errors::ChromaError,
-};
+use crate::{config::Configurable, errors::ChromaError};
 
 use super::{
     config::{AssignmentPolicyConfig, HasherType},
@@ -20,14 +17,10 @@ Interfaces
 /// This trait mirrors the go and python versions of the assignment policy
 /// interface.
 /// # Methods
-/// - assign: Assign a key to a topic.
+/// - assign: Assign a key to a member.
 /// - get_members: Get the members that can be assigned to.
 /// - set_members: Set the members that can be assigned to.
-/// # Notes
-/// An assignment policy is not responsible for creating the topics it assigns to.
-/// It is the responsibility of the caller to ensure that the topics exist.
-/// An assignment policy must be Send.
-pub(crate) trait AssignmentPolicy: Send {
+pub(crate) trait AssignmentPolicy: Send + Sync {
     fn assign(&self, key: &str) -> Result<String, AssignmentError>;
     fn get_members(&self) -> Vec<String>;
     fn set_members(&mut self, members: Vec<String>);
@@ -45,16 +38,7 @@ pub(crate) struct RendezvousHashingAssignmentPolicy {
 }
 
 impl RendezvousHashingAssignmentPolicy {
-    // Rust beginners note
-    // The reason we take String and not &str is because we need to put the strings into our
-    // struct, and we can't do that with references so rather than clone the strings, we just
-    // take ownership of them and put the responsibility on the caller to clone them if they
-    // need to. This is the general pattern we should follow in rust - put the burden of cloning
-    // on the caller, and if they don't need to clone, they can pass ownership.
-    pub(crate) fn new(
-        pulsar_tenant: String,
-        pulsar_namespace: String,
-    ) -> RendezvousHashingAssignmentPolicy {
+    pub(crate) fn new() -> RendezvousHashingAssignmentPolicy {
         return RendezvousHashingAssignmentPolicy {
             hasher: Murmur3Hasher {},
             members: vec![],
@@ -67,9 +51,11 @@ impl RendezvousHashingAssignmentPolicy {
 }
 
 #[async_trait]
-impl Configurable for RendezvousHashingAssignmentPolicy {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let assignment_policy_config = match &worker_config.assignment_policy {
+impl Configurable<AssignmentPolicyConfig> for RendezvousHashingAssignmentPolicy {
+    async fn try_from_config(
+        config: &AssignmentPolicyConfig,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let assignment_policy_config = match config {
             AssignmentPolicyConfig::RendezvousHashing(config) => config,
         };
         let hasher = match assignment_policy_config.hasher {
@@ -84,9 +70,8 @@ impl Configurable for RendezvousHashingAssignmentPolicy {
 
 impl AssignmentPolicy for RendezvousHashingAssignmentPolicy {
     fn assign(&self, key: &str) -> Result<String, AssignmentError> {
-        let topics = self.get_members();
-        let topic = assign(key, topics, &self.hasher);
-        return topic;
+        let members = self.get_members();
+        assign(key, members, &self.hasher)
     }
 
     fn get_members(&self) -> Vec<String> {

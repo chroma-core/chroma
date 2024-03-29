@@ -16,6 +16,7 @@ mod system;
 mod types;
 
 use config::Configurable;
+use memberlist::MemberlistProvider;
 
 mod chroma_proto {
     tonic::include_proto!("chroma");
@@ -23,17 +24,18 @@ mod chroma_proto {
 
 pub async fn query_service_entrypoint() {
     let config = config::RootConfig::load();
+    let config = config.query_service;
     let system: system::System = system::System::new();
-    let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
-    {
-        Ok(dispatcher) => dispatcher,
-        Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
-            return;
-        }
-    };
+    let dispatcher =
+        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
+    let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
         Ok(worker_server) => worker_server,
         Err(err) => {
             println!("Failed to create worker server component: {:?}", err);
@@ -52,18 +54,32 @@ pub async fn query_service_entrypoint() {
 
 pub async fn compaction_service_entrypoint() {
     let config = config::RootConfig::load();
+    let config = config.compaction_service;
     let system: system::System = system::System::new();
-    let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
+
+    let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
+        &config.memberlist_provider,
+    )
+    .await
     {
-        Ok(dispatcher) => dispatcher,
+        Ok(memberlist) => memberlist,
         Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
+            println!("Failed to create memberlist component: {:?}", err);
             return;
         }
     };
+
+    let dispatcher =
+        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut compaction_manager =
-        match crate::compactor::CompactionManager::try_from_config(&config.worker).await {
+        match crate::compactor::CompactionManager::try_from_config(&config).await {
             Ok(compaction_manager) => compaction_manager,
             Err(err) => {
                 println!("Failed to create compaction manager component: {:?}", err);
@@ -72,6 +88,15 @@ pub async fn compaction_service_entrypoint() {
         };
     compaction_manager.set_dispatcher(dispatcher_handle.receiver());
     compaction_manager.set_system(system.clone());
+
     let mut compaction_manager_handle = system.start_component(compaction_manager);
-    tokio::join!(compaction_manager_handle.join(), dispatcher_handle.join());
+    memberlist.subscribe(compaction_manager_handle.receiver());
+
+    let mut memberlist_handle = system.start_component(memberlist);
+
+    tokio::join!(
+        memberlist_handle.join(),
+        compaction_manager_handle.join(),
+        dispatcher_handle.join()
+    );
 }

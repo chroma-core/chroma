@@ -1,7 +1,6 @@
 use crate::chroma_proto;
 use crate::chroma_proto::log_service_client::LogServiceClient;
 use crate::config::Configurable;
-use crate::config::WorkerConfig;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
@@ -94,9 +93,9 @@ impl ChromaError for GrpcLogError {
 }
 
 #[async_trait]
-impl Configurable for GrpcLog {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &worker_config.log {
+impl Configurable<LogConfig> for GrpcLog {
+    async fn try_from_config(config: &LogConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
             LogConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;

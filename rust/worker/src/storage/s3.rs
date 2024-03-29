@@ -9,7 +9,7 @@
 // streaming from s3.
 
 use super::{config::StorageConfig, Storage};
-use crate::config::{Configurable, WorkerConfig};
+use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use async_trait::async_trait;
 use aws_sdk_s3;
@@ -73,9 +73,9 @@ impl S3Storage {
 }
 
 #[async_trait]
-impl Configurable for S3Storage {
-    async fn try_from_config(config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &config.storage {
+impl Configurable<StorageConfig> for S3Storage {
+    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
             StorageConfig::S3(s3_config) => {
                 let config = aws_config::load_from_env().await;
                 let client = aws_sdk_s3::Client::new(&config);
