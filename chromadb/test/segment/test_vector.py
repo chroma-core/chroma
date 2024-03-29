@@ -3,11 +3,8 @@ import pickle
 import pytest
 from typing import Generator, List, Callable, Iterator, Type, cast, Any, Dict, Optional
 
-from pypika import Table
 
 from chromadb.config import System, Settings
-from chromadb.db.base import ParameterValue, get_sql
-from chromadb.segment.impl.metadata.sqlite import _decode_seq_id
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     OperationRecord,
@@ -30,6 +27,7 @@ from chromadb.segment.impl.vector.local_hnsw import (
 
 from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
+    PersistentData,
 )
 
 from chromadb.test.property.strategies import test_hnsw_config
@@ -177,7 +175,7 @@ def test_insert_and_count(
     assert segment.count() == 6
 
 
-def test_insert_with_db_persist(
+def test_insert_with_protobuf_persist(
     system: System,
     sample_embeddings: Iterator[OperationRecord],
     vector_reader: Type[VectorReader],
@@ -206,34 +204,11 @@ def test_insert_with_db_persist(
 
     assert segment.count() == 5
     if isinstance(segment, PersistentLocalHnswSegment):
-        t = Table("max_seq_id")
-        q = (
-            segment._db.querybuilder()
-            .from_(t)
-            .select(t.seq_id)
-            .where(t.segment_id == ParameterValue(segment._db.uuid_to_db(segment._id)))
-        )
-        sql, params = get_sql(q)
-        with segment._db.tx() as cur:
-            result = cur.execute(sql, params).fetchone()
-            assert _decode_seq_id(result[0]) == 5
-        t2 = Table("segment_metadata")
-        q2 = (
-            segment._db.querybuilder()
-            .from_(t2)
-            .select(t2.key, t2.int_value)
-            .where(t2.segment_id == ParameterValue(segment._db.uuid_to_db(segment._id)))
-        )
-        sql2, params2 = get_sql(q2)
-        with segment._db.tx() as cur:
-            metadata = cur.execute(sql2, params2).fetchall()
-            assert len(metadata) >= 3
-            kdict = {r[0]: r[1] for r in metadata}
-            assert "max_seq_id" in kdict.keys()
-            assert "total_elements_added" in kdict.keys()
-            assert "dimensionality" in kdict.keys()
-            assert "id_label_seq_id_tuple_list" in kdict.keys()
-            assert kdict["max_seq_id"] == 5
+        _pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        assert _pd.max_seq_id == 5
+        assert _pd.total_elements_added == 5
+        assert _pd.dimensionality == 2
+        assert len(_pd.id_to_label) == 5
 
 
 def test_migrate_metadatafile(
@@ -265,40 +240,81 @@ def test_migrate_metadatafile(
 
     assert segment.count() == 5
     if isinstance(segment, PersistentLocalHnswSegment):
-        with open(segment._get_metadata_file(), "wb") as metadata_file:
+        _pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        with open(segment._get_legacy_metadata_file(), "wb") as metadata_file:
             pickle.dump(segment._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
-        t2 = Table("segment_metadata")
-        q2 = (
-            segment._db.querybuilder()
-            .from_(t2)
-            .delete()
-            .where(t2.segment_id == ParameterValue(segment._db.uuid_to_db(segment._id)))
-        )
-        q3 = (
-            segment._db.querybuilder()
-            .from_(t2)
-            .select(t2.key, t2.int_value)
-            .where(t2.segment_id == ParameterValue(segment._db.uuid_to_db(segment._id)))
-        )
-        with segment._db.tx() as cur:
-            cur.execute(*get_sql(q2))
-        with segment._db.tx() as cur:
-            metadata = cur.execute(*get_sql(q3)).fetchall()
-            assert len(metadata) == 0
+        assert os.path.exists(segment._get_legacy_metadata_file())
+        assert _pd.max_seq_id == 5
+        assert _pd.total_elements_added == 5
+        assert _pd.dimensionality == 2
+        assert len(_pd.id_to_label) == 5
+        os.unlink(segment._get_metadata_file())
+        assert not os.path.exists(segment._get_metadata_file())
         segment.stop()
+        segment.start()
         segment = cast(
             PersistentLocalHnswSegment, vector_reader(system, segment_definition)
         )
+        assert os.path.exists(segment._get_metadata_file())
+        assert not os.path.exists(segment._get_legacy_metadata_file())
+        _migrated_pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        assert _migrated_pd.max_seq_id == 5
+        assert _migrated_pd.total_elements_added == 5
+        assert _migrated_pd.dimensionality == 2
+        assert len(_migrated_pd.id_to_label) == 5
+
+
+def test_metadata_corruption_with_backup(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+
+    system.reset_state()
+    segment_definition = create_random_segment_definition(
+        extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
+    )
+    collection_id = segment_definition["collection"]
+    # We know that the segment definition has a collection_id
+    collection_id = cast(uuid.UUID, collection_id)
+    max_id = produce_fns(
+        collection_id=collection_id,
+        producer=producer,
+        n=5,
+        embeddings=sample_embeddings,
+    )[1][-1]
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    sync(segment, max_id)
+
+    assert segment.count() == 5
+    if isinstance(segment, PersistentLocalHnswSegment):
+        _pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        _pd.store_to_proto(segment._get_metadata_file() + ".new")
+        assert os.path.exists(segment._get_metadata_file() + ".new")
+        assert _pd.max_seq_id == 5
+        assert _pd.total_elements_added == 5
+        assert _pd.dimensionality == 2
+        assert len(_pd.id_to_label) == 5
+        os.unlink(segment._get_metadata_file())
+        assert not os.path.exists(segment._get_metadata_file())
+        with open(segment._get_metadata_file(), "wb") as metadata_file:
+            metadata_file.write(b"corrupted")
+        segment.stop()
         segment.start()
-        with segment._db.tx() as cur:
-            metadata = cur.execute(*get_sql(q3)).fetchall()
-            assert len(metadata) >= 3
-            kdict = {r[0]: r[1] for r in metadata}
-            assert "max_seq_id" in kdict.keys()
-            assert "total_elements_added" in kdict.keys()
-            assert "dimensionality" in kdict.keys()
-            assert "id_label_seq_id_tuple_list" in kdict.keys()
-            assert kdict["max_seq_id"] == 5
+        segment = cast(
+            PersistentLocalHnswSegment, vector_reader(system, segment_definition)
+        )
+        assert os.path.exists(segment._get_metadata_file())
+        _migrated_pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        assert _migrated_pd.max_seq_id == 5
+        assert _migrated_pd.total_elements_added == 5
+        assert _migrated_pd.dimensionality == 2
+        assert len(_migrated_pd.id_to_label) == 5
 
 
 def approx_equal(a: float, b: float, epsilon: float = 0.0001) -> bool:

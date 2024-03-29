@@ -293,3 +293,16 @@ message VectorQueryResult {
     float distance = 3;
     optional Vector vector = 4;
 }
+
+message LocalSegmentMetadataTuple {
+  string embedding_id = 1;
+  int32 hnsw_label = 2;
+  int32 seq_id = 3;
+}
+
+message LocalSegmentMetadata {
+  repeated LocalSegmentMetadataTuple tuples = 1;
+  int32 dimensionality = 2;
+  int64 total_elements_added = 3;
+  int64 max_seq_id = 4;
+}
