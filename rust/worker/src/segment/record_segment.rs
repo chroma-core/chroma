@@ -1,7 +1,7 @@
 use super::types::{OffsetIdAssigner, SegmentWriter};
 use crate::blockstore::{provider::BlockfileProvider, Blockfile};
 use crate::blockstore::{BlockfileKey, Key, KeyType, Value, ValueType};
-use crate::types::{EmbeddingRecord, Operation, Segment};
+use crate::types::{LogRecord, Operation, Segment};
 use std::sync::atomic::AtomicU32;
 
 struct RecordSegment {
@@ -21,7 +21,7 @@ struct RecordSegment {
 
 struct StoredRecord<'a> {
     segment_offset_id: u32,
-    record: &'a Option<EmbeddingRecord>,
+    record: &'a Option<LogRecord>,
     embedding: Option<Vec<f32>>,
     metadata: Option<crate::types::Metadata>,
     document: Option<String>,
@@ -69,20 +69,19 @@ impl SegmentWriter for RecordSegment {
         }
     }
 
-    fn write_records(
-        &mut self,
-        mut records: Vec<Box<EmbeddingRecord>>,
-        mut offset_ids: Vec<Option<u32>>,
-    ) {
+    fn write_records(&mut self, records: Vec<Box<LogRecord>>, offset_ids: Vec<Option<u32>>) {
+        // TODO: this should not be mut
+        let mut records = records;
+        let mut offset_ids = offset_ids;
         // TODO: Once this uses log chunk, we should expect invalid ADDs to already be filtered out
         // we also then can assume that UPSERTs have been converted to ADDs or UPDATEs
         for (record, offset_id) in records.drain(..).zip(offset_ids.drain(..)) {
-            match record.operation {
+            match record.record.operation {
                 Operation::Add => {
                     // Check if the key already exists
                     let res = self.user_id_to_id.get(BlockfileKey::new(
                         "".to_string(),
-                        Key::String(record.id.clone()),
+                        Key::String(record.record.id.clone()),
                     ));
                     // See if its a KeyNotFound error
                     match res {
@@ -101,13 +100,13 @@ impl SegmentWriter for RecordSegment {
                     let id = offset_id.unwrap();
                     // TODO: Support empty prefixes in blockfile keys
                     let res = self.user_id_to_id.set(
-                        BlockfileKey::new("".to_string(), Key::String(record.id.clone())),
+                        BlockfileKey::new("".to_string(), Key::String(record.record.id.clone())),
                         Value::UintValue(id),
                     );
                     // TODO: use the res
                     let res = self.id_to_user_id.set(
                         BlockfileKey::new("".to_string(), Key::Uint(id)),
-                        Value::StringValue(record.id.clone()),
+                        Value::StringValue(record.record.id.clone()),
                     );
                     let res = self.records.set(
                         BlockfileKey::new("".to_string(), Key::Uint(id)),
@@ -119,7 +118,7 @@ impl SegmentWriter for RecordSegment {
                     // Check if the key already exists
                     let res = self.user_id_to_id.get(BlockfileKey::new(
                         "".to_string(),
-                        Key::String(record.id.clone()),
+                        Key::String(record.record.id.clone()),
                     ));
                     // See if its a KeyNotFound error
                     match res {
@@ -156,23 +155,23 @@ impl SegmentWriter for RecordSegment {
         );
     }
 
-    fn rollback_transaction(&self) {
+    fn rollback_transaction(&mut self) {
         todo!()
     }
 }
 
 impl OffsetIdAssigner for RecordSegment {
-    fn assign_offset_ids(&self, records: Vec<Box<EmbeddingRecord>>) -> Vec<Option<u32>> {
+    fn assign_offset_ids(&mut self, records: Vec<Box<LogRecord>>) -> Vec<Option<u32>> {
         // TODO: this should happen in a transaction
         let mut offset_ids = Vec::new();
         for record in records {
             // Only ADD and UPSERT assign an offset id if the key doesn't exist
-            let id = match record.operation {
+            let id = match record.record.operation {
                 Operation::Add | Operation::Upsert => {
                     // Check if the key already exists
                     let res = self.user_id_to_id.get(BlockfileKey::new(
                         "".to_string(),
-                        Key::String(record.id.clone()),
+                        Key::String(record.record.id.clone()),
                     ));
                     // See if its a KeyNotFound error
                     match res {
@@ -201,8 +200,7 @@ impl OffsetIdAssigner for RecordSegment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ScalarEncoding;
-    use num_bigint::BigInt;
+    use crate::types::{OperationRecord, ScalarEncoding};
     use uuid::Uuid;
 
     // RESUME POINT: STORE METADATA AS PROTO AND ADD A RECORD TYPE FOR INTERNAL USE. THIS RECORD TYPE IS A OPERATION NOT A VALUE
@@ -213,14 +211,15 @@ mod tests {
             Box::new(crate::blockstore::arrow_blockfile::provider::ArrowBlockfileProvider::new());
         let mut segment = RecordSegment::new(blockfile_provider);
         segment.begin_transaction();
-        let record = Box::new(EmbeddingRecord {
-            id: "test".to_string(),
-            operation: Operation::Add,
-            embedding: Some(vec![1.0, 2.0, 3.0]),
-            seq_id: BigInt::from(0),
-            encoding: Some(ScalarEncoding::FLOAT32),
-            metadata: None,
-            collection_id: Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
+        let record = Box::new(LogRecord {
+            log_offset: 1,
+            record: OperationRecord {
+                id: "test".to_string(),
+                embedding: Some(vec![1.0, 2.0, 3.0]),
+                encoding: Some(ScalarEncoding::FLOAT32),
+                metadata: None,
+                operation: Operation::Add,
+            },
         });
         let records = vec![record];
         let offset_ids = segment.assign_offset_ids(records.clone());
@@ -235,7 +234,7 @@ mod tests {
         println!("{:?}", res);
         match res {
             Value::EmbeddingRecordValue(record) => {
-                assert_eq!(record.id, "test");
+                assert_eq!(record.record.id, "test");
             }
             _ => panic!("Wrong value type"),
         }

@@ -1,7 +1,9 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::chroma_proto;
 use crate::errors::{ChromaError, ErrorCodes};
-use crate::types::{EmbeddingRecord, MetadataValue, UpdateMetadata, UpdateMetadataValue};
+use crate::types::{
+    LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadata, UpdateMetadataValue,
+};
 use arrow::array::{
     ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
     Float32Builder, GenericByteBuilder, StructArray, StructBuilder, UInt32Array, UInt32Builder,
@@ -13,7 +15,6 @@ use arrow::{
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
-use num_bigint::BigInt;
 use parking_lot::RwLock;
 use prost::Message;
 use std::io::Error;
@@ -226,17 +227,18 @@ impl Block {
                                         }
                                         None => None,
                                     };
-                                    return Some(Value::EmbeddingRecordValue(EmbeddingRecord {
-                                        id,
-                                        seq_id: BigInt::from(0), // TODO: THIS IS WRONG, WE NEED A NEW TYPE
-                                        operation: crate::types::Operation::Add, // TODO: THIS IS WRONG, WE NEED A NEW TYPE
-                                        embedding: Some(vec![1.0, 2.0, 3.0]), // TODO: populate this
-                                        encoding: None,                       // TODO: populate this
-                                        metadata,
-                                        collection_id: Uuid::parse_str(
-                                            "00000000-0000-0000-0000-000000000000",
-                                        )
-                                        .unwrap(),
+                                    // TOOD: Replace with DataRecord abstraction.
+                                    // i.e the materialized state of a record
+                                    // not a log record
+                                    return Some(Value::EmbeddingRecordValue(LogRecord {
+                                        log_offset: 0,
+                                        record: OperationRecord {
+                                            id,
+                                            embedding: None,
+                                            encoding: None,
+                                            metadata,
+                                            operation: Operation::Add,
+                                        },
                                     }));
                                 }
                                 // TODO: Add support for other types
@@ -648,11 +650,11 @@ impl BlockDataBuilder {
                 Value::EmbeddingRecordValue(embedding_record) => {
                     builder
                         .user_id_builder
-                        .append_value(embedding_record.id.clone());
+                        .append_value(embedding_record.record.id.clone());
                     builder
                         .document_builder
                         .append_option(embedding_record.get_document());
-                    match embedding_record.metadata {
+                    match embedding_record.record.metadata {
                         Some(metadata) => {
                             let proto: chroma_proto::UpdateMetadata = metadata.into();
                             let bytes = proto.encode_to_vec();

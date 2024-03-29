@@ -189,7 +189,7 @@ pub(crate) enum Value {
     IntValue(i32),
     UintValue(u32),
     RoaringBitmapValue(RoaringBitmap),
-    EmbeddingRecordValue(EmbeddingRecord),
+    EmbeddingRecordValue(LogRecord),
 }
 
 impl Clone for Value {
@@ -232,12 +232,12 @@ impl Value {
                 unimplemented!("Size of positional posting list")
             }
             Value::EmbeddingRecordValue(record) => {
-                let user_id_size = record.id.len();
-                let embedding_size = match &record.embedding {
+                let user_id_size = record.record.id.len();
+                let embedding_size = match &record.record.embedding {
                     Some(embedding) => embedding.len(),
                     None => 0,
                 };
-                let metadata_size = match &record.metadata {
+                let metadata_size = match &record.record.metadata {
                     Some(metadata) => {
                         let as_proto: chroma_proto::UpdateMetadata = metadata.clone().into();
                         as_proto.encoded_len()

@@ -242,7 +242,7 @@ impl BlockDeltaInner {
     fn get_metadata_size(&self) -> usize {
         self.new_data.iter().fold(0, |acc, (_, value)| match value {
             Value::EmbeddingRecordValue(embedding_record) => {
-                match &embedding_record.metadata {
+                match &embedding_record.record.metadata {
                     Some(metadata) => {
                         // TODO: cache this
                         let as_proto: chroma_proto::UpdateMetadata = metadata.clone().into();
@@ -258,7 +258,7 @@ impl BlockDeltaInner {
 
     fn get_user_id_size(&self) -> usize {
         self.new_data.iter().fold(0, |acc, (_, value)| match value {
-            Value::EmbeddingRecordValue(embedding_record) => acc + embedding_record.id.len(),
+            Value::EmbeddingRecordValue(embedding_record) => acc + embedding_record.record.id.len(),
             _ => 0,
         })
     }
@@ -445,7 +445,9 @@ impl From<Arc<Block>> for BlockDelta {
 mod test {
     use super::*;
     use crate::blockstore::types::{Key, KeyType, ValueType};
-    use crate::types::{LogRecord, ScalarEncoding, UpdateMetadataValue};
+    use crate::types::{
+        LogRecord, Operation, OperationRecord, ScalarEncoding, UpdateMetadataValue,
+    };
     use arrow::array::Int32Array;
     use rand::{random, Rng};
     use std::collections::HashMap;
@@ -564,15 +566,15 @@ mod test {
                 "random_float".to_string(),
                 UpdateMetadataValue::Float(random::<f64>()),
             );
-            let value = Value::EmbeddingRecordValue(EmbeddingRecord {
-                seq_id: BigInt::from(0),
-                embedding: Some(vec![1.0, 2.0, 3.0]),
-                id: "test".to_string(),
-                encoding: Some(ScalarEncoding::FLOAT32),
-                metadata: Some(metadata),
-                operation: crate::types::Operation::Add,
-                collection_id: uuid::Uuid::from_str("00000000-0000-0000-0000-000000000000")
-                    .unwrap(),
+            let value = Value::EmbeddingRecordValue(LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "test".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: Some(ScalarEncoding::FLOAT32),
+                    metadata: Some(metadata),
+                    operation: Operation::Add,
+                },
             });
             delta.add(key, value);
         }

@@ -466,11 +466,10 @@ impl ArrowBlockfile {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::types::{EmbeddingRecord, Operation, UpdateMetadataValue};
+    use crate::types::{LogRecord, Operation, OperationRecord, UpdateMetadataValue};
 
     use super::*;
     use arrow::array::Int32Array;
-    use num_bigint::BigInt;
 
     #[test]
     fn test_blockfile() {
@@ -744,14 +743,15 @@ mod tests {
             blockfile
                 .set(
                     key,
-                    Value::EmbeddingRecordValue(EmbeddingRecord {
-                        id: format!("{:04}", i),
-                        seq_id: BigInt::from(i),
-                        embedding: None,
-                        encoding: None,
-                        metadata: Some(metadata),
-                        operation: Operation::Add,
-                        collection_id: Uuid::new_v4(),
+                    Value::EmbeddingRecordValue(LogRecord {
+                        log_offset: i,
+                        record: OperationRecord {
+                            id: format!("{:04}", i),
+                            embedding: None,
+                            encoding: None,
+                            metadata: Some(metadata),
+                            operation: Operation::Add,
+                        },
                     }),
                 )
                 .unwrap();
@@ -763,8 +763,8 @@ mod tests {
             let res = blockfile.get(key).unwrap();
             match res {
                 Value::EmbeddingRecordValue(record) => {
-                    let metadata = record.metadata.unwrap();
-                    assert_eq!(record.id, format!("{:04}", i));
+                    let metadata = record.record.metadata.unwrap();
+                    assert_eq!(record.record.id, format!("{:04}", i));
                     assert_eq!(metadata.len(), 2);
                     assert_eq!(
                         metadata.get("chroma:document").unwrap(),
