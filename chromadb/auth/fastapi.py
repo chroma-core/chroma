@@ -22,7 +22,6 @@ from chromadb.auth import (
     AuthInfoType,
     ServerAuthenticationResponse,
     ServerAuthProvider,
-    ChromaAuthMiddleware,
     ChromaAuthzMiddleware,
     ServerAuthorizationProvider,
 )
@@ -68,7 +67,7 @@ class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
         return self._auth_success
 
 
-class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
+class FastAPIChromaAuthMiddleware:
     _auth_provider: ServerAuthProvider
 
     def __init__(self, system: System) -> None:

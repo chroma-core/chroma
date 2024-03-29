@@ -179,34 +179,25 @@ class Settings(BaseSettings):  # type: ignore
             )
         return v
 
+    # Must keep
     chroma_client_auth_provider: Optional[str] = None
+    chroma_client_auth_credentials_file: Optional[str] = None
+    chroma_client_auth_credentials: Optional[str] = None
+
+    chroma_server_authz_provider: Optional[str] = None
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
         "/api/v1": ["GET"],
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
     }
 
-    chroma_client_auth_credentials_provider: Optional[
-        str
-    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
-    chroma_client_auth_protocol_adapter: Optional[
-        str
-    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
-    chroma_client_auth_credentials_file: Optional[str] = None
-    chroma_client_auth_credentials: Optional[str] = None
-    chroma_client_auth_token_transport_header: Optional[str] = None
+    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
+
+    # TODOBEN maybe delete
     chroma_server_auth_token_transport_header: Optional[str] = None
+    chroma_client_auth_token_transport_header: Optional[str] = None
 
-    chroma_server_authz_provider: Optional[str] = None
-
-    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
-    }
     chroma_server_authz_config_file: Optional[str] = None
-
-    chroma_server_authz_config: Optional[Dict[str, Any]] = None
 
     @validator(
         "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
@@ -221,13 +212,23 @@ class Settings(BaseSettings):  # type: ignore
         if v and not os.path.isfile(os.path.join(v)):
             raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
         return v
-
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None
     chroma_server_authz_config_provider: Optional[
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
-    # TODO comment
-    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
+    # TODOBEN delete
+    # chroma_client_auth_credentials_provider: Optional[
+    #     str
+    # ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
+    # chroma_client_auth_protocol_adapter: Optional[
+    #     str
+    # ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
+    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
+        "/api/v1": ["GET"],
+        "/api/v1/heartbeat": ["GET"],
+        "/api/v1/version": ["GET"],
+    }
 
     anonymized_telemetry: bool = True
 

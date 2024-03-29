@@ -31,7 +31,6 @@ ProviderTypes = Union[
 
 _provider_registry = {
     "client_auth_providers": {},
-    "client_auth_config_providers": {},
     "client_auth_credentials_providers": {},
     "client_auth_protocol_adapters": {},
     "server_auth_providers": {},
@@ -57,8 +56,6 @@ def register_provider(
         global _provider_registry
         if issubclass(cls, ClientAuthProvider):
             _provider_registry["client_auth_providers"][short_hand] = cls
-        elif issubclass(cls, ClientAuthConfigurationProvider):
-            _provider_registry["client_auth_config_providers"][short_hand] = cls
         elif issubclass(cls, ClientAuthCredentialsProvider):
             _provider_registry["client_auth_credentials_providers"][short_hand] = cls
         elif issubclass(cls, ClientAuthProtocolAdapter):
@@ -93,8 +90,6 @@ def resolve_provider(
     global _provider_registry
     if issubclass(cls, ClientAuthProvider):
         _key = "client_auth_providers"
-    elif issubclass(cls, ClientAuthConfigurationProvider):
-        _key = "client_auth_config_providers"
     elif issubclass(cls, ClientAuthCredentialsProvider):
         _key = "client_auth_credentials_providers"
     elif issubclass(cls, ClientAuthProtocolAdapter):

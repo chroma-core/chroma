@@ -1,4 +1,3 @@
-import logging
 import multiprocessing
 import os
 import shutil
@@ -32,11 +31,6 @@ from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
-
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)  # This will only run when testing
-
-logger = logging.getLogger(__name__)
 
 hypothesis.settings.register_profile(
     "dev",
@@ -109,6 +103,7 @@ def _run_server(
     chroma_server_authz_config: Optional[Dict[str, Any]] = None,
     chroma_server_ssl_certfile: Optional[str] = None,
     chroma_server_ssl_keyfile: Optional[str] = None,
+    chroma_overwrite_singleton_tenant_database_access_from_auth: Optional[bool] = False,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -129,6 +124,7 @@ def _run_server(
             chroma_server_authz_provider=chroma_server_authz_provider,
             chroma_server_authz_config_file=chroma_server_authz_config_file,
             chroma_server_authz_config=chroma_server_authz_config,
+            chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
     else:
         settings = Settings(
@@ -147,6 +143,7 @@ def _run_server(
             chroma_server_authz_provider=chroma_server_authz_provider,
             chroma_server_authz_config_file=chroma_server_authz_config_file,
             chroma_server_authz_config=chroma_server_authz_config,
+            chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(
@@ -165,10 +162,8 @@ def _await_server(api: ServerAPI, attempts: int = 0) -> None:
         api.heartbeat()
     except ConnectionError as e:
         if attempts > 15:
-            logger.error("Test server failed to start after 15 attempts")
             raise e
         else:
-            logger.info("Waiting for server to start...")
             time.sleep(4)
             _await_server(api, attempts + 1)
 
@@ -188,12 +183,12 @@ def _fastapi_fixture(
     chroma_server_authz_config: Optional[Dict[str, Any]] = None,
     chroma_server_ssl_certfile: Optional[str] = None,
     chroma_server_ssl_keyfile: Optional[str] = None,
+    chroma_overwrite_singleton_tenant_database_access_from_auth: Optional[bool] = False,
 ) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
 
     port = find_free_port()
-    logger.info(f"Running test FastAPI server on port {port}")
     ctx = multiprocessing.get_context("spawn")
     args: Tuple[
         int,
@@ -209,6 +204,7 @@ def _fastapi_fixture(
         Optional[Dict[str, Any]],
         Optional[str],
         Optional[str],
+        Optional[bool]
     ] = (
         port,
         False,
@@ -223,6 +219,7 @@ def _fastapi_fixture(
         chroma_server_authz_config,
         chroma_server_ssl_certfile,
         chroma_server_ssl_keyfile,
+        chroma_overwrite_singleton_tenant_database_access_from_auth,
     )
     persist_directory = None
     if is_persistent:
@@ -241,6 +238,7 @@ def _fastapi_fixture(
             chroma_server_authz_config,
             chroma_server_ssl_certfile,
             chroma_server_ssl_keyfile,
+            chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
@@ -254,6 +252,7 @@ def _fastapi_fixture(
         chroma_client_auth_token_transport_header=chroma_client_auth_token_transport_header,
         chroma_server_ssl_verify=chroma_server_ssl_certfile,
         chroma_server_ssl_enabled=True if chroma_server_ssl_certfile else False,
+        chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
     )
     system = System(settings)
     api = system.instance(ServerAPI)

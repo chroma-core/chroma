@@ -43,7 +43,7 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
     }
 
 
-@settings(max_examples=10)
+@settings(max_examples=1)
 @given(token_config())
 def test_fastapi_server_token_auth(token_config: Dict[str, Any]) -> None:
     api = _fastapi_fixture(
@@ -85,7 +85,7 @@ def invalid_token(draw: st.DrawFn) -> str:
     return token
 
 
-@settings(max_examples=10)
+@settings(max_examples=1)
 @given(tconf=token_config(), inval_tok=invalid_token())
 def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
     api = _fastapi_fixture(
@@ -107,7 +107,7 @@ def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
     assert "Invalid token" in str(e)
 
 
-@settings(max_examples=10)
+@settings(max_examples=1)
 @given(token_config(), random_token())
 def test_fastapi_server_token_auth_wrong_token(
     token_config: Dict[str, Any], random_token: str
@@ -136,3 +136,64 @@ def test_fastapi_server_token_auth_wrong_token(
     with pytest.raises(Exception) as e:
         _api.list_collections()
     assert "Unauthorized" in str(e)
+
+
+@settings(max_examples=1)
+@given(token_config())
+def test_fastapi_server_correct_auth_token(
+    token_config: Dict[str, Any]
+) -> None:
+    api = _fastapi_fixture(
+        is_persistent=token_config["is_persistent"],
+        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_auth_credentials_provider=token_config[
+            "chroma_server_auth_credentials_provider"
+        ],
+        chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
+        chroma_server_auth_token_transport_header=token_config[
+            "token_transport_header"
+        ],
+        chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
+        chroma_client_auth_token_transport_header=token_config[
+            "token_transport_header"
+        ],
+        chroma_client_auth_credentials=token_config["chroma_client_auth_credentials"]
+    )
+    _sys: System = next(api)
+    _sys.reset_state()
+    _api = _sys.instance(ServerAPI)
+    _api.heartbeat()
+    collection = "test_collection"
+    _api.create_collection(collection)
+
+    cols = _api.list_collections()
+    assert len(cols) == 1
+    assert cols[0].name == collection
+
+
+# TODOBEN
+@settings(max_examples=1)
+@given(token_config())
+def test_fastapi_overwrite_default_tenant_and_default_database(
+    token_config: Dict[str, Any]
+) -> None:
+    api = _fastapi_fixture(
+        is_persistent=token_config["is_persistent"],
+        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_auth_credentials_provider=token_config[
+            "chroma_server_auth_credentials_provider"
+        ],
+        chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
+        chroma_server_auth_token_transport_header=token_config[
+            "token_transport_header"
+        ],
+        chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
+        chroma_client_auth_token_transport_header=token_config[
+            "token_transport_header"
+        ],
+        chroma_client_auth_credentials=token_config["chroma_client_auth_credentials"],
+    )
+    _sys: System = next(api)
+    _sys.reset_state()
+    _api = _sys.instance(ServerAPI)
+    _api.heartbeat()

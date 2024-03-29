@@ -1,14 +1,13 @@
 """
 Contains only Auth abstractions, no implementations.
 """
+from __future__ import annotations
+
 import base64
-from functools import partial
-import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (
     Any,
-    Callable,
     List,
     Optional,
     Dict,
@@ -23,27 +22,29 @@ from overrides import EnforceOverrides, override
 from pydantic import SecretStr
 
 from chromadb.config import (
-    DEFAULT_DATABASE,
-    DEFAULT_TENANT,
     Component,
     System,
 )
 from chromadb.errors import ChromaError
-
-logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 S = TypeVar("S")
 
 
 class AuthInfoType(Enum):
+    """
+    Allowed types of authentication information.
+    """
     COOKIE = "cookie"
     HEADER = "header"
     URL = "url"
-    METADATA = "metadata"  # gRPC
+    METADATA = "metadata"
 
 
 class UserIdentity(EnforceOverrides, ABC):
+    """
+    Represents the identity of a user.
+    """
     @abstractmethod
     def get_user_id(self) -> str:
         ...
@@ -62,6 +63,10 @@ class UserIdentity(EnforceOverrides, ABC):
 
 
 class SimpleUserIdentity(UserIdentity):
+    """
+    The simplest possible implementation of UserIdentity. This is not a dataclass
+    so we can use polymorphism to just pass around UserIdentity objects.
+    """
     def __init__(
         self,
         user_id: str,
@@ -80,7 +85,7 @@ class SimpleUserIdentity(UserIdentity):
 
     @override
     def get_user_tenant(self) -> Optional[str]:
-        return self._tenant if self._tenant else DEFAULT_TENANT
+        return self._tenant
 
     @override
     def get_user_databases(self) -> Optional[List[str]]:
@@ -92,6 +97,9 @@ class SimpleUserIdentity(UserIdentity):
 
 
 class ClientAuthResponse(EnforceOverrides, ABC):
+    """
+    TODOBEN what exactly does this do?
+    """
     @abstractmethod
     def get_auth_info_type(self) -> AuthInfoType:
         ...
@@ -99,11 +107,17 @@ class ClientAuthResponse(EnforceOverrides, ABC):
     @abstractmethod
     def get_auth_info(
         self,
+    # TODOBEN typing
     ) -> Union[Tuple[str, SecretStr], List[Tuple[str, SecretStr]]]:
         ...
 
 
 class ClientAuthProvider(Component):
+    """
+    Created in the client-side system to provide authentication information which can be
+    injected into a request. Use a ClientAuthProtocolAdapter to actually inject the
+    credentials.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
@@ -112,16 +126,11 @@ class ClientAuthProvider(Component):
         pass
 
 
-class ClientAuthConfigurationProvider(Component):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def get_configuration(self) -> Optional[T]:
-        pass
-
-
 class ClientAuthCredentialsProvider(Component, Generic[T]):
+    """
+    Creates credentials to be used by a ClientAuthProvider. Basically ClientAuthProvider
+    is a thin wrapper around this.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
@@ -131,6 +140,10 @@ class ClientAuthCredentialsProvider(Component, Generic[T]):
 
 
 class ClientAuthProtocolAdapter(Component, Generic[T]):
+    """
+    Injects client-side credentials into a request. Uses the system's ClientAuthProvider
+    to get the credentials.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
@@ -139,53 +152,20 @@ class ClientAuthProtocolAdapter(Component, Generic[T]):
         pass
 
 
-# SERVER-SIDE Abstractions
-
-
 class ServerAuthenticationRequest(EnforceOverrides, ABC, Generic[T]):
     @abstractmethod
     def get_auth_info(self, auth_info_type: AuthInfoType, auth_info_id: str) -> T:
-        """
-        This method should return the necessary auth info based on the type of
-        authentication (e.g. header, cookie, url) and a given id for the respective
-        auth type (e.g. name of the header, cookie, url param).
-
-        :param auth_info_type: The type of auth info to return
-        :param auth_info_id: The id of the auth info to return
-        :return: The auth info which can be specific to the implementation
-        """
         pass
 
 
+@dataclass
 class ServerAuthenticationResponse(EnforceOverrides, ABC):
-    @abstractmethod
-    def success(self) -> bool:
-        ...
-
-    @abstractmethod
-    def get_user_identity(self) -> Optional[UserIdentity]:
-        ...
-
-
-class SimpleServerAuthenticationResponse(ServerAuthenticationResponse):
-    """Simple implementation of ServerAuthenticationResponse"""
-
-    _auth_success: bool
-    _user_identity: Optional[UserIdentity]
-
-    def __init__(
-        self, auth_success: bool, user_identity: Optional[UserIdentity]
-    ) -> None:
-        self._auth_success = auth_success
-        self._user_identity = user_identity
-
-    @override
-    def success(self) -> bool:
-        return self._auth_success
-
-    @override
-    def get_user_identity(self) -> Optional[UserIdentity]:
-        return self._user_identity
+    """
+    Represents the response from a server authentication request. If success = True,
+    the user_identity field MAY be populated but does not have to be.
+    """
+    success: bool
+    user_identity: Optional[UserIdentity]
 
 
 class ServerAuthProvider(Component):
@@ -240,8 +220,7 @@ class AuthenticationError(ChromaError):
 
 class AbstractCredentials(EnforceOverrides, ABC, Generic[T]):
     """
-    The class is used by Auth Providers to encapsulate credentials received
-    from the server and pass them to a ServerAuthCredentialsProvider.
+    TODOBEN
     """
 
     @abstractmethod
@@ -272,7 +251,7 @@ class BasicAuthCredentials(SecretStrAbstractCredentials):
         return {"username": self.username, "password": self.password}
 
     @staticmethod
-    def from_header(header: str) -> "BasicAuthCredentials":
+    def from_header(header: str) -> BasicAuthCredentials:
         """
         Parses a basic auth header and returns a BasicAuthCredentials object.
         """
@@ -329,7 +308,7 @@ class AuthzResourceActions(str, Enum):
 @dataclass
 class AuthzUser:
     id: Optional[str]
-    tenant: Optional[str] = DEFAULT_TENANT
+    tenant: Optional[str]
     attributes: Optional[Dict[str, Any]] = None
     claims: Optional[Dict[str, Any]] = None
 
@@ -341,58 +320,58 @@ class AuthzResource:
     attributes: Optional[Dict[str, Any]] = None
 
 
-class DynamicAuthzResource:
-    id: Optional[Union[str, Callable[..., str]]]
-    type: Optional[Union[str, Callable[..., str]]]
-    attributes: Optional[Union[Dict[str, Any], Callable[..., Dict[str, Any]]]]
+# class DynamicAuthzResource:
+#     id: Optional[Union[str, Callable[..., str]]]
+#     type: Optional[Union[str, Callable[..., str]]]
+#     attributes: Optional[Union[Dict[str, Any], Callable[..., Dict[str, Any]]]]
 
-    def __init__(
-        self,
-        id: Optional[Union[str, Callable[..., str]]] = None,
-        attributes: Optional[
-            Union[Dict[str, Any], Callable[..., Dict[str, Any]]]
-        ] = lambda **kwargs: {},
-        type: Optional[Union[str, Callable[..., str]]] = DEFAULT_DATABASE,
-    ) -> None:
-        self.id = id
-        self.attributes = attributes
-        self.type = type
+#     def __init__(
+#         self,
+#         id: Optional[Union[str, Callable[..., str]]] = None,
+#         attributes: Optional[
+#             Union[Dict[str, Any], Callable[..., Dict[str, Any]]]
+#         ] = lambda **kwargs: {},
+#         type: Optional[Union[str, Callable[..., str]]] = DEFAULT_DATABASE,
+#     ) -> None:
+#         self.id = id
+#         self.attributes = attributes
+#         self.type = type
 
-    def to_authz_resource(self, **kwargs: Any) -> AuthzResource:
-        return AuthzResource(
-            id=self.id(**kwargs) if callable(self.id) else self.id,
-            type=self.type(**kwargs) if callable(self.type) else self.type,
-            attributes=self.attributes(**kwargs)
-            if callable(self.attributes)
-            else self.attributes,
-        )
+#     def to_authz_resource(self, **kwargs: Any) -> AuthzResource:
+#         return AuthzResource(
+#             id=self.id(**kwargs) if callable(self.id) else self.id,
+#             type=self.type(**kwargs) if callable(self.type) else self.type,
+#             attributes=self.attributes(**kwargs)
+#             if callable(self.attributes)
+#             else self.attributes,
+#         )
 
 
-class AuthzDynamicParams:
-    @staticmethod
-    def from_function_name(**kwargs: Any) -> Callable[..., str]:
-        return partial(lambda **kwargs: kwargs["function"].__name__, **kwargs)
+# class AuthzDynamicParams:
+#     @staticmethod
+#     def from_function_name(**kwargs: Any) -> Callable[..., str]:
+#         return partial(lambda **kwargs: kwargs["function"].__name__, **kwargs)
 
-    @staticmethod
-    def from_function_args(**kwargs: Any) -> Callable[..., str]:
-        return partial(
-            lambda **kwargs: kwargs["function_args"][kwargs["arg_num"]], **kwargs
-        )
+#     @staticmethod
+#     def from_function_args(**kwargs: Any) -> Callable[..., str]:
+#         return partial(
+#             lambda **kwargs: kwargs["function_args"][kwargs["arg_num"]], **kwargs
+#         )
 
-    @staticmethod
-    def from_function_kwargs(**kwargs: Any) -> Callable[..., str]:
-        return partial(
-            lambda **kwargs: kwargs["function_kwargs"][kwargs["arg_name"]], **kwargs
-        )
+#     @staticmethod
+#     def from_function_kwargs(**kwargs: Any) -> Callable[..., str]:
+#         return partial(
+#             lambda **kwargs: kwargs["function_kwargs"][kwargs["arg_name"]], **kwargs
+#         )
 
-    @staticmethod
-    def dict_from_function_kwargs(**kwargs: Any) -> Callable[..., Dict[str, Any]]:
-        return partial(
-            lambda **kwargs: {
-                k: kwargs["function_kwargs"][k] for k in kwargs["arg_names"]
-            },
-            **kwargs,
-        )
+#     @staticmethod
+#     def dict_from_function_kwargs(**kwargs: Any) -> Callable[..., Dict[str, Any]]:
+#         return partial(
+#             lambda **kwargs: {
+#                 k: kwargs["function_kwargs"][k] for k in kwargs["arg_names"]
+#             },
+#             **kwargs,
+#         )
 
 
 @dataclass

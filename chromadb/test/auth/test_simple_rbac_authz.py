@@ -313,7 +313,6 @@ def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> Non
     _api = _sys.instance(ServerAPI)
     _api.heartbeat()
     for action in authz_config["roles_mapping"][random_user["role"]]["actions"]:
-        print(action)
         api_executors[action](_api, _master_api, admin_api)  # type: ignore
     for unauthorized_action in authz_config["roles_mapping"][random_user["role"]][
         "unauthorized_actions"
