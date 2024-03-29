@@ -99,7 +99,7 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         OpenTelemetryGranularity.ALL,
     )
     @override
-    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+    async def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if "token" not in _creds:
             logger.error("Returned credentials do not contain token")
@@ -107,7 +107,7 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         return _creds["token"].get_secret_value() == self._token.get_secret_value()
 
     @override
-    def get_user_identity(
+    async def get_user_identity(
         self, credentials: AbstractCredentials[T]
     ) -> Optional[SimpleUserIdentity]:
         return None
@@ -158,7 +158,7 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
         return None
 
     @override
-    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+    async def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if "token" not in _creds:
             logger.error("Returned credentials do not contain token")
@@ -166,7 +166,7 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
         return _creds["token"].get_secret_value() in self._token_user_mapping.keys()
 
     @override
-    def get_user_identity(
+    async def get_user_identity(
         self, credentials: AbstractCredentials[T]
     ) -> Optional[SimpleUserIdentity]:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
@@ -241,7 +241,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
 
     @trace_method("TokenAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(
+    async def authenticate(
         self, request: ServerAuthenticationRequest[Any]
     ) -> SimpleServerAuthenticationResponse:
         try:
@@ -252,8 +252,8 @@ class TokenAuthServerProvider(ServerAuthProvider):
                 _auth_header, self._token_transport_header
             )
             return SimpleServerAuthenticationResponse(
-                self._credentials_provider.validate_credentials(_token_creds),
-                self._credentials_provider.get_user_identity(_token_creds),
+                await self._credentials_provider.validate_credentials(_token_creds),
+                await self._credentials_provider.get_user_identity(_token_creds),
             )
         except Exception as e:
             logger.error(f"TokenAuthServerProvider.authenticate failed: {repr(e)}")

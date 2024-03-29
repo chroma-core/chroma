@@ -193,7 +193,7 @@ class ServerAuthProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(
+    async def authenticate(
         self, request: ServerAuthenticationRequest[T]
     ) -> ServerAuthenticationResponse:
         pass
@@ -288,11 +288,11 @@ class ServerAuthCredentialsProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+    async def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         ...
 
     @abstractmethod
-    def get_user_identity(
+    async def get_user_identity(
         self, credentials: AbstractCredentials[T]
     ) -> Optional[UserIdentity]:
         ...

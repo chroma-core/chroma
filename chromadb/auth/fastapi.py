@@ -98,7 +98,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
     async def authenticate(
         self, request: ServerAuthenticationRequest[Any]
     ) -> ServerAuthenticationResponse:
-        return self._auth_provider.authenticate(request)
+        return await self._auth_provider.authenticate(request)
 
     @trace_method(
         "FastAPIChromaAuthMiddleware.ignore_operation", OpenTelemetryGranularity.ALL

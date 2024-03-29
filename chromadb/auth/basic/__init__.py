@@ -91,17 +91,17 @@ class BasicAuthServerProvider(ServerAuthProvider):
 
     @trace_method("BasicAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(
+    async def authenticate(
         self, request: ServerAuthenticationRequest[Any]
     ) -> SimpleServerAuthenticationResponse:
         try:
             _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
-            _validation = self._credentials_provider.validate_credentials(
+            _validation = await self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
             )
             return SimpleServerAuthenticationResponse(
                 _validation,
-                self._credentials_provider.get_user_identity(
+                await self._credentials_provider.get_user_identity(
                     BasicAuthCredentials.from_header(_auth_header)
                 ),
             )
