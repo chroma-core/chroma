@@ -104,3 +104,18 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 	log.Info("GetAllCollectionInfoToCompact success", zap.Any("collectionInfo", res.AllCollectionInfo))
 	return res, nil
 }
+
+func (s *Server) UpdateCollectionLogOffset(ctx context.Context, req *logservicepb.UpdateCollectionLogOffsetRequest) (*logservicepb.UpdateCollectionLogOffsetResponse, error) {
+	res := &logservicepb.UpdateCollectionLogOffsetResponse{}
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	if err != nil {
+		return nil, err
+	}
+	err = s.logService.SetCollectionPosition(collectionID, req.LogId)
+	if err != nil {
+		log.Error("error setting collection position", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError("error setting collection position")
+	}
+	return res, nil
+}

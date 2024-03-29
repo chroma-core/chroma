@@ -93,7 +93,7 @@ func (suite *CollectionPositionDbTestSuite) TestRecordLogDb_PushLogs() {
 				for i, log := range logs {
 					expect := string(suite.model.CollectionData[c.collectionId][index+int64(i)])
 					result := string(*log.Record)
-					assert.Equal(suite.t, string(suite.model.CollectionData[c.collectionId][index+int64(i)]), string(*log.Record))
+					assert.Equal(suite.t, expect, result)
 				}
 				assert.NoError(suite.t, err)
 			},

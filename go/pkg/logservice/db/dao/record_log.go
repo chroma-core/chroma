@@ -18,11 +18,11 @@ type IRecordLogDb interface {
 	GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error)
 }
 
-type recordLogDb struct {
+type RecordLogDb struct {
 	db *gorm.DB
 }
 
-func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]byte) (int, error) {
+func (s *RecordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]byte) (int, error) {
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var timestamp = time.Now().UnixNano()
 		var collectionIDStr = types.FromUniqueID(collectionID)
@@ -76,7 +76,7 @@ func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]b
 	return len(recordsContent), nil
 }
 
-func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error) {
+func (s *RecordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error) {
 	var collectionIDStr = types.FromUniqueID(collectionID)
 	log.Info("PullLogs",
 		zap.String("collectionID", *collectionIDStr),
@@ -97,7 +97,7 @@ func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize 
 	return recordLogs, nil
 }
 
-func (s *recordLogDb) GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error) {
+func (s *RecordLogDb) GetAllCollectionsToCompact() ([]*dbmodel.RecordLog, error) {
 	log.Info("GetAllCollectionsToCompact")
 	var recordLogs []*dbmodel.RecordLog
 	var rawSql = `

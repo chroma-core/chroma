@@ -2,7 +2,7 @@ package logservice
 
 import (
 	"context"
-	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
+	dao2 "github.com/chroma-core/chroma/go/pkg/logservice/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
 	"github.com/pingcap/log"
 )
@@ -10,8 +10,9 @@ import (
 var _ IRecordLog = (*RecordLog)(nil)
 
 type RecordLog struct {
-	ctx         context.Context
-	recordLogDb dbmodel.IRecordLogDb
+	ctx           context.Context
+	recordLogDb   dao2.IRecordLogDb
+	collectionLog dao2.ICollectionPositionDb
 }
 
 func NewLogService(ctx context.Context) (*RecordLog, error) {

@@ -13,6 +13,7 @@ type (
 		PushLogs(ctx context.Context, collectionID types.UniqueID, recordContent [][]byte) (int, error)
 		PullLogs(ctx context.Context, collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error)
 		GetAllCollectionIDsToCompact() ([]*dbmodel.RecordLog, error)
+		SetCollectionPosition(collectionID types.UniqueID, position int64) error
 	}
 )
 
@@ -26,4 +27,7 @@ func (s *RecordLog) PullLogs(ctx context.Context, collectionID types.UniqueID, i
 
 func (s *RecordLog) GetAllCollectionIDsToCompact() ([]*dbmodel.RecordLog, error) {
 	return s.recordLogDb.GetAllCollectionsToCompact()
+}
+func (s *RecordLog) SetCollectionPosition(collectionID types.UniqueID, position int64) error {
+	return s.collectionLog.SetCollectionPosition(collectionID, position)
 }

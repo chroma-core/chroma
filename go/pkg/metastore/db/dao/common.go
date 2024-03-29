@@ -2,9 +2,6 @@ package dao
 
 import (
 	"context"
-	"github.com/chroma-core/chroma/go/pkg/logservice/db/dao"
-	"github.com/chroma-core/chroma/go/pkg/logservice/db/dbmodel"
-
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 )
@@ -41,8 +38,4 @@ func (*metaDomain) SegmentMetadataDb(ctx context.Context) dbmodel.ISegmentMetada
 
 func (*metaDomain) NotificationDb(ctx context.Context) dbmodel.INotificationDb {
 	return &notificationDb{dbcore.GetDB(ctx)}
-}
-
-func (*metaDomain) RecordLogDb(ctx context.Context) dbmodel.IRecordLogDb {
-	return &dao.recordLogDb{dbcore.GetDB(ctx)}
 }
