@@ -179,19 +179,3 @@ class RequestsClientAuthProtocolAdapter(
             raise ValueError(
                 f"Unsupported auth type: {self._auth_header.get_auth_info_type()}"
             )
-
-
-class ConfigurationClientAuthCredentialsProvider(
-    ClientAuthCredentialsProvider[SecretStr]
-):
-    _creds: SecretStr
-
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-        system.settings.require("chroma_client_auth_credentials")
-        self._creds = SecretStr(
-            str(system.settings.chroma_client_auth_credentials))
-
-    @override
-    def get_credentials(self) -> SecretStr:
-        return self._creds

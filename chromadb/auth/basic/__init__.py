@@ -51,20 +51,16 @@ class BasicAuthClientProvider(ClientAuthProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-        system.settings.require("chroma_client_auth_credentials_provider")
-        self._credentials_provider = system.require(
-            get_class(
-                str(system.settings.chroma_client_auth_credentials_provider),
-                ClientAuthCredentialsProvider,
-            )
+        system.settings.require("chroma_client_auth_credentials")
+        self._creds = SecretStr(
+            str(system.settings.chroma_client_auth_credentials)
         )
 
     @override
     def authenticate(self) -> ClientAuthResponse:
-        _creds = self._credentials_provider.get_credentials()
         return BasicAuthClientAuthResponse(
             SecretStr(
-                base64.b64encode(f"{_creds.get_secret_value()}".encode("utf-8")).decode(
+                base64.b64encode(f"{self._creds.get_secret_value()}".encode("utf-8")).decode(
                     "utf-8"
                 )
             )

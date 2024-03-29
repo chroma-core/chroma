@@ -181,7 +181,6 @@ class Settings(BaseSettings):  # type: ignore
 
     # Must keep
     chroma_client_auth_provider: Optional[str] = None
-    chroma_client_auth_credentials_file: Optional[str] = None
     chroma_client_auth_credentials: Optional[str] = None
 
     chroma_server_authz_provider: Optional[str] = None

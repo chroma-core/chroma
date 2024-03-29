@@ -269,15 +269,12 @@ class TokenAuthClientProvider(ClientAuthProvider):
         super().__init__(system)
         self._settings = system.settings
 
-        system.settings.require("chroma_client_auth_credentials_provider")
-        self._credentials_provider = system.require(
-            get_class(
-                str(system.settings.chroma_client_auth_credentials_provider),
-                ClientAuthCredentialsProvider,
-            )
+        system.settings.require("chroma_client_auth_credentials")
+        self._token = SecretStr(
+            str(system.settings.chroma_client_auth_credentials)
         )
-        _token = self._credentials_provider.get_credentials()
-        check_token(_token.get_secret_value())
+        check_token(self._token.get_secret_value())
+
         if system.settings.chroma_client_auth_token_transport_header:
             self._token_transport_header = TokenTransportHeader[
                 str(system.settings.chroma_client_auth_token_transport_header)
@@ -286,6 +283,4 @@ class TokenAuthClientProvider(ClientAuthProvider):
     @trace_method("TokenAuthClientProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self) -> ClientAuthResponse:
-        _token = self._credentials_provider.get_credentials()
-
-        return TokenAuthClientAuthResponse(_token, self._token_transport_header)
+        return TokenAuthClientAuthResponse(self._token, self._token_transport_header)
