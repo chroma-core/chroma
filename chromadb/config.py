@@ -137,6 +137,14 @@ class Settings(BaseSettings):  # type: ignore
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
+    @validator(
+        "chroma_server_cors_allow_origins", pre=True, always=True, allow_reuse=True
+    )
+    def validate_safe_cors_origin(cls, v: List[str]) -> List[str]:
+        if len(v) > 0 and any([origin == "*" for origin in v]):
+            logger.warning("CORS origin '*' is not recommended for production use")
+        return v
+
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:
         if type(v) is str and v.strip() == "":
