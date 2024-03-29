@@ -4,14 +4,6 @@ use crate::log::log::CollectionInfo;
 use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::Component;
-use crate::system::ComponentContext;
-use crate::system::Handler;
-use async_trait::async_trait;
-use parking_lot::Mutex;
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -19,9 +11,8 @@ pub(crate) struct Scheduler {
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     policy: Box<dyn SchedulerPolicy>,
-    task_queue: Arc<Mutex<Vec<Task>>>,
-    max_queue_size: usize,
-    schedule_interval: Duration,
+    task_queue: Vec<Task>,
+    max_concurrent_tasks: usize,
 }
 
 impl Scheduler {
@@ -29,16 +20,14 @@ impl Scheduler {
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         policy: Box<dyn SchedulerPolicy>,
-        max_queue_size: usize,
-        schedule_interval: Duration,
+        max_concurrent_tasks: usize,
     ) -> Scheduler {
         Scheduler {
             log,
             sysdb,
             policy,
-            task_queue: Arc::new(Mutex::new(Vec::with_capacity(max_queue_size))),
-            max_queue_size,
-            schedule_interval,
+            task_queue: Vec::with_capacity(max_concurrent_tasks),
+            max_concurrent_tasks,
         }
     }
 
@@ -103,11 +92,10 @@ impl Scheduler {
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
         let tasks = self
             .policy
-            .determine(collection_records, self.max_queue_size as i32);
+            .determine(collection_records, self.max_concurrent_tasks as i32);
         {
-            let mut task_queue = self.task_queue.lock();
-            task_queue.clear();
-            task_queue.extend(tasks);
+            self.task_queue.clear();
+            self.task_queue.extend(tasks);
         }
     }
 
@@ -120,51 +108,8 @@ impl Scheduler {
         self.schedule_internal(collection_records).await;
     }
 
-    pub(crate) fn take_task(&self) -> Option<Task> {
-        let mut task_queue = self.task_queue.lock();
-        if task_queue.is_empty() {
-            return None;
-        }
-        Some(task_queue.remove(0))
-    }
-
-    pub(crate) fn get_tasks(&self) -> Vec<Task> {
-        let task_queue = self.task_queue.lock();
-        task_queue.clone()
-    }
-}
-
-#[async_trait]
-impl Component for Scheduler {
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        ctx.scheduler.schedule_interval(
-            ctx.sender.clone(),
-            ScheduleMessage {},
-            self.schedule_interval,
-            None,
-            ctx,
-        );
-    }
-
-    fn queue_size(&self) -> usize {
-        // TODO: make this comfigurable
-        1000
-    }
-}
-
-impl Debug for Scheduler {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Scheduler")
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ScheduleMessage {}
-
-#[async_trait]
-impl Handler<ScheduleMessage> for Scheduler {
-    async fn handle(&mut self, _event: ScheduleMessage, _ctx: &ComponentContext<Scheduler>) {
-        self.schedule().await;
+    pub(crate) fn get_tasks(&self) -> impl Iterator<Item = &Task> {
+        self.task_queue.iter()
     }
 }
 
@@ -174,93 +119,13 @@ mod tests {
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::sysdb::sysdb::GetCollectionsError;
-    use crate::sysdb::sysdb::GetSegmentsError;
+    use crate::sysdb::test_sysdb::TestSysDb;
     use crate::types::Collection;
     use crate::types::LogRecord;
     use crate::types::Operation;
     use crate::types::OperationRecord;
-    use crate::types::Segment;
-    use crate::types::SegmentScope;
-    use std::collections::HashMap;
     use std::str::FromStr;
-    use std::time::Duration;
     use uuid::Uuid;
-
-    #[derive(Clone, Debug)]
-    pub(crate) struct TestSysDb {
-        collections: HashMap<Uuid, Collection>,
-    }
-
-    impl TestSysDb {
-        pub(crate) fn new() -> Self {
-            TestSysDb {
-                collections: HashMap::new(),
-            }
-        }
-
-        pub(crate) fn add_collection(&mut self, collection: Collection) {
-            self.collections.insert(collection.id, collection);
-        }
-
-        fn filter_collections(
-            collection: &Collection,
-            collection_id: Option<Uuid>,
-            name: Option<String>,
-            tenant: Option<String>,
-            database: Option<String>,
-        ) -> bool {
-            if collection_id.is_some() && collection_id.unwrap() != collection.id {
-                return false;
-            }
-            if name.is_some() && name.unwrap() != collection.name {
-                return false;
-            }
-            if tenant.is_some() && tenant.unwrap() != collection.tenant {
-                return false;
-            }
-            if database.is_some() && database.unwrap() != collection.database {
-                return false;
-            }
-            true
-        }
-    }
-
-    #[async_trait]
-    impl SysDb for TestSysDb {
-        async fn get_collections(
-            &mut self,
-            collection_id: Option<Uuid>,
-            name: Option<String>,
-            tenant: Option<String>,
-            database: Option<String>,
-        ) -> Result<Vec<Collection>, GetCollectionsError> {
-            let mut collections = Vec::new();
-            for collection in self.collections.values() {
-                if !TestSysDb::filter_collections(
-                    &collection,
-                    collection_id,
-                    name.clone(),
-                    tenant.clone(),
-                    database.clone(),
-                ) {
-                    continue;
-                }
-                collections.push(collection.clone());
-            }
-            Ok(collections)
-        }
-
-        async fn get_segments(
-            &mut self,
-            id: Option<Uuid>,
-            r#type: Option<String>,
-            scope: Option<SegmentScope>,
-            collection: Option<Uuid>,
-        ) -> Result<Vec<Segment>, GetSegmentsError> {
-            Ok(Vec::new())
-        }
-    }
 
     #[tokio::test]
     async fn test_scheduler() {
@@ -334,17 +199,16 @@ mod tests {
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
-        let mut scheduler =
-            Scheduler::new(log, sysdb, scheduler_policy, 1000, Duration::from_secs(1));
+        let mut scheduler = Scheduler::new(log, sysdb, scheduler_policy, 1000);
 
         scheduler.schedule().await;
         let tasks = scheduler.get_tasks();
-        assert_eq!(tasks.len(), 2);
+
         // TODO: 3/9 Tasks may be out of order since we have not yet implemented SysDB Get last compaction time. Use contains instead of equal.
         let task_ids = tasks
-            .iter()
             .map(|t| t.collection_id.clone())
             .collect::<Vec<String>>();
+        assert_eq!(task_ids.len(), 2);
         assert!(task_ids.contains(&collection_id_1));
         assert!(task_ids.contains(&collection_id_2));
     }
