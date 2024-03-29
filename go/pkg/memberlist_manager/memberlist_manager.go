@@ -111,7 +111,7 @@ func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
 	if !exists && status == Ready {
 		newMemberlist = append(newMemberlist, nodeIp)
 	}
-	return m.memberlistStore.UpdateMemberlist(context.TODO(), &newMemberlist, resourceVersion)
+	return m.memberlistStore.UpdateMemberlist(context.Background(), &newMemberlist, resourceVersion)
 }
 
 func (m *MemberlistManager) Stop() error {
