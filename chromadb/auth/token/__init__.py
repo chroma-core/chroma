@@ -37,18 +37,6 @@ class TokenTransportHeader(Enum):
     X_CHROMA_TOKEN = "X-Chroma-Token"
 
 
-def TokenAuthHeader(type: TokenTransportHeader,
-                    value: str) -> ClientAuthHeaders:
-    key = None
-    if type == TokenTransportHeader.AUTHORIZATION:
-        key = "Authorization"
-    elif type == TokenTransportHeader.X_CHROMA_TOKEN:
-        key = "X-Chroma-Token"
-    else:
-        raise ValueError(f"Invalid token transport header: {type}")
-    return {key: SecretStr(value)}
-
-
 def check_token(token: str) -> None:
     token_str = str(token)
     if not all(
@@ -176,7 +164,6 @@ class TokenAuthServerProvider(ServerAuthProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-        system.settings.require("chroma_server_auth_credentials_provider")
         self._credentials_provider = system.require(
             system.settings.chroma_server_auth_credentials_provider
         )
@@ -232,5 +219,11 @@ class TokenAuthClientProvider(ClientAuthProvider):
                   OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self) -> ClientAuthHeaders:
-        return TokenAuthHeader(self._token_transport_header,
-                               self._token.get_secret_value())
+        key = None
+        if type == TokenTransportHeader.AUTHORIZATION:
+            key = "Authorization"
+        elif type == TokenTransportHeader.X_CHROMA_TOKEN:
+            key = "X-Chroma-Token"
+        else:
+            raise ValueError(f"Invalid token transport header: {type}")
+        return {key: SecretStr(self._token.get_secret_value())}
