@@ -26,9 +26,10 @@ pub(crate) enum BlockfileError {
 impl ChromaError for BlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
-            BlockfileError::NotFoundError
-            | BlockfileError::InvalidKeyType
-            | BlockfileError::InvalidValueType => ErrorCodes::InvalidArgument,
+            BlockfileError::NotFoundError => ErrorCodes::NotFound,
+            BlockfileError::InvalidKeyType | BlockfileError::InvalidValueType => {
+                ErrorCodes::InvalidArgument
+            }
             BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
                 ErrorCodes::FailedPrecondition
             }
@@ -266,6 +267,7 @@ pub(crate) trait Blockfile: BlockfileClone {
     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
 
     fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>>;
+    fn delete(&mut self, key: BlockfileKey) -> Result<(), Box<dyn ChromaError>>;
 
     fn get_gt(
         &self,
@@ -348,6 +350,13 @@ impl Blockfile for HashMapBlockfile {
     fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>> {
         self.map.write().insert(key, value);
         Ok(())
+    }
+
+    fn delete(&mut self, key: BlockfileKey) -> Result<(), Box<dyn ChromaError>> {
+        match self.map.write().remove(&key) {
+            Some(_) => Ok(()),
+            None => Err(Box::new(BlockfileError::NotFoundError)),
+        }
     }
 
     fn get_gt(

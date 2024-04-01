@@ -5,6 +5,7 @@ use super::sparse_index::SparseIndex;
 use crate::blockstore::arrow_blockfile::block::delta::BlockDelta;
 use crate::blockstore::BlockfileError;
 use crate::errors::ChromaError;
+use crate::errors::IntoResult;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use thiserror::Error;
@@ -94,6 +95,48 @@ impl Blockfile for ArrowBlockfile {
         }
     }
 
+    fn delete(&mut self, key: BlockfileKey) -> Result<(), Box<dyn ChromaError>> {
+        if !self.in_transaction() {
+            return Err(Box::new(BlockfileError::TransactionNotInProgress));
+        }
+
+        self.validate_key(&key)?;
+
+        let transaction_state = match &self.transaction_state {
+            None => return Err(Box::new(BlockfileError::TransactionNotInProgress)),
+            Some(transaction_state) => transaction_state,
+        };
+
+        // Note: The code to get the target block as well as get or create the delta is duplicated
+        // in the set and delete methods. This is due to the lock management making it clunky
+        // to abstract this into a separate method. This likely should be refactored
+        // for cleaner reuse, but for now its ok to repeat ourselves.
+
+        // Get the target block id for the key
+        let transaction_sparse_index = transaction_state.sparse_index.lock();
+        let target_block_id = match *transaction_sparse_index {
+            None => self.sparse_index.lock().get_target_block_id(&key),
+            Some(ref index) => index.lock().get_target_block_id(&key),
+        };
+
+        // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
+        // Creating a delta loads the block entirely into memory
+        let delta = match transaction_state.get_delta_for_block(&target_block_id) {
+            None => {
+                let target_block = match self.block_provider.get_block(&target_block_id) {
+                    None => return Err(Box::new(ArrowBlockfileError::BlockNotFoundError)),
+                    Some(block) => block,
+                };
+                let delta = BlockDelta::from(target_block);
+                transaction_state.add_delta(delta.clone());
+                delta
+            }
+            Some(delta) => delta,
+        };
+
+        delta.delete(key).into_result()
+    }
+
     fn get_by_prefix(
         &self,
         prefix: String,
@@ -144,29 +187,7 @@ impl Blockfile for ArrowBlockfile {
             return Err(Box::new(BlockfileError::TransactionNotInProgress));
         }
 
-        // Validate key type
-        match key.key {
-            Key::String(_) => {
-                if self.key_type != KeyType::String {
-                    return Err(Box::new(BlockfileError::InvalidKeyType));
-                }
-            }
-            Key::Float(_) => {
-                if self.key_type != KeyType::Float {
-                    return Err(Box::new(BlockfileError::InvalidKeyType));
-                }
-            }
-            Key::Bool(_) => {
-                if self.key_type != KeyType::Bool {
-                    return Err(Box::new(BlockfileError::InvalidKeyType));
-                }
-            }
-            Key::Uint(_) => {
-                if self.key_type != KeyType::Uint {
-                    return Err(Box::new(BlockfileError::InvalidKeyType));
-                }
-            }
-        }
+        self.validate_key(&key)?;
 
         // Validate value type
         match value {
@@ -388,6 +409,32 @@ impl ArrowBlockfile {
     fn in_transaction(&self) -> bool {
         self.transaction_state.is_some()
     }
+
+    fn validate_key(&self, key: &BlockfileKey) -> Result<(), Box<dyn ChromaError>> {
+        match key.key {
+            Key::String(_) => {
+                if self.key_type != KeyType::String {
+                    return Err(Box::new(BlockfileError::InvalidKeyType));
+                }
+            }
+            Key::Float(_) => {
+                if self.key_type != KeyType::Float {
+                    return Err(Box::new(BlockfileError::InvalidKeyType));
+                }
+            }
+            Key::Bool(_) => {
+                if self.key_type != KeyType::Bool {
+                    return Err(Box::new(BlockfileError::InvalidKeyType));
+                }
+            }
+            Key::Uint(_) => {
+                if self.key_type != KeyType::Uint {
+                    return Err(Box::new(BlockfileError::InvalidKeyType));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -602,6 +649,50 @@ mod tests {
                     assert_eq!(val, i as u32);
                 }
                 _ => panic!("Unexpected value type"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_delete() {
+        let block_provider = ArrowBlockProvider::new();
+        let mut blockfile =
+            ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
+
+        blockfile.begin_transaction().unwrap();
+        let key1 = BlockfileKey::new("key".to_string(), Key::String("zzzz".to_string()));
+        blockfile
+            .set(
+                key1.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
+            )
+            .unwrap();
+        let key2 = BlockfileKey::new("key".to_string(), Key::String("aaaa".to_string()));
+        blockfile
+            .set(
+                key2.clone(),
+                Value::Int32ArrayValue(Int32Array::from(vec![4, 5, 6])),
+            )
+            .unwrap();
+        blockfile.commit_transaction().unwrap();
+
+        blockfile.begin_transaction().unwrap();
+        blockfile.delete(key1.clone()).unwrap();
+        blockfile.commit_transaction().unwrap();
+
+        let res = blockfile.get(key1);
+        match res {
+            Err(err) => {
+                assert_eq!(err.code(), crate::errors::ErrorCodes::NotFound);
+            }
+            _ => panic!("Expected not found error"),
+        }
+
+        let res = blockfile.get(key2);
+        match res {
+            Ok(_) => {}
+            Err(err) => {
+                panic!("Expected key2 to be found, got error: {:?}", err);
             }
         }
     }

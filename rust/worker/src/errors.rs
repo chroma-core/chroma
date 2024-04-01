@@ -2,6 +2,7 @@
 // gRPC spec. https://grpc.github.io/grpc/core/md_doc_statuscodes.html
 // Custom errors can use these codes in order to allow for generic handling
 use std::error::Error;
+use std::result::Result;
 
 #[derive(PartialEq, Debug)]
 pub(crate) enum ErrorCodes {
@@ -43,4 +44,20 @@ pub(crate) enum ErrorCodes {
 
 pub(crate) trait ChromaError: Error + Send {
     fn code(&self) -> ErrorCodes;
+}
+
+pub(crate) trait IntoResult<T> {
+    fn into_result(self) -> Result<T, Box<dyn ChromaError>>;
+}
+
+/// Converts a Result<R, E> into a Result<R, Box<dyn ChromaError>>.
+impl<R, E: ChromaError + 'static> IntoResult<R> for Result<R, Box<E>> {
+    fn into_result(self) -> Result<R, Box<dyn ChromaError>> {
+        if self.is_err() {
+            let as_chroma_error: Box<dyn ChromaError> = self.err().unwrap();
+            return Err(as_chroma_error);
+        } else {
+            return Ok(self.unwrap());
+        }
+    }
 }

@@ -2,6 +2,7 @@ use super::{Block, BlockBuilderOptions, BlockData, BlockDataBuilder};
 use crate::blockstore::{
     arrow_blockfile::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockProvider},
     types::{BlockfileKey, KeyType, Value, ValueType},
+    BlockfileError,
 };
 use arrow::util::bit_util;
 use parking_lot::RwLock;
@@ -41,9 +42,9 @@ impl BlockDelta {
     }
 
     /// Deletes a key from the block delta.
-    pub fn delete(&self, key: BlockfileKey) {
+    pub fn delete(&self, key: BlockfileKey) -> Result<(), Box<BlockfileError>> {
         let mut inner = self.inner.write();
-        inner.delete(key);
+        inner.delete(key)
     }
 
     /// Gets the minimum key in the block delta.
@@ -131,10 +132,12 @@ impl BlockDeltaInner {
         self.new_data.insert(key, value);
     }
 
-    fn delete(&mut self, key: BlockfileKey) {
+    fn delete(&mut self, key: BlockfileKey) -> Result<(), Box<BlockfileError>> {
         if self.new_data.contains_key(&key) {
             self.new_data.remove(&key);
+            return Ok(());
         }
+        Err(Box::new(BlockfileError::NotFoundError))
     }
 
     fn get_block_size(

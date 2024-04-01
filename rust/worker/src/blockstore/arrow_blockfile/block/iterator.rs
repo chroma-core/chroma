@@ -8,15 +8,18 @@ use arrow::array::{Array, BooleanArray, Int32Array, ListArray, StringArray, UInt
 pub(super) struct BlockIterator {
     block: Block,
     index: usize,
+    length: usize,
     key_type: KeyType,
     value_type: ValueType,
 }
 
 impl BlockIterator {
     pub fn new(block: Block, key_type: KeyType, value_type: ValueType) -> Self {
+        let len = block.len();
         Self {
             block,
             index: 0,
+            length: len,
             key_type,
             value_type,
         }
@@ -29,6 +32,9 @@ impl Iterator for BlockIterator {
     fn next(&mut self) -> Option<Self::Item> {
         let data = &self.block.inner.read().data;
         if data.is_none() {
+            return None;
+        }
+        if self.index >= self.length {
             return None;
         }
 
