@@ -6,6 +6,7 @@ from pydantic import SecretStr
 
 from chromadb.auth import (
     ServerAuthProvider,
+    ServerAuthenticationResponse,
     ClientAuthProvider,
     ServerAuthCredentialsProvider,
     BasicAuthCredentials,
@@ -53,13 +54,13 @@ class BasicAuthServerProvider(ServerAuthProvider):
     @override
     def authenticate(
         self, headers: AuthHeaders
-    ) -> SimpleServerAuthenticationResponse:
+    ) -> ServerAuthenticationResponse:
         try:
             _auth_header = headers["Authorization"].get_secret_value()
             _validation = self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
             )
-            return SimpleServerAuthenticationResponse(
+            return ServerAuthenticationResponse(
                 _validation,
                 self._credentials_provider.get_user_identity(
                     BasicAuthCredentials.from_header(_auth_header)
@@ -67,4 +68,4 @@ class BasicAuthServerProvider(ServerAuthProvider):
             )
         except Exception as e:
             logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
-            return SimpleServerAuthenticationResponse(False, None)
+            return ServerAuthenticationResponse(False, None)

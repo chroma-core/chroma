@@ -15,7 +15,7 @@ from chromadb.auth import (
     AuthHeaders,
     SecretStrAbstractCredentials,
     AbstractCredentials,
-    SimpleServerAuthenticationResponse,
+    ServerAuthenticationResponse,
     UserIdentity,
 )
 from chromadb.config import System
@@ -221,7 +221,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
     @override
     def authenticate(
         self, headers: AuthHeaders
-    ) -> SimpleServerAuthenticationResponse:
+    ) -> ServerAuthenticationResponse:
         try:
             _auth_header = headers[
                 self._token_transport_header.value
@@ -229,13 +229,13 @@ class TokenAuthServerProvider(ServerAuthProvider):
             _token_creds = TokenAuthCredentials.from_header(
                 _auth_header, self._token_transport_header
             )
-            return SimpleServerAuthenticationResponse(
+            return ServerAuthenticationResponse(
                 self._credentials_provider.validate_credentials(_token_creds),
                 self._credentials_provider.get_user_identity(_token_creds),
             )
         except Exception as e:
             logger.error(f"TokenAuthServerProvider.authenticate failed: {repr(e)}")
-            return SimpleServerAuthenticationResponse(False, None)
+            return ServerAuthenticationResponse(False, None)
 
 
 class TokenAuthClientProvider(ClientAuthProvider):
