@@ -64,35 +64,31 @@ class Token(TypedDict):
     secret: str
 
 
-class User(TypedDict):
-    id: str
-    role: str
-    tenant: Optional[str]
-    databases: Optional[List[str]]
-    tokens: List[Token]
-
-
 class UserTokenConfigServerAuthCredentialsProvider(
     ServerAuthCredentialsProvider
 ):
+    class User(TypedDict):
+        id: str
+        role: str
+        tenant: Optional[str]
+        databases: Optional[List[str]]
+        tokens: List[Token]
+
     _users: List[User]
     _token_user_mapping: Dict[str, str]  # reverse mapping of token to user
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
-        if system.settings.chroma_server_auth_credentials_file:
-            system.settings.require("chroma_server_auth_credentials_file")
-            user_file = str(
-                system.settings.chroma_server_auth_credentials_file
-            )
-            with open(user_file) as f:
-                self._users = cast(List[User], yaml.safe_load(f)["users"])
-        elif system.settings.chroma_server_auth_credentials:
-            self._users = cast(
-                List[User], json.loads(
-                    system.settings.chroma_server_auth_credentials
-                )
-            )
+        if not system.settings.chroma_server_auth_credentials_file:
+            raise ValueError("chroma_server_auth_credentials_file not set")
+
+        system.settings.require("chroma_server_auth_credentials_file")
+        user_file = str(
+            system.settings.chroma_server_auth_credentials_file
+        )
+        with open(user_file) as f:
+            self._users = cast(List[User], yaml.safe_load(f)["users"])
+
         self._token_user_mapping = {}
         for user in self._users:
             for t in user["tokens"]:
