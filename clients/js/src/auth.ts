@@ -4,7 +4,8 @@ export interface ClientAuthProvider {
   /**
    * Abstract method for authenticating a client.
    */
-  authenticate(): ClientAuthResponse;
+  // TODOBEN I changed this to ClientAuthHeaders -- uncover the ramifications.
+  authenticate(): ClientAuthHeaders;
 }
 
 export interface ClientAuthConfigurationProvider<T> {
@@ -22,18 +23,7 @@ export interface ClientAuthCredentialsProvider<T> {
   getCredentials(user?: string): T;
 }
 
-enum AuthInfoType {
-  COOKIE = "cookie",
-  HEADER = "header",
-  URL = "url",
-  METADATA = "metadata",
-}
-
-export interface ClientAuthResponse {
-  getAuthInfoType(): AuthInfoType;
-
-  getAuthInfo(): { key: string; value: string };
-}
+export type ClientAuthHeaders = { [key: string]: string };
 
 export interface AbstractCredentials<T> {
   getCredentials(): T;
@@ -46,7 +36,7 @@ export interface ClientAuthProtocolAdapter<T> {
 }
 
 class SecretStr {
-  constructor(private readonly secret: string) {}
+  constructor(private readonly secret: string) { }
 
   getSecret(): string {
     return this.secret;
@@ -67,21 +57,6 @@ class BasicAuthCredentials implements AbstractCredentials<SecretStr> {
   getCredentials(): SecretStr {
     //encode base64
     return this.credentials;
-  }
-}
-
-class BasicAuthClientAuthResponse implements ClientAuthResponse {
-  constructor(private readonly credentials: BasicAuthCredentials) {}
-
-  getAuthInfo(): { key: string; value: string } {
-    return {
-      key: "Authorization",
-      value: "Basic " + this.credentials.getCredentials().getSecret(),
-    };
-  }
-
-  getAuthInfoType(): AuthInfoType {
-    return AuthInfoType.HEADER;
   }
 }
 
@@ -136,10 +111,10 @@ class BasicAuthClientAuthProvider implements ClientAuthProvider {
       new BasicAuthCredentialsProvider(options.textCredentials);
   }
 
-  authenticate(): ClientAuthResponse {
-    return new BasicAuthClientAuthResponse(
-      this.credentialsProvider.getCredentials(),
-    );
+  authenticate(): ClientAuthHeaders {
+    var headers: { [key: string]: string } = {};
+    headers["Authorization"] = "Basic " + this.credentialsProvider.getCredentials().getCredentials().getSecret();
+    return headers
   }
 }
 
@@ -202,56 +177,14 @@ export class TokenClientAuthProvider implements ClientAuthProvider {
       new TokenCredentialsProvider(options.textCredentials);
   }
 
-  authenticate(): ClientAuthResponse {
-    return new TokenClientAuthResponse(
-      this.credentialsProvider.getCredentials(),
-      this.providerOptions.headerType,
-    );
+  authenticate(): ClientAuthHeaders {
+    var headers: { [key: string]: string } = {};
+    headers["Authorization"] = "Bearer " + this.credentialsProvider.getCredentials().getCredentials().getSecret();
+    return headers
   }
 }
 
 type TokenHeaderType = "AUTHORIZATION" | "X_CHROMA_TOKEN";
-
-const TokenHeader: Record<
-  TokenHeaderType,
-  (value: string) => { key: string; value: string }
-> = {
-  AUTHORIZATION: (value: string) => ({
-    key: "Authorization",
-    value: `Bearer ${value}`,
-  }),
-  X_CHROMA_TOKEN: (value: string) => ({ key: "X-Chroma-Token", value: value }),
-};
-
-class TokenClientAuthResponse implements ClientAuthResponse {
-  constructor(
-    private readonly credentials: TokenAuthCredentials,
-    private readonly headerType: TokenHeaderType = "AUTHORIZATION",
-  ) {}
-
-  getAuthInfo(): { key: string; value: string } {
-    if (this.headerType === "AUTHORIZATION") {
-      return TokenHeader.AUTHORIZATION(
-        this.credentials.getCredentials().getSecret(),
-      );
-    } else if (this.headerType === "X_CHROMA_TOKEN") {
-      return TokenHeader.X_CHROMA_TOKEN(
-        this.credentials.getCredentials().getSecret(),
-      );
-    } else {
-      throw new Error(
-        "Invalid header type: " +
-          this.headerType +
-          ". Valid types are: " +
-          Object.keys(TokenHeader).join(", "),
-      );
-    }
-  }
-
-  getAuthInfoType(): AuthInfoType {
-    return AuthInfoType.HEADER;
-  }
-}
 
 export class IsomorphicFetchClientAuthProtocolAdapter
   implements ClientAuthProtocolAdapter<RequestInit>
@@ -367,6 +300,7 @@ export class IsomorphicFetchClientAuthProtocolAdapter
   }
 }
 
+// TODOBEN
 export type AuthOptions = {
   provider: ClientAuthProvider | string | undefined;
   credentialsProvider?: ClientAuthCredentialsProvider<any> | undefined;

@@ -19,7 +19,6 @@ from chromadb.auth import (
     AuthzUser,
     DynamicAuthzResource,
     ServerAuthenticationRequest,
-    AuthInfoType,
     ServerAuthenticationResponse,
     ServerAuthProvider,
     ChromaAuthzMiddleware,
@@ -42,18 +41,9 @@ class FastAPIServerAuthenticationRequest(ServerAuthenticationRequest[Optional[st
 
     @override
     def get_auth_info(
-        self, auth_info_type: AuthInfoType, auth_info_id: str
+        self, auth_info_id: str
     ) -> Optional[str]:
-        if auth_info_type == AuthInfoType.HEADER:
-            return str(self._request.headers[auth_info_id])
-        elif auth_info_type == AuthInfoType.COOKIE:
-            return str(self._request.cookies[auth_info_id])
-        elif auth_info_type == AuthInfoType.URL:
-            return str(self._request.query_params[auth_info_id])
-        elif auth_info_type == AuthInfoType.METADATA:
-            raise ValueError("Metadata not supported for FastAPI")
-        else:
-            raise ValueError(f"Unknown auth info type: {auth_info_type}")
+        return str(self._request.headers[auth_info_id])
 
 
 class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
@@ -267,7 +257,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         self._settings.require("chroma_server_authz_provider")
         self._ignore_auth_paths: Dict[
             str, List[str]
-        ] = self._settings.chroma_server_authz_ignore_paths
+        ] = self._settings.chroma_server_auth_ignore_paths
         if self._settings.chroma_server_authz_provider:
             logger.debug(
                 "Server Authorization Provider: "

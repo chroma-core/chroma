@@ -4,9 +4,6 @@ import pkgutil
 from typing import Union, Dict, Type, Callable  # noqa: F401
 
 from chromadb.auth import (
-    ClientAuthConfigurationProvider,
-    ClientAuthCredentialsProvider,
-    ClientAuthProtocolAdapter,
     ServerAuthProvider,
     ServerAuthConfigurationProvider,
     ServerAuthCredentialsProvider,
@@ -19,12 +16,9 @@ from chromadb.utils import get_class
 logger = logging.getLogger(__name__)
 ProviderTypes = Union[
     "ClientAuthProvider",
-    "ClientAuthConfigurationProvider",
-    "ClientAuthCredentialsProvider",
     "ServerAuthProvider",
     "ServerAuthConfigurationProvider",
     "ServerAuthCredentialsProvider",
-    "ClientAuthProtocolAdapter",
     "ServerAuthorizationProvider",
     "ServerAuthorizationConfigurationProvider",
 ]
@@ -32,7 +26,6 @@ ProviderTypes = Union[
 _provider_registry = {
     "client_auth_providers": {},
     "client_auth_credentials_providers": {},
-    "client_auth_protocol_adapters": {},
     "server_auth_providers": {},
     "server_auth_config_providers": {},
     "server_auth_credentials_providers": {},
@@ -56,10 +49,6 @@ def register_provider(
         global _provider_registry
         if issubclass(cls, ClientAuthProvider):
             _provider_registry["client_auth_providers"][short_hand] = cls
-        elif issubclass(cls, ClientAuthCredentialsProvider):
-            _provider_registry["client_auth_credentials_providers"][short_hand] = cls
-        elif issubclass(cls, ClientAuthProtocolAdapter):
-            _provider_registry["client_auth_protocol_adapters"][short_hand] = cls
         elif issubclass(cls, ServerAuthProvider):
             _provider_registry["server_auth_providers"][short_hand] = cls
         elif issubclass(cls, ServerAuthConfigurationProvider):
@@ -73,9 +62,9 @@ def register_provider(
         else:
             raise ValueError(
                 "Only ClientAuthProvider, ClientAuthConfigurationProvider, "
-                "ClientAuthCredentialsProvider, ServerAuthProvider, "
+                "ServerAuthProvider, "
                 "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, "
-                "ClientAuthProtocolAdapter, ServerAuthorizationProvider, "
+                "ServerAuthorizationProvider, "
                 "ServerAuthorizationConfigurationProvider can be registered."
             )
         return cls
@@ -90,10 +79,6 @@ def resolve_provider(
     global _provider_registry
     if issubclass(cls, ClientAuthProvider):
         _key = "client_auth_providers"
-    elif issubclass(cls, ClientAuthCredentialsProvider):
-        _key = "client_auth_credentials_providers"
-    elif issubclass(cls, ClientAuthProtocolAdapter):
-        _key = "client_auth_protocol_adapters"
     elif issubclass(cls, ServerAuthProvider):
         _key = "server_auth_providers"
     elif issubclass(cls, ServerAuthConfigurationProvider):
@@ -106,10 +91,10 @@ def resolve_provider(
         _key = "server_authz_config_providers"
     else:
         raise ValueError(
-            "Only ClientAuthProvider, ClientAuthConfigurationProvider, "
-            "ClientAuthCredentialsProvider, ServerAuthProvider, "
+            "Only ClientAuthProvider, "
+            "ServerAuthProvider, "
             "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, "
-            "ClientAuthProtocolAdapter, ServerAuthorizationProvider,"
+            "ServerAuthorizationProvider,"
             "ServerAuthorizationConfigurationProvider, can be registered."
         )
     if class_or_name in _provider_registry[_key]:

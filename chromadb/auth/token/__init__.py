@@ -13,13 +13,11 @@ from chromadb.auth import (
     ClientAuthProvider,
     ServerAuthenticationRequest,
     ServerAuthCredentialsProvider,
-    AuthInfoType,
-    ClientAuthCredentialsProvider,
-    ClientAuthResponse,
+    ClientAuthHeaders,
     SecretStrAbstractCredentials,
     AbstractCredentials,
     SimpleServerAuthenticationResponse,
-    SimpleUserIdentity,
+    UserIdentity,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
@@ -43,35 +41,15 @@ class TokenTransportHeader(Enum):
     X_CHROMA_TOKEN = "X-Chroma-Token"
 
 
-class TokenAuthClientAuthResponse(ClientAuthResponse):
-    _token_transport_header: TokenTransportHeader
-
-    def __init__(
-        self,
-        credentials: SecretStr,
-        token_transport_header: TokenTransportHeader = TokenTransportHeader.AUTHORIZATION,
-    ) -> None:
-        self._credentials = credentials
-        self._token_transport_header = token_transport_header
-
-    @override
-    def get_auth_info_type(self) -> AuthInfoType:
-        return AuthInfoType.HEADER
-
-    @override
-    def get_auth_info(self) -> Tuple[str, SecretStr]:
-        if self._token_transport_header == TokenTransportHeader.AUTHORIZATION:
-            return "Authorization", SecretStr(
-                f"Bearer {self._credentials.get_secret_value()}"
-            )
-        elif self._token_transport_header == TokenTransportHeader.X_CHROMA_TOKEN:
-            return "X-Chroma-Token", SecretStr(
-                f"{self._credentials.get_secret_value()}"
-            )
-        else:
-            raise ValueError(
-                f"Invalid token transport header: {self._token_transport_header}"
-            )
+def TokenAuthHeader(type: TokenTransportHeader, value: str) -> ClientAuthHeaders:
+    key = None
+    if type == TokenTransportHeader.AUTHORIZATION:
+        key = "Authorization"
+    elif type == TokenTransportHeader.X_CHROMA_TOKEN:
+        key = "X-Chroma-Token"
+    else:
+        raise ValueError(f"Invalid token transport header: {type}")
+    return {key: SecretStr(value)}
 
 
 def check_token(token: str) -> None:
@@ -109,7 +87,7 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     @override
     def get_user_identity(
         self, credentials: AbstractCredentials[T]
-    ) -> Optional[SimpleUserIdentity]:
+    ) -> Optional[UserIdentity]:
         return None
 
 
@@ -168,7 +146,7 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
     @override
     def get_user_identity(
         self, credentials: AbstractCredentials[T]
-    ) -> Optional[SimpleUserIdentity]:
+    ) -> Optional[UserIdentity]:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if "token" not in _creds:
             logger.error("Returned credentials do not contain token")
@@ -177,7 +155,7 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
         # complex use cases
         _user_id = self._token_user_mapping[_creds["token"].get_secret_value()]
         _user = self.find_user_by_id(_user_id)
-        return SimpleUserIdentity(
+        return UserIdentity(
             user_id=_user_id,
             tenant=_user["tenant"] if _user and "tenant" in _user else "*",
             databases=_user["databases"] if _user and "databases" in _user else ["*"],
@@ -246,7 +224,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
     ) -> SimpleServerAuthenticationResponse:
         try:
             _auth_header = request.get_auth_info(
-                AuthInfoType.HEADER, self._token_transport_header.value
+                self._token_transport_header.value
             )
             _token_creds = TokenAuthCredentials.from_header(
                 _auth_header, self._token_transport_header
@@ -262,7 +240,6 @@ class TokenAuthServerProvider(ServerAuthProvider):
 
 @register_provider("token")
 class TokenAuthClientProvider(ClientAuthProvider):
-    _credentials_provider: ClientAuthCredentialsProvider[Any]
     _token_transport_header: TokenTransportHeader = TokenTransportHeader.AUTHORIZATION
 
     def __init__(self, system: System) -> None:
@@ -282,5 +259,5 @@ class TokenAuthClientProvider(ClientAuthProvider):
 
     @trace_method("TokenAuthClientProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(self) -> ClientAuthResponse:
-        return TokenAuthClientAuthResponse(self._token, self._token_transport_header)
+    def authenticate(self) -> ClientAuthHeaders:
+        return TokenAuthHeader(self._token_transport_header, self.token)

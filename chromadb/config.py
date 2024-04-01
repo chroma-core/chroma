@@ -145,43 +145,17 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_nofile: Optional[int] = None
 
-    chroma_server_auth_provider: Optional[str] = None
-
-    @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
-    def chroma_server_auth_provider_non_empty(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_auth_provider cannot be empty or just whitespace"
-            )
-        return v
-
-    chroma_server_auth_configuration_provider: Optional[str] = None
-    chroma_server_auth_configuration_file: Optional[str] = None
-    chroma_server_auth_credentials_provider: Optional[str] = None
-    chroma_server_auth_credentials_file: Optional[str] = None
-    chroma_server_auth_credentials: Optional[str] = None
-
-    @validator(
-        "chroma_server_auth_credentials_file", pre=True, always=True, allow_reuse=True
-    )
-    def chroma_server_auth_credentials_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_auth_credentials_file cannot be empty or just whitespace"
-            )
-        if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(
-                f"chroma_server_auth_credentials_file [{v}] does not exist"
-            )
-        return v
-
-    # Must keep
+    # The provider for client auth. See chromadb/auth/__init__.py
     chroma_client_auth_provider: Optional[str] = None
+    # If needed by the provider (e.g. BasicAuthClientProvider),
+    # the credentials to use.
     chroma_client_auth_credentials: Optional[str] = None
+    # The transport header to use for the token. Defaults to TODOBEN
+    chroma_client_auth_token_transport_header: Optional[str] = None
+
+    # Server auth
+    chroma_server_auth_provider: Optional[str] = None
+    chroma_server_auth_token_transport_header: Optional[str] = None
 
     chroma_server_authz_provider: Optional[str] = None
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
@@ -190,11 +164,17 @@ class Settings(BaseSettings):  # type: ignore
         "/api/v1/version": ["GET"],
     }
 
+    # If true, Chroma will accept any tenant_id and database_id in the request
+    # and will not check if the tenant_id and database_id are valid. Instead,
+    # it will use the tenant_id and database_id associated with the auth info
+    # in the request.
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
     # TODOBEN maybe delete
-    chroma_server_auth_token_transport_header: Optional[str] = None
-    chroma_client_auth_token_transport_header: Optional[str] = None
+    chroma_server_auth_configuration_file: Optional[str] = None
+    chroma_server_auth_credentials_provider: Optional[str] = None
+    chroma_server_auth_credentials_file: Optional[str] = None
+    chroma_server_auth_credentials: Optional[str] = None
 
     chroma_server_authz_config_file: Optional[str] = None
 
@@ -211,23 +191,10 @@ class Settings(BaseSettings):  # type: ignore
         if v and not os.path.isfile(os.path.join(v)):
             raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
         return v
-    chroma_server_authz_config: Optional[Dict[str, Any]] = None
     chroma_server_authz_config_provider: Optional[
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
-    # TODOBEN delete
-    # chroma_client_auth_credentials_provider: Optional[
-    #     str
-    # ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
-    # chroma_client_auth_protocol_adapter: Optional[
-    #     str
-    # ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
-    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
-    }
 
     anonymized_telemetry: bool = True
 

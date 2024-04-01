@@ -1,6 +1,5 @@
-import base64
 import logging
-from typing import Tuple, Any, cast
+from typing import cast
 
 from overrides import override
 from pydantic import SecretStr
@@ -8,13 +7,9 @@ from pydantic import SecretStr
 from chromadb.auth import (
     ServerAuthProvider,
     ClientAuthProvider,
-    ServerAuthenticationRequest,
     ServerAuthCredentialsProvider,
-    AuthInfoType,
     BasicAuthCredentials,
-    ClientAuthCredentialsProvider,
-    ClientAuthResponse,
-    SimpleServerAuthenticationResponse,
+    ClientAuthHeaders,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
@@ -22,32 +17,14 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.utils import get_class
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["BasicAuthServerProvider", "BasicAuthClientProvider"]
 
 
-class BasicAuthClientAuthResponse(ClientAuthResponse):
-    def __init__(self, credentials: SecretStr) -> None:
-        self._credentials = credentials
-
-    @override
-    def get_auth_info_type(self) -> AuthInfoType:
-        return AuthInfoType.HEADER
-
-    @override
-    def get_auth_info(self) -> Tuple[str, SecretStr]:
-        return "Authorization", SecretStr(
-            f"Basic {self._credentials.get_secret_value()}"
-        )
-
-
 @register_provider("basic")
 class BasicAuthClientProvider(ClientAuthProvider):
-    _credentials_provider: ClientAuthCredentialsProvider[Any]
-
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -57,14 +34,10 @@ class BasicAuthClientProvider(ClientAuthProvider):
         )
 
     @override
-    def authenticate(self) -> ClientAuthResponse:
-        return BasicAuthClientAuthResponse(
-            SecretStr(
-                base64.b64encode(f"{self._creds.get_secret_value()}".encode("utf-8")).decode(
-                    "utf-8"
-                )
-            )
-        )
+    def authenticate(self) -> ClientAuthHeaders:
+        return {
+            "Authorization": SecretStr(f"Basic {self._creds.get_secret_value()}"),
+        }
 
 
 @register_provider("basic")
@@ -91,7 +64,7 @@ class BasicAuthServerProvider(ServerAuthProvider):
         self, request: ServerAuthenticationRequest[Any]
     ) -> SimpleServerAuthenticationResponse:
         try:
-            _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
+            _auth_header = request.get_auth_info("Authorization")
             _validation = self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
             )

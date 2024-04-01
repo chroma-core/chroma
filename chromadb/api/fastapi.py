@@ -33,7 +33,6 @@ from chromadb.api.types import (
 from chromadb.auth import (
     ClientAuthProvider,
 )
-from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry.opentelemetry import (
@@ -114,32 +113,27 @@ class FastAPI(ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
+        self._session = requests.Session()
+
         self._header = system.settings.chroma_server_headers
-        if (
-            system.settings.chroma_client_auth_provider
-            and system.settings.chroma_client_auth_protocol_adapter
-        ):
-            self._auth_provider = self.require(
-                resolve_provider(
-                    system.settings.chroma_client_auth_provider, ClientAuthProvider
-                )
-            )
-            self._adapter = cast(
-                RequestsClientAuthProtocolAdapter,
-                system.require(
-                    resolve_provider(
-                        system.settings.chroma_client_auth_protocol_adapter,
-                        RequestsClientAuthProtocolAdapter,
-                    )
-                ),
-            )
-            self._session = self._adapter.session
-        else:
-            self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
         if self._settings.chroma_server_ssl_verify is not None:
             self._session.verify = self._settings.chroma_server_ssl_verify
+
+        if system.settings.chroma_client_auth_provider:
+            _auth_provider_type = resolve_provider(
+                system.settings.chroma_client_auth_provider, ClientAuthProvider
+            )
+            # Error if it's Type[Unknown]
+            if _auth_provider_type != ClientAuthProvider:
+                raise ValueError(
+                    f"Invalid auth provider: {system.settings.chroma_client_auth_provider}"
+                )
+            self._auth_provider = self.require(ClientAuthProvider)
+            _headers = self._auth_provider.authenticate()
+            for header, value in _headers.items():
+                self._session.headers[header] = value.get_secret_value()
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override

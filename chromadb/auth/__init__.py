@@ -1,6 +1,3 @@
-"""
-Contains only Auth abstractions, no implementations.
-"""
 from __future__ import annotations
 
 import base64
@@ -12,9 +9,7 @@ from typing import (
     Optional,
     Dict,
     TypeVar,
-    Tuple,
     Generic,
-    Union,
 )
 from dataclasses import dataclass
 
@@ -31,131 +26,34 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
-class AuthInfoType(Enum):
-    """
-    Allowed types of authentication information.
-    """
-    COOKIE = "cookie"
-    HEADER = "header"
-    URL = "url"
-    METADATA = "metadata"
-
-
-class UserIdentity(EnforceOverrides, ABC):
-    """
-    Represents the identity of a user.
-    """
-    @abstractmethod
-    def get_user_id(self) -> str:
-        ...
-
-    @abstractmethod
-    def get_user_tenant(self) -> Optional[str]:
-        ...
-
-    @abstractmethod
-    def get_user_databases(self) -> Optional[List[str]]:
-        ...
-
-    @abstractmethod
-    def get_user_attributes(self) -> Optional[Dict[str, Any]]:
-        ...
-
-
-class SimpleUserIdentity(UserIdentity):
-    """
-    The simplest possible implementation of UserIdentity. This is not a dataclass
-    so we can use polymorphism to just pass around UserIdentity objects.
-    """
-    def __init__(
-        self,
-        user_id: str,
-        tenant: Optional[str] = None,
-        databases: Optional[List[str]] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        self._user_id = user_id
-        self._tenant = tenant
-        self._attributes = attributes
-        self._databases = databases
-
-    @override
-    def get_user_id(self) -> str:
-        return self._user_id
-
-    @override
-    def get_user_tenant(self) -> Optional[str]:
-        return self._tenant
-
-    @override
-    def get_user_databases(self) -> Optional[List[str]]:
-        return self._databases
-
-    @override
-    def get_user_attributes(self) -> Optional[Dict[str, Any]]:
-        return self._attributes
-
-
-class ClientAuthResponse(EnforceOverrides, ABC):
-    """
-    TODOBEN what exactly does this do?
-    """
-    @abstractmethod
-    def get_auth_info_type(self) -> AuthInfoType:
-        ...
-
-    @abstractmethod
-    def get_auth_info(
-        self,
-    # TODOBEN typing
-    ) -> Union[Tuple[str, SecretStr], List[Tuple[str, SecretStr]]]:
-        ...
+ClientAuthHeaders = Dict[str, SecretStr]
 
 
 class ClientAuthProvider(Component):
     """
-    Created in the client-side system to provide authentication information which can be
-    injected into a request. Use a ClientAuthProtocolAdapter to actually inject the
-    credentials.
+    ClientAuthProvider is responsible for providing authentication headers for
+    client requests. Client implementations (in our case, just the FastAPI client)
+    must inject these headers into their requests.
     """
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(self) -> ClientAuthResponse:
+    def authenticate(self) -> ClientAuthHeaders:
         pass
 
 
-class ClientAuthCredentialsProvider(Component, Generic[T]):
+@dataclass
+class UserIdentity:
     """
-    Creates credentials to be used by a ClientAuthProvider. Basically ClientAuthProvider
-    is a thin wrapper around this.
+    UserIdentity represents the identity of a user. In general, not all fields
+    will be populated, and the fields that are populated will depend on the
+    authentication provider.
     """
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def get_credentials(self) -> T:
-        pass
-
-
-class ClientAuthProtocolAdapter(Component, Generic[T]):
-    """
-    Injects client-side credentials into a request. Uses the system's ClientAuthProvider
-    to get the credentials.
-    """
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def inject_credentials(self, injection_context: T) -> None:
-        pass
-
-
-class ServerAuthenticationRequest(EnforceOverrides, ABC, Generic[T]):
-    @abstractmethod
-    def get_auth_info(self, auth_info_type: AuthInfoType, auth_info_id: str) -> T:
-        pass
+    user_id: str
+    tenant: Optional[str] = None
+    databases: Optional[List[str]] = None
+    attributes: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -177,25 +75,6 @@ class ServerAuthProvider(Component):
         self, request: ServerAuthenticationRequest[T]
     ) -> ServerAuthenticationResponse:
         pass
-
-
-class ChromaAuthMiddleware(Component):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def authenticate(
-        self, request: ServerAuthenticationRequest[T]
-    ) -> ServerAuthenticationResponse:
-        ...
-
-    @abstractmethod
-    def ignore_operation(self, verb: str, path: str) -> bool:
-        ...
-
-    @abstractmethod
-    def instrument_server(self, app: T) -> None:
-        ...
 
 
 class ServerAuthConfigurationProvider(Component):
