@@ -24,7 +24,6 @@ from chromadb.auth import (
     ChromaAuthzMiddleware,
     ServerAuthorizationProvider,
 )
-from chromadb.auth.registry import resolve_provider
 from chromadb.errors import AuthorizationError
 from chromadb.utils.fastapi import fastapi_json_response
 from chromadb.telemetry.opentelemetry import (
@@ -72,10 +71,7 @@ class FastAPIChromaAuthMiddleware:
             logger.debug(
                 f"Server Auth Provider: {self._settings.chroma_server_auth_provider}"
             )
-            _cls = resolve_provider(
-                self._settings.chroma_server_auth_provider, ServerAuthProvider
-            )
-            self._auth_provider = cast(ServerAuthProvider, self.require(_cls))
+            self._auth_provider = self._system.require(self._settings.chroma_server_auth_provider)
 
     @trace_method(
         "FastAPIChromaAuthMiddleware.authenticate", OpenTelemetryGranularity.ALL
@@ -263,10 +259,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
                 "Server Authorization Provider: "
                 f"{self._settings.chroma_server_authz_provider}"
             )
-            _cls = resolve_provider(
-                self._settings.chroma_server_authz_provider, ServerAuthorizationProvider
-            )
-            self._authz_provider = cast(ServerAuthorizationProvider, self.require(_cls))
+            self._authz_provider = self.require(self._settings.chroma_server_authz_provider)
 
     @override
     def pre_process(self, request: AuthorizationRequestContext[Request]) -> None:

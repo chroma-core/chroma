@@ -11,7 +11,6 @@ from chromadb.auth import (
     BasicAuthCredentials,
     ClientAuthHeaders,
 )
-from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -23,7 +22,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["BasicAuthServerProvider", "BasicAuthClientProvider"]
 
 
-@register_provider("basic")
 class BasicAuthClientProvider(ClientAuthProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
@@ -40,7 +38,6 @@ class BasicAuthClientProvider(ClientAuthProvider):
         }
 
 
-@register_provider("basic")
 class BasicAuthServerProvider(ServerAuthProvider):
     _credentials_provider: ServerAuthCredentialsProvider
 
@@ -48,14 +45,8 @@ class BasicAuthServerProvider(ServerAuthProvider):
         super().__init__(system)
         self._settings = system.settings
         system.settings.require("chroma_server_auth_credentials_provider")
-        self._credentials_provider = cast(
-            ServerAuthCredentialsProvider,
-            system.require(
-                resolve_provider(
-                    str(system.settings.chroma_server_auth_credentials_provider),
-                    ServerAuthCredentialsProvider,
-                )
-            ),
+        self._credentials_provider = system.require(
+            self._settings.chroma_server_auth_credentials_provider
         )
 
     @trace_method("BasicAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)

@@ -33,7 +33,6 @@ from chromadb.api.types import (
 from chromadb.auth import (
     ClientAuthProvider,
 )
-from chromadb.auth.registry import resolve_provider
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -122,14 +121,6 @@ class FastAPI(ServerAPI):
             self._session.verify = self._settings.chroma_server_ssl_verify
 
         if system.settings.chroma_client_auth_provider:
-            _auth_provider_type = resolve_provider(
-                system.settings.chroma_client_auth_provider, ClientAuthProvider
-            )
-            # Error if it's Type[Unknown]
-            if _auth_provider_type != ClientAuthProvider:
-                raise ValueError(
-                    f"Invalid auth provider: {system.settings.chroma_client_auth_provider}"
-                )
             self._auth_provider = self.require(ClientAuthProvider)
             _headers = self._auth_provider.authenticate()
             for header, value in _headers.items():

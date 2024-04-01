@@ -86,17 +86,6 @@ class ServerAuthConfigurationProvider(Component):
         pass
 
 
-class AuthenticationError(ChromaError):
-    @override
-    def code(self) -> int:
-        return 401
-
-    @classmethod
-    @override
-    def name(cls) -> str:
-        return "AuthenticationError"
-
-
 class AbstractCredentials(EnforceOverrides, ABC, Generic[T]):
     """
     TODOBEN

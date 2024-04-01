@@ -6,7 +6,6 @@ from chromadb.auth import (
     AuthorizationContext,
     ServerAuthorizationProvider,
 )
-from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import DEFAULT_TENANT, System
 
 from chromadb.telemetry.opentelemetry import (
@@ -17,7 +16,6 @@ from chromadb.telemetry.opentelemetry import (
 logger = logging.getLogger(__name__)
 
 
-@register_provider("simple_rbac")
 class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)

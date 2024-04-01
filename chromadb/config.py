@@ -188,6 +188,9 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_auth_provider: Optional[str] = None
     chroma_server_auth_configuration_file: Optional[str] = None
+    # File which maps user identities to their tokens, passwords, or
+    # other credentials. The chroma_server_auth_provider will
+    # generally read this.
     chroma_server_auth_credentials_file: Optional[str] = None
     chroma_server_auth_credentials_provider: Optional[str] = None
 
