@@ -1,26 +1,23 @@
-use std::sync::Arc;
 use std::{fmt::Debug, sync::RwLock};
 
-use super::config::{CustomResourceMemberlistProviderConfig, MemberlistProviderConfig};
-use crate::system::{Receiver, Sender};
+use super::config::MemberlistProviderConfig;
+use crate::system::Receiver;
 use crate::{
     config::{Configurable, WorkerConfig},
     errors::{ChromaError, ErrorCodes},
     system::{Component, ComponentContext, Handler, StreamHandler},
 };
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
-use k8s_openapi::api::events::v1::Event;
+use futures::StreamExt;
+use kube::runtime::watcher::Config;
 use kube::{
     api::Api,
-    config,
-    runtime::{watcher, watcher::Error as WatchError, WatchStreamExt},
+    runtime::{watcher, WatchStreamExt},
     Client, CustomResource,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio_util::sync::CancellationToken;
 
 /* =========== Basic Types ============== */
 pub(crate) type Memberlist = Vec<String>;
@@ -108,8 +105,8 @@ impl Configurable for CustomResourceMemberlistProvider {
         let c: CustomResourceMemberlistProvider = CustomResourceMemberlistProvider {
             memberlist_name: my_config.memberlist_name.clone(),
             kube_ns: worker_config.kube_namespace.clone(),
-            kube_client: kube_client,
-            memberlist_cr_client: memberlist_cr_client,
+            kube_client,
+            memberlist_cr_client,
             queue_size: my_config.queue_size,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
@@ -128,11 +125,11 @@ impl CustomResourceMemberlistProvider {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(kube_client.clone(), &kube_ns);
         CustomResourceMemberlistProvider {
-            memberlist_name: memberlist_name,
-            kube_ns: kube_ns,
-            kube_client: kube_client,
-            memberlist_cr_client: memberlist_cr_client,
-            queue_size: queue_size,
+            memberlist_name,
+            kube_ns,
+            kube_client,
+            memberlist_cr_client,
+            queue_size,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
         }
@@ -142,7 +139,10 @@ impl CustomResourceMemberlistProvider {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(self.kube_client.clone(), &self.kube_ns);
 
-        let stream = watcher(memberlist_cr_client, watcher::Config::default())
+        let field_selector = format!("metadata.name={}", self.memberlist_name);
+        let conifg = Config::default().fields(&field_selector);
+
+        let stream = watcher(memberlist_cr_client, conifg)
             .default_backoff()
             .applied_objects();
         let stream = stream.then(|event| async move {
