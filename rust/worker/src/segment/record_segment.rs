@@ -19,14 +19,6 @@ struct RecordSegment {
     current_max_offset_id: AtomicU32,
 }
 
-struct StoredRecord<'a> {
-    segment_offset_id: u32,
-    record: &'a Option<LogRecord>,
-    embedding: Option<Vec<f32>>,
-    metadata: Option<crate::types::Metadata>,
-    document: Option<String>,
-}
-
 impl RecordSegment {
     pub fn new(mut blockfile_provider: Box<dyn BlockfileProvider>) -> Self {
         // TODO: file naming etc should be better here (use segment prefix etc.)
@@ -175,10 +167,7 @@ impl OffsetIdAssigner for RecordSegment {
                     ));
                     // See if its a KeyNotFound error
                     match res {
-                        Ok(_) => {
-                            // This is an error, but due to decoupled read/write, we silently ignore it
-                            None
-                        }
+                        Ok(_) => None,
                         Err(e) => match *e {
                             crate::blockstore::BlockfileError::NotFoundError => Some(
                                 self.current_max_offset_id
