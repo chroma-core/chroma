@@ -59,37 +59,6 @@ def check_token(token: str) -> None:
                          only ASCII letters and digits.")
 
 
-class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
-    _token: SecretStr
-
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-        system.settings.require("chroma_server_auth_credentials")
-        token_str = str(system.settings.chroma_server_auth_credentials)
-        check_token(token_str)
-        self._token = SecretStr(token_str)
-
-    @trace_method(
-        "TokenConfigServerAuthCredentialsProvider.validate_credentials",
-        OpenTelemetryGranularity.ALL,
-    )
-    @override
-    def validate_credentials(self,
-                             credentials: AbstractCredentials[T]) -> bool:
-        _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
-        if "token" not in _creds:
-            logger.error("Returned credentials do not contain token")
-            return False
-        return _creds["token"].get_secret_value() == \
-            self._token.get_secret_value()
-
-    @override
-    def get_user_identity(
-        self, credentials: AbstractCredentials[T]
-    ) -> Optional[UserIdentity]:
-        return None
-
-
 class Token(TypedDict):
     token: str
     secret: str
