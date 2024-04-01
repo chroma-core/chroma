@@ -13,14 +13,12 @@ from starlette.types import ASGIApp
 import chromadb
 from chromadb.config import DEFAULT_TENANT, System, Component
 from chromadb.auth import (
-    AuthHeaders,
     AuthorizationContext,
     AuthzAction,
     AuthzResource,
     AuthzResourceActions,
     AuthzUser,
     DynamicAuthzResource,
-    ServerAuthenticationResponse,
     ServerAuthProvider,
     ChromaAuthzMiddleware,
     ServerAuthorizationProvider,
@@ -35,11 +33,17 @@ from chromadb.telemetry.opentelemetry import (
 logger = logging.getLogger(__name__)
 
 
-class AuthnMiddleware(Component):
+class AuthnMiddleware(BaseHTTPMiddleware, Component):
+    """
+    This middleware is responsible for authenticating incoming requests.
+    It uses the system's auth config to authenticate requests, setting
+    the user_identity field on the request state if successful.
+    """
     _auth_provider: ServerAuthProvider
 
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
+    def __init__(self, app: ASGIApp, system: System) -> None:
+        BaseHTTPMiddleware.__init__(self, app)
+        Component.__init__(self, system)
         self._system = system
         self._settings = system.settings
         self._settings.require("chroma_server_auth_provider")
@@ -56,21 +60,10 @@ class AuthnMiddleware(Component):
             )
 
     @trace_method(
-        "AuthnMiddleware.authenticate",
-        OpenTelemetryGranularity.ALL
-    )
-    @override
-    def authenticate(
-        self, headers: AuthHeaders
-    ) -> ServerAuthenticationResponse:
-        return self._auth_provider.authenticate(headers)
-
-    @trace_method(
         "AuthnMiddleware.ignore_operation",
         OpenTelemetryGranularity.ALL
     )
-    @override
-    def ignore_operation(self, verb: str, path: str) -> bool:
+    def _ignore_operation(self, verb: str, path: str) -> bool:
         if (
             path in self._ignore_auth_paths.keys()
             and verb.upper() in self._ignore_auth_paths[path]
@@ -79,33 +72,25 @@ class AuthnMiddleware(Component):
             return True
         return False
 
-
-class AuthnMiddlewareWrapper(BaseHTTPMiddleware):
-    def __init__(
-        self, app: ASGIApp, auth_middleware: AuthnMiddleware
-    ) -> None:
-        super().__init__(app)
-        self._middleware = auth_middleware
-
     @trace_method(
-        "AuthnMiddlewareWrapper.dispatch",
+        "AuthnMiddleware.dispatch",
         OpenTelemetryGranularity.ALL
     )
     @override
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if self._middleware.ignore_operation(request.method, request.url.path):
+        if self._ignore_operation(request.method, request.url.path):
             logger.debug(
                 f"Skipping auth for path {request.url.path} \
                     and method {request.method}"
             )
             return await call_next(request)
-        response = self._middleware.authenticate(request.headers)
-        if not response or not response.success():
+        response = self._auth_provider.authenticate(request.headers)
+        if not response or not response.success:
             return fastapi_json_response(AuthorizationError("Unauthorized"))
 
-        request.state.user_identity = response.get_user_identity()
+        request.state.user_identity = response.user_identity
         return await call_next(request)
 
 

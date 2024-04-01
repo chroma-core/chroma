@@ -12,7 +12,7 @@ from chromadb.auth import (
     ServerAuthProvider,
     ClientAuthProvider,
     ServerAuthCredentialsProvider,
-    AuthHeaders,
+    ClientAuthHeaders,
     SecretStrAbstractCredentials,
     AbstractCredentials,
     ServerAuthenticationResponse,
@@ -23,6 +23,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
+from starlette.datastructures import Headers
 
 T = TypeVar("T")
 
@@ -36,7 +37,7 @@ class TokenTransportHeader(Enum):
     X_CHROMA_TOKEN = "X-Chroma-Token"
 
 
-def TokenAuthHeader(type: TokenTransportHeader, value: str) -> AuthHeaders:
+def TokenAuthHeader(type: TokenTransportHeader, value: str) -> ClientAuthHeaders:
     key = None
     if type == TokenTransportHeader.AUTHORIZATION:
         key = "Authorization"
@@ -222,12 +223,12 @@ class TokenAuthServerProvider(ServerAuthProvider):
                   OpenTelemetryGranularity.ALL)
     @override
     def authenticate(
-        self, headers: AuthHeaders
+        self, headers: Headers
     ) -> ServerAuthenticationResponse:
         try:
             _auth_header = headers[
                 self._token_transport_header.value
-            ].get_secret_value()
+            ]
             _token_creds = TokenAuthCredentials.from_header(
                 _auth_header, self._token_transport_header
             )
@@ -264,6 +265,6 @@ class TokenAuthClientProvider(ClientAuthProvider):
     @trace_method("TokenAuthClientProvider.authenticate",
                   OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(self) -> AuthHeaders:
+    def authenticate(self) -> ClientAuthHeaders:
         return TokenAuthHeader(self._token_transport_header,
                                self._token.get_secret_value())

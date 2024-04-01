@@ -13,6 +13,7 @@ from typing import (
 )
 from dataclasses import dataclass
 from starlette.requests import Request
+from starlette.datastructures import Headers
 
 from overrides import EnforceOverrides, override
 from pydantic import SecretStr
@@ -26,7 +27,7 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
-AuthHeaders = Dict[str, SecretStr]
+ClientAuthHeaders = Dict[str, SecretStr]
 
 
 class ClientAuthProvider(Component):
@@ -39,7 +40,7 @@ class ClientAuthProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(self) -> AuthHeaders:
+    def authenticate(self) -> ClientAuthHeaders:
         pass
 
 
@@ -73,7 +74,7 @@ class ServerAuthProvider(Component):
 
     @abstractmethod
     def authenticate(
-        self, headers: AuthHeaders
+        self, headers: Headers
     ) -> ServerAuthenticationResponse:
         pass
 
