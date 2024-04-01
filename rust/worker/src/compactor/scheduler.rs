@@ -1,5 +1,5 @@
 use crate::compactor::scheduler_policy::SchedulerPolicy;
-use crate::compactor::types::Task;
+use crate::compactor::types::CompactionJob;
 use crate::log::log::CollectionInfo;
 use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
@@ -11,8 +11,8 @@ pub(crate) struct Scheduler {
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     policy: Box<dyn SchedulerPolicy>,
-    task_queue: Vec<Task>,
-    max_concurrent_tasks: usize,
+    job_queue: Vec<CompactionJob>,
+    max_concurrent_jobs: usize,
 }
 
 impl Scheduler {
@@ -20,14 +20,14 @@ impl Scheduler {
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         policy: Box<dyn SchedulerPolicy>,
-        max_concurrent_tasks: usize,
+        max_concurrent_jobs: usize,
     ) -> Scheduler {
         Scheduler {
             log,
             sysdb,
             policy,
-            task_queue: Vec::with_capacity(max_concurrent_tasks),
-            max_concurrent_tasks,
+            job_queue: Vec::with_capacity(max_concurrent_jobs),
+            max_concurrent_jobs,
         }
     }
 
@@ -90,12 +90,12 @@ impl Scheduler {
     }
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
-        let tasks = self
+        let jobs = self
             .policy
-            .determine(collection_records, self.max_concurrent_tasks as i32);
+            .determine(collection_records, self.max_concurrent_jobs as i32);
         {
-            self.task_queue.clear();
-            self.task_queue.extend(tasks);
+            self.job_queue.clear();
+            self.job_queue.extend(jobs);
         }
     }
 
@@ -108,8 +108,8 @@ impl Scheduler {
         self.schedule_internal(collection_records).await;
     }
 
-    pub(crate) fn get_tasks(&self) -> impl Iterator<Item = &Task> {
-        self.task_queue.iter()
+    pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {
+        self.job_queue.iter()
     }
 }
 
@@ -202,14 +202,14 @@ mod tests {
         let mut scheduler = Scheduler::new(log, sysdb, scheduler_policy, 1000);
 
         scheduler.schedule().await;
-        let tasks = scheduler.get_tasks();
+        let jobs = scheduler.get_jobs();
 
         // TODO: 3/9 Tasks may be out of order since we have not yet implemented SysDB Get last compaction time. Use contains instead of equal.
-        let task_ids = tasks
+        let job_ids = jobs
             .map(|t| t.collection_id.clone())
             .collect::<Vec<String>>();
-        assert_eq!(task_ids.len(), 2);
-        assert!(task_ids.contains(&collection_id_1));
-        assert!(task_ids.contains(&collection_id_2));
+        assert_eq!(job_ids.len(), 2);
+        assert!(job_ids.contains(&collection_id_1));
+        assert!(job_ids.contains(&collection_id_2));
     }
 }

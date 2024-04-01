@@ -1,7 +1,7 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
-use crate::compactor::types::Task;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
@@ -33,7 +33,7 @@ pub(crate) struct CompactionManager {
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Config
     compaction_manager_queue_size: usize,
-    max_concurrent_tasks: usize,
+    max_concurrent_jobs: usize,
     compaction_interval: Duration,
 }
 
@@ -56,7 +56,7 @@ impl CompactionManager {
         scheduler: Scheduler,
         log: Box<dyn Log>,
         compaction_manager_queue_size: usize,
-        max_concurrent_tasks: usize,
+        max_concurrent_jobs: usize,
         compaction_interval: Duration,
     ) -> Self {
         CompactionManager {
@@ -65,13 +65,16 @@ impl CompactionManager {
             log,
             dispatcher: None,
             compaction_manager_queue_size,
-            max_concurrent_tasks,
+            max_concurrent_jobs,
             compaction_interval,
         }
     }
 
-    async fn compact(&self, task: &Task) -> Result<CompactionResponse, Box<dyn ChromaError>> {
-        let collection_uuid = Uuid::from_str(&task.collection_id);
+    async fn compact(
+        &self,
+        compaction_job: &CompactionJob,
+    ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
+        let collection_uuid = Uuid::from_str(&compaction_job.collection_id);
         if collection_uuid.is_err() {
             // handle error properly
             println!("Failed to parse collection id");
@@ -89,7 +92,7 @@ impl CompactionManager {
         match self.system {
             Some(ref system) => {
                 let orchestrator = CompactOrchestrator::new(
-                    task.clone(),
+                    compaction_job.clone(),
                     system.clone(),
                     collection_uuid.unwrap(),
                     self.log.clone(),
@@ -118,25 +121,25 @@ impl CompactionManager {
     // TODO: make the return type more informative
     pub(crate) async fn compact_batch(&mut self) -> (u32, u32) {
         self.scheduler.schedule().await;
-        let mut tasks = FuturesUnordered::new();
-        for task in self.scheduler.get_tasks() {
-            tasks.push(self.compact(task));
+        let mut jobs = FuturesUnordered::new();
+        for job in self.scheduler.get_jobs() {
+            jobs.push(self.compact(job));
         }
-        let mut num_completed_tasks = 0;
-        let mut num_failed_tasks = 0;
-        while let Some(task) = tasks.next().await {
-            match task {
+        let mut num_completed_jobs = 0;
+        let mut num_failed_jobs = 0;
+        while let Some(job) = jobs.next().await {
+            match job {
                 Ok(result) => {
                     println!("Compaction completed: {:?}", result);
-                    num_completed_tasks += 1;
+                    num_completed_jobs += 1;
                 }
                 Err(e) => {
                     println!("Compaction failed: {:?}", e);
-                    num_failed_tasks += 1;
+                    num_failed_jobs += 1;
                 }
             }
         }
-        (num_completed_tasks, num_failed_tasks)
+        (num_completed_jobs, num_failed_jobs)
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
@@ -169,13 +172,13 @@ impl Configurable for CompactionManager {
         let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let scheduler = Scheduler::new(log.clone(), sysdb.clone(), policy, 1000);
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
-        let max_concurrent_tasks = config.compactor.max_concurrent_tasks;
+        let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
         Ok(CompactionManager::new(
             scheduler,
             log,
             compaction_manager_queue_size,
-            max_concurrent_tasks,
+            max_concurrent_jobs,
             Duration::from_secs(compaction_interval_sec),
         ))
     }

@@ -1,5 +1,5 @@
 use super::super::operator::{wrap, TaskMessage};
-use crate::compactor::Task;
+use crate::compactor::CompactionJob;
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::DataChunk;
 use crate::execution::operators::partition::PartitionInput;
@@ -46,7 +46,7 @@ enum ExecutionState {
 #[derive(Debug)]
 pub struct CompactOrchestrator {
     id: Uuid,
-    task: Task,
+    task: CompactionJob,
     state: ExecutionState,
     // Component Execution
     system: System,
@@ -64,13 +64,13 @@ pub struct CompactOrchestrator {
 #[derive(Debug)]
 pub struct CompactionResponse {
     id: Uuid,
-    task: Task,
+    task: CompactionJob,
     message: String,
 }
 
 impl CompactOrchestrator {
     pub fn new(
-        task: Task,
+        task: CompactionJob,
         system: System,
         collection_id: Uuid,
         log: Box<dyn Log>,
