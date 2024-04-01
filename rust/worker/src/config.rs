@@ -167,7 +167,7 @@ mod tests {
                         worker_queue_size: 100
                     compactor:
                         compaction_manager_queue_size: 1000
-                        max_concurrent_tasks: 100
+                        max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                 "#,
             );
@@ -219,7 +219,7 @@ mod tests {
                         worker_queue_size: 100
                     compactor:
                         compaction_manager_queue_size: 1000
-                        max_concurrent_tasks: 100
+                        max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                 "#,
             );
@@ -286,7 +286,7 @@ mod tests {
                         worker_queue_size: 100
                     compactor:
                         compaction_manager_queue_size: 1000
-                        max_concurrent_tasks: 100
+                        max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                 "#,
             );
@@ -334,7 +334,7 @@ mod tests {
                         worker_queue_size: 100
                     compactor:
                         compaction_manager_queue_size: 1000
-                        max_concurrent_tasks: 100
+                        max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                 "#,
             );
