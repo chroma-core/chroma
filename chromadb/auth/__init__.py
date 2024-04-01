@@ -296,12 +296,3 @@ class ChromaAuthzMiddleware(Component, Generic[T, S]):
     @abstractmethod
     def instrument_server(self, app: T) -> None:
         ...
-
-
-class ServerAuthorizationConfigurationProvider(Component, Generic[T]):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def get_configuration(self) -> T:
-        pass

@@ -25,15 +25,12 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.utils import get_class
 
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["TokenAuthServerProvider", "TokenAuthClientProvider"]
-
-_token_transport_headers = ["Authorization", "X-Chroma-Token"]
 
 
 class TokenTransportHeader(Enum):
@@ -212,9 +209,9 @@ class TokenAuthServerProvider(ServerAuthProvider):
                 )
             ),
         )
-        if system.settings.chroma_server_auth_token_transport_header:
+        if system.settings.chroma_auth_token_transport_header:
             self._token_transport_header = TokenTransportHeader[
-                str(system.settings.chroma_server_auth_token_transport_header)
+                str(system.settings.chroma_auth_token_transport_header)
             ]
 
     @trace_method("TokenAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
@@ -252,9 +249,9 @@ class TokenAuthClientProvider(ClientAuthProvider):
         )
         check_token(self._token.get_secret_value())
 
-        if system.settings.chroma_client_auth_token_transport_header:
+        if system.settings.chroma_auth_token_transport_header:
             self._token_transport_header = TokenTransportHeader[
-                str(system.settings.chroma_client_auth_token_transport_header)
+                str(system.settings.chroma_auth_token_transport_header)
             ]
 
     @trace_method("TokenAuthClientProvider.authenticate", OpenTelemetryGranularity.ALL)

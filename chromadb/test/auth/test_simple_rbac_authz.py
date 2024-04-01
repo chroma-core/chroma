@@ -295,10 +295,10 @@ def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> Non
         ],
         chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
         chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
-        chroma_client_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
-        chroma_server_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_server_authz_provider=token_config["chroma_server_authz_provider"],

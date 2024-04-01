@@ -1,7 +1,6 @@
 import importlib
 import inspect
 import logging
-import os
 from abc import ABC
 from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
@@ -85,6 +84,7 @@ DEFAULT_DATABASE = "default_database"
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
+    # TODOBEN sort these out
     # Legacy config that has to be kept around because pydantic will error
     # on nonexisting keys
     chroma_db_impl: Optional[str] = None
@@ -108,7 +108,10 @@ class Settings(BaseSettings):  # type: ignore
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
 
-    # Distributed architecture specific components
+    # =========================
+    # Distributed Chroma config
+    # =========================
+
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "query-service-memberlist"
@@ -120,6 +123,7 @@ class Settings(BaseSettings):  # type: ignore
     tenant_id: str = "default"
     topic_namespace: str = "default"
 
+    # TODOBEN sort these out
     is_persistent: bool = False
     persist_directory: str = "./chroma"
 
@@ -130,7 +134,10 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[int] = None
     chroma_server_ssl_enabled: Optional[bool] = False
+    allow_reset: bool = False
+
     # the below config value is only applicable to Chroma HTTP clients
+
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
     chroma_server_api_default_path: Optional[str] = "/api/v1"
     chroma_server_grpc_port: Optional[int] = None
@@ -145,56 +152,55 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_nofile: Optional[int] = None
 
+    # ===================================
+    # {Client, Server} auth{n, z}
+    # ===================================
+
+    # The header to use for the token. Defaults to "Authorization".
+    chroma_auth_token_transport_header: Optional[str] = None
+
+    # ================
+    # Client auth{n,z}
+    # ================
+
     # The provider for client auth. See chromadb/auth/__init__.py
     chroma_client_auth_provider: Optional[str] = None
     # If needed by the provider (e.g. BasicAuthClientProvider),
     # the credentials to use.
+    # TODOBEN should be a file
     chroma_client_auth_credentials: Optional[str] = None
-    # The transport header to use for the token. Defaults to TODOBEN
-    chroma_client_auth_token_transport_header: Optional[str] = None
 
-    # Server auth
-    chroma_server_auth_provider: Optional[str] = None
-    chroma_server_auth_token_transport_header: Optional[str] = None
+    # ================
+    # Server auth{n,z}
+    # ================
 
-    chroma_server_authz_provider: Optional[str] = None
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
         "/api/v1": ["GET"],
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
     }
-
-    # If true, Chroma will accept any tenant_id and database_id in the request
-    # and will not check if the tenant_id and database_id are valid. Instead,
-    # it will use the tenant_id and database_id associated with the auth info
-    # in the request.
+    # TODOBEN document this correctly.
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
-    # TODOBEN maybe delete
-    chroma_server_auth_configuration_file: Optional[str] = None
-    chroma_server_auth_credentials_provider: Optional[str] = None
-    chroma_server_auth_credentials_file: Optional[str] = None
-    chroma_server_auth_credentials: Optional[str] = None
+    # ============
+    # Server authn
+    # ============
 
+    chroma_server_auth_provider: Optional[str] = None
+    chroma_server_auth_configuration_file: Optional[str] = None
+    chroma_server_auth_credentials_file: Optional[str] = None
+    chroma_server_auth_credentials_provider: Optional[str] = None
+
+    # ============
+    # Server authz
+    # ============
+
+    chroma_server_authz_provider: Optional[str] = None
     chroma_server_authz_config_file: Optional[str] = None
 
-    @validator(
-        "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
-    )
-    def chroma_server_authz_config_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_authz_config_file cannot be empty or just whitespace"
-            )
-        if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
-        return v
-    chroma_server_authz_config_provider: Optional[
-        str
-    ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
-
+    # ================
+    # Telemetry config
+    # ================
 
     anonymized_telemetry: bool = True
 
@@ -203,7 +209,9 @@ class Settings(BaseSettings):  # type: ignore
     chroma_otel_collection_headers: Dict[str, str] = {}
     chroma_otel_granularity: Optional[str] = None
 
-    allow_reset: bool = False
+    # =================
+    # Migrations config
+    # =================
 
     migrations: Literal["none", "validate", "apply"] = "apply"
     # you cannot change the hash_algorithm after migrations have already been applied once

@@ -23,7 +23,7 @@ EOF
     token)
       cat <<EOF > .chroma_env
 CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
-CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
+CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
 CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
 EOF
@@ -31,7 +31,7 @@ EOF
     xtoken)
           cat <<EOF > .chroma_env
 CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
-CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
+CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
 CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
 EOF

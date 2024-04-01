@@ -54,10 +54,10 @@ def test_fastapi_server_token_auth(token_config: Dict[str, Any]) -> None:
         ],
         chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
         chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
-        chroma_client_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
-        chroma_server_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_credentials=token_config["chroma_client_auth_credentials"],
@@ -95,9 +95,9 @@ def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
             "chroma_server_auth_credentials_provider"
         ],
         chroma_server_auth_credentials=tconf["chroma_server_auth_credentials"],
-        chroma_server_auth_token_transport_header=tconf["token_transport_header"],
+        chroma_auth_token_transport_header=tconf["token_transport_header"],
         chroma_client_auth_provider=tconf["chroma_client_auth_provider"],
-        chroma_client_auth_token_transport_header=tconf["token_transport_header"],
+        chroma_auth_token_transport_header=tconf["token_transport_header"],
         chroma_client_auth_credentials=inval_tok,
     )
     with pytest.raises(Exception) as e:
@@ -119,11 +119,11 @@ def test_fastapi_server_token_auth_wrong_token(
             "chroma_server_auth_credentials_provider"
         ],
         chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
-        chroma_server_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
-        chroma_client_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_credentials=token_config["chroma_client_auth_credentials"]
@@ -150,11 +150,11 @@ def test_fastapi_server_correct_auth_token(
             "chroma_server_auth_credentials_provider"
         ],
         chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
-        chroma_server_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
-        chroma_client_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_credentials=token_config["chroma_client_auth_credentials"]
@@ -184,11 +184,11 @@ def test_fastapi_overwrite_default_tenant_and_default_database(
             "chroma_server_auth_credentials_provider"
         ],
         chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
-        chroma_server_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
-        chroma_client_auth_token_transport_header=token_config[
+        chroma_auth_token_transport_header=token_config[
             "token_transport_header"
         ],
         chroma_client_auth_credentials=token_config["chroma_client_auth_credentials"],

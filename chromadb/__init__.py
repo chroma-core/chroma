@@ -248,7 +248,7 @@ def CloudClient(
 
     settings.chroma_client_auth_provider = "chromadb.auth.token.TokenAuthClientProvider"
     settings.chroma_client_auth_credentials = api_key
-    settings.chroma_client_auth_token_transport_header = (
+    settings.chroma_auth_token_transport_header = (
         TokenTransportHeader.X_CHROMA_TOKEN.name
     )
 

@@ -8,7 +8,6 @@ from chromadb.auth import (
     ServerAuthConfigurationProvider,
     ServerAuthCredentialsProvider,
     ClientAuthProvider,
-    ServerAuthorizationConfigurationProvider,
     ServerAuthorizationProvider,
 )
 from chromadb.utils import get_class
@@ -20,7 +19,6 @@ ProviderTypes = Union[
     "ServerAuthConfigurationProvider",
     "ServerAuthCredentialsProvider",
     "ServerAuthorizationProvider",
-    "ServerAuthorizationConfigurationProvider",
 ]
 
 _provider_registry = {
@@ -57,15 +55,13 @@ def register_provider(
             _provider_registry["server_auth_credentials_providers"][short_hand] = cls
         elif issubclass(cls, ServerAuthorizationProvider):
             _provider_registry["server_authz_providers"][short_hand] = cls
-        elif issubclass(cls, ServerAuthorizationConfigurationProvider):
-            _provider_registry["server_authz_config_providers"][short_hand] = cls
         else:
             raise ValueError(
                 "Only ClientAuthProvider, ClientAuthConfigurationProvider, "
                 "ServerAuthProvider, "
                 "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, "
                 "ServerAuthorizationProvider, "
-                "ServerAuthorizationConfigurationProvider can be registered."
+                "can be registered."
             )
         return cls
 
@@ -87,15 +83,13 @@ def resolve_provider(
         _key = "server_auth_credentials_providers"
     elif issubclass(cls, ServerAuthorizationProvider):
         _key = "server_authz_providers"
-    elif issubclass(cls, ServerAuthorizationConfigurationProvider):
-        _key = "server_authz_config_providers"
     else:
         raise ValueError(
             "Only ClientAuthProvider, "
             "ServerAuthProvider, "
             "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, "
             "ServerAuthorizationProvider,"
-            "ServerAuthorizationConfigurationProvider, can be registered."
+            "can be registered."
         )
     if class_or_name in _provider_registry[_key]:
         return _provider_registry[_key][class_or_name]
