@@ -2,7 +2,7 @@ import json
 import logging
 import string
 from enum import Enum
-from typing import List, Optional, Tuple, Any, TypedDict, cast, Dict, TypeVar
+from typing import List, Optional, TypedDict, cast, Dict, TypeVar
 
 from overrides import override
 from pydantic import SecretStr
@@ -162,7 +162,9 @@ class UserTokenConfigServerAuthCredentialsProvider(
         return UserIdentity(
             user_id=_user_id,
             tenant=_user["tenant"] if _user and "tenant" in _user else "*",
-            databases=_user["databases"] if _user and "databases" in _user else ["*"],
+            databases=_user[
+                "databases"
+            ] if _user and "databases" in _user else ["*"],
         )
 
 
@@ -234,7 +236,9 @@ class TokenAuthServerProvider(ServerAuthProvider):
                 self._credentials_provider.get_user_identity(_token_creds),
             )
         except Exception as e:
-            logger.error(f"TokenAuthServerProvider.authenticate failed: {repr(e)}")
+            logger.error(
+                f"TokenAuthServerProvider.authenticate failed: {repr(e)}"
+            )
             return ServerAuthenticationResponse(False, None)
 
 
@@ -261,4 +265,5 @@ class TokenAuthClientProvider(ClientAuthProvider):
                   OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self) -> AuthHeaders:
-        return TokenAuthHeader(self._token_transport_header, self.token)
+        return TokenAuthHeader(self._token_transport_header,
+                               self._token.get_secret_value())

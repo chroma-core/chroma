@@ -58,8 +58,9 @@ class UserIdentity:
 @dataclass
 class ServerAuthenticationResponse(EnforceOverrides, ABC):
     """
-    Represents the response from a server authentication request. If success = True,
-    the user_identity field MAY be populated but does not have to be.
+    Represents the response from a server authentication request.
+    If success = True, the user_identity field MAY be populated
+    but does not have to be.
     """
     success: bool
     user_identity: Optional[UserIdentity]
@@ -76,7 +77,7 @@ class ServerAuthProvider(Component):
         pass
 
 
-class ServerAuthConfigurationProvider(Component):
+class ServerAuthConfigurationProvider(Component, Generic[T]):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
@@ -134,7 +135,8 @@ class ServerAuthCredentialsProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+    def validate_credentials(self,
+                             credentials: AbstractCredentials[T]) -> bool:
         ...
 
     @abstractmethod

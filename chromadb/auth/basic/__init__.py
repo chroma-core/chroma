@@ -1,5 +1,4 @@
 import logging
-from typing import cast
 
 from overrides import override
 from pydantic import SecretStr
@@ -35,7 +34,9 @@ class BasicAuthClientProvider(ClientAuthProvider):
     @override
     def authenticate(self) -> AuthHeaders:
         return {
-            "Authorization": SecretStr(f"Basic {self._creds.get_secret_value()}"),
+            "Authorization": SecretStr(
+                f"Basic {self._creds.get_secret_value()}"
+            ),
         }
 
 
@@ -50,7 +51,8 @@ class BasicAuthServerProvider(ServerAuthProvider):
             self._settings.chroma_server_auth_credentials_provider
         )
 
-    @trace_method("BasicAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
+    @trace_method("BasicAuthServerProvider.authenticate",
+                  OpenTelemetryGranularity.ALL)
     @override
     def authenticate(
         self, headers: AuthHeaders

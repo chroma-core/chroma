@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Set, cast
+from typing import Any, Dict, Set
 from overrides import override
 import yaml
 from chromadb.auth import (
@@ -22,8 +22,8 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         self._settings = system.settings
         if not self._settings.chroma_server_authz_config_file:
             raise ValueError(
-                "No configuration (CHROMA_SERVER_AUTHZ_CONFIG_FILE) file provided for "
-                "SimpleRBACAuthorizationProvider"
+                "No configuration (CHROMA_SERVER_AUTHZ_CONFIG_FILE) file "
+                "provided for SimpleRBACAuthorizationProvider"
             )
         config_file = str(system.settings.chroma_server_authz_config_file)
         with open(config_file, "r") as f:
@@ -44,7 +44,8 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
             f"({len(self._config['users'])}) users"
         )
         logger.info(
-            "Authorization Provider SimpleRBACAuthorizationProvider initialized"
+            "Authorization Provider SimpleRBACAuthorizationProvider "
+            "initialized"
         )
 
     @trace_method(

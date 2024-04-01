@@ -11,7 +11,7 @@ from starlette.responses import Response
 from starlette.types import ASGIApp
 
 import chromadb
-from chromadb.config import DEFAULT_TENANT, System
+from chromadb.config import DEFAULT_TENANT, System, Component
 from chromadb.auth import (
     AuthHeaders,
     AuthorizationContext,
@@ -34,17 +34,6 @@ from chromadb.telemetry.opentelemetry import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
-    _auth_success: bool
-
-    def __init__(self, auth_success: bool) -> None:
-        self._auth_success = auth_success
-
-    @override
-    def success(self) -> bool:
-        return self._auth_success
 
 
 class FastAPIChromaAuthMiddleware(Component):
@@ -100,7 +89,8 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
         self._middleware = auth_middleware
 
     @trace_method(
-        "FastAPIChromaAuthMiddlewareWrapper.dispatch", OpenTelemetryGranularity.ALL
+        "FastAPIChromaAuthMiddlewareWrapper.dispatch",
+        OpenTelemetryGranularity.ALL
     )
     @override
     async def dispatch(
@@ -108,10 +98,11 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     ) -> Response:
         if self._middleware.ignore_operation(request.method, request.url.path):
             logger.debug(
-                f"Skipping auth for path {request.url.path} and method {request.method}"
+                f"Skipping auth for path {request.url.path} \
+                    and method {request.method}"
             )
             return await call_next(request)
-        response = self._middleware.authenticate(headers)
+        response = self._middleware.authenticate(request.headers)
         if not response or not response.success():
             return fastapi_json_response(AuthorizationError("Unauthorized"))
 
@@ -119,13 +110,14 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-request_var: ContextVar[Optional[Request]] = ContextVar("request_var", default=None)
+request_var: ContextVar[Optional[Request]] = ContextVar("request_var",
+                                                        default=None)
 authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
     "authz_provider", default=None
 )
 
-# This needs to be module-level config, since it's used in authz_context() where we
-# don't have a system (so don't have easy access to the settings).
+# This needs to be module-level config, since it's used in authz_context()
+# where we don't have a system (so don't have easy access to the settings).
 overwrite_singleton_tenant_database_access_from_auth: bool = False
 
 
@@ -137,7 +129,8 @@ def set_overwrite_singleton_tenant_database_access_from_auth(
 
 
 def authz_context(
-    action: Union[str, AuthzResourceActions, List[str], List[AuthzResourceActions]],
+    action: Union[str, AuthzResourceActions, List[str],
+                  List[AuthzResourceActions]],
     resource: Union[AuthzResource, DynamicAuthzResource],
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
@@ -243,10 +236,13 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
                 "Server Authorization Provider: "
                 f"{self._settings.chroma_server_authz_provider}"
             )
-            self._authz_provider = self.require(self._settings.chroma_server_authz_provider)
+            self._authz_provider = self.require(
+                self._settings.chroma_server_authz_provider
+            )
 
     @override
-    def pre_process(self, request: AuthorizationRequestContext[Request]) -> None:
+    def pre_process(self,
+                    request: AuthorizationRequestContext[Request]) -> None:
         rest_request = request.get_request()
         request_var.set(rest_request)
         authz_provider.set(self._authz_provider)
@@ -270,7 +266,8 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
         self._middleware = authz_middleware
 
     @trace_method(
-        "FastAPIChromaAuthzMiddlewareWrapper.dispatch", OpenTelemetryGranularity.ALL
+        "FastAPIChromaAuthzMiddlewareWrapper.dispatch",
+        OpenTelemetryGranularity.ALL
     )
     @override
     async def dispatch(
@@ -282,5 +279,7 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
                 "and method {request.method}"
             )
             return await call_next(request)
-        self._middleware.pre_process(FastAPIAuthorizationRequestContext(request))
+        self._middleware.pre_process(
+            FastAPIAuthorizationRequestContext(request)
+        )
         return await call_next(request)

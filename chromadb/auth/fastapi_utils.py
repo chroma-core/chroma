@@ -21,7 +21,8 @@ def find_key_with_value_of_type(
             value, CreateCollection
         ):
             return dict(value)
-        elif type == AuthzResourceTypes.TENANT and isinstance(value, CreateTenant):
+        elif type == AuthzResourceTypes.TENANT and isinstance(value,
+                                                              CreateTenant):
             return dict(value)
     return {}
 

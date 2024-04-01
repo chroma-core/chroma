@@ -39,7 +39,8 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         OpenTelemetryGranularity.ALL,
     )
     @override
-    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+    def validate_credentials(self,
+                             credentials: AbstractCredentials[T]) -> bool:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if len(_creds) != 2:
             logger.error(
@@ -68,7 +69,9 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         return UserIdentity(user_id=_creds["username"].get_secret_value())
 
 
-class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsProvider):
+class HtpasswdFileServerAuthCredentialsProvider(
+    HtpasswdServerAuthCredentialsProvider
+):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         system.settings.require("chroma_server_auth_credentials_file")
@@ -98,7 +101,8 @@ class HtpasswdConfigurationServerAuthCredentialsProvider(
         super().__init__(system)
         system.settings.require("chroma_server_auth_credentials")
         _raw_creds = (
-            str(system.settings.chroma_server_auth_credentials).strip().split(":")
+            str(system.settings.chroma_server_auth_credentials).
+            strip().split(":")
         )
         self._creds = {
             "username": SecretStr(_raw_creds[0]),
