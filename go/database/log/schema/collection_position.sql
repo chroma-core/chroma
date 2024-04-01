@@ -1,7 +1,5 @@
-CREATE TABLE log (
-                        id   BIGINT PRIMARY KEY,
-                        collection_id text NOT NULL,
-                        timestamp int NOT NULL,
-                        record bytea NOT NULL
+CREATE TABLE collection_position (
+                        collection_id text PRIMARY KEY,
+                        record_log_position bigint NOT NULL
 );
 

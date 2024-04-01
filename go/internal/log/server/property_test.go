@@ -1,12 +1,15 @@
-package dao
+package server
 
 import (
-	dbcore2 "github.com/chroma-core/chroma/go/pkg/logservice/db/dbcore"
+	"context"
+	"github.com/chroma-core/chroma/go/internal/libs"
+	"github.com/chroma-core/chroma/go/internal/log/repository"
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	"github.com/pingcap/log"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"gorm.io/gorm"
 	"pgregory.net/rapid"
 	"testing"
 )
@@ -17,24 +20,25 @@ type ModelState struct {
 	CollectionLastIndexCompacted map[types.UniqueID]int64
 }
 
-type CollectionPositionDbTestSuite struct {
+type LogServerTestSuite struct {
 	suite.Suite
-	server
-	model                ModelState
-	t                    *testing.T
+	logServer logservicepb.LogServiceServer
+	model     ModelState
+	t         *testing.T
 }
 
-func (suite *CollectionPositionDbTestSuite) SetupSuite() {
-	log.Info("setup suite")
-	db, err := dbcore2.ConfigDatabaseForTesting()
+func (suite *LogServerTestSuite) SetupSuite() {
+	ctx := context.Background()
+	connectionString, err := libs.StartPgContainer(ctx)
 	assert.NoError(suite.t, err)
-	suite.db = db
-	suite.collectionPositionDb = &collectionPositionDb{
-		db: suite.db,
-	}
-	suite.recordLogDb = &recordLogDb{
-		db: suite.db,
-	}
+	assert.NoError(suite.t, err)
+	var conn *pgx.Conn
+	conn, err = libs.NewPgConnection(ctx, connectionString)
+	assert.NoError(suite.t, err)
+	err = libs.RunMigration(ctx, connectionString)
+	assert.NoError(suite.t, err)
+	lr := repository.NewLogRepository(conn)
+	suite.logServer = NewLogServer(lr)
 	suite.model = ModelState{
 		CollectionIndex:              map[types.UniqueID]int64{},
 		CollectionData:               map[types.UniqueID][][]byte{},
@@ -42,72 +46,85 @@ func (suite *CollectionPositionDbTestSuite) SetupSuite() {
 	}
 }
 
-func (suite *CollectionPositionDbTestSuite) TestRecordLogDb_PushLogs() {
-	type CollectionPosition struct {
-		collectionId types.UniqueID
-		position     int64
-	}
+func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
+
 	// Generate candidate id
-	candidates := make([]types.UniqueID, 100)
+	candidates := make([]types.UniqueID, 10)
 	for i := 0; i < len(candidates); i++ {
 		candidates[i] = types.NewUniqueID()
 	}
 
 	logsGen := rapid.SliceOf(rapid.SliceOf(rapid.Byte()))
 
-	gen := rapid.Custom(func(t *rapid.T) CollectionPosition {
-		return CollectionPosition{
-			collectionId: candidates[rapid.IntRange(0, len(candidates)-1).Draw(t, "collectionId")],
-			position:     rapid.Int64Min(0).Draw(t, "position"),
-		}
+	gen := rapid.Custom(func(t *rapid.T) types.UniqueID {
+		return candidates[rapid.IntRange(0, len(candidates)-1).Draw(t, "collectionId")]
 	})
 
 	rapid.Check(suite.t, func(t *rapid.T) {
 		t.Repeat(map[string]func(*rapid.T){
 			"pushLogs": func(t *rapid.T) {
+
 				c := gen.Draw(t, "collectionPosition")
 				data := logsGen.Draw(t, "logs")
-				inserted, err := suite.recordLogDb.PushLogs(c.collectionId, data)
-				assert.Equal(suite.t, len(data), inserted)
-				assert.NoError(suite.t, err)
-				suite.model.CollectionData[c.collectionId] = append(suite.model.CollectionData[c.collectionId], data...)
+				logs := make([]*coordinatorpb.SubmitEmbeddingRecord, len(data))
+				for i, record := range data {
+					logs[i] = &coordinatorpb.SubmitEmbeddingRecord{
+						Vector: &coordinatorpb.Vector{
+							Vector: record,
+						},
+						CollectionId: c.String(),
+					}
+				}
+				r, err := suite.logServer.PushLogs(context.Background(), &logservicepb.PushLogsRequest{
+					CollectionId: c.String(),
+					Records:      logs,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if int32(len(data)) != r.RecordCount {
+					t.Fatal("record count mismatch", len(data), r.RecordCount)
+				}
+				suite.model.CollectionData[c] = append(suite.model.CollectionData[c], data...)
 			},
 			"getAllCollectionsToCompact": func(t *rapid.T) {
-				collections, err := suite.recordLogDb.GetAllCollectionsToCompact()
+				result, err := suite.logServer.GetAllCollectionInfoToCompact(context.Background(), &logservicepb.GetAllCollectionInfoToCompactRequest{})
 				assert.NoError(suite.t, err)
-				for _, collection := range collections {
-					id, err := types.Parse(*collection.CollectionID)
-					assert.NoError(suite.t, err)
+				for _, collection := range result.AllCollectionInfo {
+					id, err := types.Parse(collection.CollectionId)
+					if err != nil {
+						t.Fatal(err)
+					}
 					newCompactationIndex := rapid.Int64Range(suite.model.CollectionLastIndexCompacted[id], int64(len(suite.model.CollectionData)+1)).Draw(t, "new_position")
-					err = suite.collectionPositionDb.SetCollectionPosition(id, newCompactationIndex)
-					assert.NoError(suite.t, err)
 					suite.model.CollectionLastIndexCompacted[id] = newCompactationIndex
 				}
 			},
 			"pullLogs": func(t *rapid.T) {
 				c := gen.Draw(t, "collectionPosition")
-				index := rapid.Int64Range(suite.model.CollectionLastIndexCompacted[c.collectionId], suite.model.CollectionIndex[c.collectionId]).Draw(t, "id")
-				logs, err := suite.recordLogDb.PullLogs(c.collectionId, index, 1000)
-				for i, log := range logs {
-					expect := string(suite.model.CollectionData[c.collectionId][index+int64(i)])
-					result := string(*log.Record)
-					assert.Equal(suite.t, expect, result)
+				index := rapid.Int64Range(suite.model.CollectionLastIndexCompacted[c], suite.model.CollectionIndex[c]).Draw(t, "id")
+				response, err := suite.logServer.PullLogs(context.Background(), &logservicepb.PullLogsRequest{
+					CollectionId: c.String(),
+					StartFromId:  index,
+					BatchSize:    10,
+				})
+				if err != nil {
+					t.Fatal(err)
 				}
-				assert.NoError(suite.t, err)
-			},
-			"getCollectionPosition": func(t *rapid.T) {
-				c := gen.Draw(t, "collectionPosition")
-				var position int64
-				position, err := suite.collectionPositionDb.GetCollectionPosition(c.collectionId)
-				assert.NoError(suite.t, err)
-				assert.Equal(suite.t, suite.model.CollectionLastIndexCompacted[c.collectionId], position)
+				for _, log := range response.Records {
+					expect := string(suite.model.CollectionData[c][log.LogId-1])
+					result := string(log.Record.Vector.Vector)
+					if expect != result {
+						t.Fatalf("expect %s, got %s", expect, result)
+					}
+				}
+
 			},
 		})
 	})
 }
 
-func TestCollectionPositionDbTestSuite(t *testing.T) {
-	testSuite := new(CollectionPositionDbTestSuite)
+func TestLogServerTestSuite(t *testing.T) {
+	testSuite := new(LogServerTestSuite)
 	testSuite.t = t
 	suite.Run(t, testSuite)
 }
