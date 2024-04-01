@@ -95,7 +95,7 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 	if err != nil {
 		return
 	}
-	err = s.lr.UpdateCollectionCompactionOffsetPosition(ctx, collectionID.String(), req.LogId)
+	err = s.lr.UpdateCollectionCompactionOffsetPosition(ctx, collectionID.String(), req.LogOffset)
 	if err != nil {
 		return
 	}

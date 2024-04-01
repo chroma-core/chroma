@@ -49,7 +49,7 @@ message GetAllCollectionInfoToCompactResponse {
 
 message UpdateCollectionLogOffsetRequest {
   string collection_id = 1;
-  int64 log_id = 2;
+  int64 log_offset = 2;
 }
 
 message UpdateCollectionLogOffsetResponse {
