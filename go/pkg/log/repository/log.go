@@ -19,15 +19,16 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	queriesWithTx := r.queries.WithTx(tx)
 	defer func() {
 		if err != nil {
-			err = tx.Rollback(ctx)
+			tx.Rollback(ctx)
 		} else {
 			err = tx.Commit(ctx)
 		}
 	}()
 	collection, err = queriesWithTx.GetCollectionForUpdate(ctx, collectionId)
 	if err != nil {
+		// If no row found, insert one.
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = queriesWithTx.InsertCollection(ctx, log.InsertCollectionParams{
+			collection, err = queriesWithTx.InsertCollection(ctx, log.InsertCollectionParams{
 				ID:                              collectionId,
 				RecordEnumerationOffsetPosition: 0,
 				RecordCompactionOffsetPosition:  0,
@@ -41,10 +42,11 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	}
 	params := make([]log.InsertRecordParams, len(records))
 	for i, record := range records {
+		offset := collection.RecordEnumerationOffsetPosition + int64(i) + 1
 		params[i] = log.InsertRecordParams{
 			CollectionID: collectionId,
 			Record:       record,
-			Offset:       collection.RecordEnumerationOffsetPosition + int64(i) + 1,
+			Offset:       offset,
 		}
 	}
 	insertCount, err = queriesWithTx.InsertRecord(ctx, params)

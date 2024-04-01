@@ -27,5 +27,5 @@ UPDATE collection set record_compaction_offset_position = $2 where id = $1;
 -- name: UpdateCollectionEnumerationOffsetPosition :exec
 UPDATE collection set record_enumeration_offset_position = $2 where id = $1;
 
--- name: InsertCollection :exec
-INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position) values($1, $2, $3);
+-- name: InsertCollection :one
+INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position) values($1, $2, $3) returning *;

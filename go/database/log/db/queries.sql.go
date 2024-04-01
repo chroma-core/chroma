@@ -102,8 +102,8 @@ func (q *Queries) GetRecordsForCollection(ctx context.Context, arg GetRecordsFor
 	return items, nil
 }
 
-const insertCollection = `-- name: InsertCollection :exec
-INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position) values($1, $2, $3)
+const insertCollection = `-- name: InsertCollection :one
+INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position) values($1, $2, $3) returning id, record_compaction_offset_position, record_enumeration_offset_position
 `
 
 type InsertCollectionParams struct {
@@ -112,9 +112,11 @@ type InsertCollectionParams struct {
 	RecordCompactionOffsetPosition  int64
 }
 
-func (q *Queries) InsertCollection(ctx context.Context, arg InsertCollectionParams) error {
-	_, err := q.db.Exec(ctx, insertCollection, arg.ID, arg.RecordEnumerationOffsetPosition, arg.RecordCompactionOffsetPosition)
-	return err
+func (q *Queries) InsertCollection(ctx context.Context, arg InsertCollectionParams) (Collection, error) {
+	row := q.db.QueryRow(ctx, insertCollection, arg.ID, arg.RecordEnumerationOffsetPosition, arg.RecordCompactionOffsetPosition)
+	var i Collection
+	err := row.Scan(&i.ID, &i.RecordCompactionOffsetPosition, &i.RecordEnumerationOffsetPosition)
+	return i, err
 }
 
 type InsertRecordParams struct {
