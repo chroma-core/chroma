@@ -37,7 +37,8 @@ class TokenTransportHeader(Enum):
     X_CHROMA_TOKEN = "X-Chroma-Token"
 
 
-def TokenAuthHeader(type: TokenTransportHeader, value: str) -> ClientAuthHeaders:
+def TokenAuthHeader(type: TokenTransportHeader,
+                    value: str) -> ClientAuthHeaders:
     key = None
     if type == TokenTransportHeader.AUTHORIZATION:
         key = "Authorization"

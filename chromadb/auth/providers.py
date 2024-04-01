@@ -92,29 +92,3 @@ class HtpasswdFileServerAuthCredentialsProvider(
                 "[chroma_server_auth_credentials]. "
                 "Must be <username>:<bcrypt passwd>."
             )
-
-
-class HtpasswdConfigurationServerAuthCredentialsProvider(
-    HtpasswdServerAuthCredentialsProvider
-):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-        system.settings.require("chroma_server_auth_credentials")
-        _raw_creds = (
-            str(system.settings.chroma_server_auth_credentials).
-            strip().split(":")
-        )
-        self._creds = {
-            "username": SecretStr(_raw_creds[0]),
-            "password": SecretStr(_raw_creds[1]),
-        }
-        if (
-            len(self._creds) != 2
-            or "username" not in self._creds
-            or "password" not in self._creds
-        ):
-            raise ValueError(
-                "Invalid Htpasswd credentials found in "
-                "[chroma_server_auth_credentials]. "
-                "Must be <username>:<bcrypt passwd>."
-            )
