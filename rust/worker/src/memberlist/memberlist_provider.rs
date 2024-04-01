@@ -3,7 +3,7 @@ use std::{fmt::Debug, sync::RwLock};
 use super::config::MemberlistProviderConfig;
 use crate::system::Receiver;
 use crate::{
-    config::{Configurable, WorkerConfig},
+    config::Configurable,
     errors::{ChromaError, ErrorCodes},
     system::{Component, ComponentContext, Handler, StreamHandler},
 };
@@ -23,7 +23,9 @@ use thiserror::Error;
 pub(crate) type Memberlist = Vec<String>;
 
 #[async_trait]
-pub(crate) trait MemberlistProvider: Component + Configurable {
+pub(crate) trait MemberlistProvider:
+    Component + Configurable<MemberlistProviderConfig>
+{
     fn subscribe(&mut self, receiver: Box<dyn Receiver<Memberlist> + Send>) -> ();
 }
 
@@ -84,9 +86,11 @@ impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
 }
 
 #[async_trait]
-impl Configurable for CustomResourceMemberlistProvider {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let my_config = match &worker_config.memberlist_provider {
+impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider {
+    async fn try_from_config(
+        config: &MemberlistProviderConfig,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let my_config = match &config {
             MemberlistProviderConfig::CustomResource(config) => config,
         };
         let kube_client = match Client::try_default().await {
@@ -99,12 +103,12 @@ impl Configurable for CustomResourceMemberlistProvider {
         };
         let memberlist_cr_client = Api::<MemberListKubeResource>::namespaced(
             kube_client.clone(),
-            &worker_config.kube_namespace,
+            &my_config.kube_namespace,
         );
 
         let c: CustomResourceMemberlistProvider = CustomResourceMemberlistProvider {
             memberlist_name: my_config.memberlist_name.clone(),
-            kube_ns: worker_config.kube_namespace.clone(),
+            kube_ns: my_config.kube_namespace.clone(),
             kube_client,
             memberlist_cr_client,
             queue_size: my_config.queue_size,

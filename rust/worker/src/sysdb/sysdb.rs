@@ -1,6 +1,6 @@
 use super::config::SysDbConfig;
 use crate::chroma_proto;
-use crate::config::{Configurable, WorkerConfig};
+use crate::config::Configurable;
 use crate::types::{CollectionConversionError, SegmentConversionError};
 use crate::{
     chroma_proto::sys_db_client,
@@ -78,9 +78,9 @@ impl ChromaError for GrpcSysDbError {
 }
 
 #[async_trait]
-impl Configurable for GrpcSysDb {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &worker_config.sysdb {
+impl Configurable<SysDbConfig> for GrpcSysDb {
+    async fn try_from_config(config: &SysDbConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
             SysDbConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;

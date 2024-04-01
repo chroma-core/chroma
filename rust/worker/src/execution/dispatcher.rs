@@ -1,6 +1,7 @@
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
+use crate::execution::config::DispatcherConfig;
 use crate::{
-    config::{Configurable, WorkerConfig},
+    config::{Configurable, QueryServiceConfig},
     errors::ChromaError,
     system::{Component, ComponentContext, Handler, Receiver, System},
 };
@@ -129,12 +130,12 @@ impl Dispatcher {
 }
 
 #[async_trait]
-impl Configurable for Dispatcher {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+impl Configurable<DispatcherConfig> for Dispatcher {
+    async fn try_from_config(config: &DispatcherConfig) -> Result<Self, Box<dyn ChromaError>> {
         Ok(Dispatcher::new(
-            worker_config.dispatcher.num_worker_threads,
-            worker_config.dispatcher.dispatcher_queue_size,
-            worker_config.dispatcher.worker_queue_size,
+            config.num_worker_threads,
+            config.dispatcher_queue_size,
+            config.worker_queue_size,
         ))
     }
 }

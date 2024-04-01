@@ -2,7 +2,7 @@ use crate::chroma_proto;
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use crate::config::{Configurable, WorkerConfig};
+use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::HnswQueryOrchestrator;
@@ -26,15 +26,17 @@ pub struct WorkerServer {
 }
 
 #[async_trait]
-impl Configurable for WorkerServer {
-    async fn try_from_config(config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb = match crate::sysdb::from_config(&config).await {
+impl Configurable<QueryServiceConfig> for WorkerServer {
+    async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
+        let sysdb_config = &config.sysdb;
+        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
             }
         };
-        let log = match crate::log::from_config(&config).await {
+        let log_config = &config.log;
+        let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
