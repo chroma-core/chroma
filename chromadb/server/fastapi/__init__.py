@@ -16,8 +16,8 @@ from chromadb.auth import (
     DynamicAuthzResource,
 )
 from chromadb.auth.fastapi import (
-    FastAPIChromaAuthMiddleware,
-    FastAPIChromaAuthMiddlewareWrapper,
+    AuthnMiddleware,
+    AuthnMiddlewareWrapper,
     FastAPIChromaAuthzMiddleware,
     FastAPIChromaAuthzMiddlewareWrapper,
     authz_context,
@@ -155,8 +155,8 @@ class FastAPI(chromadb.server.Server):
 
         if settings.chroma_server_auth_provider:
             self._app.add_middleware(
-                FastAPIChromaAuthMiddlewareWrapper,
-                auth_middleware=self._api.require(FastAPIChromaAuthMiddleware),
+                AuthnMiddlewareWrapper,
+                auth_middleware=self._api.require(AuthnMiddleware),
             )
         set_overwrite_singleton_tenant_database_access_from_auth(
             settings.chroma_overwrite_singleton_tenant_database_access_from_auth

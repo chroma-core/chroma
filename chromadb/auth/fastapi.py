@@ -35,7 +35,7 @@ from chromadb.telemetry.opentelemetry import (
 logger = logging.getLogger(__name__)
 
 
-class FastAPIChromaAuthMiddleware(Component):
+class AuthnMiddleware(Component):
     _auth_provider: ServerAuthProvider
 
     def __init__(self, system: System) -> None:
@@ -56,7 +56,7 @@ class FastAPIChromaAuthMiddleware(Component):
             )
 
     @trace_method(
-        "FastAPIChromaAuthMiddleware.authenticate",
+        "AuthnMiddleware.authenticate",
         OpenTelemetryGranularity.ALL
     )
     @override
@@ -66,7 +66,7 @@ class FastAPIChromaAuthMiddleware(Component):
         return self._auth_provider.authenticate(headers)
 
     @trace_method(
-        "FastAPIChromaAuthMiddleware.ignore_operation",
+        "AuthnMiddleware.ignore_operation",
         OpenTelemetryGranularity.ALL
     )
     @override
@@ -80,15 +80,15 @@ class FastAPIChromaAuthMiddleware(Component):
         return False
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
+class AuthnMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
-        self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
+        self, app: ASGIApp, auth_middleware: AuthnMiddleware
     ) -> None:
         super().__init__(app)
         self._middleware = auth_middleware
 
     @trace_method(
-        "FastAPIChromaAuthMiddlewareWrapper.dispatch",
+        "AuthnMiddlewareWrapper.dispatch",
         OpenTelemetryGranularity.ALL
     )
     @override
@@ -207,7 +207,7 @@ def authz_context(
     return decorator
 
 
-class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
+class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware):
     _authz_provider: ServerAuthorizationProvider
 
     def __init__(self, system: System) -> None:
