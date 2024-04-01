@@ -20,26 +20,25 @@ from chromadb.config import (
     Component,
     System,
 )
-from chromadb.errors import ChromaError
 
 T = TypeVar("T")
 S = TypeVar("S")
 
 
-ClientAuthHeaders = Dict[str, SecretStr]
+AuthHeaders = Dict[str, SecretStr]
 
 
 class ClientAuthProvider(Component):
     """
     ClientAuthProvider is responsible for providing authentication headers for
-    client requests. Client implementations (in our case, just the FastAPI client)
-    must inject these headers into their requests.
+    client requests. Client implementations (in our case, just the FastAPI
+    client) must inject these headers into their requests.
     """
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(self) -> ClientAuthHeaders:
+    def authenticate(self) -> AuthHeaders:
         pass
 
 
@@ -72,7 +71,7 @@ class ServerAuthProvider(Component):
 
     @abstractmethod
     def authenticate(
-        self, request: ServerAuthenticationRequest[T]
+        self, headers: AuthHeaders
     ) -> ServerAuthenticationResponse:
         pass
 
@@ -280,8 +279,4 @@ class ChromaAuthzMiddleware(Component, Generic[T, S]):
 
     @abstractmethod
     def ignore_operation(self, verb: str, path: str) -> bool:
-        ...
-
-    @abstractmethod
-    def instrument_server(self, app: T) -> None:
         ...

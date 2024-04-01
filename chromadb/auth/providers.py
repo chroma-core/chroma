@@ -9,7 +9,6 @@ from chromadb.auth import (
     AbstractCredentials,
     UserIdentity,
 )
-from chromadb.auth.registry import register_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -69,7 +68,6 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         return UserIdentity(user_id=_creds["username"].get_secret_value())
 
 
-@register_provider("htpasswd_file")
 class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)

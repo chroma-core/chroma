@@ -3,7 +3,9 @@ from functools import wraps
 import logging
 from typing import Callable, Optional, Dict, List, Union, cast, Any
 from overrides import override
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.middleware.base import (
+  BaseHTTPMiddleware, RequestResponseEndpoint
+)
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
@@ -11,6 +13,7 @@ from starlette.types import ASGIApp
 import chromadb
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
+    AuthHeaders,
     AuthorizationContext,
     AuthorizationRequestContext,
     AuthzAction,
@@ -18,7 +21,6 @@ from chromadb.auth import (
     AuthzResourceActions,
     AuthzUser,
     DynamicAuthzResource,
-    ServerAuthenticationRequest,
     ServerAuthenticationResponse,
     ServerAuthProvider,
     ChromaAuthzMiddleware,
@@ -34,17 +36,6 @@ from chromadb.telemetry.opentelemetry import (
 logger = logging.getLogger(__name__)
 
 
-class FastAPIServerAuthenticationRequest(ServerAuthenticationRequest[Optional[str]]):
-    def __init__(self, request: Request) -> None:
-        self._request = request
-
-    @override
-    def get_auth_info(
-        self, auth_info_id: str
-    ) -> Optional[str]:
-        return str(self._request.headers[auth_info_id])
-
-
 class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
     _auth_success: bool
 
@@ -56,7 +47,7 @@ class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
         return self._auth_success
 
 
-class FastAPIChromaAuthMiddleware:
+class FastAPIChromaAuthMiddleware(Component):
     _auth_provider: ServerAuthProvider
 
     def __init__(self, system: System) -> None:
@@ -69,21 +60,26 @@ class FastAPIChromaAuthMiddleware:
         ] = self._settings.chroma_server_auth_ignore_paths
         if self._settings.chroma_server_auth_provider:
             logger.debug(
-                f"Server Auth Provider: {self._settings.chroma_server_auth_provider}"
+                f"Server Auth Provider: \
+                    {self._settings.chroma_server_auth_provider}"
             )
-            self._auth_provider = self._system.require(self._settings.chroma_server_auth_provider)
+            self._auth_provider = self._system.require(
+                self._settings.chroma_server_auth_provider
+            )
 
     @trace_method(
-        "FastAPIChromaAuthMiddleware.authenticate", OpenTelemetryGranularity.ALL
+        "FastAPIChromaAuthMiddleware.authenticate",
+        OpenTelemetryGranularity.ALL
     )
     @override
     def authenticate(
-        self, request: ServerAuthenticationRequest[Any]
+        self, headers: AuthHeaders
     ) -> ServerAuthenticationResponse:
-        return self._auth_provider.authenticate(request)
+        return self._auth_provider.authenticate(headers)
 
     @trace_method(
-        "FastAPIChromaAuthMiddleware.ignore_operation", OpenTelemetryGranularity.ALL
+        "FastAPIChromaAuthMiddleware.ignore_operation",
+        OpenTelemetryGranularity.ALL
     )
     @override
     def ignore_operation(self, verb: str, path: str) -> bool:
@@ -95,12 +91,6 @@ class FastAPIChromaAuthMiddleware:
             return True
         return False
 
-    @override
-    def instrument_server(self, app: ASGIApp) -> None:
-        # We can potentially add an `/auth` endpoint to the server to allow for more
-        # complex auth flows
-        raise NotImplementedError("Not implemented yet")
-
 
 class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
@@ -108,10 +98,6 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     ) -> None:
         super().__init__(app)
         self._middleware = auth_middleware
-        try:
-            self._middleware.instrument_server(app)
-        except NotImplementedError:
-            pass
 
     @trace_method(
         "FastAPIChromaAuthMiddlewareWrapper.dispatch", OpenTelemetryGranularity.ALL
@@ -125,9 +111,7 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
                 f"Skipping auth for path {request.url.path} and method {request.method}"
             )
             return await call_next(request)
-        response = self._middleware.authenticate(
-            FastAPIServerAuthenticationRequest(request)
-        )
+        response = self._middleware.authenticate(headers)
         if not response or not response.success():
             return fastapi_json_response(AuthorizationError("Unauthorized"))
 
@@ -277,12 +261,6 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
             return True
         return False
 
-    @override
-    def instrument_server(self, app: ASGIApp) -> None:
-        # We can potentially add an `/auth` endpoint to the server to allow
-        # for more complex auth flows
-        raise NotImplementedError("Not implemented yet")
-
 
 class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
@@ -290,10 +268,6 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     ) -> None:
         super().__init__(app)
         self._middleware = authz_middleware
-        try:
-            self._middleware.instrument_server(app)
-        except NotImplementedError:
-            pass
 
     @trace_method(
         "FastAPIChromaAuthzMiddlewareWrapper.dispatch", OpenTelemetryGranularity.ALL

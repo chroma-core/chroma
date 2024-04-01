@@ -4,8 +4,8 @@ export interface ClientAuthProvider {
   /**
    * Abstract method for authenticating a client.
    */
-  // TODOBEN I changed this to ClientAuthHeaders -- uncover the ramifications.
-  authenticate(): ClientAuthHeaders;
+  // TODOBEN I changed this to AuthHeaders -- uncover the ramifications.
+  authenticate(): AuthHeaders;
 }
 
 export interface ClientAuthConfigurationProvider<T> {
@@ -23,7 +23,7 @@ export interface ClientAuthCredentialsProvider<T> {
   getCredentials(user?: string): T;
 }
 
-export type ClientAuthHeaders = { [key: string]: string };
+export type AuthHeaders = { [key: string]: string };
 
 export interface AbstractCredentials<T> {
   getCredentials(): T;
@@ -111,7 +111,7 @@ class BasicAuthClientAuthProvider implements ClientAuthProvider {
       new BasicAuthCredentialsProvider(options.textCredentials);
   }
 
-  authenticate(): ClientAuthHeaders {
+  authenticate(): AuthHeaders {
     var headers: { [key: string]: string } = {};
     headers["Authorization"] = "Basic " + this.credentialsProvider.getCredentials().getCredentials().getSecret();
     return headers
@@ -177,7 +177,7 @@ export class TokenClientAuthProvider implements ClientAuthProvider {
       new TokenCredentialsProvider(options.textCredentials);
   }
 
-  authenticate(): ClientAuthHeaders {
+  authenticate(): AuthHeaders {
     var headers: { [key: string]: string } = {};
     headers["Authorization"] = "Bearer " + this.credentialsProvider.getCredentials().getCredentials().getSecret();
     return headers

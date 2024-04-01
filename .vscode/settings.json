@@ -1,7 +1,7 @@
 {
   "git.ignoreLimitWarning": true,
   "editor.rulers": [
-    88
+    79
   ],
   "editor.formatOnSave": true,
   "python.formatting.provider": "black",

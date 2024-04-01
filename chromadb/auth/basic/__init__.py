@@ -9,7 +9,7 @@ from chromadb.auth import (
     ClientAuthProvider,
     ServerAuthCredentialsProvider,
     BasicAuthCredentials,
-    ClientAuthHeaders,
+    AuthHeaders,
 )
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
@@ -32,7 +32,7 @@ class BasicAuthClientProvider(ClientAuthProvider):
         )
 
     @override
-    def authenticate(self) -> ClientAuthHeaders:
+    def authenticate(self) -> AuthHeaders:
         return {
             "Authorization": SecretStr(f"Basic {self._creds.get_secret_value()}"),
         }
@@ -52,10 +52,10 @@ class BasicAuthServerProvider(ServerAuthProvider):
     @trace_method("BasicAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
     def authenticate(
-        self, request: ServerAuthenticationRequest[Any]
+        self, headers: AuthHeaders
     ) -> SimpleServerAuthenticationResponse:
         try:
-            _auth_header = request.get_auth_info("Authorization")
+            _auth_header = headers["Authorization"].get_secret_value()
             _validation = self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
             )
