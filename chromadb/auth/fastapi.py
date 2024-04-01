@@ -15,7 +15,6 @@ from chromadb.config import DEFAULT_TENANT, System, Component
 from chromadb.auth import (
     AuthHeaders,
     AuthorizationContext,
-    AuthorizationRequestContext,
     AuthzAction,
     AuthzResource,
     AuthzResourceActions,
@@ -208,18 +207,6 @@ def authz_context(
     return decorator
 
 
-class FastAPIAuthorizationRequestContext(AuthorizationRequestContext[Request]):
-    _request: Request
-
-    def __init__(self, request: Request) -> None:
-        self._request = request
-        pass
-
-    @override
-    def get_request(self) -> Request:
-        return self._request
-
-
 class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
     _authz_provider: ServerAuthorizationProvider
 
@@ -242,9 +229,8 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
 
     @override
     def pre_process(self,
-                    request: AuthorizationRequestContext[Request]) -> None:
-        rest_request = request.get_request()
-        request_var.set(rest_request)
+                    request: Request) -> None:
+        request_var.set(request)
         authz_provider.set(self._authz_provider)
 
     @override
@@ -279,7 +265,5 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
                 "and method {request.method}"
             )
             return await call_next(request)
-        self._middleware.pre_process(
-            FastAPIAuthorizationRequestContext(request)
-        )
+        self._middleware.pre_process(request)
         return await call_next(request)

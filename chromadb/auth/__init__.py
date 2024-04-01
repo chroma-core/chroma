@@ -12,6 +12,7 @@ from typing import (
     Generic,
 )
 from dataclasses import dataclass
+from starlette.requests import Request
 
 from overrides import EnforceOverrides, override
 from pydantic import SecretStr
@@ -265,18 +266,12 @@ class ServerAuthorizationProvider(Component):
         pass
 
 
-class AuthorizationRequestContext(EnforceOverrides, ABC, Generic[T]):
-    @abstractmethod
-    def get_request(self) -> T:
-        ...
-
-
-class ChromaAuthzMiddleware(Component, Generic[T, S]):
+class ChromaAuthzMiddleware(Component):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def pre_process(self, request: AuthorizationRequestContext[S]) -> None:
+    def pre_process(self, request: Request) -> None:
         ...
 
     @abstractmethod

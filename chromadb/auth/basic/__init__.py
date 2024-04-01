@@ -69,5 +69,7 @@ class BasicAuthServerProvider(ServerAuthProvider):
                 ),
             )
         except Exception as e:
-            logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
+            logger.error(
+                f"BasicAuthServerProvider.authenticate failed: {repr(e)}"
+            )
             return ServerAuthenticationResponse(False, None)

@@ -63,7 +63,8 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
 
         policy_decision = False
         if (
-            context.user.id in self._authz_tuples_map.keys()
+            context.user.id
+            and context.user.id in self._authz_tuples_map.keys()
             and _authz_tuple in self._authz_tuples_map[context.user.id]
         ):
             policy_decision = True
