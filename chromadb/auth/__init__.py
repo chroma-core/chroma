@@ -10,7 +10,6 @@ from typing import (
     TypeVar,
 )
 from dataclasses import dataclass
-from starlette.requests import Request
 from starlette.datastructures import Headers
 
 from pydantic import SecretStr
@@ -112,60 +111,6 @@ class AuthzResource:
     id: Optional[str]
     type: Optional[str]
     attributes: Optional[Dict[str, Any]] = None
-
-
-# class DynamicAuthzResource:
-#     id: Optional[Union[str, Callable[..., str]]]
-#     type: Optional[Union[str, Callable[..., str]]]
-#     attributes: Optional[Union[Dict[str, Any], Callable[..., Dict[str, Any]]]]
-
-#     def __init__(
-#         self,
-#         id: Optional[Union[str, Callable[..., str]]] = None,
-#         attributes: Optional[
-#             Union[Dict[str, Any], Callable[..., Dict[str, Any]]]
-#         ] = lambda **kwargs: {},
-#         type: Optional[Union[str, Callable[..., str]]] = DEFAULT_DATABASE,
-#     ) -> None:
-#         self.id = id
-#         self.attributes = attributes
-#         self.type = type
-
-#     def to_authz_resource(self, **kwargs: Any) -> AuthzResource:
-#         return AuthzResource(
-#             id=self.id(**kwargs) if callable(self.id) else self.id,
-#             type=self.type(**kwargs) if callable(self.type) else self.type,
-#             attributes=self.attributes(**kwargs)
-#             if callable(self.attributes)
-#             else self.attributes,
-#         )
-
-
-# class AuthzDynamicParams:
-#     @staticmethod
-#     def from_function_name(**kwargs: Any) -> Callable[..., str]:
-#         return partial(lambda **kwargs: kwargs["function"].__name__, **kwargs)
-
-#     @staticmethod
-#     def from_function_args(**kwargs: Any) -> Callable[..., str]:
-#         return partial(
-#             lambda **kwargs: kwargs["function_args"][kwargs["arg_num"]], **kwargs
-#         )
-
-#     @staticmethod
-#     def from_function_kwargs(**kwargs: Any) -> Callable[..., str]:
-#         return partial(
-#             lambda **kwargs: kwargs["function_kwargs"][kwargs["arg_name"]], **kwargs
-#         )
-
-#     @staticmethod
-#     def dict_from_function_kwargs(**kwargs: Any) -> Callable[..., Dict[str, Any]]:
-#         return partial(
-#             lambda **kwargs: {
-#                 k: kwargs["function_kwargs"][k] for k in kwargs["arg_names"]
-#             },
-#             **kwargs,
-#         )
 
 
 @dataclass

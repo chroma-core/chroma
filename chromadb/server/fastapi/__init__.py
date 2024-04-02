@@ -14,14 +14,6 @@ from chromadb.auth import (
     ServerAuthenticationProvider,
     ServerAuthorizationProvider,
 )
-from chromadb.auth.fastapi import (
-    authz_context,
-    set_overwrite_singleton_tenant_database_access_from_auth,
-)
-from chromadb.auth.fastapi_utils import (
-    attr_from_collection_lookup,
-    attr_from_resource_object,
-)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.api import ServerAPI
 from chromadb.errors import (
@@ -314,8 +306,11 @@ class FastAPI(Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    def authenticate_and_authorize_or_raise(self, request: Request,
-                                            *args: Any, **kwargs: Any) -> (
+    def authenticate_and_authorize_or_raise(self,
+        auth_headers: Dict[str, str],
+        *args: Any,
+        **kwargs: Any
+    ) -> (
       Tuple[str, str]
     ):
         """

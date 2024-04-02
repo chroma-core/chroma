@@ -14,7 +14,7 @@ resource_type_action: # This is here just for reference
   - collection:delete
   - collection:get
   - collection:query
-  - collection:peek #from API perspective this is the same as collection:get
+  - collection:peek
   - collection:count
   - collection:update
   - collection:upsert
@@ -87,7 +87,7 @@ roles_mapping:
         "collection:peek",
         "collection:count",
       ]
-  collection_x_read:
+  collection_x_list:
     actions:
       [
         "tenant:get_tenant",
