@@ -33,59 +33,6 @@ from chromadb.telemetry.opentelemetry import (
 logger = logging.getLogger(__name__)
 
 
-class AuthnMiddleware(BaseHTTPMiddleware, Component):
-    """
-    This middleware is responsible for authenticating incoming requests.
-    It uses the system's auth config to authenticate requests, setting
-    the user_identity field on the request state if successful.
-    """
-    _auth_provider: ServerAuthenticationProvider
-
-    def __init__(self, app: ASGIApp, system: System) -> None:
-        BaseHTTPMiddleware.__init__(self, app)
-        Component.__init__(self, system)
-        self._system = system
-        self._settings = system.settings
-        self._settings.require("chroma_server_authn_provider")
-        self._ignore_auth_paths: Dict[
-            str, List[str]
-        ] = self._settings.chroma_server_auth_ignore_paths
-
-    @trace_method(
-        "AuthnMiddleware.ignore_operation",
-        OpenTelemetryGranularity.ALL
-    )
-    def _ignore_operation(self, verb: str, path: str) -> bool:
-        if (
-            path in self._ignore_auth_paths.keys()
-            and verb.upper() in self._ignore_auth_paths[path]
-        ):
-            logger.debug(f"Skipping auth for path {path} and method {verb}")
-            return True
-        return False
-
-    @trace_method(
-        "AuthnMiddleware.dispatch",
-        OpenTelemetryGranularity.ALL
-    )
-    @override
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        if self._ignore_operation(request.method, request.url.path):
-            logger.debug(
-                f"Skipping auth for path {request.url.path} \
-                    and method {request.method}"
-            )
-            return await call_next(request)
-        user_identity = self._auth_provider.authenticate(request.headers)
-        if not user_identity:
-            return fastapi_json_response(AuthorizationError("Unauthorized"))
-
-        request.state.user_identity = user_identity
-        return await call_next(request)
-
-
 request_var: ContextVar[Optional[Request]] = ContextVar("request_var",
                                                         default=None)
 authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
