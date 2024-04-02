@@ -51,6 +51,12 @@ def _check_token(token: str) -> None:
 
 
 class TokenAuthClientProvider(ClientAuthProvider):
+    """
+    Client auth provider for token-based auth. Header key will be either
+    "Authorization" or "X-Chroma-Token" depending on
+    `chroma_auth_token_transport_header`. If the header is "Authorization",
+    the token is passed as a bearer token.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -70,9 +76,12 @@ class TokenAuthClientProvider(ClientAuthProvider):
 
     @override
     def authenticate(self) -> ClientAuthHeaders:
+        val = self._token.get_secret_value()
+        if self._token_transport_header == TokenTransportHeader.AUTHORIZATION:
+            val = f"Bearer {val}"
         return {
             self._token_transport_header.value:
-            SecretStr(self._token.get_secret_value())
+            SecretStr(val),
         }
 
 
@@ -90,6 +99,16 @@ class User(TypedDict):
 
 
 class TokenAuthServerProvider(ServerAuthProvider):
+    """
+    Server authentication provider for token-based auth. The server will
+    - Read the users from the file specified in
+        `chroma_server_auth_credentials_file`
+    - Check the token in the header specified by
+        `chroma_auth_token_transport_header`. If the configured header is
+        "Authorization", the token is expected to be a bearer token.
+    - If the token is valid, the server will return the user identity
+        associated with the token.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -139,7 +158,10 @@ class TokenAuthServerProvider(ServerAuthProvider):
             ]
             if (self._token_transport_header ==
                     TokenTransportHeader.AUTHORIZATION):
+                if not token.startswith("Bearer "):
+                    return ServerAuthenticationResponse(False, None)
                 token = token.replace("Bearer ", "")
+
             token = token.strip()
             _check_token(token)
 
@@ -151,7 +173,6 @@ class TokenAuthServerProvider(ServerAuthProvider):
                 tenant=self._token_user_mapping[token]["tenant"],
                 databases=self._token_user_mapping[token]["databases"],
             )
-
             return ServerAuthenticationResponse(
                 True,
                 user_identity
