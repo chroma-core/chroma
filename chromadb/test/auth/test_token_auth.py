@@ -14,7 +14,7 @@ from chromadb.test.conftest import _fastapi_fixture
 def token_config(draw: st.DrawFn) -> Dict[str, Any]:
     token_header = draw(st.sampled_from(["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
     server_provider = draw(
-        st.sampled_from(["token", "chromadb.auth.token.TokenAuthServerProvider"])
+        st.sampled_from(["token", "chromadb.auth.token.TokenAuthenticationServerProvider"])
     )
     client_provider = draw(
         st.sampled_from(["token", "chromadb.auth.token.TokenAuthClientProvider"])
@@ -36,7 +36,7 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
         "token_transport_header": token_header,
         "chroma_server_auth_credentials": token,
         "chroma_client_auth_credentials": token,
-        "chroma_server_auth_provider": server_provider,
+        "chroma_server_authn_provider": server_provider,
         "chroma_client_auth_provider": client_provider,
         "chroma_server_auth_credentials_provider": server_credentials_provider,
         "is_persistent": persistence,
@@ -48,7 +48,7 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
 def test_fastapi_server_token_auth(token_config: Dict[str, Any]) -> None:
     api = _fastapi_fixture(
         is_persistent=token_config["is_persistent"],
-        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_authn_provider=token_config["chroma_server_authn_provider"],
         chroma_server_auth_credentials_provider=token_config[
             "chroma_server_auth_credentials_provider"
         ],
@@ -90,7 +90,7 @@ def invalid_token(draw: st.DrawFn) -> str:
 def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
     api = _fastapi_fixture(
         is_persistent=tconf["is_persistent"],
-        chroma_server_auth_provider=tconf["chroma_server_auth_provider"],
+        chroma_server_authn_provider=tconf["chroma_server_authn_provider"],
         chroma_server_auth_credentials_provider=tconf[
             "chroma_server_auth_credentials_provider"
         ],
@@ -114,7 +114,7 @@ def test_fastapi_server_token_auth_wrong_token(
 ) -> None:
     api = _fastapi_fixture(
         is_persistent=token_config["is_persistent"],
-        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_authn_provider=token_config["chroma_server_authn_provider"],
         chroma_server_auth_credentials_provider=token_config[
             "chroma_server_auth_credentials_provider"
         ],
@@ -145,7 +145,7 @@ def test_fastapi_server_correct_auth_token(
 ) -> None:
     api = _fastapi_fixture(
         is_persistent=token_config["is_persistent"],
-        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_authn_provider=token_config["chroma_server_authn_provider"],
         chroma_server_auth_credentials_provider=token_config[
             "chroma_server_auth_credentials_provider"
         ],
@@ -179,7 +179,7 @@ def test_fastapi_overwrite_default_tenant_and_default_database(
 ) -> None:
     api = _fastapi_fixture(
         is_persistent=token_config["is_persistent"],
-        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_authn_provider=token_config["chroma_server_authn_provider"],
         chroma_server_auth_credentials_provider=token_config[
             "chroma_server_auth_credentials_provider"
         ],

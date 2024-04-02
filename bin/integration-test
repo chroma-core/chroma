@@ -17,7 +17,7 @@ function setup_auth {
       cat <<EOF > .chroma_env
 CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthenticationServerProvider"
 EOF
       ;;
     token)
@@ -25,7 +25,7 @@ EOF
 CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
 CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthenticationServerProvider"
 EOF
       ;;
     xtoken)
@@ -33,7 +33,7 @@ EOF
 CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
 CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthenticationServerProvider"
 EOF
     ;;
     *)

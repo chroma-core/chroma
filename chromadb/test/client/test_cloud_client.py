@@ -20,7 +20,7 @@ def valid_token() -> str:
 
 @pytest.fixture(scope="module")
 def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
-    chroma_server_auth_provider: str = "chromadb.auth.token.TokenAuthServerProvider"
+    chroma_server_authn_provider: str = "chromadb.auth.token.TokenAuthenticationServerProvider"
     chroma_server_auth_credentials_provider: str = (
         "chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
     )
@@ -45,7 +45,7 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
         port,
         False,
         None,
-        chroma_server_auth_provider,
+        chroma_server_authn_provider,
         chroma_server_auth_credentials_provider,
         None,
         chroma_server_auth_credentials,

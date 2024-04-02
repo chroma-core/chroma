@@ -93,9 +93,9 @@ def _run_server(
     port: int,
     is_persistent: bool = False,
     persist_directory: Optional[str] = None,
-    chroma_server_auth_provider: Optional[str] = None,
+    chroma_server_authn_provider: Optional[str] = None,
     chroma_server_auth_credentials_provider: Optional[str] = None,
-    chroma_server_auth_credentials_file: Optional[str] = None,
+    chroma_server_authn_credentials_file: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_auth_token_transport_header: Optional[str] = None,
     chroma_server_authz_provider: Optional[str] = None,
@@ -116,9 +116,9 @@ def _run_server(
             is_persistent=is_persistent,
             persist_directory=persist_directory,
             allow_reset=True,
-            chroma_server_auth_provider=chroma_server_auth_provider,
+            chroma_server_authn_provider=chroma_server_authn_provider,
             chroma_server_auth_credentials_provider=chroma_server_auth_credentials_provider,
-            chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
+            chroma_server_authn_credentials_file=chroma_server_authn_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_auth_token_transport_header=chroma_auth_token_transport_header,
             chroma_server_authz_provider=chroma_server_authz_provider,
@@ -135,9 +135,9 @@ def _run_server(
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             is_persistent=False,
             allow_reset=True,
-            chroma_server_auth_provider=chroma_server_auth_provider,
+            chroma_server_authn_provider=chroma_server_authn_provider,
             chroma_server_auth_credentials_provider=chroma_server_auth_credentials_provider,
-            chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
+            chroma_server_authn_credentials_file=chroma_server_authn_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_auth_token_transport_header=chroma_auth_token_transport_header,
             chroma_server_authz_provider=chroma_server_authz_provider,
@@ -170,10 +170,10 @@ def _await_server(api: ServerAPI, attempts: int = 0) -> None:
 
 def _fastapi_fixture(
     is_persistent: bool = False,
-    chroma_server_auth_provider: Optional[str] = None,
+    chroma_server_authn_provider: Optional[str] = None,
     chroma_server_auth_credentials_provider: Optional[str] = None,
     chroma_client_auth_provider: Optional[str] = None,
-    chroma_server_auth_credentials_file: Optional[str] = None,
+    chroma_server_authn_credentials_file: Optional[str] = None,
     chroma_client_auth_credentials: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_auth_token_transport_header: Optional[str] = None,
@@ -209,9 +209,9 @@ def _fastapi_fixture(
         port,
         False,
         None,
-        chroma_server_auth_provider,
+        chroma_server_authn_provider,
         chroma_server_auth_credentials_provider,
-        chroma_server_auth_credentials_file,
+        chroma_server_authn_credentials_file,
         chroma_server_auth_credentials,
         chroma_auth_token_transport_header,
         chroma_server_authz_provider,
@@ -228,9 +228,9 @@ def _fastapi_fixture(
             port,
             is_persistent,
             persist_directory,
-            chroma_server_auth_provider,
+            chroma_server_authn_provider,
             chroma_server_auth_credentials_provider,
-            chroma_server_auth_credentials_file,
+            chroma_server_authn_credentials_file,
             chroma_server_auth_credentials,
             chroma_auth_token_transport_header,
             chroma_server_authz_provider,
@@ -304,9 +304,9 @@ def fastapi_server_basic_auth() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
-        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_server_authn_credentials_file="./server.htpasswd",
         chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
     ):
@@ -320,9 +320,9 @@ def fastapi_server_basic_auth_param() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
-        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_server_authn_credentials_file="./server.htpasswd",
         chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
     ):
@@ -337,9 +337,9 @@ def fastapi_server_basic_auth_file() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
-        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_server_authn_credentials_file="./server.htpasswd",
         chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
     ):
@@ -353,9 +353,9 @@ def fastapi_server_basic_auth_shorthand() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_auth_provider="basic",
+        chroma_server_authn_provider="basic",
         chroma_server_auth_credentials_provider="htpasswd_file",
-        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_server_authn_credentials_file="./server.htpasswd",
         chroma_client_auth_provider="basic",
         chroma_client_auth_credentials="admin:admin",
     ):
@@ -369,9 +369,9 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
-        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_server_authn_credentials_file="./server.htpasswd",
         chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin1",
     ):

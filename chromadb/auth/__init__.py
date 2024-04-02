@@ -68,7 +68,7 @@ class ServerAuthenticationResponse(EnforceOverrides, ABC):
     user_identity: Optional[UserIdentity]
 
 
-class ServerAuthProvider(Component):
+class ServerAuthenticationProvider(Component):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 

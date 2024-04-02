@@ -160,7 +160,7 @@ def rbac_config(draw: st.DrawFn) -> Dict[str, Any]:
 def token_config(draw: st.DrawFn) -> Dict[str, Any]:
     token_header = draw(st.sampled_from(["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
     server_provider = draw(
-        st.sampled_from(["token", "chromadb.auth.token.TokenAuthServerProvider"])
+        st.sampled_from(["token", "chromadb.auth.token.TokenAuthenticationServerProvider"])
     )
     client_provider = draw(
         st.sampled_from(["token", "chromadb.auth.token.TokenAuthClientProvider"])
@@ -173,8 +173,8 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
     persistence = draw(st.booleans())
     return {
         "token_transport_header": token_header,
-        "chroma_server_auth_credentials_file": None,
-        "chroma_server_auth_provider": server_provider,
+        "chroma_server_authn_credentials_file": None,
+        "chroma_server_authn_provider": server_provider,
         "chroma_client_auth_provider": client_provider,
         "chroma_server_authz_config_file": None,
         "chroma_server_auth_credentials_provider": server_credentials_provider,
@@ -289,7 +289,7 @@ def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> Non
     random_token = random.choice(random_user["tokens"])["token"]
     api = _fastapi_fixture(
         is_persistent=token_config["is_persistent"],
-        chroma_server_auth_provider=token_config["chroma_server_auth_provider"],
+        chroma_server_authn_provider=token_config["chroma_server_authn_provider"],
         chroma_server_auth_credentials_provider=token_config[
             "chroma_server_auth_credentials_provider"
         ],

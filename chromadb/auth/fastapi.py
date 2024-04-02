@@ -19,7 +19,7 @@ from chromadb.auth import (
     AuthzResourceActions,
     AuthzUser,
     DynamicAuthzResource,
-    ServerAuthProvider,
+    ServerAuthenticationProvider,
     ChromaAuthzMiddleware,
     ServerAuthorizationProvider,
 )
@@ -39,24 +39,24 @@ class AuthnMiddleware(BaseHTTPMiddleware, Component):
     It uses the system's auth config to authenticate requests, setting
     the user_identity field on the request state if successful.
     """
-    _auth_provider: ServerAuthProvider
+    _auth_provider: ServerAuthenticationProvider
 
     def __init__(self, app: ASGIApp, system: System) -> None:
         BaseHTTPMiddleware.__init__(self, app)
         Component.__init__(self, system)
         self._system = system
         self._settings = system.settings
-        self._settings.require("chroma_server_auth_provider")
+        self._settings.require("chroma_server_authn_provider")
         self._ignore_auth_paths: Dict[
             str, List[str]
         ] = self._settings.chroma_server_auth_ignore_paths
-        if self._settings.chroma_server_auth_provider:
+        if self._settings.chroma_server_authn_provider:
             logger.debug(
                 f"Server Auth Provider: \
-                    {self._settings.chroma_server_auth_provider}"
+                    {self._settings.chroma_server_authn_provider}"
             )
             self._auth_provider = self._system.require(
-                self._settings.chroma_server_auth_provider
+                self._settings.chroma_server_authn_provider
             )
 
     @trace_method(

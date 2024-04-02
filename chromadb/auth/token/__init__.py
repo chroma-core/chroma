@@ -8,7 +8,7 @@ from pydantic import SecretStr
 import yaml
 
 from chromadb.auth import (
-    ServerAuthProvider,
+    ServerAuthenticationProvider,
     ClientAuthProvider,
     ClientAuthHeaders,
     ServerAuthenticationResponse,
@@ -25,7 +25,7 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TokenAuthServerProvider", "TokenAuthClientProvider"]
+__all__ = ["TokenAuthenticationServerProvider", "TokenAuthClientProvider"]
 
 
 class TokenTransportHeader(Enum):
@@ -98,11 +98,11 @@ class User(TypedDict):
     tokens: List[str]
 
 
-class TokenAuthServerProvider(ServerAuthProvider):
+class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     """
     Server authentication provider for token-based auth. The server will
     - Read the users from the file specified in
-        `chroma_server_auth_credentials_file`
+        `chroma_server_authn_credentials_file`
     - Check the token in the header specified by
         `chroma_auth_token_transport_header`. If the configured header is
         "Authorization", the token is expected to be a bearer token.
@@ -119,11 +119,11 @@ class TokenAuthServerProvider(ServerAuthProvider):
         else:
             self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
-        if not system.settings.chroma_server_auth_credentials_file:
-            raise ValueError("chroma_server_auth_credentials_file not set")
+        if not system.settings.chroma_server_authn_credentials_file:
+            raise ValueError("chroma_server_authn_credentials_file not set")
 
         users_file = str(
-            system.settings.chroma_server_auth_credentials_file
+            system.settings.chroma_server_authn_credentials_file
         )
         with open(users_file) as f:
             self._users = cast(List[User], yaml.safe_load(f)["users"])
@@ -146,7 +146,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
                     )
                 self._token_user_mapping[token] = user
 
-    @trace_method("TokenAuthServerProvider.authenticate",
+    @trace_method("TokenAuthenticationServerProvider.authenticate",
                   OpenTelemetryGranularity.ALL)
     @override
     def authenticate(
@@ -179,6 +179,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
             )
         except Exception as e:
             logger.error(
-                f"TokenAuthServerProvider.authenticate failed: {repr(e)}"
+                "TokenAuthenticationServerProvider.authenticate "
+                f"failed: {repr(e)}"
             )
             return ServerAuthenticationResponse(False, None)

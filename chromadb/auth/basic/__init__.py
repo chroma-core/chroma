@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 from chromadb.auth import (
     UserIdentity,
-    ServerAuthProvider,
+    ServerAuthenticationProvider,
     ServerAuthenticationResponse,
     ClientAuthProvider,
     ClientAuthHeaders,
@@ -21,7 +21,7 @@ from starlette.datastructures import Headers
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BasicAuthServerProvider", "BasicAuthClientProvider"]
+__all__ = ["BasicAuthenticationServerProvider", "BasicAuthClientProvider"]
 
 
 class BasicAuthClientProvider(ClientAuthProvider):
@@ -46,10 +46,10 @@ class BasicAuthClientProvider(ClientAuthProvider):
         }
 
 
-class BasicAuthServerProvider(ServerAuthProvider):
+class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
     """
     Server auth provider for basic auth. The credentials are read from
-    `chroma_server_auth_credentials_file` and each line must be in the format
+    `chroma_server_authn_credentials_file` and each line must be in the format
     <username>:<bcrypt passwd>.
 
     Expects tokens to be passed as a base64-encoded string in the Authorization
@@ -70,12 +70,12 @@ class BasicAuthServerProvider(ServerAuthProvider):
 
         self._creds = {}
 
-        system.settings.require("chroma_server_auth_credentials_file")
-        _creds_file = str(system.settings.chroma_server_auth_credentials_file)
+        system.settings.require("chroma_server_authn_credentials_file")
+        _creds_file = str(system.settings.chroma_server_authn_credentials_file)
         with open(_creds_file, "r") as f:
             for line in f:
                 _raw_creds = [v for v in line.strip().split(":")]
-                if len(_raw_creds) != 2 or f.readline():
+                if len(_raw_creds) != 2 or not all(_raw_creds):
                     raise ValueError(
                         "Invalid Htpasswd credentials found in "
                         "[chroma_server_auth_credentials]. "
@@ -83,12 +83,6 @@ class BasicAuthServerProvider(ServerAuthProvider):
                     )
                 username = _raw_creds[0]
                 password = _raw_creds[1]
-                if not username or not password:
-                    raise ValueError(
-                        "Invalid Htpasswd credentials found in "
-                        "[chroma_server_auth_credentials]. "
-                        "Lines must be exactly <username>:<bcrypt passwd>."
-                    )
                 if username in self._creds:
                     raise ValueError(
                         "Duplicate username found in "
@@ -97,7 +91,7 @@ class BasicAuthServerProvider(ServerAuthProvider):
                     )
                 self._creds[username] = SecretStr(password)
 
-    @trace_method("BasicAuthServerProvider.authenticate",
+    @trace_method("BasicAuthenticationServerProvider.authenticate",
                   OpenTelemetryGranularity.ALL)
     @override
     def authenticate(
@@ -126,6 +120,7 @@ class BasicAuthServerProvider(ServerAuthProvider):
             )
         except Exception as e:
             logger.error(
-                f"BasicAuthServerProvider.authenticate failed: {repr(e)}"
+                "BasicAuthenticationServerProvider.authenticate "
+                f"failed: {repr(e)}"
             )
             return ServerAuthenticationResponse(False, None)

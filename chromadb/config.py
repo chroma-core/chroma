@@ -186,8 +186,8 @@ class Settings(BaseSettings):  # type: ignore
     # Server authn
     # ============
 
-    chroma_server_auth_provider: Optional[str] = None
-    chroma_server_auth_credentials_file: Optional[str] = None
+    chroma_server_authn_provider: Optional[str] = None
+    chroma_server_authn_credentials_file: Optional[str] = None
 
     # ============
     # Server authz
