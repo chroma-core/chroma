@@ -56,7 +56,7 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     @override
     def authorize(self, context: AuthorizationContext) -> bool:
         _authz_tuple = (
-            context.user.id,
+            context.user.user_id,
             context.user.tenant,
             context.resource.type,
             context.action.id,
@@ -64,15 +64,16 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
 
         policy_decision = False
         if (
-            context.user.id
-            and context.user.id in self._authz_tuples_map.keys()
-            and _authz_tuple in self._authz_tuples_map[context.user.id]
+            context.user.user_id
+            and context.user.user_id in self._authz_tuples_map.keys()
+            and _authz_tuple in self._authz_tuples_map[context.user.user_id]
         ):
             policy_decision = True
         logger.debug(
             f"Authorization decision: Access "
             f"{'granted' if policy_decision else 'denied'} for "
-            f"user [{context.user.id}] attempting to [{context.action.id}]"
+            f"user [{context.user.user_id}] attempting to "
+            f"[{context.action.id}]"
             f" on [{context.resource}]"
         )
         return policy_decision
