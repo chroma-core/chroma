@@ -61,20 +61,30 @@ _legacy_config_values = {
     "chromadb.api.local.LocalAPI",
 }
 
-# TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
+
+# Map specific abstract types to the setting which specifies which
+# concrete implementation to use.
+# Please keep these sorted. We're civilized people.
 _abstract_type_keys: Dict[str, str] = {
+    # TODO: Don't use concrete types here to avoid circular deps. Strings are
+    #       fine for right here!
     # NOTE: this is to support legacy api construction. Use ServerAPI instead
+    # TODOBEN add auth stuff.
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
-    "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
-    "chromadb.ingest.Producer": "chroma_producer_impl",
-    "chromadb.ingest.Consumer": "chroma_consumer_impl",
-    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.ingest.Consumer": "chroma_consumer_impl",
+    "chromadb.ingest.Producer": "chroma_producer_impl",
+    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
+    "chromadb.rate_limiting.RateLimitingProvider":
+        "chroma_rate_limiting_provider_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
-    "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
-    "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
-    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
+    "chromadb.segment.distributed.SegmentDirectory":
+        "chroma_segment_directory_impl",
+    "chromadb.segment.distributed.MemberlistProvider":
+        "chroma_memberlist_provider_impl",
+    "chromadb.telemetry.product.ProductTelemetryClient":
+        "chroma_product_telemetry_impl",
 }
 
 DEFAULT_TENANT = "default_tenant"

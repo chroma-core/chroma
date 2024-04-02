@@ -153,6 +153,13 @@ class FastAPI(chromadb.server.Server):
             )
 
         if settings.chroma_server_authn_provider:
+            self.authn_provider = settings.require(
+                settings.chroma_server_authn_provider
+            )
+            self.authn_provider = self._system.require(
+                ServerAuthenticationProvider
+            )
+
             self._app.add_middleware(
                 AuthnMiddleware,
                 system=self._system,

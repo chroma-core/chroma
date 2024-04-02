@@ -86,7 +86,6 @@ class AuthnMiddleware(BaseHTTPMiddleware, Component):
                     and method {request.method}"
             )
             return await call_next(request)
-        # TODOBEN change this to just an optional useridentity
         user_identity = self._auth_provider.authenticate(request.headers)
         if not user_identity:
             return fastapi_json_response(AuthorizationError("Unauthorized"))
@@ -128,63 +127,66 @@ def authz_context(
                 "function_kwargs": kwargs,
             }
             request = request_var.get()
-            if request:
-                _provider = authz_provider.get()
-                a_list: List[Union[str, AuthzAction]] = []
-                if not isinstance(action, list):
-                    a_list = [action]
-                else:
-                    a_list = cast(List[Union[str, AuthzAction]], action)
-                a_authz_responses = []
-                for a in a_list:
-                    _action = a if isinstance(a, AuthzAction) else AuthzAction(id=a)
-                    _resource = (
-                        resource
-                        if isinstance(resource, AuthzResource)
-                        else resource.to_authz_resource(**_dynamic_kwargs)
-                    )
-                    _context = AuthorizationContext(
-                        user=AuthzUser(
-                            id=request.state.user_identity.get_user_id()
-                            if hasattr(request.state, "user_identity")
-                            else "Anonymous",
-                            tenant=request.state.user_identity.get_user_tenant()
-                            if hasattr(request.state, "user_identity")
-                            else DEFAULT_TENANT,
-                            attributes=request.state.user_identity.get_user_attributes()
-                            if hasattr(request.state, "user_identity")
-                            else {},
-                        ),
-                        resource=_resource,
-                        action=_action,
-                    )
+            if not request:
+                return
 
-                    if _provider:
-                        a_authz_responses.append(_provider.authorize(_context))
-                if not any(a_authz_responses):
-                    raise AuthorizationError("Unauthorized")
-                # In a multi-tenant environment, we may want to allow users to send
-                # requests without configuring a tenant and DB. If so, they can set
-                # the request tenant and DB however they like and we simply overwrite it.
-                if overwrite_singleton_tenant_database_access_from_auth:
-                    desired_tenant = request.state.user_identity.get_user_tenant()
-                    if desired_tenant and "tenant" in kwargs:
-                        if isinstance(kwargs["tenant"], str):
-                            kwargs["tenant"] = desired_tenant
-                        elif isinstance(
-                            kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant
-                        ):
-                            kwargs["tenant"].name = desired_tenant
-                    databases = request.state.user_identity.get_user_databases()
-                    if databases and len(databases) == 1 and "database" in kwargs:
-                        desired_database = databases[0]
-                        if isinstance(kwargs["database"], str):
-                            kwargs["database"] = desired_database
-                        elif isinstance(
-                            kwargs["database"],
-                            chromadb.server.fastapi.types.CreateDatabase,
-                        ):
-                            kwargs["database"].name = desired_database
+            _provider = authz_provider.get()
+            a_list: List[Union[str, AuthzAction]] = []
+            if not isinstance(action, list):
+                a_list = [action]
+            else:
+                a_list = cast(List[Union[str, AuthzAction]], action)
+            a_authz_responses = []
+            for a in a_list:
+                _action = a if isinstance(a, AuthzAction) else AuthzAction(id=a)
+                _resource = (
+                    resource
+                    if isinstance(resource, AuthzResource)
+                    else resource.to_authz_resource(**_dynamic_kwargs)
+                )
+                _context = AuthorizationContext(
+                    user=AuthzUser(
+                        id=request.state.user_identity.get_user_id()
+                        if hasattr(request.state, "user_identity")
+                        else "Anonymous",
+                        tenant=request.state.user_identity.get_user_tenant()
+                        if hasattr(request.state, "user_identity")
+                        else DEFAULT_TENANT,
+                        attributes=request.state.user_identity.get_user_attributes()
+                        if hasattr(request.state, "user_identity")
+                        else {},
+                    ),
+                    resource=_resource,
+                    action=_action,
+                )
+
+                if _provider:
+                    a_authz_responses.append(_provider.authorize(_context))
+            if not any(a_authz_responses):
+                raise AuthorizationError("Unauthorized")
+
+            # In a multi-tenant environment, we may want to allow users to send
+            # requests without configuring a tenant and DB. If so, they can set
+            # the request tenant and DB however they like and we simply overwrite it.
+            if overwrite_singleton_tenant_database_access_from_auth:
+                desired_tenant = request.state.user_identity.get_user_tenant()
+                if desired_tenant and "tenant" in kwargs:
+                    if isinstance(kwargs["tenant"], str):
+                        kwargs["tenant"] = desired_tenant
+                    elif isinstance(
+                        kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant
+                    ):
+                        kwargs["tenant"].name = desired_tenant
+                databases = request.state.user_identity.get_user_databases()
+                if databases and len(databases) == 1 and "database" in kwargs:
+                    desired_database = databases[0]
+                    if isinstance(kwargs["database"], str):
+                        kwargs["database"] = desired_database
+                    elif isinstance(
+                        kwargs["database"],
+                        chromadb.server.fastapi.types.CreateDatabase,
+                    ):
+                        kwargs["database"].name = desired_database
 
             return f(*args, **kwargs)
 

@@ -22,7 +22,7 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         self._settings = system.settings
         if not self._settings.chroma_server_authz_config_file:
             raise ValueError(
-                "No configuration (CHROMA_SERVER_AUTHZ_CONFIG_FILE) file "
+                "No configuration file (`chroma_server_authz_config_file`) "
                 "provided for SimpleRBACAuthorizationProvider"
             )
         config_file = str(system.settings.chroma_server_authz_config_file)

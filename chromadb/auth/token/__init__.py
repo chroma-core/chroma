@@ -99,10 +99,12 @@ class User(TypedDict):
 
 class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     """
-    Server authentication provider for token-based auth. The server will
-    - Read the users from the file specified in
-        `chroma_server_authn_credentials_file`
-    - Check the token in the header specified by
+    Server authentication provider for token-based auth. The provider will
+    - On initialization, read the users from the file specified in
+        `chroma_server_authn_credentials_file`. This file must be a well-formed
+        YAML file with a top-level array called `users`. Each user must have
+        an `id` field and a `tokens` (string array) field.
+    - On each request, check the token in the header specified by
         `chroma_auth_token_transport_header`. If the configured header is
         "Authorization", the token is expected to be a bearer token.
     - If the token is valid, the server will return the user identity
