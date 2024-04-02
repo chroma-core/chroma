@@ -79,15 +79,6 @@ class ServerAuthProvider(Component):
         pass
 
 
-class ServerAuthConfigurationProvider(Component, Generic[T]):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def get_configuration(self) -> Optional[T]:
-        pass
-
-
 class AbstractCredentials(EnforceOverrides, ABC, Generic[T]):
     """
     TODOBEN
@@ -109,27 +100,6 @@ class SecretStrAbstractCredentials(AbstractCredentials[SecretStr]):
         Returns the data encapsulated by the credentials object.
         """
         pass
-
-
-class BasicAuthCredentials(SecretStrAbstractCredentials):
-    def __init__(self, username: SecretStr, password: SecretStr) -> None:
-        self.username = username
-        self.password = password
-
-    @override
-    def get_credentials(self) -> Dict[str, SecretStr]:
-        return {"username": self.username, "password": self.password}
-
-    @staticmethod
-    def from_header(header: str) -> BasicAuthCredentials:
-        """
-        Parses a basic auth header and returns a BasicAuthCredentials object.
-        """
-        header = header.replace("Basic ", "")
-        header = header.strip()
-        base64_decoded = base64.b64decode(header).decode("utf-8")
-        username, password = base64_decoded.split(":")
-        return BasicAuthCredentials(SecretStr(username), SecretStr(password))
 
 
 class ServerAuthCredentialsProvider(Component):

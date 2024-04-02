@@ -86,6 +86,7 @@ class AuthnMiddleware(BaseHTTPMiddleware, Component):
                     and method {request.method}"
             )
             return await call_next(request)
+        # TODOBEN change this to just an optional useridentity
         response = self._auth_provider.authenticate(request.headers)
         if not response or not response.success:
             return fastapi_json_response(AuthorizationError("Unauthorized"))
