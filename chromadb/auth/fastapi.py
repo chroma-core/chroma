@@ -87,11 +87,11 @@ class AuthnMiddleware(BaseHTTPMiddleware, Component):
             )
             return await call_next(request)
         # TODOBEN change this to just an optional useridentity
-        response = self._auth_provider.authenticate(request.headers)
-        if not response or not response.success:
+        user_identity = self._auth_provider.authenticate(request.headers)
+        if not user_identity:
             return fastapi_json_response(AuthorizationError("Unauthorized"))
 
-        request.state.user_identity = response.user_identity
+        request.state.user_identity = user_identity
         return await call_next(request)
 
 

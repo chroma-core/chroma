@@ -4,11 +4,11 @@ import logging
 
 from overrides import override
 from pydantic import SecretStr
+from typing import Optional
 
 from chromadb.auth import (
     UserIdentity,
     ServerAuthenticationProvider,
-    ServerAuthenticationResponse,
     ClientAuthProvider,
     ClientAuthHeaders,
 )
@@ -96,7 +96,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
     @override
     def authenticate(
         self, headers: Headers
-    ) -> ServerAuthenticationResponse:
+    ) -> Optional[UserIdentity]:
         try:
             _auth_header = headers["Authorization"]
             _auth_header = _auth_header.replace("Basic ", "")
@@ -113,14 +113,12 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 password.encode("utf-8"),
                 self._creds["password"].get_secret_value().encode("utf-8"),
             )
-            success = _usr_check and _pwd_check
-            return ServerAuthenticationResponse(
-                success,
-                UserIdentity(user_id=username) if success else None,
-            )
+            if _usr_check and _pwd_check:
+                return UserIdentity(user_id=username)
+
         except Exception as e:
             logger.error(
                 "BasicAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
-            return ServerAuthenticationResponse(False, None)
+        return None

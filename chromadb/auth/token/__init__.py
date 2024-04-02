@@ -11,7 +11,6 @@ from chromadb.auth import (
     ServerAuthenticationProvider,
     ClientAuthProvider,
     ClientAuthHeaders,
-    ServerAuthenticationResponse,
     UserIdentity,
 )
 from chromadb.config import System
@@ -151,7 +150,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     @override
     def authenticate(
         self, headers: Headers
-    ) -> ServerAuthenticationResponse:
+    ) -> Optional[UserIdentity]:
         try:
             token = headers[
                 self._token_transport_header.value
@@ -159,27 +158,24 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
             if (self._token_transport_header ==
                     TokenTransportHeader.AUTHORIZATION):
                 if not token.startswith("Bearer "):
-                    return ServerAuthenticationResponse(False, None)
+                    return None
                 token = token.replace("Bearer ", "")
 
             token = token.strip()
             _check_token(token)
 
             if token not in self._token_user_mapping:
-                return ServerAuthenticationResponse(False, None)
+                return None
 
             user_identity = UserIdentity(
                 user_id=self._token_user_mapping[token]["id"],
                 tenant=self._token_user_mapping[token]["tenant"],
                 databases=self._token_user_mapping[token]["databases"],
             )
-            return ServerAuthenticationResponse(
-                True,
-                user_identity
-            )
+            return user_identity
         except Exception as e:
             logger.error(
                 "TokenAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
-            return ServerAuthenticationResponse(False, None)
+            return None
