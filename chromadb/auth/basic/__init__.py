@@ -25,6 +25,10 @@ __all__ = ["BasicAuthServerProvider", "BasicAuthClientProvider"]
 
 
 class BasicAuthClientProvider(ClientAuthProvider):
+    """
+    Client auth provider for basic auth. The credentials are passed as a
+    base64-encoded string in the Authorization header prepended with "Basic ".
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -43,6 +47,14 @@ class BasicAuthClientProvider(ClientAuthProvider):
 
 
 class BasicAuthServerProvider(ServerAuthProvider):
+    """
+    Server auth provider for basic auth. The credentials are read from
+    `chroma_server_auth_credentials_file` and each line must be in the format
+    <username>:<bcrypt passwd>.
+
+    Expects tokens to be passed as a base64-encoded string in the Authorization
+    header prepended with "Basic".
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -56,20 +68,34 @@ class BasicAuthServerProvider(ServerAuthProvider):
                 "Please install it with `pip install bcrypt`"
             )
 
+        self._creds = {}
+
         system.settings.require("chroma_server_auth_credentials_file")
         _creds_file = str(system.settings.chroma_server_auth_credentials_file)
         with open(_creds_file, "r") as f:
-            _raw_creds = [v for v in f.readline().strip().split(":")]
-            if len(_raw_creds) != 2 or f.readline():
-                raise ValueError(
-                    "Invalid Htpasswd credentials found in "
-                    "[chroma_server_auth_credentials]. "
-                    "Must be exactly <username>:<bcrypt passwd>."
-                )
-            self._creds = {
-                "username": SecretStr(_raw_creds[0]),
-                "password": SecretStr(_raw_creds[1]),
-            }
+            for line in f:
+                _raw_creds = [v for v in line.strip().split(":")]
+                if len(_raw_creds) != 2 or f.readline():
+                    raise ValueError(
+                        "Invalid Htpasswd credentials found in "
+                        "[chroma_server_auth_credentials]. "
+                        "Lines must be exactly <username>:<bcrypt passwd>."
+                    )
+                username = _raw_creds[0]
+                password = _raw_creds[1]
+                if not username or not password:
+                    raise ValueError(
+                        "Invalid Htpasswd credentials found in "
+                        "[chroma_server_auth_credentials]. "
+                        "Lines must be exactly <username>:<bcrypt passwd>."
+                    )
+                if username in self._creds:
+                    raise ValueError(
+                        "Duplicate username found in "
+                        "[chroma_server_auth_credentials]. "
+                        "Usernames must be unique."
+                    )
+                self._creds[username] = SecretStr(password)
 
     @trace_method("BasicAuthServerProvider.authenticate",
                   OpenTelemetryGranularity.ALL)
