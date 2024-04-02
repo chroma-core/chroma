@@ -51,9 +51,6 @@ def _check_token(token: str) -> None:
 
 
 class TokenAuthClientProvider(ClientAuthProvider):
-    _token_transport_header: TokenTransportHeader = \
-        TokenTransportHeader.AUTHORIZATION
-
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -68,20 +65,15 @@ class TokenAuthClientProvider(ClientAuthProvider):
             self._token_transport_header = TokenTransportHeader[
                 str(system.settings.chroma_auth_token_transport_header)
             ]
+        else:
+            self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
-    @trace_method("TokenAuthClientProvider.authenticate",
-                  OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self) -> ClientAuthHeaders:
-        # TODOBEN this is fucky
-        key = None
-        if type == TokenTransportHeader.AUTHORIZATION:
-            key = "Authorization"
-        elif type == TokenTransportHeader.X_CHROMA_TOKEN:
-            key = "X-Chroma-Token"
-        else:
-            raise ValueError(f"Invalid token transport header: {type}")
-        return {key: SecretStr(self._token.get_secret_value())}
+        return {
+            self._token_transport_header.value:
+            SecretStr(self._token.get_secret_value())
+        }
 
 
 class User(TypedDict):
