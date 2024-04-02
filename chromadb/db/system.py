@@ -60,17 +60,15 @@ class SysDB(Component):
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        topic: Optional[str] = None,
         collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
-        """Find segments by id, type, scope, topic or collection."""
+        """Find segments by id, type, scope or collection."""
         pass
 
     @abstractmethod
     def update_segment(
         self,
         id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
         collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
@@ -91,8 +89,8 @@ class SysDB(Component):
         database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         """Create a new collection any associated resources
-        (Such as the necessary topics) in the SysDB. If get_or_create is True, the
-        collectionwill be created if one with the same name does not exist.
+        in the SysDB. If get_or_create is True, the
+        collection will be created if one with the same name does not exist.
         The metadata will be updated using the same protocol as update_collection. If get_or_create
         is False and the collection already exists, a error will be raised.
 
@@ -105,7 +103,7 @@ class SysDB(Component):
     def delete_collection(
         self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> None:
-        """Delete a collection, topic, all associated segments and any associate resources
+        """Delete a collection, all associated segments and any associate resources (log stream)
         from the SysDB and the system at large."""
         pass
 
@@ -113,19 +111,19 @@ class SysDB(Component):
     def get_collections(
         self,
         id: Optional[UUID] = None,
-        topic: Optional[str] = None,
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
-        """Find collections by id, topic or name. If name is provided, tenant and database must also be provided."""
+        """Find collections by id or name. If name is provided, tenant and database must also be provided."""
         pass
 
     @abstractmethod
     def update_collection(
         self,
         id: UUID,
-        topic: OptionalArgument[str] = Unspecified(),
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),

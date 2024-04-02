@@ -3,6 +3,7 @@ import hypothesis
 import hypothesis.strategies as st
 from typing import Any, Optional, List, Dict, Union, cast
 from typing_extensions import TypedDict
+import uuid
 import numpy as np
 import numpy.typing as npt
 import chromadb.api.types as types
@@ -184,6 +185,18 @@ def create_embeddings(
     return embeddings
 
 
+def create_embeddings_ndarray(
+    dim: int,
+    count: int,
+    dtype: npt.DTypeLike,
+) -> np.typing.NDArray[Any]:
+    return np.random.uniform(
+        low=-1.0,
+        high=1.0,
+        size=(count, dim),
+    ).astype(dtype)
+
+
 class hashing_embedding_function(types.EmbeddingFunction[Documents]):
     def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
         self.dim = dim
@@ -223,16 +236,37 @@ def embedding_function_strategy(
 
 
 @dataclass
-class Collection:
+class ExternalCollection:
+    """
+    An external view of a collection.
+
+    This strategy only contains information about a collection that a client of Chroma
+    sees -- that is, it contains none of Chroma's internal bookkeeping. It should
+    be used to test the API and client code.
+    """
+
     name: str
     metadata: Optional[types.Metadata]
+    embedding_function: Optional[types.EmbeddingFunction[Embeddable]]
+
+
+@dataclass
+class Collection(ExternalCollection):
+    """
+    An internal view of a collection.
+
+    This strategy contains all the information Chroma uses internally to manage a
+    collection. It is a superset of ExternalCollection and should be used to test
+    internal Chroma logic.
+    """
+
+    id: uuid.UUID
     dimension: int
     dtype: npt.DTypeLike
     known_metadata_keys: types.Metadata
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
-    embedding_function: Optional[types.EmbeddingFunction[Embeddable]] = None
 
 
 @st.composite
@@ -297,6 +331,7 @@ def collections(
     embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
     return Collection(
+        id=uuid.uuid4(),
         name=name,
         metadata=metadata,
         dimension=dimension,
@@ -518,7 +553,13 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
         word = draw(st.sampled_from(collection.known_document_keywords))
     else:
         word = draw(safe_text)
-    return {"$contains": word}
+
+    op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
+    if op == "$contains":
+        return {"$contains": word}
+    else:
+        assert op == "$not_contains"
+        return {"$not_contains": word}
 
 
 def binary_operator_clause(

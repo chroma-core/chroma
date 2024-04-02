@@ -1,5 +1,6 @@
 from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
+import uuid
 
 from overrides import override
 import requests
@@ -22,6 +23,7 @@ from chromadb.api.types import (
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
+from chromadb.errors import ChromaError
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
@@ -78,9 +80,8 @@ class SharedSystemClient:
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
                 )
         elif api_impl == "chromadb.api.fastapi.FastAPI":
-            identifier = (
-                f"{settings.chroma_server_host}:{settings.chroma_server_http_port}"
-            )
+            # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
+            identifier = str(uuid.uuid4())
         else:
             raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
 
@@ -170,8 +171,18 @@ class Client(SharedSystemClient, ClientAPI):
         return self._server.heartbeat()
 
     @override
-    def list_collections(self) -> Sequence[Collection]:
-        return self._server.list_collections(tenant=self.tenant, database=self.database)
+    def list_collections(
+        self, limit: Optional[int] = None, offset: Optional[int] = None
+    ) -> Sequence[Collection]:
+        return self._server.list_collections(
+            limit, offset, tenant=self.tenant, database=self.database
+        )
+
+    @override
+    def count_collections(self) -> int:
+        return self._server.count_collections(
+            tenant=self.tenant, database=self.database
+        )
 
     @override
     def create_collection(
@@ -429,6 +440,9 @@ class Client(SharedSystemClient, ClientAPI):
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
+        # Propagate ChromaErrors
+        except ChromaError as e:
+            raise e
         except Exception:
             raise ValueError(
                 f"Could not connect to tenant {tenant}. Are you sure it exists?"

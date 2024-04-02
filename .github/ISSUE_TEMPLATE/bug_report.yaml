@@ -1,5 +1,5 @@
-name: Bug Report
-description: File a bug report with Chroma
+name: 🐛 Bug Report
+description: File a bug report to help us improve Chroma
 title: "[Bug]: "
 labels: ["bug", "triage"]
 # assignees:
