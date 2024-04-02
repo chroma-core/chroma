@@ -314,7 +314,8 @@ class FastAPI(Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    def authenticate_and_authorize_or_raise(*args: Any, **kwargs: Any) -> (
+    def authenticate_and_authorize_or_raise(self, request: Request,
+                                            *args: Any, **kwargs: Any) -> (
       Tuple[str, str]
     ):
         """
@@ -324,9 +325,12 @@ class FastAPI(Server):
 
         If self.overwrite_singleton_tenant_database_access_from_auth is True
         and the user only has access to a single tenant and database, this
-        will overwrite the tenant and database in the request. If the user
-        has access to multiple tenants or databases, this will raise an
-        authorization error.
+        will use the user's tenant and database for an authorization decision
+        and return them.
+
+        If self.overwrite_singleton_tenant_database_access_from_auth is True
+        and the user instead has access to multiple tenants and/or databases,
+        authorization will execute as normal.
         """
         return "", ""
 
