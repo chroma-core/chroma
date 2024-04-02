@@ -104,10 +104,8 @@ users:
     role: admin
     tenant: my_tenant
     tokens:
-      - token: test-token-admin
-        secret: my_api_secret # not yet supported
+      - test-token-admin
   - id: Anonymous
     role: db_read
     tokens:
-      - token: my_api_token
-        secret: my_api_secret
+      - my_api_token

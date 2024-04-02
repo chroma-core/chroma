@@ -79,45 +79,6 @@ class ServerAuthProvider(Component):
         pass
 
 
-class AbstractCredentials(EnforceOverrides, ABC, Generic[T]):
-    """
-    TODOBEN
-    """
-
-    @abstractmethod
-    def get_credentials(self) -> Dict[str, T]:
-        """
-        Returns the data encapsulated by the credentials object.
-        """
-        pass
-
-
-class SecretStrAbstractCredentials(AbstractCredentials[SecretStr]):
-    @abstractmethod
-    @override
-    def get_credentials(self) -> Dict[str, SecretStr]:
-        """
-        Returns the data encapsulated by the credentials object.
-        """
-        pass
-
-
-class ServerAuthCredentialsProvider(Component):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def validate_credentials(self,
-                             credentials: AbstractCredentials[T]) -> bool:
-        ...
-
-    @abstractmethod
-    def get_user_identity(
-        self, credentials: AbstractCredentials[T]
-    ) -> Optional[UserIdentity]:
-        ...
-
-
 class AuthzResourceTypes(str, Enum):
     DB = "db"
     COLLECTION = "collection"
