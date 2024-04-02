@@ -7,7 +7,6 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OperationRecord {
@@ -229,6 +228,7 @@ mod tests {
     use super::*;
     use crate::{chroma_proto, types::UpdateMetadataValue};
     use std::collections::HashMap;
+    use uuid::Uuid;
 
     fn as_byte_view(input: &[f32]) -> Vec<u8> {
         unsafe {

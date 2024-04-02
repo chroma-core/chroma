@@ -5,4 +5,4 @@ mod scheduler_policy;
 mod types;
 
 pub(crate) use compaction_manager::*;
-pub use types::*;
+pub(crate) use types::*;

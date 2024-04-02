@@ -56,7 +56,7 @@ impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
-        let server = Server::builder()
+        let _server = Server::builder()
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
                 worker,
             ))
@@ -83,7 +83,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         request: Request<GetVectorsRequest>,
     ) -> Result<Response<GetVectorsResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
             Ok(uuid) => uuid,
             Err(_) => {
                 return Err(Status::invalid_argument("Invalid UUID"));
@@ -109,7 +109,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
 
         let mut query_vectors = Vec::new();
         for proto_query_vector in request.vectors {
-            let (query_vector, encoding) = match proto_query_vector.try_into() {
+            let (query_vector, _encoding) = match proto_query_vector.try_into() {
                 Ok((vector, encoding)) => (vector, encoding),
                 Err(e) => {
                     return Err(Status::internal(format!("Error converting vector: {}", e)));

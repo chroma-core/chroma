@@ -1,4 +1,4 @@
-use crate::types::{LogRecord, OperationRecord};
+use crate::types::LogRecord;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -110,12 +110,10 @@ mod tests {
     use super::*;
     use crate::types::LogRecord;
     use crate::types::Operation;
-    use std::str::FromStr;
-    use uuid::Uuid;
+    use crate::types::OperationRecord;
 
     #[test]
     fn test_data_chunk() {
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let data = vec![
             LogRecord {
                 log_offset: 1,

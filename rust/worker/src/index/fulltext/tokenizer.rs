@@ -1,6 +1,4 @@
-use crate::errors::{ChromaError, ErrorCodes};
-
-use tantivy::tokenizer::{NgramTokenizer, Token, Tokenizer, TokenStream};
+use tantivy::tokenizer::{NgramTokenizer, Token, TokenStream, Tokenizer};
 
 pub(crate) trait ChromaTokenStream {
     fn process(&mut self, sink: &mut dyn FnMut(&Token));
@@ -8,14 +6,12 @@ pub(crate) trait ChromaTokenStream {
 }
 
 pub(crate) struct TantivyChromaTokenStream {
-    tokens: Vec<Token>
+    tokens: Vec<Token>,
 }
 
 impl TantivyChromaTokenStream {
     pub fn new(tokens: Vec<Token>) -> Self {
-        TantivyChromaTokenStream {
-            tokens,
-        }
+        TantivyChromaTokenStream { tokens }
     }
 }
 
@@ -36,14 +32,12 @@ pub(crate) trait ChromaTokenizer {
 }
 
 pub(crate) struct TantivyChromaTokenizer {
-    tokenizer: Box<NgramTokenizer>
+    tokenizer: Box<NgramTokenizer>,
 }
 
 impl TantivyChromaTokenizer {
     pub fn new(tokenizer: Box<NgramTokenizer>) -> Self {
-        TantivyChromaTokenizer {
-            tokenizer,
-        }
+        TantivyChromaTokenizer { tokenizer }
     }
 }
 
