@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence, Optional, Union
+from typing import Any, Callable, Dict, List, Sequence, Optional, Tuple, Union
 from typing_extensions import Annotated
 import fastapi
 from fastapi import FastAPI as _FastAPI, Response
@@ -23,7 +23,6 @@ from chromadb.auth.fastapi_utils import (
     attr_from_resource_object,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-import chromadb.api
 from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
@@ -156,7 +155,7 @@ class FastAPI(Server):
                 ServerAuthorizationProvider
             )
 
-        set_overwrite_singleton_tenant_database_access_from_auth(
+        self.overwrite_singleton_tenant_database_access_from_auth = (
             settings.
             chroma_overwrite_singleton_tenant_database_access_from_auth
         )
@@ -315,8 +314,21 @@ class FastAPI(Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    def authenticate_and_authorize_or_raise(*args: Any, **kwargs: Any):
-        pass
+    def authenticate_and_authorize_or_raise(*args: Any, **kwargs: Any) -> (
+      Tuple[str, str]
+    ):
+        """
+        Authenticate and authorize the request, or raise an authorization error
+        if the request is not authorized. Uses the authn and authz providers
+        configured for this Component.
+
+        If self.overwrite_singleton_tenant_database_access_from_auth is True
+        and the user only has access to a single tenant and database, this
+        will overwrite the tenant and database in the request. If the user
+        has access to multiple tenants or databases, this will raise an
+        authorization error.
+        """
+        return "", ""
 
     @trace_method("FastAPI.create_database",
                   OpenTelemetryGranularity.OPERATION)
