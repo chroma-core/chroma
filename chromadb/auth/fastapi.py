@@ -17,7 +17,7 @@ from chromadb.auth import (
     AuthzAction,
     AuthzResource,
     AuthzResourceActions,
-    AuthzUser,
+    UserIdentity,
     DynamicAuthzResource,
     ServerAuthenticationProvider,
     ChromaAuthzMiddleware,
@@ -50,14 +50,6 @@ class AuthnMiddleware(BaseHTTPMiddleware, Component):
         self._ignore_auth_paths: Dict[
             str, List[str]
         ] = self._settings.chroma_server_auth_ignore_paths
-        if self._settings.chroma_server_authn_provider:
-            logger.debug(
-                f"Server Auth Provider: \
-                    {self._settings.chroma_server_authn_provider}"
-            )
-            self._auth_provider = self._system.require(
-                self._settings.chroma_server_authn_provider
-            )
 
     @trace_method(
         "AuthnMiddleware.ignore_operation",
@@ -145,8 +137,8 @@ def authz_context(
                     else resource.to_authz_resource(**_dynamic_kwargs)
                 )
                 _context = AuthorizationContext(
-                    user=AuthzUser(
-                        id=request.state.user_identity.get_user_id()
+                    user=UserIdentity(
+                        user_id=request.state.user_identity.get_user_id()
                         if hasattr(request.state, "user_identity")
                         else "Anonymous",
                         tenant=request.state.user_identity.get_user_tenant()

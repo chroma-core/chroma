@@ -51,18 +51,32 @@ class UserIdentity:
     user_id: str
     tenant: Optional[str] = None
     databases: Optional[List[str]] = None
+    # This can be used for any additional auth context which needs to be
+    # propagated from the authentication provider to the authorization
+    # provider.
     attributes: Optional[Dict[str, Any]] = None
 
 
 class ServerAuthenticationProvider(Component):
     def __init__(self, system: System) -> None:
         super().__init__(system)
+        self._ignore_auth_paths: Dict[
+            str, List[str]
+        ] = system.settings.chroma_server_auth_ignore_paths
 
     @abstractmethod
     def authenticate(
         self, headers: Headers
     ) -> Optional[UserIdentity]:
         pass
+
+    def ignore_operation(self, verb: str, path: str) -> bool:
+        if (
+            path in self._ignore_auth_paths.keys()
+            and verb.upper() in self._ignore_auth_paths[path]
+        ):
+            return True
+        return False
 
 
 class AuthzResourceTypes(str, Enum):
@@ -91,14 +105,6 @@ class AuthzResourceActions(str, Enum):
     UPDATE = "update"
     UPSERT = "upsert"
     RESET = "reset"
-
-
-@dataclass
-class AuthzUser:
-    id: Optional[str]
-    tenant: Optional[str]
-    attributes: Optional[Dict[str, Any]] = None
-    claims: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -170,7 +176,7 @@ class AuthzAction:
 
 @dataclass
 class AuthorizationContext:
-    user: AuthzUser
+    user: UserIdentity
     resource: AuthzResource
     action: AuthzAction
 

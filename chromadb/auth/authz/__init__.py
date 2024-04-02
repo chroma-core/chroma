@@ -29,6 +29,7 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         with open(config_file, "r") as f:
             self._config = yaml.safe_load(f)
 
+        # TODOBEN make this less fucky
         self._authz_tuples_map: Dict[str, Set[Any]] = {}
         for u in self._config["users"]:
             _actions = self._config["roles_mapping"][u["role"]]["actions"]

@@ -1,24 +1,20 @@
-from typing import Any, Callable, Dict, List, Sequence, Optional
+from typing import Any, Callable, Dict, List, Sequence, Optional, Union
+from typing_extensions import Annotated
 import fastapi
 from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from fastapi import HTTPException, status
+from fastapi import Header, HTTPException, status
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
-    AuthzDynamicParams,
-    AuthzResourceActions,
-    AuthzResourceTypes,
-    DynamicAuthzResource,
+    ServerAuthenticationProvider,
+    ServerAuthorizationProvider,
 )
 from chromadb.auth.fastapi import (
-    AuthnMiddleware,
-    FastAPIChromaAuthzMiddleware,
-    FastAPIChromaAuthzMiddlewareWrapper,
     authz_context,
     set_overwrite_singleton_tenant_database_access_from_auth,
 )
@@ -36,6 +32,7 @@ from chromadb.errors import (
 )
 from chromadb.quota import QuotaError
 from chromadb.rate_limiting import RateLimitError
+from chromadb.server import Server
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CreateDatabase,
@@ -97,12 +94,13 @@ async def check_http_version_middleware(
 
 
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
-    # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
-    # same as URLs without. Docs will only contain URLs without trailing "/"s.
+    # A simple subclass of fastapi's APIRouter which treats URLs with a
+    # trailing "/" the same as URLs without. Docs will only contain URLs
+    # without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
-        # If kwargs["include_in_schema"] isn't passed OR is True, we should only
-        # include the non-"/" path. If kwargs["include_in_schema"] is False, include
-        # neither.
+        # If kwargs["include_in_schema"] isn't passed OR is True, we should
+        # only include the non-"/" path. If kwargs["include_in_schema"] is
+        # False, include neither.
         exclude_from_schema = (
             "include_in_schema" in kwargs and not kwargs["include_in_schema"]
         )
@@ -123,7 +121,7 @@ class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
         super().add_api_route(path, *args, **kwargs)
 
 
-class FastAPI(chromadb.server.Server):
+class FastAPI(Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
@@ -141,31 +139,26 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
-        self._app.add_exception_handler(QuotaError, self.quota_exception_handler)
-        self._app.add_exception_handler(RateLimitError, self.rate_limit_exception_handler)
+        self._app.add_exception_handler(QuotaError,
+                                        self.quota_exception_handler)
+        self._app.add_exception_handler(RateLimitError,
+                                        self.rate_limit_exception_handler)
 
         self._app.on_event("shutdown")(self.shutdown)
 
-        if settings.chroma_server_authz_provider:
-            self._app.add_middleware(
-                FastAPIChromaAuthzMiddlewareWrapper,
-                authz_middleware=self._api.require(FastAPIChromaAuthzMiddleware),
-            )
-
         if settings.chroma_server_authn_provider:
-            self.authn_provider = settings.require(
-                settings.chroma_server_authn_provider
-            )
             self.authn_provider = self._system.require(
                 ServerAuthenticationProvider
             )
 
-            self._app.add_middleware(
-                AuthnMiddleware,
-                system=self._system,
+        if settings.chroma_server_authz_provider:
+            self.authz_provider = self._system.require(
+                ServerAuthorizationProvider
             )
+
         set_overwrite_singleton_tenant_database_access_from_auth(
-            settings.chroma_overwrite_singleton_tenant_database_access_from_auth
+            settings.
+            chroma_overwrite_singleton_tenant_database_access_from_auth
         )
 
         self.router = ChromaAPIRouter()
@@ -298,12 +291,13 @@ class FastAPI(chromadb.server.Server):
     def app(self) -> fastapi.FastAPI:
         return self._app
 
-    async def rate_limit_exception_handler(self, request: Request, exc: RateLimitError):
+    async def rate_limit_exception_handler(self, request: Request,
+                                           exc: RateLimitError):
         return JSONResponse(
             status_code=429,
-            content={"message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"},
+            content={"message": "rate limit. resource: "
+                     f"{exc.resource} quota: {exc.quota}"},
         )
-
 
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
@@ -311,7 +305,8 @@ class FastAPI(chromadb.server.Server):
     async def quota_exception_handler(self, request: Request, exc: QuotaError):
         return JSONResponse(
             status_code=429,
-            content={"message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"},
+            content={"message": f"quota error. resource: {exc.resource} "
+                     f"quota: {exc.quota} actual: {exc.actual}"},
         )
 
     def heartbeat(self) -> Dict[str, int]:
@@ -320,7 +315,11 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
+    def authenticate_and_authorize_or_raise(*args: Any, **kwargs: Any):
+        pass
+
+    @trace_method("FastAPI.create_database",
+                  OpenTelemetryGranularity.OPERATION)
     @authz_context(
         action=AuthzResourceActions.CREATE_DATABASE,
         resource=DynamicAuthzResource(
@@ -331,8 +330,14 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def create_database(
-        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
+        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> None:
+        self.authenticate_and_authorize_or_raise(
+            database=database, tenant=tenant, x_chroma_token=x_chroma_token,
+            authorization=authorization, action=AuthzResourceActions.CREATE_DATABASE
+        )
         return self._api.create_database(database.name, tenant)
 
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
