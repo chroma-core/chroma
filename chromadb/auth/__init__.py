@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (
@@ -9,13 +8,12 @@ from typing import (
     Optional,
     Dict,
     TypeVar,
-    Generic,
 )
 from dataclasses import dataclass
 from starlette.requests import Request
 from starlette.datastructures import Headers
 
-from overrides import EnforceOverrides, override
+from overrides import EnforceOverrides
 from pydantic import SecretStr
 
 from chromadb.config import (
