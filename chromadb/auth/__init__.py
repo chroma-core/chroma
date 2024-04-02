@@ -188,16 +188,3 @@ class ServerAuthorizationProvider(Component):
     @abstractmethod
     def authorize(self, context: AuthorizationContext) -> bool:
         pass
-
-
-class ChromaAuthzMiddleware(Component):
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-
-    @abstractmethod
-    def pre_process(self, request: Request) -> None:
-        ...
-
-    @abstractmethod
-    def ignore_operation(self, verb: str, path: str) -> bool:
-        ...
