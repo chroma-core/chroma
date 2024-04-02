@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_sparse_index() {
-        let mut block_id_1 = uuid::Uuid::new_v4();
+        let block_id_1 = uuid::Uuid::new_v4();
         let mut sparse_index = SparseIndex::new(block_id_1);
         let mut blockfile_key =
             BlockfileKey::new("prefix".to_string(), Key::String("a".to_string()));

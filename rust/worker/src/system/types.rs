@@ -36,7 +36,7 @@ pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
     }
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -181,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_can_work() {
-        let mut system = System::new();
+        let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let mut handle = system.start_component(component);

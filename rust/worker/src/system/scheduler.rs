@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{sender::Sender, Receiver};
+use super::sender::Sender;
 use super::{Component, ComponentContext, Handler};
 
 #[derive(Debug)]
@@ -198,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schedule() {
-        let mut system = System::new();
+        let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let _handle = system.start_component(component);

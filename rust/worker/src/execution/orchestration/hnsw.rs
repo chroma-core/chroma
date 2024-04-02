@@ -206,7 +206,7 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
     async fn handle(
         &mut self,
         message: BruteForceKnnOperatorResult,
-        ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
+        _ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         // This is an example of the final state transition and result
         let result_channel = match self.result_channel.take() {

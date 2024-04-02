@@ -44,10 +44,6 @@ impl RendezvousHashingAssignmentPolicy {
             members: vec![],
         };
     }
-
-    pub(crate) fn set_members(&mut self, members: Vec<String>) {
-        self.members = members;
-    }
 }
 
 #[async_trait]

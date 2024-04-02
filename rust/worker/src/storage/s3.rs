@@ -9,7 +9,7 @@
 // streaming from s3.
 
 use super::{config::StorageConfig, Storage};
-use crate::config::{Configurable, QueryServiceConfig};
+use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
 use aws_sdk_s3;
@@ -90,7 +90,7 @@ impl Configurable<StorageConfig> for S3Storage {
 #[async_trait]
 impl Storage for S3Storage {
     async fn get(&self, key: &str, path: &str) -> Result<(), String> {
-        let mut file = std::fs::File::create(path);
+        let file = std::fs::File::create(path);
         let res = self
             .client
             .get_object()

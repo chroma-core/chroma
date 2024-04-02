@@ -78,7 +78,7 @@ pub(crate) enum CustomResourceMemberlistProviderConfigurationError {
 impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
     fn code(&self) -> crate::errors::ErrorCodes {
         match self {
-            CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(e) => {
+            CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(_e) => {
                 ErrorCodes::Internal
             }
         }
@@ -168,7 +168,7 @@ impl CustomResourceMemberlistProvider {
     async fn notify_subscribers(&self) -> () {
         let curr_memberlist = match self.current_memberlist.read() {
             Ok(curr_memberlist) => curr_memberlist.clone(),
-            Err(err) => {
+            Err(_err) => {
                 // TODO: Log error and attempt recovery
                 return;
             }
@@ -222,7 +222,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                         Ok(mut curr_memberlist) => {
                             *curr_memberlist = memberlist;
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             // TODO: Log an error
                         }
                     }

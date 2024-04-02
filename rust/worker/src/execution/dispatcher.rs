@@ -1,7 +1,7 @@
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
 use crate::{
-    config::{Configurable, QueryServiceConfig},
+    config::Configurable,
     errors::ChromaError,
     system::{Component, ComponentContext, Handler, Receiver, System},
 };
@@ -249,7 +249,7 @@ mod tests {
     impl Handler<Result<String, ()>> for MockDispatchUser {
         async fn handle(
             &mut self,
-            message: Result<String, ()>,
+            _message: Result<String, ()>,
             ctx: &ComponentContext<MockDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
@@ -263,7 +263,7 @@ mod tests {
 
     #[async_trait]
     impl Handler<()> for MockDispatchUser {
-        async fn handle(&mut self, message: (), ctx: &ComponentContext<MockDispatchUser>) {
+        async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
             let res = self.dispatcher.send(task).await;
         }
@@ -271,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dispatcher() {
-        let mut system = System::new();
+        let system = System::new();
         let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
