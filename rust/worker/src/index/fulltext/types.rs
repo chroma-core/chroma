@@ -104,7 +104,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
                 .entry(token.text.to_string())
                 .and_modify(|e| *e += 1)
                 .or_insert(1);
-            let mut builder = self
+            let builder = self
                 .uncommitted
                 .entry(token.text.to_string())
                 .or_insert(PositionalPostingListBuilder::new());
@@ -219,7 +219,7 @@ impl FullTextIndex for BlockfileFullTextIndex {
 mod tests {
     use super::*;
     use crate::blockstore::provider::{BlockfileProvider, HashMapBlockfileProvider};
-    use crate::blockstore::{HashMapBlockfile, KeyType, ValueType};
+    use crate::blockstore::{KeyType, ValueType};
     use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
     use tantivy::tokenizer::NgramTokenizer;
 

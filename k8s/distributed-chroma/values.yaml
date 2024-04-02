@@ -3,10 +3,10 @@
 
 namespace: 'chroma'
 
-frontend:
+frontendService:
   image:
     repository: 'local'
-    tag: 'frontend-server'
+    tag: 'frontend-service'
 
   # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
   # populated from secrets or configMaps. So we let consumers fill these directly.
@@ -22,7 +22,7 @@ frontend:
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
-  coordinatorHost: 'value: "coordinator.chroma"'
+  coordinatorHost: 'value: "sysdb.chroma"'
   authProvider: 'value: ""'
   authCredentialsProvider: 'value: ""'
   authzProvider: 'value: ""'
@@ -32,10 +32,10 @@ frontend:
   logServicePort: 'value: "50051"'
   otherEnvConfig: ''
 
-coordinator:
+sysdb:
   image:
     repository: 'local'
-    tag: 'coordinator'
+    tag: 'sysdb'
   replicaCount: 1
   env:
   flags:
@@ -46,16 +46,27 @@ coordinator:
 logService:
   image:
     repository: 'local'
-    tag: 'coordinator'
+    tag: 'sysdb'
   env:
   flags:
 
-worker:
+queryService:
   image:
     repository: 'local'
-    tag: 'worker'
+    tag: 'query-service'
+
+compactionService:
+  image:
+    repository: 'local'
+    tag: 'compaction-service'
 
 sysdbMigration:
   image:
     repository: 'local'
-    tag: 'migration'
+    tag: 'sysdb-migration'
+  username: chroma
+  password: chroma
+  netloc: postgres
+  port: 5432
+  dbName: chroma
+  sslmode: disable

@@ -3,6 +3,8 @@ package memberlist_manager
 import (
 	"context"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -53,6 +55,7 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 
 func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist *Memberlist, resourceVersion string) error {
 	gvr := getGvr()
+	log.Info("Updating memberlist store", zap.Any("memberlist", memberlist))
 	unstructured := memberlistToCr(memberlist, s.coordinatorNamespace, s.memberlistCustomResource, resourceVersion)
 	_, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Update(context.TODO(), unstructured, metav1.UpdateOptions{})
 	if err != nil {

@@ -76,14 +76,12 @@ func TestConvertSegmentToModel(t *testing.T) {
 
 	// Test case 3: segmentAndMetadataList contains one segment with all fields set
 	segmentID := types.MustParse("515fc331-e117-4b86-bd84-85341128c337")
-	segmentTopic := "segment_topic"
 	collectionID := "d9a75e2e-2929-45c4-af06-75b15630edd0"
 	segmentAndMetadata := &dbmodel.SegmentAndMetadata{
 		Segment: &dbmodel.Segment{
 			ID:           segmentID.String(),
 			Type:         "segment_type",
 			Scope:        "segment_scope",
-			Topic:        &segmentTopic,
 			CollectionID: &collectionID,
 		},
 		SegmentMetadata: []*dbmodel.SegmentMetadata{},
@@ -94,7 +92,6 @@ func TestConvertSegmentToModel(t *testing.T) {
 	assert.Equal(t, segmentID, modelSegments[0].ID)
 	assert.Equal(t, "segment_type", modelSegments[0].Type)
 	assert.Equal(t, "segment_scope", modelSegments[0].Scope)
-	assert.Equal(t, "segment_topic", *modelSegments[0].Topic)
 	assert.Equal(t, types.MustParse(collectionID), modelSegments[0].CollectionID)
 	assert.Nil(t, modelSegments[0].Metadata)
 }
@@ -136,13 +133,11 @@ func TestConvertCollectionToModel(t *testing.T) {
 	// Test case 3: collectionAndMetadataList contains one collection with all fields set
 	collectionID := types.MustParse("d9a75e2e-2929-45c4-af06-75b15630edd0")
 	collectionName := "collection_name"
-	collectionTopic := "collection_topic"
 	collectionDimension := int32(3)
 	collectionAndMetadata := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:        collectionID.String(),
 			Name:      &collectionName,
-			Topic:     &collectionTopic,
 			Dimension: &collectionDimension,
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
@@ -152,7 +147,6 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Len(t, modelCollections, 1)
 	assert.Equal(t, collectionID, modelCollections[0].ID)
 	assert.Equal(t, collectionName, modelCollections[0].Name)
-	assert.Equal(t, collectionTopic, modelCollections[0].Topic)
 	assert.Equal(t, collectionDimension, *modelCollections[0].Dimension)
 	assert.Nil(t, modelCollections[0].Metadata)
 }

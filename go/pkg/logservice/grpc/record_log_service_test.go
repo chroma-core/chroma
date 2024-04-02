@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"testing"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/logservice/testutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -11,21 +14,17 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
-	"testing"
-	"time"
 )
 
 type RecordLogServiceTestSuite struct {
 	suite.Suite
 	db           *gorm.DB
 	s            *Server
-	t            *testing.T
 	collectionId types.UniqueID
 }
 
@@ -38,18 +37,25 @@ func (suite *RecordLogServiceTestSuite) SetupSuite() {
 		StartGrpc:  false,
 	})
 	suite.s = s
-	suite.db = dbcore.GetDB(context.Background())
-	suite.collectionId = types.NewUniqueID()
+	suite.db = dbcore.ConfigDatabaseForTesting()
+	recordLogTableExist := suite.db.Migrator().HasTable(&dbmodel.RecordLog{})
+	if !recordLogTableExist {
+		err := suite.db.Migrator().CreateTable(&dbmodel.RecordLog{})
+		suite.NoError(err)
+	}
 }
 
 func (suite *RecordLogServiceTestSuite) SetupTest() {
 	log.Info("setup test")
-	testutils.SetupTest(suite.db, suite.collectionId)
+	suite.collectionId = types.NewUniqueID()
+	err := testutils.CreateCollections(suite.db, suite.collectionId)
+	suite.NoError(err)
 }
 
 func (suite *RecordLogServiceTestSuite) TearDownTest() {
 	log.Info("teardown test")
-	testutils.TearDownTest(suite.db)
+	err := testutils.CleanupCollections(suite.db, suite.collectionId)
+	suite.NoError(err)
 }
 
 func encodeVector(dimension int32, vector []float32, encoding coordinatorpb.ScalarEncoding) *coordinatorpb.Vector {
@@ -66,28 +72,25 @@ func encodeVector(dimension int32, vector []float32, encoding coordinatorpb.Scal
 	}
 }
 
-func GetTestEmbeddingRecords(collectionId string) (recordsToSubmit []*coordinatorpb.SubmitEmbeddingRecord) {
+func GetTestEmbeddingRecords(collectionId string) (recordsToSubmit []*coordinatorpb.OperationRecord) {
 	testVector1 := []float32{1.0, 2.0, 3.0}
 	testVector2 := []float32{1.2, 2.24, 3.2}
 	testVector3 := []float32{7.0, 8.0, 9.0}
-	recordsToSubmit = make([]*coordinatorpb.SubmitEmbeddingRecord, 0)
-	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.SubmitEmbeddingRecord{
-		Id:           types.NewUniqueID().String(),
-		Vector:       encodeVector(10, testVector1, coordinatorpb.ScalarEncoding_FLOAT32),
-		Operation:    coordinatorpb.Operation_ADD,
-		CollectionId: collectionId,
+	recordsToSubmit = make([]*coordinatorpb.OperationRecord, 0)
+	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.OperationRecord{
+		Id:        types.NewUniqueID().String(),
+		Vector:    encodeVector(10, testVector1, coordinatorpb.ScalarEncoding_FLOAT32),
+		Operation: coordinatorpb.Operation_ADD,
 	})
-	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.SubmitEmbeddingRecord{
-		Id:           types.NewUniqueID().String(),
-		Vector:       encodeVector(6, testVector2, coordinatorpb.ScalarEncoding_FLOAT32),
-		Operation:    coordinatorpb.Operation_UPDATE,
-		CollectionId: collectionId,
+	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.OperationRecord{
+		Id:        types.NewUniqueID().String(),
+		Vector:    encodeVector(6, testVector2, coordinatorpb.ScalarEncoding_FLOAT32),
+		Operation: coordinatorpb.Operation_UPDATE,
 	})
-	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.SubmitEmbeddingRecord{
-		Id:           types.NewUniqueID().String(),
-		Vector:       encodeVector(10, testVector3, coordinatorpb.ScalarEncoding_FLOAT32),
-		Operation:    coordinatorpb.Operation_ADD,
-		CollectionId: collectionId,
+	recordsToSubmit = append(recordsToSubmit, &coordinatorpb.OperationRecord{
+		Id:        types.NewUniqueID().String(),
+		Vector:    encodeVector(10, testVector3, coordinatorpb.ScalarEncoding_FLOAT32),
+		Operation: coordinatorpb.Operation_ADD,
 	})
 	return recordsToSubmit
 }
@@ -101,56 +104,60 @@ func (suite *RecordLogServiceTestSuite) TestServer_PushLogs() {
 		Records:      recordsToSubmit,
 	}
 	response, err := suite.s.PushLogs(context.Background(), &pushRequest)
-	assert.Nil(suite.t, err)
-	assert.Equal(suite.t, int32(3), response.RecordCount)
+	suite.NoError(err)
+	suite.Equal(int32(3), response.RecordCount)
 
 	var recordLogs []*dbmodel.RecordLog
 	suite.db.Where("collection_id = ?", types.FromUniqueID(suite.collectionId)).Find(&recordLogs)
-	assert.Len(suite.t, recordLogs, 3)
+	suite.Len(recordLogs, 3)
 	for index := range recordLogs {
-		assert.Equal(suite.t, int64(index+1), recordLogs[index].ID)
-		assert.Equal(suite.t, suite.collectionId.String(), *recordLogs[index].CollectionID)
-		record := &coordinatorpb.SubmitEmbeddingRecord{}
-		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
-			panic(err)
+		suite.Equal(int64(index+1), recordLogs[index].LogOffset)
+		suite.Equal(suite.collectionId.String(), *recordLogs[index].CollectionID)
+		record := &coordinatorpb.OperationRecord{}
+		if unmarshalErr := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
+			suite.NoError(unmarshalErr)
 		}
-		assert.Equal(suite.t, record.Id, recordsToSubmit[index].Id)
-		assert.Equal(suite.t, record.Operation, recordsToSubmit[index].Operation)
-		assert.Equal(suite.t, record.CollectionId, "")
-		assert.Equal(suite.t, record.Metadata, recordsToSubmit[index].Metadata)
-		assert.Equal(suite.t, record.Vector.Dimension, recordsToSubmit[index].Vector.Dimension)
-		assert.Equal(suite.t, record.Vector.Encoding, recordsToSubmit[index].Vector.Encoding)
-		assert.Equal(suite.t, record.Vector.Vector, recordsToSubmit[index].Vector.Vector)
+		suite.Equal(recordsToSubmit[index].Id, record.Id)
+		suite.Equal(recordsToSubmit[index].Operation, record.Operation)
+		suite.Equal(recordsToSubmit[index].Metadata, record.Metadata)
+		suite.Equal(recordsToSubmit[index].Vector.Dimension, record.Vector.Dimension)
+		suite.Equal(recordsToSubmit[index].Vector.Encoding, record.Vector.Encoding)
+		suite.Equal(recordsToSubmit[index].Vector.Vector, record.Vector.Vector)
 	}
 }
 
 func (suite *RecordLogServiceTestSuite) TestServer_PullLogs() {
 	// push some records
 	recordsToSubmit := GetTestEmbeddingRecords(suite.collectionId.String())
+	// deep clone the records since PushLogs will mutate the records and we need a source of truth
+	recordsToSubmit_sot := make([]*coordinatorpb.OperationRecord, len(recordsToSubmit))
+	for i := range recordsToSubmit {
+		recordsToSubmit_sot[i] = proto.Clone(recordsToSubmit[i]).(*coordinatorpb.OperationRecord)
+	}
 	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: suite.collectionId.String(),
 		Records:      recordsToSubmit,
 	}
-	suite.s.PushLogs(context.Background(), &pushRequest)
+	_, err := suite.s.PushLogs(context.Background(), &pushRequest)
+	suite.NoError(err)
 
 	// pull the records
 	pullRequest := logservicepb.PullLogsRequest{
-		CollectionId: suite.collectionId.String(),
-		StartFromId:  0,
-		BatchSize:    10,
+		CollectionId:    suite.collectionId.String(),
+		StartFromOffset: 0,
+		BatchSize:       10,
 	}
 	pullResponse, err := suite.s.PullLogs(context.Background(), &pullRequest)
-	assert.Nil(suite.t, err)
-	assert.Len(suite.t, pullResponse.Records, 3)
+	suite.NoError(err)
+	suite.Len(pullResponse.Records, 3)
 	for index := range pullResponse.Records {
-		assert.Equal(suite.t, int64(index+1), pullResponse.Records[index].LogId)
-		assert.Equal(suite.t, recordsToSubmit[index].Id, pullResponse.Records[index].Record.Id)
-		assert.Equal(suite.t, recordsToSubmit[index].Operation, pullResponse.Records[index].Record.Operation)
-		assert.Equal(suite.t, recordsToSubmit[index].CollectionId, pullResponse.Records[index].Record.CollectionId)
-		assert.Equal(suite.t, recordsToSubmit[index].Metadata, pullResponse.Records[index].Record.Metadata)
-		assert.Equal(suite.t, recordsToSubmit[index].Vector.Dimension, pullResponse.Records[index].Record.Vector.Dimension)
-		assert.Equal(suite.t, recordsToSubmit[index].Vector.Encoding, pullResponse.Records[index].Record.Vector.Encoding)
-		assert.Equal(suite.t, recordsToSubmit[index].Vector.Vector, pullResponse.Records[index].Record.Vector.Vector)
+		suite.Equal(int64(index+1), pullResponse.Records[index].LogOffset)
+		suite.Equal(recordsToSubmit_sot[index].Id, pullResponse.Records[index].Record.Id)
+		suite.Equal(recordsToSubmit_sot[index].Operation, pullResponse.Records[index].Record.Operation)
+		suite.Equal(recordsToSubmit_sot[index].Metadata, pullResponse.Records[index].Record.Metadata)
+		suite.Equal(recordsToSubmit_sot[index].Vector.Dimension, pullResponse.Records[index].Record.Vector.Dimension)
+		suite.Equal(recordsToSubmit_sot[index].Vector.Encoding, pullResponse.Records[index].Record.Vector.Encoding)
+		suite.Equal(recordsToSubmit_sot[index].Vector.Vector, pullResponse.Records[index].Record.Vector.Vector)
 	}
 }
 
@@ -159,30 +166,28 @@ func (suite *RecordLogServiceTestSuite) TestServer_Bad_CollectionId() {
 	// push some records
 	pushRequest := logservicepb.PushLogsRequest{
 		CollectionId: "badId",
-		Records:      []*coordinatorpb.SubmitEmbeddingRecord{},
+		Records:      []*coordinatorpb.OperationRecord{},
 	}
-	pushResponse, err := suite.s.PushLogs(context.Background(), &pushRequest)
-	assert.Nil(suite.t, pushResponse)
-	assert.NotNil(suite.t, err)
+	_, err := suite.s.PushLogs(context.Background(), &pushRequest)
+	suite.Error(err)
 	st, ok := status.FromError(err)
-	assert.True(suite.t, ok)
-	assert.Equal(suite.T(), codes.InvalidArgument, st.Code())
-	assert.Equal(suite.T(), "invalid collection_id", st.Message())
+	suite.True(ok)
+	suite.Equal(codes.InvalidArgument, st.Code())
+	suite.Equal("invalid collection_id", st.Message())
 
 	// pull the records
 	// pull the records
 	pullRequest := logservicepb.PullLogsRequest{
-		CollectionId: "badId",
-		StartFromId:  0,
-		BatchSize:    10,
+		CollectionId:    "badId",
+		StartFromOffset: 0,
+		BatchSize:       10,
 	}
-	pullResponse, err := suite.s.PullLogs(context.Background(), &pullRequest)
-	assert.Nil(suite.t, pullResponse)
-	assert.NotNil(suite.t, err)
+	_, err = suite.s.PullLogs(context.Background(), &pullRequest)
+	suite.Error(err)
 	st, ok = status.FromError(err)
-	assert.True(suite.t, ok)
-	assert.Equal(suite.T(), codes.InvalidArgument, st.Code())
-	assert.Equal(suite.T(), "invalid collection_id", st.Message())
+	suite.True(ok)
+	suite.Equal(codes.InvalidArgument, st.Code())
+	suite.Equal("invalid collection_id", st.Message())
 }
 
 func (suite *RecordLogServiceTestSuite) TestServer_GetAllCollectionInfoToCompact() {
@@ -193,17 +198,18 @@ func (suite *RecordLogServiceTestSuite) TestServer_GetAllCollectionInfoToCompact
 		CollectionId: suite.collectionId.String(),
 		Records:      recordsToSubmit,
 	}
-	suite.s.PushLogs(context.Background(), &pushRequest)
+	_, err := suite.s.PushLogs(context.Background(), &pushRequest)
+	suite.NoError(err)
 
 	// get collection info for compactor
 	request := logservicepb.GetAllCollectionInfoToCompactRequest{}
 	response, err := suite.s.GetAllCollectionInfoToCompact(context.Background(), &request)
-	assert.Nil(suite.t, err)
-	assert.Len(suite.t, response.AllCollectionInfo, 1)
-	assert.Equal(suite.T(), suite.collectionId.String(), response.AllCollectionInfo[0].CollectionId)
-	assert.Equal(suite.T(), int64(1), response.AllCollectionInfo[0].FirstLogId)
-	assert.True(suite.T(), response.AllCollectionInfo[0].FirstLogIdTs > startTime)
-	assert.True(suite.T(), response.AllCollectionInfo[0].FirstLogIdTs < time.Now().UnixNano())
+	suite.NoError(err)
+	suite.Len(response.AllCollectionInfo, 1)
+	suite.Equal(suite.collectionId.String(), response.AllCollectionInfo[0].CollectionId)
+	suite.Equal(int64(1), response.AllCollectionInfo[0].FirstLogOffset)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs > startTime)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs < time.Now().UnixNano())
 
 	// move log position
 	testutils.MoveLogPosition(suite.db, suite.collectionId, 2)
@@ -211,17 +217,15 @@ func (suite *RecordLogServiceTestSuite) TestServer_GetAllCollectionInfoToCompact
 	// get collection info for compactor
 	request = logservicepb.GetAllCollectionInfoToCompactRequest{}
 	response, err = suite.s.GetAllCollectionInfoToCompact(context.Background(), &request)
-	assert.Nil(suite.t, err)
-	assert.Len(suite.t, response.AllCollectionInfo, 1)
-	assert.Equal(suite.T(), suite.collectionId.String(), response.AllCollectionInfo[0].CollectionId)
-	assert.Equal(suite.T(), int64(3), response.AllCollectionInfo[0].FirstLogId)
-	assert.True(suite.T(), response.AllCollectionInfo[0].FirstLogIdTs > startTime)
-	assert.True(suite.T(), response.AllCollectionInfo[0].FirstLogIdTs < time.Now().UnixNano())
-
+	suite.NoError(err)
+	suite.Len(response.AllCollectionInfo, 1)
+	suite.Equal(suite.collectionId.String(), response.AllCollectionInfo[0].CollectionId)
+	suite.Equal(int64(3), response.AllCollectionInfo[0].FirstLogOffset)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs > startTime)
+	suite.True(response.AllCollectionInfo[0].FirstLogTs < time.Now().UnixNano())
 }
 
 func TestRecordLogServiceTestSuite(t *testing.T) {
 	testSuite := new(RecordLogServiceTestSuite)
-	testSuite.t = t
 	suite.Run(t, testSuite)
 }

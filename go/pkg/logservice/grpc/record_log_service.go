@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -21,13 +22,12 @@ type CollectionInfo struct {
 func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest) (*logservicepb.PushLogsResponse, error) {
 	res := &logservicepb.PushLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}
 	var recordsContent [][]byte
 	for _, record := range req.Records {
-		record.CollectionId = ""
 		data, err := proto.Marshal(record)
 		if err != nil {
 			log.Error("marshaling error", zap.Error(err))
@@ -42,7 +42,7 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 	recordCount, err := s.logService.PushLogs(ctx, collectionID, recordsContent)
 	if err != nil {
 		log.Error("error pushing logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pushing logs")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.RecordCount = int32(recordCount)
 	log.Info("PushLogs success", zap.String("collectionID", req.CollectionId), zap.Int("recordCount", recordCount))
@@ -52,18 +52,18 @@ func (s *Server) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequest
 func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (*logservicepb.PullLogsResponse, error) {
 	res := &logservicepb.PullLogsResponse{}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
-	err = grpcutils.BuildErrorForCollectionId(collectionID, err)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
 		return nil, err
 	}
-	records := make([]*logservicepb.RecordLog, 0)
-	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromId(), int(req.BatchSize))
+	records := make([]*logservicepb.LogRecord, 0)
+	recordLogs, err := s.logService.PullLogs(ctx, collectionID, req.GetStartFromOffset(), int(req.BatchSize), req.GetEndTimestamp())
 	if err != nil {
 		log.Error("error pulling logs", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error pulling logs")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for index := range recordLogs {
-		record := &coordinatorpb.SubmitEmbeddingRecord{}
+		record := &coordinatorpb.OperationRecord{}
 		if err := proto.Unmarshal(*recordLogs[index].Record, record); err != nil {
 			log.Error("Unmarshal error", zap.Error(err))
 			grpcError, err := grpcutils.BuildInvalidArgumentGrpcError("records", "marshaling error")
@@ -72,9 +72,9 @@ func (s *Server) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest
 			}
 			return nil, grpcError
 		}
-		recordLog := &logservicepb.RecordLog{
-			LogId:  recordLogs[index].ID,
-			Record: record,
+		recordLog := &logservicepb.LogRecord{
+			LogOffset: recordLogs[index].LogOffset,
+			Record:    record,
 		}
 		records = append(records, recordLog)
 	}
@@ -90,13 +90,13 @@ func (s *Server) GetAllCollectionInfoToCompact(ctx context.Context, req *logserv
 	recordLogs, err := s.logService.GetAllCollectionIDsToCompact()
 	if err != nil {
 		log.Error("error getting collection info", zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error getting collection info")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for _, recordLog := range recordLogs {
 		collectionInfo := &logservicepb.CollectionInfo{
-			CollectionId: *recordLog.CollectionID,
-			FirstLogId:   recordLog.ID,
-			FirstLogIdTs: recordLog.Timestamp,
+			CollectionId:   *recordLog.CollectionID,
+			FirstLogOffset: recordLog.LogOffset,
+			FirstLogTs:     recordLog.Timestamp,
 		}
 		res.AllCollectionInfo = append(res.AllCollectionInfo, collectionInfo)
 	}

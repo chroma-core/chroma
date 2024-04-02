@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -10,7 +12,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"time"
 )
 
 // The catalog backed by databases using GORM.
@@ -227,7 +228,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 
 		collectionName := createCollection.Name
-		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, nil, tenantID, databaseName)
+		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err
@@ -258,7 +259,6 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		dbCollection := &dbmodel.Collection{
 			ID:          createCollection.ID.String(),
 			Name:        &createCollection.Name,
-			Topic:       &createCollection.Topic,
 			Dimension:   createCollection.Dimension,
 			DatabaseID:  databases[0].ID,
 			Ts:          ts,
@@ -280,7 +280,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			}
 		}
 		// get collection
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, nil, tenantID, databaseName)
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err
@@ -306,8 +306,8 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	return result, nil
 }
 
-func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenandID string, databaseName string) ([]*model.Collection, error) {
-	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, collectionTopic, tenandID, databaseName)
+func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) ([]*model.Collection, error) {
+	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName)
 	if err != nil {
 		return nil, err
 	}
@@ -316,9 +316,10 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 }
 
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	log.Info("deleting collection", zap.Any("deleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
-		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, nil, deleteCollection.TenantID, deleteCollection.DatabaseName)
+		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName)
 		if err != nil {
 			return err
 		}
@@ -351,13 +352,13 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
+	log.Info("updating collection", zap.String("collectionId", updateCollection.ID.String()))
 	var result *model.Collection
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		dbCollection := &dbmodel.Collection{
 			ID:        updateCollection.ID.String(),
 			Name:      updateCollection.Name,
-			Topic:     updateCollection.Topic,
 			Dimension: updateCollection.Dimension,
 			Ts:        ts,
 		}
@@ -398,7 +399,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		}
 		databaseName := updateCollection.DatabaseName
 		tenantID := updateCollection.TenantID
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, nil, tenantID, databaseName)
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, tenantID, databaseName)
 		if err != nil {
 			return err
 		}
@@ -411,7 +412,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	if err != nil {
 		return nil, err
 	}
-	log.Info("collection updated", zap.Any("collection", result))
+	log.Info("collection updated", zap.String("collectionID", result.ID.String()))
 	return result, nil
 }
 
@@ -427,9 +428,6 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 			Type:         createSegment.Type,
 			Scope:        createSegment.Scope,
 			Ts:           ts,
-		}
-		if createSegment.Topic != nil {
-			dbSegment.Topic = createSegment.Topic
 		}
 		err := tc.metaDomain.SegmentDb(txCtx).Insert(dbSegment)
 		if err != nil {
@@ -449,7 +447,7 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 			}
 		}
 		// get segment
-		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(createSegment.ID, nil, nil, nil, types.NilUniqueID())
+		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(createSegment.ID, nil, nil, types.NilUniqueID())
 		if err != nil {
 			log.Error("error getting segment", zap.Error(err))
 			return err
@@ -465,19 +463,19 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 	return result, nil
 }
 
-func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error) {
-	segmentAndMetadataList, err := tc.metaDomain.SegmentDb(ctx).GetSegments(segmentID, segmentType, scope, topic, collectionID)
+func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error) {
+	segmentAndMetadataList, err := tc.metaDomain.SegmentDb(ctx).GetSegments(segmentID, segmentType, scope, collectionID)
 	if err != nil {
 		return nil, err
 	}
 	segments := make([]*model.Segment, 0, len(segmentAndMetadataList))
 	for _, segmentAndMetadata := range segmentAndMetadataList {
 		segment := &model.Segment{
-			ID:    types.MustParse(segmentAndMetadata.Segment.ID),
-			Type:  segmentAndMetadata.Segment.Type,
-			Scope: segmentAndMetadata.Segment.Scope,
-			Topic: segmentAndMetadata.Segment.Topic,
-			Ts:    segmentAndMetadata.Segment.Ts,
+			ID:        types.MustParse(segmentAndMetadata.Segment.ID),
+			Type:      segmentAndMetadata.Segment.Type,
+			Scope:     segmentAndMetadata.Segment.Scope,
+			Ts:        segmentAndMetadata.Segment.Ts,
+			FilePaths: segmentAndMetadata.Segment.FilePaths,
 		}
 
 		if segmentAndMetadata.Segment.CollectionID != nil {
@@ -493,7 +491,7 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, nil, types.NilUniqueID())
+		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, types.NilUniqueID())
 		if err != nil {
 			return err
 		}
@@ -521,7 +519,7 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// TODO: we should push in collection_id here, add a GET to fix test for now
 		if updateSegment.Collection == nil {
-			results, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, nil, types.NilUniqueID())
+			results, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, types.NilUniqueID())
 			if err != nil {
 				return err
 			}
@@ -538,8 +536,6 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 		// update segment
 		dbSegment := &dbmodel.UpdateSegment{
 			ID:              updateSegment.ID.String(),
-			Topic:           updateSegment.Topic,
-			ResetTopic:      updateSegment.ResetTopic,
 			Collection:      updateSegment.Collection,
 			ResetCollection: updateSegment.ResetCollection,
 		}
@@ -590,7 +586,7 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 		}
 
 		// get segment
-		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, nil, types.NilUniqueID())
+		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, types.NilUniqueID())
 		if err != nil {
 			log.Error("error getting segment", zap.Error(err))
 			return err
@@ -613,4 +609,42 @@ func (tc *Catalog) SetTenantLastCompactionTime(ctx context.Context, tenantID str
 func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
 	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenantsLastCompactionTime(tenantIDs)
 	return tenants, err
+}
+
+func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	flushCollectionInfo := &model.FlushCollectionInfo{
+		ID: flushCollectionCompaction.ID.String(),
+	}
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// register files to Segment metadata
+		err := tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+		if err != nil {
+			return err
+		}
+
+		// update collection log position and version
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionAndVersion(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion)
+		if err != nil {
+			return err
+		}
+		flushCollectionInfo.CollectionVersion = collectionVersion
+
+		// update tenant last compaction time
+		// TODO: add a system configuration to disable
+		// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
+		lastCompactionTime := time.Now().Unix()
+		err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
+		if err != nil {
+			return err
+		}
+		flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
+
+		// return nil will commit the transaction
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return flushCollectionInfo, nil
 }
