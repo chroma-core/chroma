@@ -8,7 +8,7 @@ FOR UPDATE;
 INSERT INTO record_log (collection_id, "offset", record) values($1, $2, $3);
 
 -- name: GetRecordsForCollection :many
-SELECT * FROM record_log r WHERE r.collection_id = $1 AND r.offset > $2  ORDER BY r.offset DESC limit $3 ;
+SELECT * FROM record_log r WHERE r.collection_id = $1 AND r.offset >= $2  ORDER BY r.offset ASC limit $3 ;
 
 -- name: GetAllCollectionsToCompact :many
 with summary as (

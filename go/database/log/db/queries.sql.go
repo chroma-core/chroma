@@ -68,7 +68,7 @@ func (q *Queries) GetCollectionForUpdate(ctx context.Context, id string) (Collec
 }
 
 const getRecordsForCollection = `-- name: GetRecordsForCollection :many
-SELECT "offset", collection_id, timestamp, record FROM record_log r WHERE r.collection_id = $1 AND r.offset > $2  ORDER BY r.offset DESC limit $3
+SELECT "offset", collection_id, timestamp, record FROM record_log r WHERE r.collection_id = $1 AND r.offset >= $2  ORDER BY r.offset ASC limit $3
 `
 
 type GetRecordsForCollectionParams struct {
