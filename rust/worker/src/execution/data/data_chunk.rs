@@ -1,4 +1,4 @@
-use crate::types::{LogRecord, OperationRecord};
+use crate::types::LogRecord;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -108,8 +108,8 @@ impl<'a> Iterator for DataChunkIteraror<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::LogRecord;
     use crate::types::Operation;
+    use crate::types::{LogRecord, OperationRecord};
 
     #[test]
     fn test_data_chunk() {

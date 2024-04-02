@@ -99,7 +99,7 @@ impl Blockfile for ArrowBlockfile {
         }
     }
 
-    fn delete(&mut self, key: BlockfileKey) -> Result<(), Box<dyn ChromaError>> {
+    fn delete(&mut self, key: BlockfileKey) -> Result<(), Box<BlockfileError>> {
         if !self.in_transaction() {
             return Err(Box::new(BlockfileError::TransactionNotInProgress));
         }
@@ -128,7 +128,11 @@ impl Blockfile for ArrowBlockfile {
         let delta = match transaction_state.get_delta_for_block(&target_block_id) {
             None => {
                 let target_block = match self.block_provider.get_block(&target_block_id) {
-                    None => return Err(Box::new(ArrowBlockfileError::BlockNotFoundError)),
+                    None => {
+                        return Err(Box::new(BlockfileError::Other(Box::new(
+                            ArrowBlockfileError::BlockNotFoundError,
+                        ))));
+                    }
                     Some(block) => block,
                 };
                 let delta = BlockDelta::from(target_block);
@@ -138,7 +142,7 @@ impl Blockfile for ArrowBlockfile {
             Some(delta) => delta,
         };
 
-        delta.delete(key).into_result()
+        delta.delete(key)
     }
 
     fn get_by_prefix(
@@ -435,7 +439,7 @@ impl ArrowBlockfile {
         self.transaction_state.is_some()
     }
 
-    fn validate_key(&self, key: &BlockfileKey) -> Result<(), Box<dyn ChromaError>> {
+    fn validate_key(&self, key: &BlockfileKey) -> Result<(), Box<BlockfileError>> {
         match key.key {
             Key::String(_) => {
                 if self.key_type != KeyType::String {

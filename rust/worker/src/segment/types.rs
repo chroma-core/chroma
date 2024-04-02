@@ -11,12 +11,15 @@ use crate::{
 /// A MaterializedLogRecord would have the metadata fully reconciled in its materialized_metadata
 /// field.
 pub(super) struct MaterializedLogRecord<'a> {
-    segment_offset_id: u32,
+    segment_offset_id: Option<u32>, // If the record is new, this is the offset id assigned to it
     record: &'a LogRecord,
-    new_embedding: Option<Vec<f32>>,
+    old_embedding: Option<Vec<f32>>,
     new_metadata: Option<crate::types::Metadata>,
-    new_document: Option<String>,
+    old_metadata: Option<crate::types::Metadata>,
+    old_document: Option<String>,
 }
+
+// In order to update full text search we need to know the old document so we can remove it
 
 pub(super) trait SegmentWriter {
     fn begin_transaction(&mut self);
@@ -26,10 +29,10 @@ pub(super) trait SegmentWriter {
 }
 
 pub(super) trait OffsetIdAssigner: SegmentWriter {
-    fn assign_offset_ids(&mut self, records: Vec<Box<LogRecord>>) -> Vec<Option<u32>>;
+    fn assign_offset_ids(&mut self, records: DataChunk) -> Vec<Option<u32>>;
 }
 
-pub(super) fn data_chunk() {
+pub(super) async fn data_chunk() {
     let data = vec![
         LogRecord {
             log_offset: 1,
@@ -68,7 +71,7 @@ pub(super) fn data_chunk() {
         println!("Record: {:?}", stored_record.record);
     }
     let arc_stored: Arc<[MaterializedLogRecord]> = stored_record_vec.into();
-    test_store_fn(arc_stored);
+    test_store_fn(arc_stored).await;
 }
 
 pub(super) async fn test_store_fn(arc_stored: Arc<[MaterializedLogRecord<'_>]>) {
