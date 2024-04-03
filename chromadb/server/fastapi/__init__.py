@@ -348,14 +348,14 @@ class FastAPI(Server):
             database=database,
             collection=collection,
         )
-        (tenant, database) = self.authn_provider.\
+        (new_tenant, new_database) = self.authn_provider.\
             singleton_tenant_database_if_applicable(
             user_identity
         )
-        if tenant:
-            authz_resource.tenant = tenant
-        if database:
-            authz_resource.database = database
+        if new_tenant:
+            authz_resource.tenant = new_tenant
+        if new_database:
+            authz_resource.database = new_database
 
         self.authz_provider.authorize(user_identity, action, authz_resource)
         return user_identity
