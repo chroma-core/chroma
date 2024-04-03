@@ -592,7 +592,7 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    async def add(self, request: Request, collection_id: str) -> None:
+    async def add(self, request: Request, collection_id: str) -> bool:
         try:
 
             def process_add(raw_body: bytes) -> bool:
@@ -606,10 +606,13 @@ class FastAPI(chromadb.server.Server):
                     uris=add.uris,  # type: ignore
                 )
 
-            await to_thread.run_sync(
-                process_add,
-                await request.body(),
-                limiter=self._capacity_limiter,
+            return cast(
+                bool,
+                await to_thread.run_sync(
+                    process_add,
+                    await request.body(),
+                    limiter=self._capacity_limiter,
+                ),
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
