@@ -47,11 +47,12 @@ func StartPgContainer(ctx context.Context) (connectionString string, err error) 
 
 func RunMigration(ctx context.Context, connectionString string) (err error) {
 	cmd := exec.Command("pwd && ls")
-
+	workdir := os.Getenv("GITHUB_WORKSPACE")
+	fmt.Println(workdir)
 	_, dir, _, _ := runtime.Caller(0)
 	fmt.Println(dir)
 	cmd.Dir = path.Join(dir, "../../../")
-	i, err := os.Stat(path.Join(cmd.Dir, "bin/migrate_up_test.sh"))
+	i, err := os.Stat(path.Join(workdir, "go/bin/migrate_up_test.sh"))
 	fmt.Println(i)
 	fmt.Println(err)
 	i, err = os.Stat("/home/runner/work/chroma/go/bin/migrate_up_test.sh")
