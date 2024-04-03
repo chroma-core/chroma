@@ -7,7 +7,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"os"
 	"os/exec"
 	"path"
 	"runtime"
@@ -48,26 +47,9 @@ func StartPgContainer(ctx context.Context) (connectionString string, err error) 
 func RunMigration(ctx context.Context, connectionString string) (err error) {
 	cmd := exec.Command("/bin/sh", "bin/migrate_up_test.sh", connectionString)
 	_, dir, _, _ := runtime.Caller(0)
-	fmt.Println(dir)
 	cmd.Dir = path.Join(dir, "../../../")
-	i, err := os.Stat(path.Join(cmd.Dir, "bin/migrate_up_test.sh"))
-	fmt.Println(i)
-	fmt.Println(err)
-
-	fmt.Println(cmd.Dir)
-	byte, err := cmd.CombinedOutput()
-	fmt.Println(err)
+	var byte []byte
+	byte, err = cmd.CombinedOutput()
 	fmt.Println(string(byte))
-	err = fmt.Errorf("test")
-	return
-}
-
-func RunMigrationQuota(ctx context.Context, connectionString string) (err error) {
-	cmd := exec.Command("/bin/sh", "bin/migrate_up_test.sh", connectionString)
-
-	_, dir, _, _ := runtime.Caller(0)
-
-	cmd.Dir = path.Join(dir, "../../../")
-	_, err = cmd.Output()
 	return
 }
