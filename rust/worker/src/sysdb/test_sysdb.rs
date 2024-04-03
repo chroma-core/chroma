@@ -74,10 +74,10 @@ impl SysDb for TestSysDb {
 
     async fn get_segments(
         &mut self,
-        id: Option<Uuid>,
-        r#type: Option<String>,
-        scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        _id: Option<Uuid>,
+        _type: Option<String>,
+        _scope: Option<SegmentScope>,
+        _collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         Ok(Vec::new())
     }

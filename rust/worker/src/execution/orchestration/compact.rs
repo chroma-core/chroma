@@ -196,7 +196,7 @@ impl Handler<PartitionResult> for CompactOrchestrator {
     async fn handle(
         &mut self,
         message: PartitionResult,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        _ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         let records = match message {
             Ok(result) => result.records,

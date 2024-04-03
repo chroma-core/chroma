@@ -1,5 +1,6 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
 use crate::config::CompactionServiceConfig;
@@ -230,8 +231,8 @@ impl Debug for CompactionManager {
 impl Handler<ScheduleMessage> for CompactionManager {
     async fn handle(
         &mut self,
-        message: ScheduleMessage,
-        ctx: &ComponentContext<CompactionManager>,
+        _message: ScheduleMessage,
+        _ctx: &ComponentContext<CompactionManager>,
     ) {
         self.compact_batch().await;
     }
@@ -239,7 +240,7 @@ impl Handler<ScheduleMessage> for CompactionManager {
 
 #[async_trait]
 impl Handler<Memberlist> for CompactionManager {
-    async fn handle(&mut self, message: Memberlist, ctx: &ComponentContext<CompactionManager>) {
+    async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
         self.scheduler.set_memberlist(message);
     }
 }
