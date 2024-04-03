@@ -674,7 +674,7 @@ class FastAPI(Server):
                 "x-chroma-token": x_chroma_token,
                 "authorization": authorization,
             },
-            AuthzAction.DELETE_COLLECTION,
+            AuthzAction.ADD,
             None,
             None,
             collection_id,
@@ -706,7 +706,7 @@ class FastAPI(Server):
                 "x-chroma-token": x_chroma_token,
                 "authorization": authorization,
             },
-            AuthzAction.DELETE_COLLECTION,
+            AuthzAction.UPDATE,
             None,
             None,
             collection_id,
@@ -734,7 +734,7 @@ class FastAPI(Server):
                 "x-chroma-token": x_chroma_token,
                 "authorization": authorization,
             },
-            AuthzAction.DELETE_COLLECTION,
+            AuthzAction.UPSERT,
             None,
             None,
             collection_id,
@@ -750,15 +750,24 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
+    def get(
+        self,
+        collection_id: str,
+        get: GetEmbedding,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> GetResult:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.GET,
+            None,
+            None,
+            collection_id,
+        )
+
         return self._api._get(
             collection_id=_uuid(collection_id),
             ids=get.ids,
@@ -771,15 +780,24 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.DELETE,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
+    def delete(
+        self,
+        collection_id: str,
+        delete: DeleteEmbedding,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> List[UUID]:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.DELETE,
+            None,
+            None,
+            collection_id,
+        )
+
         return self._api._delete(
             where=delete.where,  # type: ignore
             ids=delete.ids,
@@ -788,40 +806,64 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.COUNT,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    def count(self, collection_id: str) -> int:
+    def count(
+        self,
+        collection_id: str,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> int:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.COUNT,
+            None,
+            None,
+            collection_id,
+        )
+
         return self._api._count(_uuid(collection_id))
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.RESET,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-        ),
-    )
-    def reset(self) -> bool:
+    def reset(
+        self,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> bool:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.RESET,
+            None,
+            None,
+            None,
+        )
+
         return self._api.reset()
 
-    @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.QUERY,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
+    @trace_method("FastAPI.get_nearest_neighbors",
+                  OpenTelemetryGranularity.OPERATION)
     def get_nearest_neighbors(
-        self, collection_id: str, query: QueryEmbedding
+        self,
+        collection_id: str,
+        query: QueryEmbedding,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> QueryResult:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.RESET,
+            None,
+            None,
+            collection_id,
+        )
+
         nnresult = self._api._query(
             collection_id=_uuid(collection_id),
             where=query.where,  # type: ignore
