@@ -7,6 +7,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"os"
 	"os/exec"
 	"path"
 	"runtime"
@@ -50,6 +51,9 @@ func RunMigration(ctx context.Context, connectionString string) (err error) {
 	_, dir, _, _ := runtime.Caller(0)
 
 	cmd.Dir = path.Join(dir, "../../../")
+	i, err := os.Stat(path.Join(dir, "../../../", "bin/migrate_up_test.sh"))
+	fmt.Println(i)
+	fmt.Println(err)
 	fmt.Println(cmd.Dir)
 	fmt.Println(path.Join(dir, "../../../", "bin/migrate_up_test.sh"))
 	byte, err := cmd.CombinedOutput()
