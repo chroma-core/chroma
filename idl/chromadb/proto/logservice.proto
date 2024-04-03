@@ -47,8 +47,18 @@ message GetAllCollectionInfoToCompactResponse {
   repeated CollectionInfo all_collection_info = 1;
 }
 
+message UpdateCollectionLogOffsetRequest {
+  string collection_id = 1;
+  int64 log_offset = 2;
+}
+
+message UpdateCollectionLogOffsetResponse {
+  // Empty
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
+  rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
 }
