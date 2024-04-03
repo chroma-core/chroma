@@ -19,6 +19,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from starlette.datastructures import Headers
+from typing import Dict
 
 T = TypeVar("T")
 
@@ -129,7 +130,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         with open(users_file) as f:
             self._users = cast(List[User], yaml.safe_load(f)["users"])
 
-        self._token_user_mapping = {}
+        self._token_user_mapping: Dict[str, User] = {}
         for user in self._users:
             if "tokens" not in user:
                 raise ValueError("User missing tokens")

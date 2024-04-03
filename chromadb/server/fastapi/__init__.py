@@ -11,8 +11,11 @@ from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
+    AuthzAction,
+    AuthzResource,
     ServerAuthenticationProvider,
     ServerAuthorizationProvider,
+    UserIdentity,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.api import ServerAPI
@@ -35,6 +38,7 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
+from starlette.datastructures import Headers
 from starlette.requests import Request
 
 import logging
@@ -146,11 +150,6 @@ class FastAPI(Server):
             self.authz_provider = self._system.require(
                 ServerAuthorizationProvider
             )
-
-        self.overwrite_singleton_tenant_database_access_from_auth = (
-            settings.
-            chroma_overwrite_singleton_tenant_database_access_from_auth
-        )
 
         self.router = ChromaAPIRouter()
 
@@ -306,73 +305,138 @@ class FastAPI(Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    def authenticate_and_authorize_or_raise(self,
-        auth_headers: Dict[str, str],
-        *args: Any,
-        **kwargs: Any
-    ) -> (
-      Tuple[str, str]
-    ):
+    def authenticate_and_authorize_or_raise(
+        self,
+        auth_headers: Headers,
+        action: AuthzAction,
+        tenant: Optional[str],
+        database: Optional[str],
+        collection: Optional[str],
+    ) -> Optional[UserIdentity]:
         """
         Authenticate and authorize the request, or raise an authorization error
         if the request is not authorized. Uses the authn and authz providers
-        configured for this Component.
+        configured for this Component. Returns the UserIdentity if the request
+        is authenticated. Returns None if authn is disabled.
 
         If self.overwrite_singleton_tenant_database_access_from_auth is True
-        and the user only has access to a single tenant and database, this
-        will use the user's tenant and database for an authorization decision
-        and return them.
+        and the user only has access to a single tenant and/or database, this
+        function will ignore the passed parameters and check authorization
+        as if the user-accessible tenant and/or database had been passed.
 
-        If self.overwrite_singleton_tenant_database_access_from_auth is True
-        and the user instead has access to multiple tenants and/or databases,
+        If self.overwrite_singleton_tenant_database_access_from_auth is False
+        or the user instead has access to multiple tenants and/or databases,
         authorization will execute as normal.
         """
-        return "", ""
+        if not self.authn_provider:
+            return None
+
+        user_identity = self.authn_provider.authenticate(auth_headers)
+        if not user_identity:
+            # Something is funky. An authn provider should always return a
+            # user identity or raise an exception.
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        if not self.authz_provider:
+            return user_identity
+
+        authz_resource = AuthzResource(
+            tenant=tenant,
+            database=database,
+            collection=collection,
+        )
+        (tenant, database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if tenant:
+            authz_resource.tenant = tenant
+        if database:
+            authz_resource.database = database
+
+        self.authz_provider.authorize(user_identity, action, authz_resource)
+        return user_identity
 
     @trace_method("FastAPI.create_database",
                   OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.CREATE_DATABASE,
-        resource=DynamicAuthzResource(
-            type=AuthzResourceTypes.DB,
-            attributes=attr_from_resource_object(
-                type=AuthzResourceTypes.DB, additional_attrs=["tenant"]
-            ),
-        ),
-    )
     def create_database(
         self, database: CreateDatabase, tenant: str = DEFAULT_TENANT,
         x_chroma_token: Annotated[Union[str, None], Header()] = None,
         authorization: Annotated[Union[str, None], Header()] = None
     ) -> None:
-        self.authenticate_and_authorize_or_raise(
-            database=database, tenant=tenant, x_chroma_token=x_chroma_token,
-            authorization=authorization, action=AuthzResourceActions.CREATE_DATABASE
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.CREATE_DATABASE,
+            tenant,
+            None,
+            None,
         )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database.name = overwrite_database
+
         return self._api.create_database(database.name, tenant)
 
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET_DATABASE,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
-    def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
+    def get_database(
+        self,
+        database: str,
+        tenant: str = DEFAULT_TENANT,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> Database:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.GET_DATABASE,
+            tenant,
+            database,
+            None,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database = overwrite_database
+
         return self._api.get_database(database, tenant)
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.CREATE_TENANT,
-        resource=DynamicAuthzResource(
-            type=AuthzResourceTypes.TENANT,
-        ),
-    )
-    def create_tenant(self, tenant: CreateTenant) -> None:
+    def create_tenant(
+        self,
+        tenant: CreateTenant,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> None:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.CREATE_TENANT,
+            tenant.name,
+            None,
+            None,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant.name = overwrite_tenant
         return self._api.create_tenant(tenant.name)
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)

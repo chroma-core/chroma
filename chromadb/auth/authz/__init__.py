@@ -4,10 +4,12 @@ from overrides import override
 import yaml
 from chromadb.auth import (
     AuthzAction,
+    AuthzResource,
     UserIdentity,
     ServerAuthorizationProvider,
 )
 from chromadb.config import System
+from fastapi import HTTPException
 
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -53,16 +55,18 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     def authorize(self,
                   user: UserIdentity,
                   action: AuthzAction,
-                  resource: str) -> bool:
+                  resource: AuthzResource) -> None:
 
         policy_decision = False
         if (user.user_id in self._permissions and
                 action in self._permissions[user.user_id]):
             policy_decision = True
+
         logger.debug(
             f"Authorization decision: Access "
             f"{'granted' if policy_decision else 'denied'} for "
             f"user [{user.user_id}] attempting to "
             f"[{action}] [{resource}]"
         )
-        return policy_decision
+        if not policy_decision:
+            raise HTTPException(status_code=401, detail="Unauthorized")

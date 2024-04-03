@@ -18,6 +18,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from starlette.datastructures import Headers
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 "Please install it with `pip install bcrypt`"
             )
 
-        self._creds = {}
+        self._creds: Dict[str, SecretStr] = {}
 
         system.settings.require("chroma_server_authn_credentials_file")
         _creds_file = str(system.settings.chroma_server_authn_credentials_file)
@@ -107,7 +108,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
 
             _usr_check = bool(
                 username
-                == self._creds["username"].get_secret_value()
+                == self._creds["username"]
             )
             _pwd_check = self.bc.checkpw(
                 password.encode("utf-8"),
