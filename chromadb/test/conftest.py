@@ -304,10 +304,10 @@ def fastapi_server_basic_auth() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
         chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
     ):
         yield item
@@ -320,10 +320,10 @@ def fastapi_server_basic_auth_param() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
         chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
     ):
         yield item
@@ -337,10 +337,10 @@ def fastapi_server_basic_auth_file() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
         chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
     ):
         yield item
@@ -369,10 +369,10 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     for item in _fastapi_fixture(
         is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic.BasicAuthenticationServerProvider",
+        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
         chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
         chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin1",
     ):
         yield item

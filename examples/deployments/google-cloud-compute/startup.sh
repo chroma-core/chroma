@@ -30,7 +30,7 @@ if [ "$${enable_auth}" = "true" ] && [ "$${auth_type}" = "basic" ] && [ ! -z "$$
   cat <<EOF > .env
 CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthenticationServerProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
 EOF
 fi
 
