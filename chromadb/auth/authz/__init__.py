@@ -1,12 +1,13 @@
 import logging
-from typing import Any, Dict, Set
+from typing import Dict, Set
 from overrides import override
 import yaml
 from chromadb.auth import (
-    AuthorizationContext,
+    AuthzAction,
+    UserIdentity,
     ServerAuthorizationProvider,
 )
-from chromadb.config import DEFAULT_TENANT, System
+from chromadb.config import System
 
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -29,21 +30,16 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         with open(config_file, "r") as f:
             self._config = yaml.safe_load(f)
 
-        # TODOBEN make this less fucky
-        self._authz_tuples_map: Dict[str, Set[Any]] = {}
-        for u in self._config["users"]:
-            _actions = self._config["roles_mapping"][u["role"]]["actions"]
-            for a in _actions:
-                tenant = u["tenant"] if "tenant" in u else DEFAULT_TENANT
-                if u["id"] not in self._authz_tuples_map.keys():
-                    self._authz_tuples_map[u["id"]] = set()
-                self._authz_tuples_map[u["id"]].add(
-                    (u["id"], tenant, *a.split(":"))
-                )
-        logger.debug(
-            f"Loaded {len(self._authz_tuples_map)} permissions for "
-            f"({len(self._config['users'])}) users"
-        )
+        # We favor preprocessing here to avoid having to parse the config file
+        # on every request. This AuthorizationProvider does not support
+        # per-resource authorization so we just map the user ID to the
+        # permissions they have. We're not worried about the size of this dict
+        # since users are all specified in the file -- anyone with a gigantic
+        # number of users can roll their own AuthorizationProvider.
+        self._permissions: Dict[str, Set[str]] = {}
+        for user in self._config["users"]:
+            _actions = self._config["roles_mapping"][user["role"]]["actions"]
+            self._permissions[user["user_id"]] = set(_actions)
         logger.info(
             "Authorization Provider SimpleRBACAuthorizationProvider "
             "initialized"
@@ -54,26 +50,19 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         OpenTelemetryGranularity.ALL,
     )
     @override
-    def authorize(self, context: AuthorizationContext) -> bool:
-        _authz_tuple = (
-            context.user.user_id,
-            context.user.tenant,
-            context.resource.type,
-            context.action.id,
-        )
+    def authorize(self,
+                  user: UserIdentity,
+                  action: AuthzAction,
+                  resource: str) -> bool:
 
         policy_decision = False
-        if (
-            context.user.user_id
-            and context.user.user_id in self._authz_tuples_map.keys()
-            and _authz_tuple in self._authz_tuples_map[context.user.user_id]
-        ):
+        if (user.user_id in self._permissions and
+                action in self._permissions[user.user_id]):
             policy_decision = True
         logger.debug(
             f"Authorization decision: Access "
             f"{'granted' if policy_decision else 'denied'} for "
-            f"user [{context.user.user_id}] attempting to "
-            f"[{context.action.id}]"
-            f" on [{context.resource}]"
+            f"user [{user.user_id}] attempting to "
+            f"[{action}] [{resource}]"
         )
         return policy_decision
