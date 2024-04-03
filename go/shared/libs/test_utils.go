@@ -46,7 +46,7 @@ func StartPgContainer(ctx context.Context) (connectionString string, err error) 
 }
 
 func RunMigration(ctx context.Context, connectionString string) (err error) {
-	cmd := exec.Command("/bin/sh", "./bin/migrate_up_test.sh", connectionString)
+	cmd := exec.Command("/bin/sh", "pwd && ls")
 
 	_, dir, _, _ := runtime.Caller(0)
 	fmt.Println(dir)
@@ -58,5 +58,6 @@ func RunMigration(ctx context.Context, connectionString string) (err error) {
 	byte, err := cmd.CombinedOutput()
 	fmt.Println(err)
 	fmt.Println(string(byte))
+	err = fmt.Errorf("test")
 	return
 }
