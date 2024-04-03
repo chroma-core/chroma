@@ -14,6 +14,8 @@ their queries in Chroma work.
 We want to keep of the CIP small so the focus is only query explainability, although admittedly this can be applied to
 other API calls.
 
+The goal is to mimic most SQL databases, where you can use EXPLAIN on a query to understand its execution.
+
 ## Public Interfaces
 
 We propose that a new API attribute - `explain` is added to `collection.query()` method. When set to `True`, the query
@@ -40,7 +42,7 @@ The proposed API changes will affect both persistent (local) and http client(s).
 In order to keep things backward compatible we suggest that the query explanation payload is returned as an additional (
 optional) attribute to the QueryResult object.
 
-It also worth mentioning that the query explanation can be done as a separate API call, but this comes with a a
+The query explanation can be done as a separate API call, but this comes with a
 trade-off of increased API surface and code complexity.
 
 ## Proposed Changes
