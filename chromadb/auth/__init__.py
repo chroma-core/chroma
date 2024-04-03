@@ -78,13 +78,7 @@ class ServerAuthenticationProvider(Component):
         return False
 
 
-class AuthzResourceTypes(str, Enum):
-    DB = "db"
-    COLLECTION = "collection"
-    TENANT = "tenant"
-
-
-class AuthzResourceActions(str, Enum):
+class AuthzAction(str, Enum):
     CREATE_DATABASE = "create_database"
     GET_DATABASE = "get_database"
     CREATE_TENANT = "create_tenant"
@@ -106,30 +100,13 @@ class AuthzResourceActions(str, Enum):
     RESET = "reset"
 
 
-@dataclass
-class AuthzResource:
-    id: Optional[str]
-    type: Optional[str]
-    attributes: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class AuthzAction:
-    id: str
-    attributes: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class AuthorizationContext:
-    user: UserIdentity
-    resource: AuthzResource
-    action: AuthzAction
-
-
 class ServerAuthorizationProvider(Component):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def authorize(self, context: AuthorizationContext) -> bool:
+    def authorize(self,
+                  user: UserIdentity,
+                  action: AuthzAction,
+                  resource: str) -> bool:
         pass
