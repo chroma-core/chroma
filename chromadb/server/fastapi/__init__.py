@@ -342,7 +342,7 @@ class FastAPI(chromadb.server.Server):
     async def create_database(
         self, request: Request, tenant: str = DEFAULT_TENANT
     ) -> None:
-        def process_create_tenant(raw_body: bytes) -> None:
+        def process_create_database(raw_body: bytes) -> None:
             create = CreateDatabase.model_validate(orjson.loads(raw_body))
             return self._api.create_database(create.name, tenant)
 
