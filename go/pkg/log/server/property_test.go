@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"pgregory.net/rapid"
 	"testing"
+	"time"
 )
 
 type ModelState struct {
@@ -114,6 +115,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 					CollectionId:    c.String(),
 					StartFromOffset: startOffset,
 					BatchSize:       batchSize,
+					EndTimestamp:    time.Now().Unix(),
 				})
 				if err != nil {
 					t.Fatal(err)

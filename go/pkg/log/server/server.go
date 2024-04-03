@@ -49,7 +49,7 @@ func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequ
 	if err != nil {
 		return
 	}
-	records, err := s.lr.PullRecords(ctx, collectionID.String(), req.StartFromOffset, int(req.BatchSize))
+	records, err := s.lr.PullRecords(ctx, collectionID.String(), req.StartFromOffset, int(req.BatchSize), int(req.EndTimestamp))
 	if err != nil {
 		return
 	}
