@@ -50,7 +50,7 @@ func RunMigration(ctx context.Context, connectionString string) (err error) {
 
 	_, dir, _, _ := runtime.Caller(0)
 	fmt.Println(dir)
-	cmd.Dir = path.Join(dir, "../")
+	cmd.Dir = path.Join(dir, "../../../")
 	i, err := os.Stat(path.Join(cmd.Dir, "bin/migrate_up_test.sh"))
 	fmt.Println(i)
 	fmt.Println(err)
