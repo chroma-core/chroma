@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Sequence, Optional, Union
 from typing_extensions import Annotated
 import fastapi
 from fastapi import FastAPI as _FastAPI, Response
@@ -145,7 +145,6 @@ class FastAPI(Server):
             self.authn_provider = self._system.require(
                 ServerAuthenticationProvider
             )
-
         if settings.chroma_server_authz_provider:
             self.authz_provider = self._system.require(
                 ServerAuthorizationProvider
@@ -307,7 +306,7 @@ class FastAPI(Server):
 
     def authenticate_and_authorize_or_raise(
         self,
-        auth_headers: Headers,
+        auth_headers: Dict[str, Optional[str]],
         action: AuthzAction,
         tenant: Optional[str],
         database: Optional[str],
@@ -331,7 +330,11 @@ class FastAPI(Server):
         if not self.authn_provider:
             return None
 
-        user_identity = self.authn_provider.authenticate(auth_headers)
+        # TODO this is a hack until we have fastapi requests in all our method
+        # handlers and can pass headers directly.
+        headers = Headers({k: v for k, v in auth_headers.items() if v})
+
+        user_identity = self.authn_provider.authenticate(headers)
         if not user_identity:
             # Something is funky. An authn provider should always return a
             # user identity or raise an exception.
@@ -437,76 +440,128 @@ class FastAPI(Server):
         )
         if overwrite_tenant:
             tenant.name = overwrite_tenant
+
         return self._api.create_tenant(tenant.name)
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET_TENANT,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.TENANT,
-        ),
-    )
-    def get_tenant(self, tenant: str) -> Tenant:
+    def get_tenant(
+        self,
+        tenant: str,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> Tenant:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.GET_TENANT,
+            tenant,
+            None,
+            None,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+
         return self._api.get_tenant(tenant)
 
-    @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.LIST_COLLECTIONS,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.list_collections",
+                  OpenTelemetryGranularity.OPERATION)
     def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Sequence[Collection]:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.LIST_COLLECTIONS,
+            tenant,
+            database,
+            None,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database = overwrite_database
+
         return self._api.list_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
         )
 
-    @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.COUNT_COLLECTIONS,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.count_collections",
+                  OpenTelemetryGranularity.OPERATION)
     def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> int:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.COUNT_COLLECTIONS,
+            tenant,
+            database,
+            None,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database = overwrite_database
+
         return self._api.count_collections(tenant=tenant, database=database)
 
-    @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.CREATE_COLLECTION,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.create_collection",
+                  OpenTelemetryGranularity.OPERATION)
     def create_collection(
         self,
         collection: CreateCollection,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Collection:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.CREATE_COLLECTION,
+            tenant,
+            database,
+            None,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database = overwrite_database
+
         return self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
@@ -516,75 +571,115 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET_COLLECTION,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
     def get_collection(
         self,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Collection:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.GET_COLLECTION,
+            tenant,
+            database,
+            collection_name,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database = overwrite_database
+
         return self._api.get_collection(
             collection_name, tenant=tenant, database=database
         )
 
-    @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.UPDATE_COLLECTION,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
+    @trace_method("FastAPI.update_collection",
+                  OpenTelemetryGranularity.OPERATION)
     def update_collection(
-        self, collection_id: str, collection: UpdateCollection
+        self,
+        collection_id: str,
+        collection: UpdateCollection,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> None:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.UPDATE_COLLECTION,
+            None,
+            None,
+            collection_id,
+        )
+
         return self._api._modify(
             id=_uuid(collection_id),
             new_name=collection.new_name,
             new_metadata=collection.new_metadata,
         )
 
-    @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.DELETE_COLLECTION,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.delete_collection",
+                  OpenTelemetryGranularity.OPERATION)
     def delete_collection(
         self,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
     ) -> None:
+        user_identity = self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.DELETE_COLLECTION,
+            tenant,
+            database,
+            collection_name,
+        )
+        (overwrite_tenant, overwrite_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if overwrite_tenant:
+            tenant = overwrite_tenant
+        if overwrite_database:
+            database = overwrite_database
+
         return self._api.delete_collection(
             collection_name, tenant=tenant, database=database
         )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.ADD,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    def add(self, collection_id: str, add: AddEmbedding) -> None:
+    def add(
+        self,
+        collection_id: str,
+        add: AddEmbedding,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> None:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.DELETE_COLLECTION,
+            None,
+            None,
+            collection_id,
+        )
+
         try:
             result = self._api._add(
                 collection_id=_uuid(collection_id),
@@ -599,15 +694,24 @@ class FastAPI(Server):
         return result  # type: ignore
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.UPDATE,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
+    def update(
+        self,
+        collection_id: str,
+        add: UpdateEmbedding,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> None:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.DELETE_COLLECTION,
+            None,
+            None,
+            collection_id,
+        )
+
         self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
@@ -618,15 +722,24 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.UPSERT,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
+    def upsert(
+        self,
+        collection_id: str,
+        upsert: AddEmbedding,
+        x_chroma_token: Annotated[Union[str, None], Header()] = None,
+        authorization: Annotated[Union[str, None], Header()] = None
+    ) -> None:
+        self.authenticate_and_authorize_or_raise(
+            {
+                "x-chroma-token": x_chroma_token,
+                "authorization": authorization,
+            },
+            AuthzAction.DELETE_COLLECTION,
+            None,
+            None,
+            collection_id,
+        )
+
         self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,

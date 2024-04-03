@@ -3,7 +3,7 @@ from typing import Any, Dict, Generator, Optional, Tuple
 import pytest
 from chromadb import CloudClient
 from chromadb.api import ServerAPI
-from chromadb.auth.token import TokenTransportHeader
+from chromadb.auth.token_authn import TokenTransportHeader
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import AuthorizationError
 
