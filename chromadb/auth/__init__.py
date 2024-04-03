@@ -57,6 +57,15 @@ class UserIdentity:
 
 
 class ServerAuthenticationProvider(Component):
+    """
+    ServerAuthenticationProvider is responsible for authenticating requests. If
+    a ServerAuthenticationProvider is configured, it will be called by the
+    server to authenticate requests. If no ServerAuthenticationProvider is
+    configured, all requests will be authenticated.
+
+    The ServerAuthenticationProvider should return a UserIdentity object if the
+    request is authenticated for use by the ServerAuthorizationProvider.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._ignore_auth_paths: Dict[
@@ -79,6 +88,9 @@ class ServerAuthenticationProvider(Component):
 
 
 class AuthzAction(str, Enum):
+    """
+    The set of actions that can be authorized by the authorization provider.
+    """
     CREATE_DATABASE = "create_database"
     GET_DATABASE = "get_database"
     CREATE_TENANT = "create_tenant"
@@ -101,6 +113,12 @@ class AuthzAction(str, Enum):
 
 
 class ServerAuthorizationProvider(Component):
+    """
+    ServerAuthorizationProvider is responsible for authorizing requests. If a
+    ServerAuthorizationProvider is configured, it will be called by the server
+    to authorize requests. If no ServerAuthorizationProvider is configured, all
+    requests will be authorized.
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
