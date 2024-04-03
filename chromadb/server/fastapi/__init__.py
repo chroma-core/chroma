@@ -141,10 +141,13 @@ class FastAPI(Server):
 
         self._app.on_event("shutdown")(self.shutdown)
 
+        self.authn_provider = None
         if settings.chroma_server_authn_provider:
             self.authn_provider = self._system.require(
                 ServerAuthenticationProvider
             )
+
+        self.authz_provider = None
         if settings.chroma_server_authz_provider:
             self.authz_provider = self._system.require(
                 ServerAuthorizationProvider

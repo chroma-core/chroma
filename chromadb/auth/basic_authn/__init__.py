@@ -40,9 +40,15 @@ class BasicAuthClientProvider(ClientAuthProvider):
 
     @override
     def authenticate(self) -> ClientAuthHeaders:
+        encoded = base64.b64encode(
+        # We do this goofy encode-decode dance to make the type checker happy.
+            f"{self._creds.get_secret_value()}".encode("utf-8")
+        ).decode(
+            "utf-8"
+        )
         return {
             "Authorization": SecretStr(
-                f"Basic {self._creds.get_secret_value()}"
+                f"Basic {encoded}"
             ),
         }
 
@@ -103,16 +109,15 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
             _auth_header = _auth_header.replace("Basic ", "")
             _auth_header = _auth_header.strip()
 
-            base64_decoded = base64.b64decode(_auth_header).decode("us-ascii")
+            base64_decoded = base64.b64decode(_auth_header).decode("utf-8")
             username, password = base64_decoded.split(":")
+            if not username or not password:
+                return None
 
-            _usr_check = bool(
-                username
-                == self._creds["username"]
-            )
+            _usr_check = username in self._creds
             _pwd_check = self.bc.checkpw(
                 password.encode("utf-8"),
-                self._creds["password"].get_secret_value().encode("utf-8"),
+                self._creds[username].get_secret_value().encode("utf-8"),
             )
             if _usr_check and _pwd_check:
                 return UserIdentity(user_id=username)

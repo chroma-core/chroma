@@ -6,8 +6,6 @@ import subprocess
 import tempfile
 import time
 from typing import (
-    Any,
-    Dict,
     Generator,
     Iterator,
     List,
@@ -276,7 +274,7 @@ def basic_http_client() -> Generator[System, None, None]:
     system.stop()
 
 
-def fastapi_server_basic_auth() -> Generator[System, None, None]:
+def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None, None]:
     server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
     with open(server_auth_file, "w") as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
@@ -291,26 +289,16 @@ def fastapi_server_basic_auth() -> Generator[System, None, None]:
     os.remove(server_auth_file)
 
 
-def fastapi_server_basic_auth_param() -> Generator[System, None, None]:
+def fastapi_server_basic_auth_valid_cred_multiple_users() -> Generator[System, None, None]:
+    creds = {
+        "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
+        "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
+        "admin": "$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS",
+    }
     server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
     with open(server_auth_file, "w") as f:
-        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
-        chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-        chroma_client_auth_credentials="admin:admin",
-    ):
-        yield item
-    os.remove(server_auth_file)
-
-
-# TODO we need a generator for auth providers
-def fastapi_server_basic_auth_file() -> Generator[System, None, None]:
-    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
-    with open(server_auth_file, "w") as f:
-        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+        for user, cred in creds.items():
+            f.write(f"{user}:{cred}\n")
     for item in _fastapi_fixture(
         is_persistent=False,
         chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
@@ -399,8 +387,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
 
 def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
-        fastapi_server_basic_auth_param,
-        fastapi_server_basic_auth_file,
+        fastapi_server_basic_auth_valid_cred_single_user,
+        fastapi_server_basic_auth_valid_cred_multiple_users,
     ]
     return fixtures
 
