@@ -38,7 +38,6 @@ def paths_config(
         "/api/v1/count_collections",
         "/api/v1/collections",
     ]))
-    # All these endpoints only accept GETs
     methods_to_ignore = draw(st.lists(
         st.sampled_from(["GET", "POST", "PUT", "DELETE"]),
         min_size=1,
@@ -75,3 +74,40 @@ def test_ignore_paths(
     for path, methods in get_paths.items():
         for method in methods:
             assert not server_authn_provider.ignore_operation(method, path)
+
+
+@st.composite
+def random_user_identity(draw: st.DrawFn) -> UserIdentity:
+    tenant = draw(st.text())
+    databases = draw(st.lists(st.text(), min_size=1, max_size=10))
+    return UserIdentity(
+        user_id=draw(st.text()),
+        tenant=tenant,
+        databases=databases
+    )
+
+
+@settings(max_examples=100)
+@given(st.booleans(), random_user_identity())
+def test_chroma_overwrite_singleton_tenant_database_access_from_auth(
+    api: ServerAPI,
+    overwrite: bool,
+    user: UserIdentity
+) -> None:
+    api._system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth = overwrite
+    server_authn_provider = DummyServerAuthenticationProvider(api._system)
+
+    tenant, database = server_authn_provider.singleton_tenant_database_if_applicable(user)
+    if not overwrite:
+        assert tenant is None
+        assert database is None
+        return
+
+    if user.tenant and len(user.tenant) == 1 and user.tenant[0] != "*":
+        assert tenant == user.tenant[0]
+    else:
+        assert tenant is None
+    if user.databases and len(user.databases) == 1 and user.databases[0] != "*":
+        assert database == user.databases[0]
+    else:
+        assert database is None
