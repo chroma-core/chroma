@@ -16,6 +16,29 @@ def mock_get_for_subject(self, resource: Resource, subject: Optional[str] = "", 
     """Mock function to simulate quota retrieval."""
     return 10
 
+def mock_get_for_subject_none_key_length(self, resource: Resource, subject: Optional[str] = "", tier: Optional[str] = "") -> Optional[
+    int]:
+    """Mock function to simulate quota retrieval."""
+    if resource==Resource.METADATA_KEY_LENGTH:
+        return None
+    else:
+        return 10
+
+def mock_get_for_subject_none_value_length(self, resource: Resource, subject: Optional[str] = "", tier: Optional[str] = "") -> Optional[
+    int]:
+    """Mock function to simulate quota retrieval."""
+    if resource==Resource.METADATA_VALUE_LENGTH:
+        return None
+    else:
+        return 10
+
+def mock_get_for_subject_none_key_value_length(self, resource: Resource, subject: Optional[str] = "", tier: Optional[str] = "") -> Optional[
+    int]:
+    """Mock function to simulate quota retrieval."""
+    if resource==Resource.METADATA_KEY_LENGTH or resource==Resource.METADATA_VALUE_LENGTH:
+        return None
+    else:
+        return 10
 
 def run_static_checks(enforcer: QuotaEnforcer, test_cases: List[Tuple[Any, Optional[str]]], data_key: str):
     """Generalized function to run static checks on different types of data."""
@@ -49,6 +72,35 @@ def test_static_enforcer_metadata(enforcer):
     ]
     run_static_checks(enforcer, test_cases, 'metadatas')
 
+@patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject_none_key_length)
+def test_static_enforcer_metadata_none_key_length(enforcer):
+    test_cases = [
+        ({generate_random_string(20): generate_random_string(5)}, None),
+        ({generate_random_string(5): generate_random_string(5)}, None),
+        ({generate_random_string(5): generate_random_string(20)}, "METADATA_VALUE_LENGTH"),
+        ({generate_random_string(5): generate_random_string(5)}, None)
+    ]
+    run_static_checks(enforcer, test_cases, 'metadatas')
+
+@patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject_none_value_length)
+def test_static_enforcer_metadata_none_value_length(enforcer):
+    test_cases = [
+        ({generate_random_string(20): generate_random_string(5)}, "METADATA_KEY_LENGTH"),
+        ({generate_random_string(5): generate_random_string(5)}, None),
+        ({generate_random_string(5): generate_random_string(20)}, None),
+        ({generate_random_string(5): generate_random_string(5)}, None)
+    ]
+    run_static_checks(enforcer, test_cases, 'metadatas')
+
+@patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject_none_key_value_length)
+def test_static_enforcer_metadata_none_key_value_length(enforcer):
+    test_cases = [
+        ({generate_random_string(20): generate_random_string(5)}, None),
+        ({generate_random_string(5): generate_random_string(5)}, None),
+        ({generate_random_string(5): generate_random_string(20)}, None),
+        ({generate_random_string(5): generate_random_string(5)}, None)
+    ]
+    run_static_checks(enforcer, test_cases, 'metadatas')
 
 @patch('chromadb.quota.test_provider.QuotaProviderForTest.get_for_subject', mock_get_for_subject)
 def test_static_enforcer_documents(enforcer):
