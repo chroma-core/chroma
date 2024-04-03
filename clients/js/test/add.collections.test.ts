@@ -6,6 +6,7 @@ import { IncludeEnum } from "../src/types";
 
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
+import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
 import { AmazonBedrockEmbeddingFunction } from "../src/embeddings/AmazonBedrockEmbeddingFunction";
 
 test("it should add single embeddings to a collection", async () => {
@@ -151,3 +152,30 @@ test("should error on empty embedding", async () => {
     expect(e.message).toMatch("got empty embedding at pos");
   }
 });
+
+if (!process.env.OLLAMA_SERVER_URL) {
+  test.skip("it should use ollama EF, OLLAMA_SERVER_URL not defined", async () => {});
+} else {
+  test("it should use ollama EF", async () => {
+    await chroma.reset();
+    const embedder = new OllamaEmbeddingFunction({
+      url:
+        process.env.OLLAMA_SERVER_URL ||
+        "http://127.0.0.1:11434/api/embeddings",
+      model: "nomic-embed-text",
+    });
+    const collection = await chroma.createCollection({
+      name: "test",
+      embeddingFunction: embedder,
+    });
+    const embeddings = await embedder.generate(DOCUMENTS);
+    await collection.add({ ids: IDS, embeddings: embeddings });
+    const count = await collection.count();
+    expect(count).toBe(3);
+    var res = await collection.get({
+      ids: IDS,
+      include: [IncludeEnum.Embeddings],
+    });
+    expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+  });
+}

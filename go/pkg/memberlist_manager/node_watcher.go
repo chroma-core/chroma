@@ -47,6 +47,7 @@ type KubernetesWatcher struct {
 }
 
 func NewKubernetesWatcher(clientset kubernetes.Interface, coordinator_namespace string, pod_label string, resyncPeriod time.Duration) *KubernetesWatcher {
+	log.Info("Creating new kubernetes watcher", zap.String("namespace", coordinator_namespace), zap.String("pod label", pod_label), zap.Duration("resync period", resyncPeriod))
 	labelSelector := labels.SelectorFromSet(map[string]string{MemberLabel: pod_label})
 	factory := informers.NewSharedInformerFactoryWithOptions(clientset, resyncPeriod, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
 	podInformer := factory.Core().V1().Pods().Informer()
@@ -75,6 +76,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
+				log.Info("Kubernetes Pod Added", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
 				w.mu.Lock()
 				w.ipToKey[ip] = key
@@ -91,6 +93,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
+				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
 				w.ipToKey[ip] = key
 				w.notify(ip)
@@ -105,6 +108,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
+				log.Info("Kubernetes Pod Deleted", zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
 				// The contract for GetStatus is that if the ip is not in this map, then it returns NotReady
 				delete(w.ipToKey, ip)

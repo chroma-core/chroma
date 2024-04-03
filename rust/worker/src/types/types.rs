@@ -1,5 +1,4 @@
 use crate::errors::{ChromaError, ErrorCodes};
-use num_bigint::BigInt;
 use thiserror::Error;
 
 /// A macro for easily implementing match arms for a base error type with common errors.
@@ -32,5 +31,3 @@ impl ChromaError for ConversionError {
         }
     }
 }
-
-pub(crate) type SeqId = BigInt;

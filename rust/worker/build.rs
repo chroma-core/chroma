@@ -1,13 +1,15 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the protobuf files in the chromadb proto directory.
-    tonic_build::configure().compile(
-        &[
-            "../../idl/chromadb/proto/chroma.proto",
-            "../../idl/chromadb/proto/coordinator.proto",
-            "../../idl/chromadb/proto/logservice.proto",
-        ],
-        &["../../idl/"],
-    )?;
+    tonic_build::configure()
+        .emit_rerun_if_changed(true)
+        .compile(
+            &[
+                "../../idl/chromadb/proto/chroma.proto",
+                "../../idl/chromadb/proto/coordinator.proto",
+                "../../idl/chromadb/proto/logservice.proto",
+            ],
+            &["../../idl/"],
+        )?;
 
     // Compile the hnswlib bindings.
     cc::Build::new()
@@ -18,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("-DHAVE_CXX0X")
         .flag("-fpic")
         .flag("-ftree-vectorize")
+        .flag("-w")
         .compile("bindings");
 
     // Set a compile flag based on an environment variable that tells us if we should

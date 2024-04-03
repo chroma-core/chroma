@@ -3,6 +3,8 @@ package dbmodel
 import (
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/model"
+
 	"github.com/chroma-core/chroma/go/pkg/types"
 )
 
@@ -11,15 +13,15 @@ type Segment struct {
 	   This requires us to push down CollectionID from the caller. We don't think there is
 	   need to modify CollectionID in the near future. Each Segment should always have a
 	   collection as a parent and cannot be modified. */
-	CollectionID *string         `gorm:"collection_id;primaryKey"`
-	ID           string          `gorm:"id;primaryKey"`
-	Type         string          `gorm:"type;type:string;not null"`
-	Scope        string          `gorm:"scope"`
-	Topic        *string         `gorm:"topic"`
-	Ts           types.Timestamp `gorm:"ts;type:bigint;default:0"`
-	IsDeleted    bool            `gorm:"is_deleted;type:bool;default:false"`
-	CreatedAt    time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
-	UpdatedAt    time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	CollectionID *string             `gorm:"collection_id;primaryKey"`
+	ID           string              `gorm:"id;primaryKey"`
+	Type         string              `gorm:"type;type:string;not null"`
+	Scope        string              `gorm:"scope"`
+	Ts           types.Timestamp     `gorm:"ts;type:bigint;default:0"`
+	IsDeleted    bool                `gorm:"is_deleted;type:bool;default:false"`
+	CreatedAt    time.Time           `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt    time.Time           `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	FilePaths    map[string][]string `gorm:"file_paths;serializer:json;default:'{}'"`
 }
 
 func (s Segment) TableName() string {
@@ -33,17 +35,16 @@ type SegmentAndMetadata struct {
 
 type UpdateSegment struct {
 	ID              string
-	Topic           *string
-	ResetTopic      bool
 	Collection      *string
 	ResetCollection bool
 }
 
 //go:generate mockery --name=ISegmentDb
 type ISegmentDb interface {
-	GetSegments(id types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*SegmentAndMetadata, error)
+	GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*SegmentAndMetadata, error)
 	DeleteSegmentByID(id string) error
 	Insert(*Segment) error
 	Update(*UpdateSegment) error
 	DeleteAll() error
+	RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error
 }

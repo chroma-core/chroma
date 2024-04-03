@@ -10,6 +10,11 @@ from chromadb.types import Segment
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 import threading
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryGranularity,
+    add_attributes_to_current_span,
+    trace_method,
+)
 
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 
@@ -226,6 +231,11 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     ) -> None:
         raise NotImplementedError()
 
+    @trace_method(
+        "RendezvousHashSegmentDirectory._update_memberlist",
+        OpenTelemetryGranularity.ALL,
+    )
     def _update_memberlist(self, memberlist: Memberlist) -> None:
         with self._curr_memberlist_mutex:
+            add_attributes_to_current_span({"new_memberlist": memberlist})
             self._curr_memberlist = memberlist

@@ -49,39 +49,54 @@ class Vector(_message.Message):
     encoding: ScalarEncoding
     def __init__(self, dimension: _Optional[int] = ..., vector: _Optional[bytes] = ..., encoding: _Optional[_Union[ScalarEncoding, str]] = ...) -> None: ...
 
+class FilePaths(_message.Message):
+    __slots__ = ["paths"]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, paths: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class Segment(_message.Message):
-    __slots__ = ["id", "type", "scope", "topic", "collection", "metadata"]
+    __slots__ = ["id", "type", "scope", "collection", "metadata", "file_paths"]
+    class FilePathsEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: FilePaths
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[FilePaths, _Mapping]] = ...) -> None: ...
     ID_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
+    FILE_PATHS_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
     scope: SegmentScope
-    topic: str
     collection: str
     metadata: UpdateMetadata
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ...) -> None: ...
+    file_paths: _containers.MessageMap[str, FilePaths]
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
 
 class Collection(_message.Message):
-    __slots__ = ["id", "name", "topic", "metadata", "dimension", "tenant", "database"]
+    __slots__ = ["id", "name", "metadata", "dimension", "tenant", "database", "log_position", "version"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
-    TOPIC_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
+    LOG_POSITION_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
-    topic: str
     metadata: UpdateMetadata
     dimension: int
     tenant: str
     database: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
+    log_position: int
+    version: int
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., log_position: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
 
 class Database(_message.Message):
     __slots__ = ["id", "name", "tenant"]
@@ -122,41 +137,35 @@ class UpdateMetadata(_message.Message):
     metadata: _containers.MessageMap[str, UpdateMetadataValue]
     def __init__(self, metadata: _Optional[_Mapping[str, UpdateMetadataValue]] = ...) -> None: ...
 
-class SubmitEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "vector", "metadata", "operation", "collection_id"]
+class OperationRecord(_message.Message):
+    __slots__ = ["id", "vector", "metadata", "operation"]
     ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     OPERATION_FIELD_NUMBER: _ClassVar[int]
-    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     id: str
     vector: Vector
     metadata: UpdateMetadata
     operation: Operation
-    collection_id: str
-    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ..., collection_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
 
 class VectorEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "seq_id", "vector"]
+    __slots__ = ["id", "vector"]
     ID_FIELD_NUMBER: _ClassVar[int]
-    SEQ_ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     id: str
-    seq_id: bytes
     vector: Vector
-    def __init__(self, id: _Optional[str] = ..., seq_id: _Optional[bytes] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class VectorQueryResult(_message.Message):
-    __slots__ = ["id", "seq_id", "distance", "vector"]
+    __slots__ = ["id", "distance", "vector"]
     ID_FIELD_NUMBER: _ClassVar[int]
-    SEQ_ID_FIELD_NUMBER: _ClassVar[int]
     DISTANCE_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     id: str
-    seq_id: bytes
     distance: float
     vector: Vector
-    def __init__(self, id: _Optional[str] = ..., seq_id: _Optional[bytes] = ..., distance: _Optional[float] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., distance: _Optional[float] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class VectorQueryResults(_message.Message):
     __slots__ = ["results"]

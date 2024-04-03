@@ -58,9 +58,9 @@ func (_m *ICollectionDb) DeleteCollectionByID(collectionID string) (int, error) 
 	return r0, r1
 }
 
-// GetCollections provides a mock function with given fields: collectionID, collectionName, collectionTopic, tenantID, databaseName
-func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, collectionTopic *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
-	ret := _m.Called(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+// GetCollections provides a mock function with given fields: collectionID, collectionName, tenantID, databaseName
+func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
+	ret := _m.Called(collectionID, collectionName, tenantID, databaseName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollections")
@@ -68,19 +68,19 @@ func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *st
 
 	var r0 []*dbmodel.CollectionAndMetadata
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*string, *string, *string, string, string) ([]*dbmodel.CollectionAndMetadata, error)); ok {
-		return rf(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+	if rf, ok := ret.Get(0).(func(*string, *string, string, string) ([]*dbmodel.CollectionAndMetadata, error)); ok {
+		return rf(collectionID, collectionName, tenantID, databaseName)
 	}
-	if rf, ok := ret.Get(0).(func(*string, *string, *string, string, string) []*dbmodel.CollectionAndMetadata); ok {
-		r0 = rf(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+	if rf, ok := ret.Get(0).(func(*string, *string, string, string) []*dbmodel.CollectionAndMetadata); ok {
+		r0 = rf(collectionID, collectionName, tenantID, databaseName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.CollectionAndMetadata)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*string, *string, *string, string, string) error); ok {
-		r1 = rf(collectionID, collectionName, collectionTopic, tenantID, databaseName)
+	if rf, ok := ret.Get(1).(func(*string, *string, string, string) error); ok {
+		r1 = rf(collectionID, collectionName, tenantID, databaseName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -122,6 +122,34 @@ func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	}
 
 	return r0
+}
+
+// UpdateLogPositionAndVersion provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion
+func (_m *ICollectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateLogPositionAndVersion")
+	}
+
+	var r0 int32
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, int64, int32) (int32, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion)
+	}
+	if rf, ok := ret.Get(0).(func(string, int64, int32) int32); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion)
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, int64, int32) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewICollectionDb creates a new instance of ICollectionDb. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

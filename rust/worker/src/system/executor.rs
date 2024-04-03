@@ -53,6 +53,14 @@ where
     }
 
     pub(super) async fn run(&mut self, mut channel: tokio::sync::mpsc::Receiver<Wrapper<C>>) {
+        self.handler
+            .on_start(&ComponentContext {
+                system: self.inner.system.clone(),
+                sender: self.inner.sender.clone(),
+                cancellation_token: self.inner.cancellation_token.clone(),
+                scheduler: self.inner.scheduler.clone(),
+            })
+            .await;
         loop {
             select! {
                 _ = self.inner.cancellation_token.cancelled() => {

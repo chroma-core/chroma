@@ -17,7 +17,7 @@ pub(crate) enum ComponentState {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum ComponentRuntime {
-    Global,
+    Inherit,
     Dedicated,
 }
 
@@ -30,12 +30,13 @@ pub(crate) enum ComponentRuntime {
 /// # Methods
 /// - queue_size: The size of the queue to use for the component before it starts dropping messages
 /// - on_start: Called when the component is started
+#[async_trait]
 pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn queue_size(&self) -> usize;
     fn runtime() -> ComponentRuntime {
-        ComponentRuntime::Global
+        ComponentRuntime::Inherit
     }
-    fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -166,12 +167,13 @@ mod tests {
     }
     impl StreamHandler<usize> for TestComponent {}
 
+    #[async_trait]
     impl Component for TestComponent {
         fn queue_size(&self) -> usize {
             self.queue_size
         }
 
-        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }
@@ -179,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_can_work() {
-        let mut system = System::new();
+        let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let mut handle = system.start_component(component);

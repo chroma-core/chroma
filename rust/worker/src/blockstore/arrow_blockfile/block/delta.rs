@@ -202,6 +202,7 @@ impl BlockDeltaInner {
             Value::Int32ArrayValue(arr) => acc + arr.len(),
             Value::StringValue(s) => acc + s.len(),
             Value::RoaringBitmapValue(bitmap) => acc + bitmap.serialized_size(),
+            Value::UintValue(_) => acc + 1,
             _ => unimplemented!("Value type not implemented"),
         })
     }
@@ -238,6 +239,7 @@ impl BlockDeltaInner {
             ValueType::Int32Array | ValueType::String | ValueType::RoaringBitmap => {
                 bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
             }
+            ValueType::Uint => 0,
             _ => unimplemented!("Value type not implemented"),
         }
     }
@@ -245,7 +247,7 @@ impl BlockDeltaInner {
     fn offset_size_for_key_type(&self, item_count: usize, key_type: KeyType) -> usize {
         match key_type {
             KeyType::String => bit_util::round_upto_multiple_of_64((item_count + 1) * 4),
-            KeyType::Float => 0,
+            KeyType::Float | KeyType::Uint => 0,
             _ => unimplemented!("Key type not implemented"),
         }
     }
@@ -429,7 +431,23 @@ mod test {
         let size = delta.get_size();
         let block_data = BlockData::try_from(&delta).unwrap();
         assert_eq!(size, block_data.get_size());
+    }
 
-        let (split_key, delta) = delta.split(&block_provider);
+    #[test]
+    fn test_sizing_uint_key_val() {
+        let block_provider = ArrowBlockProvider::new();
+        let block = block_provider.create_block(KeyType::Uint, ValueType::Uint);
+        let delta = BlockDelta::from(block.clone());
+
+        let n = 2000;
+        for i in 0..n {
+            let key = BlockfileKey::new("prefix".to_string(), Key::Uint(i as u32));
+            let value = Value::UintValue(i as u32);
+            delta.add(key, value);
+        }
+
+        let size = delta.get_size();
+        let block_data = BlockData::try_from(&delta).unwrap();
+        assert_eq!(size, block_data.get_size());
     }
 }

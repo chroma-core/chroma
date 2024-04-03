@@ -98,7 +98,7 @@ func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 	err := s.coordinator.SetTenantLastCompactionTime(ctx, req.TenantLastCompactionTime.TenantId, req.TenantLastCompactionTime.LastCompactionTime)
 	if err != nil {
 		log.Error("error SetTenantLastCompactionTime", zap.Any("request", req.TenantLastCompactionTime), zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error SetTenantLastCompactionTime")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -109,7 +109,7 @@ func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 	tenants, err := s.coordinator.GetTenantsLastCompactionTime(ctx, tenantIDs)
 	if err != nil {
 		log.Error("error GetLastCompactionTimeForTenant", zap.Any("tenantIDs", tenantIDs), zap.Error(err))
-		return nil, grpcutils.BuildInternalGrpcError("error GetTenantsLastCompactionTime")
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	for _, tenant := range tenants {
 		res.TenantLastCompactionTime = append(res.TenantLastCompactionTime, &coordinatorpb.TenantLastCompactionTime{

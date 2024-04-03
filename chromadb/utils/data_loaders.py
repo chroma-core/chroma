@@ -1,8 +1,8 @@
 import importlib
 import multiprocessing
-from typing import Optional, Sequence, List
+from typing import Optional, Sequence, List, Tuple
 import numpy as np
-from chromadb.api.types import URI, DataLoader, Image
+from chromadb.api.types import URI, DataLoader, Image, URIs
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -22,3 +22,10 @@ class ImageLoader(DataLoader[List[Optional[Image]]]):
     def __call__(self, uris: Sequence[Optional[URI]]) -> List[Optional[Image]]:
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             return list(executor.map(self._load_image, uris))
+
+
+class ChromaLangchainPassthroughDataLoader(DataLoader[List[Optional[Image]]]):
+    # This is a simple pass through data loader that just returns the input data with "images"
+    # flag which lets the langchain embedding function know that the data is image uris
+    def __call__(self, uris: URIs) -> Tuple[str, URIs]:  # type: ignore
+        return ("images", uris)
