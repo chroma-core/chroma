@@ -53,6 +53,7 @@ func RunMigration(ctx context.Context, connectionString string) (err error) {
 	i, err := os.Stat(path.Join(cmd.Dir, "bin/migrate_up_test.sh"))
 	fmt.Println(i)
 	fmt.Println(err)
+
 	fmt.Println(cmd.Dir)
 	byte, err := cmd.CombinedOutput()
 	fmt.Println(err)
