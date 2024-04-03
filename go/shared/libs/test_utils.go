@@ -51,6 +51,8 @@ func RunMigration(ctx context.Context, connectionString string) (err error) {
 
 	cmd.Dir = path.Join(dir, "../../../")
 	byte, err := cmd.Output()
+	fmt.Println("MIGRATION")
+	fmt.Println(err)
 	fmt.Println(string(byte))
 	return
 }
