@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "worker"
-path = "src/bin/worker.rs"
+name = "query_service"
+path = "src/bin/query_service.rs"
+
+[[bin]]
+name = "compaction_service"
+path = "src/bin/compaction_service.rs"
 
 [dependencies]
 tonic = "0.10"
@@ -25,7 +29,6 @@ num_cpus = "1.16.0"
 pulsar = "6.1.0"
 murmur3 = "0.5.2"
 thiserror = "1.0.50"
-num-bigint = "0.4.4"
 tempfile = "3.8.1"
 schemars = "0.8.16"
 kube = { version = "0.87.1", features = ["runtime", "derive"] }
@@ -35,6 +38,14 @@ parking_lot = "0.12.1"
 aws-sdk-s3 = "1.5.0"
 aws-smithy-types = "1.1.0"
 aws-config = { version = "1.1.2", features = ["behavior-version-latest"] }
+arrow = "50.0.0"
+roaring = "0.10.3"
+tantivy = "0.21.1"
+
+[dev-dependencies]
+proptest = "1.4.0"
+proptest-state-machine = "0.1.0"
+"rand" = "0.8.5"
 
 [build-dependencies]
 tonic-build = "0.10"

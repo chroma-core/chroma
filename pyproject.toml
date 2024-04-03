@@ -24,7 +24,6 @@ dependencies = [
   'numpy >= 1.22.5',
   'posthog >= 2.4.0',
   'typing_extensions >= 4.5.0',
-  'pulsar-client>=3.1.0',
   'onnxruntime >= 1.14.1',
   'opentelemetry-api>=1.2.0',
   'opentelemetry-exporter-otlp-proto-grpc>=1.2.0',
@@ -43,6 +42,7 @@ dependencies = [
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
   'mmh3>=4.0.1',
+  'orjson>=3.9.12',
 ]
 
 [tool.black]
