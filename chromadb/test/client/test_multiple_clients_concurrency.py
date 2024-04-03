@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from time import sleep
 
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import DEFAULT_TENANT

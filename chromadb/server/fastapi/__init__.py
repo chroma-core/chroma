@@ -2,11 +2,10 @@ from typing import Any, Callable, Dict, List, Sequence, Optional, cast
 import fastapi
 import orjson
 
-# https://anyio.readthedocs.io/en/stable/threads.html#adjusting-the-default-maximum-worker-thread-count
 from anyio import (
     to_thread,
     CapacityLimiter,
-)  # this is used to transform sync code to async. By default, AnyIO uses 40 threads pool
+)
 from fastapi import FastAPI as _FastAPI, Response, Request
 from fastapi.responses import JSONResponse, ORJSONResponse
 
@@ -346,8 +345,8 @@ class FastAPI(chromadb.server.Server):
             create = CreateDatabase.model_validate(orjson.loads(raw_body))
             return self._api.create_database(create.name, tenant)
 
-        return await to_thread.run_sync(  # type: ignore
-            process_create_tenant,
+        await to_thread.run_sync(
+            process_create_database,
             await request.body(),
             limiter=self._capacity_limiter,
         )
@@ -366,11 +365,14 @@ class FastAPI(chromadb.server.Server):
     async def get_database(
         self, database: str, tenant: str = DEFAULT_TENANT
     ) -> Database:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.get_database,
-            database,
-            tenant,
-            limiter=self._capacity_limiter,
+        return cast(
+            Database,
+            await to_thread.run_sync(
+                self._api.get_database,
+                database,
+                tenant,
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
@@ -385,7 +387,7 @@ class FastAPI(chromadb.server.Server):
             create = CreateTenant.model_validate(orjson.loads(raw_body))
             return self._api.create_tenant(create.name)
 
-        return await to_thread.run_sync(  # type: ignore
+        await to_thread.run_sync(
             process_create_tenant,
             await request.body(),
             limiter=self._capacity_limiter,
@@ -400,10 +402,13 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def get_tenant(self, tenant: str) -> Tenant:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.get_tenant,
-            tenant,
-            limiter=self._capacity_limiter,
+        return cast(
+            Tenant,
+            await to_thread.run_sync(
+                self._api.get_tenant,
+                tenant,
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
@@ -424,13 +429,16 @@ class FastAPI(chromadb.server.Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.list_collections,
-            limit,
-            offset,
-            tenant,
-            database,
-            limiter=self._capacity_limiter,
+        return cast(
+            Sequence[Collection],
+            await to_thread.run_sync(
+                self._api.list_collections,
+                limit,
+                offset,
+                tenant,
+                database,
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
@@ -449,11 +457,14 @@ class FastAPI(chromadb.server.Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.count_collections,
-            tenant,
-            database,
-            limiter=self._capacity_limiter,
+        return cast(
+            int,
+            await to_thread.run_sync(
+                self._api.count_collections,
+                tenant,
+                database,
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
@@ -483,10 +494,13 @@ class FastAPI(chromadb.server.Server):
                 database=database,
             )
 
-        return await to_thread.run_sync(  # type: ignore
-            process_create_collection,
-            await request.body(),
-            limiter=self._capacity_limiter,
+        return cast(
+            Collection,
+            await to_thread.run_sync(
+                process_create_collection,
+                await request.body(),
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -506,15 +520,18 @@ class FastAPI(chromadb.server.Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.get_collection,
-            collection_name,
-            None,
-            None,
-            None,
-            tenant,
-            database,
-            limiter=self._capacity_limiter,
+        return cast(
+            Collection,
+            await to_thread.run_sync(
+                self._api.get_collection,
+                collection_name,
+                None,
+                None,
+                None,
+                tenant,
+                database,
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
@@ -535,7 +552,7 @@ class FastAPI(chromadb.server.Server):
                 new_metadata=update.new_metadata,
             )
 
-        return await to_thread.run_sync(  # type: ignore
+        await to_thread.run_sync(
             process_update_collection,
             await request.body(),
             limiter=self._capacity_limiter,
@@ -558,7 +575,7 @@ class FastAPI(chromadb.server.Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        return await to_thread.run_sync(  # type: ignore
+        await to_thread.run_sync(
             self._api.delete_collection,
             collection_name,
             tenant,
@@ -589,14 +606,13 @@ class FastAPI(chromadb.server.Server):
                     uris=add.uris,  # type: ignore
                 )
 
-            result = await to_thread.run_sync(
+            await to_thread.run_sync(
                 process_add,
                 await request.body(),
                 limiter=self._capacity_limiter,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
-        return result  # type: ignore
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -722,10 +738,13 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def count(self, collection_id: str) -> int:
-        return await to_thread.run_sync(  # type: ignore
-            self._api._count,
-            _uuid(collection_id),
-            limiter=self._capacity_limiter,
+        return cast(
+            int,
+            await to_thread.run_sync(
+                self._api._count,
+                _uuid(collection_id),
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
@@ -737,9 +756,12 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     async def reset(self) -> bool:
-        return await to_thread.run_sync(  # type: ignore
-            self._api.reset,
-            limiter=self._capacity_limiter,
+        return cast(
+            bool,
+            await to_thread.run_sync(
+                self._api.reset,
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
@@ -767,7 +789,7 @@ class FastAPI(chromadb.server.Server):
 
         nnresult = cast(
             QueryResult,
-            await to_thread.run_sync(  # we don't block main thread here
+            await to_thread.run_sync(
                 process_query,
                 await request.body(),
                 limiter=self._capacity_limiter,
@@ -781,7 +803,10 @@ class FastAPI(chromadb.server.Server):
                 "max_batch_size": self._api.max_batch_size,
             }
 
-        return await to_thread.run_sync(  # type: ignore
-            process_pre_flight_checks,
-            limiter=self._capacity_limiter,
+        return cast(
+            Dict[str, Any],
+            await to_thread.run_sync(
+                process_pre_flight_checks,
+                limiter=self._capacity_limiter,
+            ),
         )
