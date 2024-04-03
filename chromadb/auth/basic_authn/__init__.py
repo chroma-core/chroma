@@ -40,8 +40,8 @@ class BasicAuthClientProvider(ClientAuthProvider):
 
     @override
     def authenticate(self) -> ClientAuthHeaders:
-        encoded = base64.b64encode(
         # We do this goofy encode-decode dance to make the type checker happy.
+        encoded = base64.b64encode(
             f"{self._creds.get_secret_value()}".encode("utf-8")
         ).decode(
             "utf-8"

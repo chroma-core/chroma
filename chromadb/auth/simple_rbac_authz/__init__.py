@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
+    """
+    TODOBEN
+    """
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings

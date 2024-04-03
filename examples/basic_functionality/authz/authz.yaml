@@ -99,6 +99,10 @@ roles_mapping:
         "collection:count",
       ]
     resources: ["<UUID>"] #not yet supported
+
+# users config is used by both TokenAuthenticationServerProvider and
+# SimpleRBACAuthorizationServerProvider. They both expect users to look the
+# same to make configuration easier.
 users:
   - id: user@example.com
     role: admin
