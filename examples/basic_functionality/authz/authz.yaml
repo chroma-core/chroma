@@ -98,15 +98,14 @@ roles_mapping:
         "collection:peek",
         "collection:count",
       ]
-    resources: ["<UUID>"] #not yet supported
 
-# users config is used by both TokenAuthenticationServerProvider and
-# SimpleRBACAuthorizationServerProvider. They both expect users to look the
-# same to make configuration easier.
+# `users` config is used by both TokenAuthenticationServerProvider and
+# SimpleRBACAuthorizationServerProvider.
+# - TokenAuthenticationProvider only needs the id and tokens.
+# - SimpleRBACAuthorizationProvider only needs the id and the role.
 users:
   - id: user@example.com
     role: admin
-    tenant: my_tenant
     tokens:
       - test-token-admin
   - id: Anonymous

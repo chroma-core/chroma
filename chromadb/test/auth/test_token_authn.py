@@ -10,13 +10,13 @@ from chromadb.test.conftest import _fastapi_fixture
 from chromadb.test.auth.utils import (
   random_token,
   random_token_transport_header,
-  users_with_tokens_and_valid_user
+  users_with_tokens
 )
 
 
 @settings(max_examples=10)
 @given(
-    users_with_tokens_and_valid_user(),
+    users_with_tokens(),
     random_token_transport_header(),
     st.booleans()
 )
@@ -46,7 +46,7 @@ def test_fastapi_server_token_authn_allows_when_it_should_allow(
 
 @settings(max_examples=10)
 @given(
-    users_with_tokens_and_valid_user(),
+    users_with_tokens(),
     random_token(),
     random_token_transport_header(),
     st.booleans()

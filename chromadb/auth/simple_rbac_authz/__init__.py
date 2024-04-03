@@ -21,7 +21,13 @@ logger = logging.getLogger(__name__)
 
 class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     """
-    TODOBEN
+    A simple Role-Based Access Control (RBAC) authorization provider. This
+    provider reads a configuration file that maps users to roles, and roles to
+    actions. The provider then checks if the user has the action they are
+    attempting to perform.
+
+    For an example of an RBAC configuration file, see
+    examples/basic_functionality/authz/authz.yaml.
     """
     def __init__(self, system: System) -> None:
         super().__init__(system)
