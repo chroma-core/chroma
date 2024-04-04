@@ -75,7 +75,11 @@ type GetRecordsForCollectionParams struct {
 	CollectionID string
 	Offset       int64
 	Limit        int32
+<<<<<<< HEAD
 	Timestamp    int32
+=======
+	Timestamp    int64
+>>>>>>> 1592cb3a (add server)
 }
 
 func (q *Queries) GetRecordsForCollection(ctx context.Context, arg GetRecordsForCollectionParams) ([]RecordLog, error) {
