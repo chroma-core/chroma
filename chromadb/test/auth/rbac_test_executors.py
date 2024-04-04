@@ -5,6 +5,7 @@ import hypothesis.strategies as st
 from typing import Callable, Dict
 
 from chromadb.api import AdminAPI, ServerAPI
+from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 
 # Each of these accepts four clients:
 # 1. The data plane client with credentials of the user under test.
@@ -23,7 +24,6 @@ def _create_tenant_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     tenant = data.draw(
@@ -41,18 +41,9 @@ def _get_tenant_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
-    root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
-    root_admin_api.create_tenant(tenant)
-    admin_api.get_tenant(tenant)
+    admin_api.get_tenant(DEFAULT_TENANT)
 
 
 @given(st.data())
@@ -60,17 +51,8 @@ def _create_database_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
-    root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
-    root_admin_api.create_tenant(tenant)
     database = data.draw(
         st.text(
             alphabet=string.ascii_letters,
@@ -78,7 +60,7 @@ def _create_database_executor(
             max_size=20
         )
     )
-    admin_api.create_database(tenant, database)
+    admin_api.create_database(DEFAULT_TENANT, database)
 
 
 @given(st.data())
@@ -86,33 +68,15 @@ def _get_database_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
-    root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
-    root_admin_api.create_tenant(tenant)
-    database = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
-    root_admin_api.create_database(tenant, database)
-    admin_api.get_database(tenant, database)
+    admin_api.get_database(DEFAULT_DATABASE, DEFAULT_TENANT)
 
 
 def _reset_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     _root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
 ) -> None:
     api.reset()
 
@@ -122,7 +86,6 @@ def _list_collections_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     _root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     api.list_collections()
@@ -133,7 +96,6 @@ def _get_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -152,7 +114,6 @@ def _create_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     _root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -170,7 +131,6 @@ def _get_or_create_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     _root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -188,7 +148,6 @@ def _delete_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     _root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -206,7 +165,6 @@ def _update_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -226,7 +184,6 @@ def _add_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -246,7 +203,6 @@ def _delete_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -267,7 +223,6 @@ def _get_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -288,7 +243,6 @@ def _query_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -309,7 +263,6 @@ def _peek_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -330,7 +283,6 @@ def _count_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -351,7 +303,6 @@ def _update_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -372,7 +323,6 @@ def _upsert_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
     root_api: ServerAPI,
-    _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -390,7 +340,7 @@ def _upsert_executor(
 
 api_executors: Dict[
         str,
-        Callable[[ServerAPI, AdminAPI, ServerAPI, AdminAPI], None]] = {
+        Callable[[ServerAPI, AdminAPI, ServerAPI], None]] = {
     "system:reset": _reset_executor,
     "tenant:create_tenant": _create_tenant_executor,
     "tenant:get_tenant": _get_tenant_executor,

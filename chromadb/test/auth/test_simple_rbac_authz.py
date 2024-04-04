@@ -30,7 +30,7 @@ def client_and_admin_client(
     return api, admin_api
 
 
-@settings(max_examples=1, phases=[Phase.generate, Phase.target])
+@settings(max_examples=10, phases=[Phase.generate, Phase.target])
 @given(
     rbac_test_conf(),
     st.booleans(),
@@ -71,8 +71,7 @@ def test_token_authn_rbac_authz(
         )
         sys: System = next(api_fixture)
         sys.reset_state()
-
-        api, admin_api = client_and_admin_client(sys.settings)
+        api = sys.instance(ServerAPI)
 
         root_settings = Settings(**dict(sys.settings))
         root_user = [
@@ -81,7 +80,7 @@ def test_token_authn_rbac_authz(
         root_settings.chroma_client_auth_credentials = root_user[
             "tokens"
         ][0]
-        root_api, root_admin_api = client_and_admin_client(root_settings)
+        root_api, admin_api = client_and_admin_client(root_settings)
 
         role_matches = [
             r for r in rbac_conf["roles"] if r["id"] == user["role"]]
@@ -93,7 +92,6 @@ def test_token_authn_rbac_authz(
                 api,
                 admin_api,
                 root_api,
-                root_admin_api
             )
 
         for unauthorized_action in unauthorized_actions(role["actions"]):
@@ -102,6 +100,5 @@ def test_token_authn_rbac_authz(
                     api,
                     admin_api,
                     root_api,
-                    root_admin_api
                 )
                 assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
