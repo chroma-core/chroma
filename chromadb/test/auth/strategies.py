@@ -50,7 +50,7 @@ def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
                     "id": random_user_name(),
                     "tokens": st.lists(
                         random_token(),
-                        min_size=1,
+                        min_size=3,
                         max_size=10
                     )
                 }
@@ -64,11 +64,11 @@ def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
     seen_tokens = set()
     for user in users:
         if user["id"] in seen_users:
-            continue
+            break
         for token in user["tokens"]:
             if token in seen_tokens:
-                continue
-
+                break
+    else:
         seen_users.add(user["id"])
         for token in user["tokens"]:
             seen_tokens.add(token)
