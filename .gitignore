@@ -3,7 +3,6 @@
 
 **/__pycache__
 
-go/bin/
 go/**/testdata/
 go/coordinator/bin/
 

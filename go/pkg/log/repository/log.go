@@ -60,11 +60,12 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	return
 }
 
-func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, offset int64, batchSize int) (records []log.RecordLog, err error) {
+func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, offset int64, batchSize int, timestamp int) (records []log.RecordLog, err error) {
 	records, err = r.queries.GetRecordsForCollection(ctx, log.GetRecordsForCollectionParams{
 		CollectionID: collectionId,
 		Offset:       offset,
 		Limit:        int32(batchSize),
+		Timestamp:    int32(timestamp),
 	})
 	return
 }
