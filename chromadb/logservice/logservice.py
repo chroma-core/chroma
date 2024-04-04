@@ -1,7 +1,7 @@
 import sys
 
 import grpc
-
+import time
 from chromadb.ingest import (
     Producer,
     Consumer,
@@ -154,7 +154,7 @@ class LogService(Producer, Consumer):
             collection_id=str(collection_id),
             start_from_offset=start_offset,
             batch_size=batch_size,
-            end_timestamp=-1,
+            end_timestamp=time.time_ns(),
         )
         response = self._log_service_stub.PullLogs(request)
         return response.records  # type: ignore
