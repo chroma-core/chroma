@@ -57,7 +57,7 @@ def test_fastapi_server_token_authn_rejects_when_it_should_reject(
     transport_header: str,
     persistence: bool
 ) -> None:
-    # Make sure we didn't hit the extremely rare case of a valid token.
+    # Make sure we actually have an unauthorized token
     for user in tconf["users"]:
         for t in user["tokens"]:
             if t == unauthorized_token:
@@ -76,5 +76,6 @@ def test_fastapi_server_token_authn_rejects_when_it_should_reject(
     with pytest.raises(Exception) as e:
         _sys: System = next(api)
         _sys.reset_state()
-        _sys.instance(ServerAPI)
+        api = _sys.instance(ServerAPI)
+        api.get_collection("test")
     assert "Unauthorized" in str(e)
