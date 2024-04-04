@@ -22,7 +22,7 @@ from chromadb.auth import (
 )
 from chromadb.api import ServerAPI
 from chromadb.api.client import Client
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.test.conftest import (
   fastapi_fixture_admin_and_singleton_tenant_db_user
 )
@@ -43,8 +43,8 @@ from chromadb.test.property.test_collections_with_database_tenant import (
 class SingletonTenantDatabaseCollectionStateMachine(
     TenantDatabaseCollectionStateMachine
 ):
-    def __init__(self, client: Client) -> None:
-        super().__init__(client)
+    def __init__(self, singleton_client: Client, root_client: Client) -> None:
+        super().__init__(root_client)
 
     @initialize()
     def initialize(self) -> None:
@@ -59,10 +59,17 @@ def test_collections_with_tenant_database_overwrite(
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
     sys.reset_state()
-    api = sys.instance(ServerAPI)
-    api.heartbeat()
     client = Client.from_system(sys)
 
+    root_settings = Settings(**dict(sys.settings))
+    root_settings.chroma_client_auth_credentials = "admin-token"
+    system = System(root_settings)
+    system.start()
+    root_client = Client.from_system(system)
+
     run_state_machine_as_test(
-        lambda: SingletonTenantDatabaseCollectionStateMachine(client)
+        lambda: SingletonTenantDatabaseCollectionStateMachine(
+            client,
+            root_client,
+        )
     )  # type: ignore

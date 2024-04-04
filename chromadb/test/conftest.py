@@ -400,7 +400,7 @@ users:
         chroma_overwrite_singleton_tenant_database_access_from_auth=True,
 
         chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials="admin-token",
+        chroma_client_auth_credentials="singleton-token",
 
         chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
         chroma_server_authn_credentials_file=server_authn_file,
