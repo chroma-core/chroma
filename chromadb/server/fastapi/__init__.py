@@ -339,8 +339,6 @@ class FastAPI(Server):
 
         user_identity = self.authn_provider.authenticate(headers)
         if not user_identity:
-            # Something is funky. An authn provider should always return a
-            # user identity or raise an exception.
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         if not self.authz_provider:

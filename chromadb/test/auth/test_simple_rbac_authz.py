@@ -1,4 +1,4 @@
-from hypothesis import given, settings
+from hypothesis import given, Phase, settings
 import hypothesis.strategies as st
 import pytest
 from typing import Dict, Any, Tuple
@@ -21,16 +21,16 @@ def test_basic_authn_rbac_authz_unit_test(
 
 
 def client_and_admin_client(
-    _settings: Settings
+    settings: Settings
 ) -> Tuple[ServerAPI, AdminAPI]:
-    system = System(_settings)
+    system = System(settings)
     api = system.instance(ServerAPI)
     admin_api = AdminClient(api.get_settings())
     system.start()
     return api, admin_api
 
 
-@settings(max_examples=1)
+@settings(max_examples=1, phases=[Phase.generate, Phase.target])
 @given(
     rbac_test_conf(),
     st.booleans(),
@@ -43,49 +43,60 @@ def test_token_authn_rbac_authz(
     header: str | None,
     data: Any
 ) -> None:
-    api_fixture = _fastapi_fixture(
-        is_persistent=persistence,
-        chroma_auth_token_transport_header=header,
-        chroma_client_auth_credentials="unused",
-        chroma_client_auth_provider="chromadb.auth."
-        "token_authn.TokenAuthClientProvider",
-
-        chroma_server_authn_provider="chromadb.auth.token_authn."
-        "TokenAuthenticationServerProvider",
-        chroma_server_authn_credentials_file=rbac_conf["filename"],
-        chroma_server_authz_provider="chromadb.auth.simple_rbac_authz."
-        "SimpleRBACAuthorizationProvider",
-        chroma_server_authz_config_file=rbac_conf["filename"],
-    )
-    sys: System = next(api_fixture)
-    sys.reset_state()
-
-    root_settings = Settings(**dict(sys.settings))
-    root_user = [
-        user for user in rbac_conf["users"] if user["id"] == "__root__"
-    ][0]
-    root_settings.chroma_client_auth_credentials = root_user[
-        "tokens"
-    ][0]["token"]
-    root_api, root_admin_api = client_and_admin_client(root_settings)
-
     for user in rbac_conf["users"]:
         if user["id"] == "__root__":
             break
 
-        token_index = data.draw(min_value=0, max_value=len(user["tokens"]) - 1)
-        token = user["tokens"][token_index]["token"]
+        token_index = data.draw(
+            st.integers(
+                min_value=0,
+                max_value=len(user["tokens"]) - 1
+            )
+        )
+        token = user["tokens"][token_index]
 
-        settings = Settings(**dict(sys.settings))
-        settings.chroma_client_auth_credentials = token
-        api, admin_api = client_and_admin_client(settings)
+        api_fixture = _fastapi_fixture(
+            is_persistent=persistence,
+            chroma_auth_token_transport_header=header,
+            chroma_client_auth_credentials=token,
+            chroma_client_auth_provider="chromadb.auth."
+            "token_authn.TokenAuthClientProvider",
 
-        for action in rbac_conf["roles_mapping"][user["role"]]["actions"]:
-            api_executors[action](api, admin_api, root_api, root_admin_api)
+            chroma_server_authn_provider="chromadb.auth.token_authn."
+            "TokenAuthenticationServerProvider",
+            chroma_server_authn_credentials_file=rbac_conf["filename"],
+            chroma_server_authz_provider="chromadb.auth.simple_rbac_authz."
+            "SimpleRBACAuthorizationProvider",
+            chroma_server_authz_config_file=rbac_conf["filename"],
+        )
+        sys: System = next(api_fixture)
+        sys.reset_state()
 
-        for unauthorized_action in unauthorized_actions(
-            rbac_conf["roles_mapping"][user["role"]]["actions"]
-        ):
+        api, admin_api = client_and_admin_client(sys.settings)
+
+        root_settings = Settings(**dict(sys.settings))
+        root_user = [
+            user for user in rbac_conf["users"] if user["id"] == "__root__"
+        ][0]
+        root_settings.chroma_client_auth_credentials = root_user[
+            "tokens"
+        ][0]
+        root_api, root_admin_api = client_and_admin_client(root_settings)
+
+        role_matches = [
+            r for r in rbac_conf["roles"] if r["id"] == user["role"]]
+        assert len(role_matches) == 1
+        role = role_matches[0]
+
+        for action in role["actions"]:
+            api_executors[action](
+                api,
+                admin_api,
+                root_api,
+                root_admin_api
+            )
+
+        for unauthorized_action in unauthorized_actions(role["actions"]):
             with pytest.raises(Exception) as ex:
                 api_executors[unauthorized_action](
                     api,

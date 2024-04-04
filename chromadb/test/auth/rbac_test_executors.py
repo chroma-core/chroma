@@ -1,7 +1,7 @@
+import string
 from typing import Any
-import uuid
 from hypothesis import given
-from hypothesis.strategies import data
+import hypothesis.strategies as st
 from typing import Callable, Dict
 
 from chromadb.api import AdminAPI, ServerAPI
@@ -18,7 +18,7 @@ from chromadb.api import AdminAPI, ServerAPI
 # test e.g. get_tenant, we have to make sure the tenant exists first.
 
 
-@given(data())
+@given(st.data())
 def _create_tenant_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
@@ -26,11 +26,17 @@ def _create_tenant_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = str(data.draw(uuid.uuid4()))
+    tenant = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     admin_api.create_tenant(tenant)
 
 
-@given(data())
+@given(st.data())
 def _get_tenant_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
@@ -38,12 +44,18 @@ def _get_tenant_executor(
     root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = str(data.draw(uuid.uuid4()))
+    tenant = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_admin_api.create_tenant(tenant)
     admin_api.get_tenant(tenant)
 
 
-@given(data())
+@given(st.data())
 def _create_database_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
@@ -51,13 +63,25 @@ def _create_database_executor(
     root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = str(data.draw(uuid.uuid4()))
+    tenant = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_admin_api.create_tenant(tenant)
-    database = str(data.draw(uuid.uuid4()))
+    database = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     admin_api.create_database(tenant, database)
 
 
-@given(data())
+@given(st.data())
 def _get_database_executor(
     _api: ServerAPI,
     admin_api: AdminAPI,
@@ -65,9 +89,21 @@ def _get_database_executor(
     root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    tenant = str(data.draw(uuid.uuid4()))
+    tenant = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_admin_api.create_tenant(tenant)
-    database = str(data.draw(uuid.uuid4()))
+    database = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_admin_api.create_database(tenant, database)
     admin_api.get_database(tenant, database)
 
@@ -81,7 +117,7 @@ def _reset_executor(
     api.reset()
 
 
-@given(data())
+@given(st.data())
 def _list_collections_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -92,7 +128,7 @@ def _list_collections_executor(
     api.list_collections()
 
 
-@given(data())
+@given(st.data())
 def _get_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -100,12 +136,18 @@ def _get_collection_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_api.create_collection(collection)
     api.get_collection(collection)
 
 
-@given(data())
+@given(st.data())
 def _create_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -113,11 +155,17 @@ def _create_collection_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     api.create_collection(collection)
 
 
-@given(data())
+@given(st.data())
 def _get_or_create_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -125,11 +173,17 @@ def _get_or_create_collection_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     api.get_or_create_collection(collection)
 
 
-@given(data())
+@given(st.data())
 def _delete_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -137,11 +191,17 @@ def _delete_collection_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     api.delete_collection(collection)
 
 
-@given(data())
+@given(st.data())
 def _update_collection_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -149,13 +209,19 @@ def _update_collection_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_api.create_collection(collection)
     col = api.get_collection(collection)
     col.modify(metadata={"foo": "bar"})
 
 
-@given(data())
+@given(st.data())
 def _add_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -163,13 +229,19 @@ def _add_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_api.create_collection(collection)
     col = api.get_collection(collection)
     col.add(ids=["1"], documents=["test document"])
 
 
-@given(data())
+@given(st.data())
 def _delete_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -177,14 +249,20 @@ def _delete_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.delete(ids=["1"])
 
 
-@given(data())
+@given(st.data())
 def _get_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -192,14 +270,20 @@ def _get_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.get(ids=["1"])
 
 
-@given(data())
+@given(st.data())
 def _query_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -207,14 +291,20 @@ def _query_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.query(query_texts=["test query text"])
 
 
-@given(data())
+@given(st.data())
 def _peek_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -222,14 +312,20 @@ def _peek_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.peek()
 
 
-@given(data())
+@given(st.data())
 def _count_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -237,14 +333,20 @@ def _count_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.count()
 
 
-@given(data())
+@given(st.data())
 def _update_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -252,14 +354,20 @@ def _update_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.update(ids=["1"], documents=["different test document"])
 
 
-@given(data())
+@given(st.data())
 def _upsert_executor(
     api: ServerAPI,
     _admin_api: AdminAPI,
@@ -267,7 +375,13 @@ def _upsert_executor(
     _root_admin_api: AdminAPI,
     data: Any
 ) -> None:
-    collection = str(data.draw(uuid.uuid4()))
+    collection = data.draw(
+        st.text(
+            alphabet=string.ascii_letters,
+            min_size=3,
+            max_size=20
+        )
+    )
     root_col = root_api.create_collection(collection)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
@@ -277,11 +391,11 @@ def _upsert_executor(
 api_executors: Dict[
         str,
         Callable[[ServerAPI, AdminAPI, ServerAPI, AdminAPI], None]] = {
+    "system:reset": _reset_executor,
     "tenant:create_tenant": _create_tenant_executor,
     "tenant:get_tenant": _get_tenant_executor,
     "db:create_database": _create_database_executor,
     "db:get_database": _get_database_executor,
-    "db:reset": _reset_executor,
     "db:list_collections": _list_collections_executor,
     "collection:get_collection": _get_collection_executor,
     "collection:create_collection": _create_collection_executor,

@@ -227,11 +227,11 @@ def random_users_and_roles(draw: st.DrawFn) -> Dict[str, Any]:
 
 def _root_user_and_role() -> Dict[str, Any]:
     return {
-        "users": {
+        "users": [{
             "id": "__root__",
             "tokens": ["root"],
             "role": "root"
-        },
+        }],
         "roles": [
             {
                 "id": "root",
@@ -248,7 +248,9 @@ def rbac_test_conf(draw: st.DrawFn) -> Dict[str, Any]:
         "users": users_and_roles["users"],
         "roles_mapping": _transform_roles_for_flush(users_and_roles["roles"])
     })
-    users_and_roles.update(_root_user_and_role())
+    root_user_and_role = _root_user_and_role()
+    users_and_roles["users"].extend(root_user_and_role["users"])
+    users_and_roles["roles"].extend(root_user_and_role["roles"])
     return {
         "users": users_and_roles["users"],
         "roles": users_and_roles["roles"],

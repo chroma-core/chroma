@@ -63,7 +63,7 @@ def test_fastapi_server_token_authn_rejects_when_it_should_reject(
             if t == unauthorized_token:
                 return
 
-    api = _fastapi_fixture(
+    _api = _fastapi_fixture(
         is_persistent=persistence,
         chroma_auth_token_transport_header=transport_header,
 
@@ -73,9 +73,11 @@ def test_fastapi_server_token_authn_rejects_when_it_should_reject(
         chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
         chroma_client_auth_credentials=unauthorized_token,
     )
+    _sys: System = next(_api)
+    _sys.reset_state()
+    api = _sys.instance(ServerAPI)
+    api.heartbeat()
     with pytest.raises(Exception) as e:
-        _sys: System = next(api)
-        _sys.reset_state()
-        api = _sys.instance(ServerAPI)
-        api.get_collection("test")
+        api.list_collections()
+
     assert "Unauthorized" in str(e)
