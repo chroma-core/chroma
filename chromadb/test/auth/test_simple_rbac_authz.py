@@ -74,9 +74,11 @@ def test_token_authn_rbac_authz(
         api = sys.instance(ServerAPI)
 
         root_settings = Settings(**dict(sys.settings))
-        root_user = [
+        root_users = [
             user for user in rbac_conf["users"] if user["id"] == "__root__"
-        ][0]
+        ]
+        assert len(root_users) == 1
+        root_user = root_users[0]
         root_settings.chroma_client_auth_credentials = root_user[
             "tokens"
         ][0]

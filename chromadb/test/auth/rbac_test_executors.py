@@ -38,17 +38,17 @@ def _create_tenant_executor(
 
 @given(st.data())
 def _get_tenant_executor(
-    _api: ServerAPI,
+    api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
-    admin_api.get_tenant(DEFAULT_TENANT)
+    api.get_tenant(DEFAULT_TENANT)
 
 
 @given(st.data())
 def _create_database_executor(
-    _api: ServerAPI,
+    api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
@@ -60,17 +60,17 @@ def _create_database_executor(
             max_size=20
         )
     )
-    admin_api.create_database(DEFAULT_TENANT, database)
+    api.create_database(DEFAULT_TENANT, database)
 
 
 @given(st.data())
 def _get_database_executor(
-    _api: ServerAPI,
+    api: ServerAPI,
     admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
-    admin_api.get_database(DEFAULT_DATABASE, DEFAULT_TENANT)
+    api.get_database(DEFAULT_DATABASE, DEFAULT_TENANT)
 
 
 def _reset_executor(
