@@ -1,131 +1,28 @@
-import json
-import random
-import string
-from typing import Dict, Any, Tuple
-import uuid
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given, settings
-from chromadb import AdminClient
+from typing import Dict, Any, Tuple
 
+from chromadb import AdminClient
 from chromadb.api import AdminAPI, ServerAPI
-from chromadb.api.models.Collection import Collection
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+from chromadb.config import Settings, System
+from chromadb.test.auth.rbac_test_executors import api_executors
+from chromadb.test.auth.strategies import (
+    random_token_transport_header,
+    rbac_test_conf,
+    unauthorized_actions
+)
 from chromadb.test.conftest import _fastapi_fixture
 
 
-
-@st.composite
-def token_config(draw: st.DrawFn) -> Dict[str, Any]:
-    token_header = draw(st.sampled_from(["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
-    server_provider = draw(
-        st.sampled_from(["token", "chromadb.auth.token.TokenAuthenticationServerProvider"])
-    )
-    client_provider = draw(
-        st.sampled_from(["token", "chromadb.auth.token.TokenAuthClientProvider"])
-    )
-    server_authz_provider = draw(
-        st.sampled_from(["chromadb.auth.authz.SimpleRBACAuthorizationProvider"])
-    )
-    server_credentials_provider = draw(st.sampled_from(["user_token_config"]))
-    # _rbac_config = draw(rbac_config())
-    persistence = draw(st.booleans())
-    return {
-        "token_transport_header": token_header,
-        "chroma_server_authn_credentials_file": None,
-        "chroma_server_authn_provider": server_provider,
-        "chroma_client_auth_provider": client_provider,
-        "chroma_server_authz_config_file": None,
-        "chroma_server_auth_credentials_provider": server_credentials_provider,
-        "chroma_server_authz_provider": server_authz_provider,
-        "is_persistent": persistence,
-    }
+def test_basic_authn_rbac_authz_unit_test(
+        api_with_authn_rbac_authz: ServerAPI) -> None:
+    api_with_authn_rbac_authz.create_collection('test')
 
 
-api_executors = {
-    "db:create_database": lambda api, mapi, aapi: (
-        aapi.create_database(f"test-{uuid.uuid4()}")
-    ),
-    "db:get_database": lambda api, mapi, aapi: (aapi.get_database(DEFAULT_DATABASE),),
-    "tenant:create_tenant": lambda api, mapi, aapi: (
-        aapi.create_tenant(f"test-{uuid.uuid4()}")
-    ),
-    "tenant:get_tenant": lambda api, mapi, aapi: (aapi.get_tenant(DEFAULT_TENANT),),
-    "db:reset": lambda api, mapi, _: api.reset(),
-    "db:list_collections": lambda api, mapi, _: api.list_collections(),
-    "collection:get_collection": lambda api, mapi, _: (
-        # pre-condition
-        mcol := mapi.create_collection(f"test-get-{uuid.uuid4()}"),
-        api.get_collection(f"{mcol.name}"),
-    ),
-    "db:create_collection": lambda api, mapi, _: (
-        api.create_collection(f"test-create-{uuid.uuid4()}"),
-    ),
-    "db:get_or_create_collection": lambda api, mapi, _: (
-        api.get_or_create_collection(f"test-get-or-create-{uuid.uuid4()}")
-    ),
-    "collection:delete_collection": lambda api, mapi, _: (
-        # pre-condition
-        mcol := mapi.create_collection(f"test-delete-col-{uuid.uuid4()}"),
-        api.delete_collection(f"{mcol.name}"),
-    ),
-    "collection:update_collection": lambda api, mapi, _: (
-        # pre-condition
-        mcol := mapi.create_collection(f"test-modify-col-{uuid.uuid4()}"),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.modify(metadata={"test": "test"}),
-    ),
-    "collection:add": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-add-doc-{uuid.uuid4()}"),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.add(documents=["test"], ids=["1"]),
-    ),
-    "collection:delete": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-delete-doc-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(client=api, name=f"{mcol.name}", id=mcol.id),
-        col.delete(ids=["1"]),
-    ),
-    "collection:get": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-get-doc-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.get(ids=["1"]),
-    ),
-    "collection:query": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-query-doc-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.query(query_texts=["test"]),
-    ),
-    "collection:peek": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-peek-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.peek(),
-    ),
-    "collection:update": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-update-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.update(ids=["1"], documents=["test1"]),
-    ),
-    "collection:upsert": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-upsert-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.upsert(ids=["1"], documents=["test1"]),
-    ),
-    "collection:count": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-count-{uuid.uuid4()}"),
-        mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"{mcol.name}", mcol.id),
-        col.count(),
-    ),
-}
-
-
-def master_api(_settings: Settings) -> Tuple[ServerAPI, AdminAPI]:
+def client_and_admin_client(
+    _settings: Settings
+) -> Tuple[ServerAPI, AdminAPI]:
     system = System(_settings)
     api = system.instance(ServerAPI)
     admin_api = AdminClient(api.get_settings())
@@ -133,51 +30,67 @@ def master_api(_settings: Settings) -> Tuple[ServerAPI, AdminAPI]:
     return api, admin_api
 
 
-@settings(max_examples=10)
-@given(token_config=token_config(), rbac_config=rbac_config())
-def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
-    authz_config = rbac_config
-    token_config["chroma_server_authz_config"] = rbac_config
-    token_config["chroma_server_auth_credentials"] = json.dumps(rbac_config["users"])
-    random_user = random.choice(
-        [user for user in authz_config["users"] if user["id"] != "__master__"]
+@settings(max_examples=1)
+@given(
+    rbac_test_conf(),
+    st.booleans(),
+    random_token_transport_header(),
+    st.data()
+)
+def test_token_authn_rbac_authz(
+    rbac_conf: Dict[str, Any],
+    persistence: bool,
+    header: str | None,
+    data: Any
+) -> None:
+    api_fixture = _fastapi_fixture(
+        is_persistent=persistence,
+        chroma_auth_token_transport_header=header,
+        chroma_client_auth_credentials="unused",
+        chroma_client_auth_provider="chromadb.auth."
+        "token_authn.TokenAuthClientProvider",
+
+        chroma_server_authn_provider="chromadb.auth.token_authn."
+        "TokenAuthenticationServerProvider",
+        chroma_server_authn_credentials_file=rbac_conf["filename"],
+        chroma_server_authz_provider="chromadb.auth.simple_rbac_authz."
+        "SimpleRBACAuthorizationProvider",
+        chroma_server_authz_config_file=rbac_conf["filename"],
     )
-    _master_user = [
-        user for user in authz_config["users"] if user["id"] == "__master__"
+    sys: System = next(api_fixture)
+    sys.reset_state()
+
+    root_settings = Settings(**dict(sys.settings))
+    root_user = [
+        user for user in rbac_conf["users"] if user["id"] == "__root__"
     ][0]
-    random_token = random.choice(random_user["tokens"])["token"]
-    api = _fastapi_fixture(
-        is_persistent=token_config["is_persistent"],
-        chroma_server_authn_provider=token_config["chroma_server_authn_provider"],
-        chroma_server_auth_credentials_provider=token_config[
-            "chroma_server_auth_credentials_provider"
-        ],
-        chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
-        chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
-        chroma_auth_token_transport_header=token_config[
-            "token_transport_header"
-        ],
-        chroma_auth_token_transport_header=token_config[
-            "token_transport_header"
-        ],
-        chroma_server_authz_provider=token_config["chroma_server_authz_provider"],
-        chroma_server_authz_config=token_config["chroma_server_authz_config"],
-        chroma_client_auth_credentials=random_token,
-    )
-    _sys: System = next(api)
-    _sys.reset_state()
-    _master_settings = Settings(**dict(_sys.settings))
-    _master_settings.chroma_client_auth_credentials = _master_user["tokens"][0]["token"]
-    _master_api, admin_api = master_api(_master_settings)
-    _api = _sys.instance(ServerAPI)
-    _api.heartbeat()
-    for action in authz_config["roles_mapping"][random_user["role"]]["actions"]:
-        api_executors[action](_api, _master_api, admin_api)  # type: ignore
-    for unauthorized_action in authz_config["roles_mapping"][random_user["role"]][
-        "unauthorized_actions"
-    ]:
-        with pytest.raises(Exception) as ex:
-            api_executors[unauthorized_action](
-                _api, _master_api, admin_api
-            )  # type: ignore
-            assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
+    root_settings.chroma_client_auth_credentials = root_user[
+        "tokens"
+    ][0]["token"]
+    root_api, root_admin_api = client_and_admin_client(root_settings)
+
+    for user in rbac_conf["users"]:
+        if user["id"] == "__root__":
+            break
+
+        token_index = data.draw(min_value=0, max_value=len(user["tokens"]) - 1)
+        token = user["tokens"][token_index]["token"]
+
+        settings = Settings(**dict(sys.settings))
+        settings.chroma_client_auth_credentials = token
+        api, admin_api = client_and_admin_client(settings)
+
+        for action in rbac_conf["roles_mapping"][user["role"]]["actions"]:
+            api_executors[action](api, admin_api, root_api, root_admin_api)
+
+        for unauthorized_action in unauthorized_actions(
+            rbac_conf["roles_mapping"][user["role"]]["actions"]
+        ):
+            with pytest.raises(Exception) as ex:
+                api_executors[unauthorized_action](
+                    api,
+                    admin_api,
+                    root_api,
+                    root_admin_api
+                )
+                assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)

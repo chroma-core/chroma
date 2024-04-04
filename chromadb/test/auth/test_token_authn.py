@@ -7,16 +7,16 @@ import pytest
 from chromadb.api import ServerAPI
 from chromadb.config import System
 from chromadb.test.conftest import _fastapi_fixture
-from chromadb.test.auth.utils import (
+from chromadb.test.auth.strategies import (
   random_token,
   random_token_transport_header,
-  users_with_tokens
+  token_test_conf
 )
 
 
 @settings(max_examples=10)
 @given(
-    users_with_tokens(),
+    token_test_conf(),
     random_token_transport_header(),
     st.booleans()
 )
@@ -46,7 +46,7 @@ def test_fastapi_server_token_authn_allows_when_it_should_allow(
 
 @settings(max_examples=10)
 @given(
-    users_with_tokens(),
+    token_test_conf(),
     random_token(),
     random_token_transport_header(),
     st.booleans()

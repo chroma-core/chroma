@@ -140,11 +140,12 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                 user["databases"] = ["*"]
             for token in user["tokens"]:
                 _check_token(token)
-                if token in self._token_user_mapping:
+                if token in self._token_user_mapping and \
+                        self._token_user_mapping[token] != user:
                     raise ValueError(
-                        f"Token ${token} already in use: wanted to use it for "
-                        f"user ${user['id']} but it's already in use by "
-                        f"user ${self._token_user_mapping[token]}"
+                        f"Token {token} already in use: wanted to use it for "
+                        f"user {user['id']} but it's already in use by "
+                        f"user {self._token_user_mapping[token]}"
                     )
                 self._token_user_mapping[token] = user
 

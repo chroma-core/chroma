@@ -16,6 +16,10 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 
+from hypothesis import Phase, settings
+settings.register_profile("ci", phases=[Phase.generate, Phase.target])
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +54,7 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         self._permissions: Dict[str, Set[str]] = {}
         for user in self._config["users"]:
             _actions = self._config["roles_mapping"][user["role"]]["actions"]
-            self._permissions[user["user_id"]] = set(_actions)
+            self._permissions[user["id"]] = set(_actions)
         logger.info(
             "Authorization Provider SimpleRBACAuthorizationProvider "
             "initialized"

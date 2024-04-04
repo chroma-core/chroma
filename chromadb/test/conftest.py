@@ -325,6 +325,57 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
     os.remove(server_auth_file)
 
 
+def fastapi_server_basic_authn_rbac_authz() -> Generator[System, None, None]:
+    server_authn_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
+    server_authz_file = os.path.abspath(os.path.join(".", "server.authz"))
+    with open(server_authn_file, "w") as f:
+        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+    with open(server_authz_file, "w") as f:
+        f.write("""
+roles_mapping:
+  admin:
+    actions:
+      [
+        "system:reset",
+        "tenant:create_tenant",
+        "tenant:get_tenant",
+        "db:create_database",
+        "db:get_database",
+        "db:list_collections",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:get_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
+      ]
+users:
+  - id: admin
+    role: admin
+"""
+                )
+    for item in _fastapi_fixture(
+        is_persistent=False,
+        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
+        chroma_client_auth_credentials="admin:admin",
+
+        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
+        chroma_server_authn_credentials_file="./server.htpasswd",
+        chroma_server_authz_provider="chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider",
+        chroma_server_authz_config_file=server_authz_file,
+    ):
+        yield item
+    os.remove(server_authn_file)
+    os.remove(server_authz_file)
+
+
 def integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
@@ -393,6 +444,11 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
+def system_fixtures_authn_rbac_authz() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [fastapi_server_basic_authn_rbac_authz]
+    return fixtures
+
+
 def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [fastapi_server_basic_auth_invalid_cred]
     return fixtures
@@ -405,6 +461,13 @@ def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
 
 @pytest.fixture(scope="module", params=system_fixtures_wrong_auth())
 def system_wrong_auth(
+    request: pytest.FixtureRequest,
+) -> Generator[ServerAPI, None, None]:
+    yield next(request.param())
+
+
+@pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
+def system_authn_rbac_authz(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
@@ -454,6 +517,15 @@ def api_wrong_cred(
 ) -> Generator[ServerAPI, None, None]:
     system_wrong_auth.reset_state()
     api = system_wrong_auth.instance(ServerAPI)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def api_with_authn_rbac_authz(
+    system_authn_rbac_authz: System,
+) -> Generator[ServerAPI, None, None]:
+    system_authn_rbac_authz.reset_state()
+    api = system_authn_rbac_authz.instance(ServerAPI)
     yield api
 
 

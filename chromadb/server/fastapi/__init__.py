@@ -380,14 +380,15 @@ class FastAPI(Server):
             None,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database.name = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database.name = overwrite_database
 
         return self._api.create_database(database.name, tenant)
 
@@ -409,14 +410,15 @@ class FastAPI(Server):
             database,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database = overwrite_database
 
         return self._api.get_database(database, tenant)
 
@@ -437,12 +439,13 @@ class FastAPI(Server):
             None,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant.name = overwrite_tenant
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant.name = overwrite_tenant
 
         return self._api.create_tenant(tenant.name)
 
@@ -463,12 +466,13 @@ class FastAPI(Server):
             None,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
 
         return self._api.get_tenant(tenant)
 
@@ -493,14 +497,15 @@ class FastAPI(Server):
             database,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database = overwrite_database
 
         return self._api.list_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
@@ -525,14 +530,15 @@ class FastAPI(Server):
             database,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database = overwrite_database
 
         return self._api.count_collections(tenant=tenant, database=database)
 
@@ -556,14 +562,15 @@ class FastAPI(Server):
             database,
             None,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database = overwrite_database
 
         return self._api.create_collection(
             name=collection.name,
@@ -592,14 +599,15 @@ class FastAPI(Server):
             database,
             collection_name,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database = overwrite_database
 
         return self._api.get_collection(
             collection_name, tenant=tenant, database=database
@@ -651,14 +659,15 @@ class FastAPI(Server):
             database,
             collection_name,
         )
-        (overwrite_tenant, overwrite_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if overwrite_tenant:
-            tenant = overwrite_tenant
-        if overwrite_database:
-            database = overwrite_database
+        if self.authn_provider:
+            (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                singleton_tenant_database_if_applicable(
+                user_identity
+            )
+            if overwrite_tenant:
+                tenant = overwrite_tenant
+            if overwrite_database:
+                database = overwrite_database
 
         return self._api.delete_collection(
             collection_name, tenant=tenant, database=database

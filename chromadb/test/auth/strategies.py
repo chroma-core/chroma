@@ -43,7 +43,7 @@ def random_user_name(draw: st.DrawFn) -> str:
 
 @st.composite
 def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
-    return draw(
+    users = draw(
         st.lists(
             st.fixed_dictionaries(
                 {
@@ -59,10 +59,26 @@ def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
             max_size=10
         )
     )
+    unseen_users = []
+    seen_users = set()
+    seen_tokens = set()
+    for user in users:
+        if user["id"] in seen_users:
+            continue
+        for token in user["tokens"]:
+            if token in seen_tokens:
+                continue
+
+        seen_users.add(user["id"])
+        for token in user["tokens"]:
+            seen_tokens.add(token)
+
+        unseen_users.append(user)
+    return unseen_users
 
 
 @st.composite
-def users_with_tokens(draw: st.DrawFn) -> Dict[str, Any]:
+def token_test_conf(draw: st.DrawFn) -> Dict[str, Any]:
     users = draw(random_users_with_tokens())
     filename = _dump_to_tmpfile({"users": users})
     return {
@@ -72,14 +88,15 @@ def users_with_tokens(draw: st.DrawFn) -> Dict[str, Any]:
 
 
 valid_action_space = [
+    "system:reset",
     "tenant:create_tenant",
     "tenant:get_tenant",
     "db:create_database",
     "db:get_database",
-    "db:reset",
     "db:list_collections",
-    "collection:get_collection",
     "db:create_collection",
+    "db:get_or_create_collection",
+    "collection:get_collection",
     "collection:delete_collection",
     "collection:update_collection",
     "collection:add",
@@ -87,10 +104,18 @@ valid_action_space = [
     "collection:get",
     "collection:query",
     "collection:peek",
+    "collection:count",
     "collection:update",
     "collection:upsert",
-    "collection:count",
 ]
+
+
+def unauthorized_actions(authorized_actions: List[str]) -> List[str]:
+    return [
+        action
+        for action in valid_action_space
+        if action not in authorized_actions
+    ]
 
 
 @st.composite
@@ -152,91 +177,84 @@ def random_allowed_actions_for_role(draw: st.DrawFn) -> List[str]:
     return actions
 
 
+@st.composite
+def random_roles(draw: st.DrawFn) -> List[Dict[str, Any]]:
+    roles = draw(
+        st.lists(
+            st.fixed_dictionaries(
+                {
+                    "id": random_role_name(),
+                    "actions": random_allowed_actions_for_role()
+                }
+            ),
+            min_size=1,
+            max_size=10
+        ),
+    )
+    unseen_roles = []
+    seen = set()
+    for role in roles:
+        if role["id"] in seen:
+            continue
+        seen.add(role["id"])
+        unseen_roles.append(role)
+    return unseen_roles
 
 
-# @st.composite
-# def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-#     role = random_role_name()
-#     user = random_user_name()
-#     actions_list = draw(actions)
-#     if any(
-#         action in actions_list
-#         for action in [
-#             "collection:add",
-#             "collection:delete",
-#             "collection:get",
-#             "collection:query",
-#             "collection:peek",
-#             "collection:update",
-#             "collection:upsert",
-#             "collection:count",
-#         ]
-#     ):
-#         actions_list.append("collection:get_collection")
-#     if any(
-#         action in actions_list
-#         for action in [
-#             "collection:peek",
-#         ]
-#     ):
-#         actions_list.append("collection:get")
-#     actions_list.extend(
-#         [
-#             "tenant:get_tenant",
-#             "db:get_database",
-#         ]
-#     )
-#     unauthorized_actions = set(valid_action_space) - set(actions_list)
-#     _role_config = {
-#         f"{role}": {
-#             "actions": actions_list,
-#             "unauthorized_actions": list(unauthorized_actions),
-#         }
-#     }
-
-#     return {
-#         "role": role,
-#         "id": user,
-#         "tenant": DEFAULT_TENANT,
-#         "tokens": [
-#             {
-#                 "token": f"{random.randint(1,1000000)}_"
-#                 + draw(
-#                     st.text(
-#                         alphabet=string.ascii_letters + string.digits,
-#                         min_size=1,
-#                         max_size=25,
-#                     )
-#                 )
-#             }
-#             for _ in range(2)
-#         ],
-#     }, _role_config
+def _transform_roles_for_flush(roles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    roles_mapping = {}
+    for role in roles:
+        roles_mapping.update({
+            role["id"]: {
+                "actions": role["actions"]
+            }
+        })
+    return roles_mapping
 
 
-# @st.composite
-# def rbac_config(draw: st.DrawFn) -> Dict[str, Any]:
-#     user_roles = draw(
-#         st.lists(user_role_config().filter(lambda t: t[0]), min_size=1, max_size=10)
-#     )
-#     muser_role = draw(st.lists(master_user(), min_size=1, max_size=1))
-#     users = []
-#     roles = []
-#     for user, role in user_roles:
-#         users.append(user)
-#         roles.append(role)
+@st.composite
+def random_users_and_roles(draw: st.DrawFn) -> Dict[str, Any]:
+    users = draw(random_users_with_tokens())
+    roles = draw(random_roles())
+    for user in users:
+        role_index = draw(st.integers(min_value=0, max_value=len(roles) - 1))
+        user["role"] = roles[role_index]["id"]
+    return {
+        "users": users,
+        "roles": roles
+    }
 
-#     for muser, mrole in muser_role:
-#         users.append(muser)
-#         roles.append(mrole)
-#     roles_mapping = {}
-#     for role in roles:
-#         roles_mapping.update(role)
-#     _rbac_config = {
-#         "roles_mapping": roles_mapping,
-#         "users": users,
-#     }
-#     return _rbac_config
+
+def _root_user_and_role() -> Dict[str, Any]:
+    return {
+        "users": {
+            "id": "__root__",
+            "tokens": ["root"],
+            "role": "root"
+        },
+        "roles": [
+            {
+                "id": "root",
+                "actions": valid_action_space
+            }
+        ]
+    }
+
+
+@st.composite
+def rbac_test_conf(draw: st.DrawFn) -> Dict[str, Any]:
+    users_and_roles = draw(random_users_and_roles())
+    filename = _dump_to_tmpfile({
+        "users": users_and_roles["users"],
+        "roles_mapping": _transform_roles_for_flush(users_and_roles["roles"])
+    })
+    users_and_roles.update(_root_user_and_role())
+    return {
+        "users": users_and_roles["users"],
+        "roles": users_and_roles["roles"],
+        "filename": filename
+    }
+
 
 def _dump_to_tmpfile(data: Any) -> str:
     tmp = tempfile.NamedTemporaryFile(delete=False)
