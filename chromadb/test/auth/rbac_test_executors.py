@@ -4,15 +4,13 @@ from hypothesis import given
 import hypothesis.strategies as st
 from typing import Callable, Dict
 
-from chromadb.api import AdminAPI, ServerAPI
+from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 
-# Each of these accepts four clients:
-# 1. The data plane client with credentials of the user under test.
-# 2. The admin client with credentials of the user under test.
-# 3. The data plane client with credentials of the root user.
-# 4. The admin client with credentials of the root user.
-# Not every executor uses all four clients, but it's easier to accept them all
+# Each of these accepts two clients:
+# 1. A data plane client with credentials of the user under test.
+# 2. A data plane client with credentials of the root user.
+# Not every executor uses bothclients, but it's easier to accept them all
 # than to have a separate signature for each executor.
 #
 # We need the root user clients to ensure preconditions are met: if we want to
@@ -21,8 +19,7 @@ from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 
 @given(st.data())
 def _create_tenant_executor(
-    _api: ServerAPI,
-    admin_api: AdminAPI,
+    api: ServerAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -33,15 +30,12 @@ def _create_tenant_executor(
             max_size=20
         )
     )
-    admin_api.create_tenant(tenant)
+    api.create_tenant(tenant)
 
 
-@given(st.data())
 def _get_tenant_executor(
     api: ServerAPI,
-    admin_api: AdminAPI,
     _root_api: ServerAPI,
-    data: Any
 ) -> None:
     api.get_tenant(DEFAULT_TENANT)
 
@@ -49,7 +43,6 @@ def _get_tenant_executor(
 @given(st.data())
 def _create_database_executor(
     api: ServerAPI,
-    admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -60,33 +53,26 @@ def _create_database_executor(
             max_size=20
         )
     )
-    api.create_database(DEFAULT_TENANT, database)
+    api.create_database(database, DEFAULT_TENANT)
 
 
-@given(st.data())
 def _get_database_executor(
     api: ServerAPI,
-    admin_api: AdminAPI,
     _root_api: ServerAPI,
-    data: Any
 ) -> None:
     api.get_database(DEFAULT_DATABASE, DEFAULT_TENANT)
 
 
 def _reset_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     _root_api: ServerAPI,
 ) -> None:
     api.reset()
 
 
-@given(st.data())
 def _list_collections_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     _root_api: ServerAPI,
-    data: Any
 ) -> None:
     api.list_collections()
 
@@ -94,7 +80,6 @@ def _list_collections_executor(
 @given(st.data())
 def _get_collection_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -112,7 +97,6 @@ def _get_collection_executor(
 @given(st.data())
 def _create_collection_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -129,7 +113,6 @@ def _create_collection_executor(
 @given(st.data())
 def _get_or_create_collection_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -146,7 +129,6 @@ def _get_or_create_collection_executor(
 @given(st.data())
 def _delete_collection_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     _root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -163,7 +145,6 @@ def _delete_collection_executor(
 @given(st.data())
 def _update_collection_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -182,7 +163,6 @@ def _update_collection_executor(
 @given(st.data())
 def _add_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -201,7 +181,6 @@ def _add_executor(
 @given(st.data())
 def _delete_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -221,7 +200,6 @@ def _delete_executor(
 @given(st.data())
 def _get_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -241,7 +219,6 @@ def _get_executor(
 @given(st.data())
 def _query_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -261,7 +238,6 @@ def _query_executor(
 @given(st.data())
 def _peek_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -281,7 +257,6 @@ def _peek_executor(
 @given(st.data())
 def _count_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -301,7 +276,6 @@ def _count_executor(
 @given(st.data())
 def _update_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -321,7 +295,6 @@ def _update_executor(
 @given(st.data())
 def _upsert_executor(
     api: ServerAPI,
-    _admin_api: AdminAPI,
     root_api: ServerAPI,
     data: Any
 ) -> None:
@@ -340,7 +313,7 @@ def _upsert_executor(
 
 api_executors: Dict[
         str,
-        Callable[[ServerAPI, AdminAPI, ServerAPI], None]] = {
+        Callable[[ServerAPI, ServerAPI], None]] = {
     "system:reset": _reset_executor,
     "tenant:create_tenant": _create_tenant_executor,
     "tenant:get_tenant": _get_tenant_executor,
