@@ -20,6 +20,8 @@ index_data
 chroma/
 chroma_test_data/
 server.htpasswd
+server.authz
+server.authn
 
 .venv
 venv
