@@ -1,17 +1,42 @@
 update_settings(max_parallel_updates=6)
 
 docker_build(
+  'local:postgres',
+  context='./k8s/test/postgres',
+  dockerfile='./k8s/test/postgres/Dockerfile'
+)
+
+docker_build(
+  'local:log-service',
+  '.',
+  only=['go/'],
+  dockerfile='./go/Dockerfile',
+  target='logservice'
+)
+
+
+docker_build(
   'local:sysdb-migration',
   '.',
   only=['go/'],
-  dockerfile='./go/Dockerfile.migration'
+  dockerfile='./go/Dockerfile.migration',
+  target='sysdb-migration'
+)
+
+docker_build(
+  'local:logservice-migration',
+  '.',
+  only=['go/'],
+  dockerfile='./go/Dockerfile.migration',
+  target="logservice-migration"
 )
 
 docker_build(
   'local:sysdb',
   '.',
   only=['go/', 'idl/'],
-  dockerfile='./go/Dockerfile'
+  dockerfile='./go/Dockerfile',
+  target='sysdb'
 )
 
 docker_build(
@@ -107,6 +132,7 @@ k8s_resource(
 k8s_resource('postgres', resource_deps=['k8s_setup', 'namespace'], labels=["infrastructure"])
 k8s_resource('pulsar', resource_deps=['k8s_setup', 'namespace'], labels=["infrastructure"], port_forwards=['6650:6650', '8080:8080'])
 k8s_resource('sysdb-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
+k8s_resource('logservice-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['sysdb-migration'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('sysdb', resource_deps=['pulsar', 'sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('frontend-service', resource_deps=['pulsar', 'sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')

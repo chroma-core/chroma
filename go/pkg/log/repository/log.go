@@ -5,6 +5,7 @@ import (
 	"errors"
 	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/jackc/pgx/v5"
+	"time"
 )
 
 type LogRepository struct {
@@ -15,6 +16,9 @@ type LogRepository struct {
 func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return
+	}
 	var collection log.Collection
 	queriesWithTx := r.queries.WithTx(tx)
 	defer func() {
@@ -47,6 +51,7 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 			CollectionID: collectionId,
 			Record:       record,
 			Offset:       offset,
+			Timestamp:    time.Now().UnixNano(),
 		}
 	}
 	insertCount, err = queriesWithTx.InsertRecord(ctx, params)
@@ -60,12 +65,12 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	return
 }
 
-func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, offset int64, batchSize int, timestamp int) (records []log.RecordLog, err error) {
+func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, offset int64, batchSize int, timestamp int64) (records []log.RecordLog, err error) {
 	records, err = r.queries.GetRecordsForCollection(ctx, log.GetRecordsForCollectionParams{
 		CollectionID: collectionId,
 		Offset:       offset,
 		Limit:        int32(batchSize),
-		Timestamp:    int32(timestamp),
+		Timestamp:    timestamp,
 	})
 	return
 }

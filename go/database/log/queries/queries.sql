@@ -5,7 +5,7 @@ WHERE id = $1
 FOR UPDATE;
 
 -- name: InsertRecord :copyfrom
-INSERT INTO record_log (collection_id, "offset", record) values($1, $2, $3);
+INSERT INTO record_log (collection_id, "offset", record, timestamp) values($1, $2, $3, $4);
 
 -- name: GetRecordsForCollection :many
 SELECT * FROM record_log r WHERE r.collection_id = $1 AND r.offset >= $2 and r.timestamp <= $4  ORDER BY r.offset ASC limit $3 ;

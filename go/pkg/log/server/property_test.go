@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/chroma-core/chroma/go/pkg/log/configuration"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
@@ -30,10 +31,12 @@ type LogServerTestSuite struct {
 
 func (suite *LogServerTestSuite) SetupSuite() {
 	ctx := context.Background()
+	config := configuration.NewLogServiceConfiguration()
 	connectionString, err := libs2.StartPgContainer(ctx)
+	config.DATABASE_URL = connectionString
 	assert.NoError(suite.t, err, "Failed to start pg container")
 	var conn *pgx.Conn
-	conn, err = libs2.NewPgConnection(ctx, connectionString)
+	conn, err = libs2.NewPgConnection(ctx, config)
 	assert.NoError(suite.t, err, "Failed to create new pg connection")
 	err = libs2.RunMigration(ctx, connectionString)
 	assert.NoError(suite.t, err, "Failed to run migration")
