@@ -84,6 +84,47 @@ describe("add collections", () => {
       });
       expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
     });
+      test("it should add OpenAI embeddings with dimensions", async () => {
+          await chroma.reset();
+          const embedder = new OpenAIEmbeddingFunction({
+              openai_api_key: process.env.OPENAI_API_KEY || "",
+              openai_embedding_dimensions: 64,
+              openai_model: "text-embedding-3-small",
+          });
+          const collection = await chroma.createCollection({
+              name: "test",
+              embeddingFunction: embedder,
+          });
+          const embeddings = await embedder.generate(DOCUMENTS);
+          await collection.add({ ids: IDS, embeddings: embeddings });
+          const count = await collection.count();
+          expect(count).toBe(3);
+          var res = await collection.get({
+              ids: IDS,
+              include: [IncludeEnum.Embeddings],
+          });
+          expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+          expect(embeddings[0].length).toBe(64);
+      });
+      test("it should add OpenAI embeddings with dimensions not supporting old models", async () => {
+          await chroma.reset();
+          const embedder = new OpenAIEmbeddingFunction({
+              openai_api_key: process.env.OPENAI_API_KEY || "",
+              openai_embedding_dimensions: 64,
+          });
+          const collection = await chroma.createCollection({
+              name: "test",
+              embeddingFunction: embedder,
+          });
+
+          try {
+              await embedder.generate(DOCUMENTS);
+          } catch (e: any) {
+              expect(e.message).toMatch(
+                  "This model does not support specifying dimensions.",
+              );
+          }
+      });
   }
 
   if (!process.env.COHERE_API_KEY) {
