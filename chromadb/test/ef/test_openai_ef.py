@@ -15,7 +15,7 @@ from chromadb.utils.embedding_functions import (
 
 
 def test_with_embedding_dimensions() -> None:
-    if not os.environ["OPENAI_API_KEY"]:
+    if os.environ.get("OPENAI_API_KEY") is None:
         pytest.skip("OPENAI_API_KEY not set")
     ef = OpenAIEmbeddingFunction(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -29,7 +29,7 @@ def test_with_embedding_dimensions() -> None:
 
 
 def test_with_embedding_dimensions_not_working_with_old_model() -> None:
-    if not os.environ["OPENAI_API_KEY"]:
+    if os.environ.get("OPENAI_API_KEY") is None:
         pytest.skip("OPENAI_API_KEY not set")
     ef = OpenAIEmbeddingFunction(api_key=os.environ["OPENAI_API_KEY"], dimensions=64)
     with pytest.raises(
