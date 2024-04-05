@@ -55,6 +55,7 @@ k8s_yaml([
 k8s_yaml([
   'k8s/test/sysdb-service.yaml',
   'k8s/test/jaeger-service.yaml',
+  'k8s/test/jaeger.yaml',
   'k8s/test/pulsar-service.yaml',
   'k8s/test/logservice-service.yaml',
   'k8s/test/minio.yaml',
@@ -115,7 +116,7 @@ k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
 
 # I have no idea why these need their own lines but the others don't.
 k8s_resource(objects=['query-service:service'], new_name='query-service-service', resource_deps=['query-service'], labels=["chroma"])
-k8s_resource(objects=['jaeger-lb:Service'], new_name='jaeger-service', resource_deps=['k8s_setup'], labels=["debug"])
+k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["debug"])
 
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards='9000:9000')
