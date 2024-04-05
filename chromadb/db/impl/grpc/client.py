@@ -1,7 +1,8 @@
+import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from chromadb.db.system import SysDB
 from chromadb.proto.convert import (
@@ -27,6 +28,7 @@ from chromadb.proto.coordinator_pb2 import (
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
+from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
     Database,
@@ -64,6 +66,8 @@ class GrpcSysDB(SysDB):
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}"
         )
+        interceptors = [OtelInterceptor()]
+        self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._sys_db_stub = SysDBStub(self._channel)  # type: ignore
         return super().start()
 
@@ -140,14 +144,12 @@ class GrpcSysDB(SysDB):
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        topic: Optional[str] = None,
         collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         request = GetSegmentsRequest(
             id=id.hex if id else None,
             type=type,
             scope=to_proto_segment_scope(scope) if scope else None,
-            topic=topic,
             collection=collection.hex if collection else None,
         )
         response = self._sys_db_stub.GetSegments(request)
@@ -161,14 +163,9 @@ class GrpcSysDB(SysDB):
     def update_segment(
         self,
         id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
         collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_topic = None
-        if topic != Unspecified():
-            write_topic = cast(Union[str, None], topic)
-
         write_collection = None
         if collection != Unspecified():
             write_collection = cast(Union[UUID, None], collection)
@@ -179,16 +176,11 @@ class GrpcSysDB(SysDB):
 
         request = UpdateSegmentRequest(
             id=id.hex,
-            topic=write_topic,
             collection=write_collection.hex if write_collection else None,
             metadata=to_proto_update_metadata(write_metadata)
             if write_metadata
             else None,
         )
-
-        if topic is None:
-            request.ClearField("topic")
-            request.reset_topic = True
 
         if collection is None:
             request.ClearField("collection")
@@ -221,10 +213,13 @@ class GrpcSysDB(SysDB):
             database=database,
         )
         response = self._sys_db_stub.CreateCollection(request)
+        # TODO: this needs to be changed to try, catch instead of checking the status code
+        if response.status.code != 200:
+            logger.info(f"failed to create collection, response: {response}")
         if response.status.code == 409:
             raise UniqueConstraintError()
         collection = from_proto_collection(response.collection)
-        return collection, response.created
+        return collection, response.status.code == 200
 
     @overrides
     def delete_collection(
@@ -236,6 +231,7 @@ class GrpcSysDB(SysDB):
             database=database,
         )
         response = self._sys_db_stub.DeleteCollection(request)
+        logging.debug(f"delete_collection response: {response}")
         if response.status.code == 404:
             raise NotFoundError()
 
@@ -243,14 +239,15 @@ class GrpcSysDB(SysDB):
     def get_collections(
         self,
         id: Optional[UUID] = None,
-        topic: Optional[str] = None,
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
+        # TODO: implement limit and offset in the gRPC service
         request = GetCollectionsRequest(
             id=id.hex if id else None,
-            topic=topic,
             name=name,
             tenant=tenant,
             database=database,
@@ -265,15 +262,10 @@ class GrpcSysDB(SysDB):
     def update_collection(
         self,
         id: UUID,
-        topic: OptionalArgument[str] = Unspecified(),
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_topic = None
-        if topic != Unspecified():
-            write_topic = cast(str, topic)
-
         write_name = None
         if name != Unspecified():
             write_name = cast(str, name)
@@ -288,7 +280,6 @@ class GrpcSysDB(SysDB):
 
         request = UpdateCollectionRequest(
             id=id.hex,
-            topic=write_topic,
             name=write_name,
             dimension=write_dimension,
             metadata=to_proto_update_metadata(write_metadata)

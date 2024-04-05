@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import shutil
 import socket
+import subprocess
 import tempfile
 import time
 from typing import (
@@ -16,6 +17,7 @@ from typing import (
     Tuple,
     Callable,
 )
+from uuid import UUID
 
 import hypothesis
 import pytest
@@ -28,7 +30,7 @@ from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
-from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
 
 root_logger = logging.getLogger()
@@ -47,7 +49,6 @@ hypothesis.settings.register_profile(
 )
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
-
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
 
 
@@ -55,6 +56,35 @@ def skip_if_not_cluster() -> pytest.MarkDecorator:
     return pytest.mark.skipif(
         NOT_CLUSTER_ONLY,
         reason="Requires Kubernetes to be running with a valid config",
+    )
+
+
+def generate_self_signed_certificate() -> None:
+    config_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "openssl.cnf"
+    )
+    print(f"Config path: {config_path}")  # Debug print to verify path
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at {config_path}")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:4096",
+            "-keyout",
+            "serverkey.pem",
+            "-out",
+            "servercert.pem",
+            "-days",
+            "365",
+            "-nodes",
+            "-subj",
+            "/CN=localhost",
+            "-config",
+            config_path,
+        ]
     )
 
 
@@ -77,6 +107,8 @@ def _run_server(
     chroma_server_authz_provider: Optional[str] = None,
     chroma_server_authz_config_file: Optional[str] = None,
     chroma_server_authz_config: Optional[Dict[str, Any]] = None,
+    chroma_server_ssl_certfile: Optional[str] = None,
+    chroma_server_ssl_keyfile: Optional[str] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -123,6 +155,8 @@ def _run_server(
         port=port,
         log_level="error",
         timeout_keep_alive=30,
+        ssl_keyfile=chroma_server_ssl_keyfile,
+        ssl_certfile=chroma_server_ssl_certfile,
     )
 
 
@@ -152,6 +186,8 @@ def _fastapi_fixture(
     chroma_server_authz_provider: Optional[str] = None,
     chroma_server_authz_config_file: Optional[str] = None,
     chroma_server_authz_config: Optional[Dict[str, Any]] = None,
+    chroma_server_ssl_certfile: Optional[str] = None,
+    chroma_server_ssl_keyfile: Optional[str] = None,
 ) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
@@ -171,6 +207,8 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[Dict[str, Any]],
+        Optional[str],
+        Optional[str],
     ] = (
         port,
         False,
@@ -183,6 +221,8 @@ def _fastapi_fixture(
         chroma_server_authz_provider,
         chroma_server_authz_config_file,
         chroma_server_authz_config,
+        chroma_server_ssl_certfile,
+        chroma_server_ssl_keyfile,
     )
     persist_directory = None
     if is_persistent:
@@ -199,17 +239,21 @@ def _fastapi_fixture(
             chroma_server_authz_provider,
             chroma_server_authz_config_file,
             chroma_server_authz_config,
+            chroma_server_ssl_certfile,
+            chroma_server_ssl_keyfile,
         )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host="localhost",
-        chroma_server_http_port=str(port),
+        chroma_server_http_port=port,
         allow_reset=True,
         chroma_client_auth_provider=chroma_client_auth_provider,
         chroma_client_auth_credentials=chroma_client_auth_credentials,
         chroma_client_auth_token_transport_header=chroma_client_auth_token_transport_header,
+        chroma_server_ssl_verify=chroma_server_ssl_certfile,
+        chroma_server_ssl_enabled=True if chroma_server_ssl_certfile else False,
     )
     system = System(settings)
     api = system.instance(ServerAPI)
@@ -231,10 +275,20 @@ def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
 
 
+def fastapi_ssl() -> Generator[System, None, None]:
+    generate_self_signed_certificate()
+    return _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_ssl_certfile="./servercert.pem",
+        chroma_server_ssl_keyfile="./serverkey.pem",
+    )
+
+
 def basic_http_client() -> Generator[System, None, None]:
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_http_port="8000",
+        chroma_server_http_port=8000,
+        chroma_server_host="localhost",
         allow_reset=True,
     )
     system = System(settings)
@@ -400,6 +454,11 @@ def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, No
     return fixtures
 
 
+def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [fastapi_ssl]
+    return fixtures
+
+
 @pytest.fixture(scope="module", params=system_fixtures_wrong_auth())
 def system_wrong_auth(
     request: pytest.FixtureRequest,
@@ -409,6 +468,11 @@ def system_wrong_auth(
 
 @pytest.fixture(scope="module", params=system_fixtures())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
+    yield next(request.param())
+
+
+@pytest.fixture(scope="module", params=system_fixtures_ssl())
+def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
@@ -428,6 +492,14 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
     client = ClientCreator.from_system(system)
+    yield client
+    client.clear_system_cache()
+
+
+@pytest.fixture(scope="function")
+def client_ssl(system_ssl: System) -> Generator[ClientAPI, None, None]:
+    system_ssl.reset_state()
+    client = ClientCreator.from_system(system_ssl)
     yield client
     client.clear_system_cache()
 
@@ -456,24 +528,24 @@ class ProducerFn(Protocol):
     def __call__(
         self,
         producer: Producer,
-        topic: str,
-        embeddings: Iterator[SubmitEmbeddingRecord],
+        collection_id: UUID,
+        embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
         ...
 
 
 def produce_n_single(
     producer: Producer,
-    topic: str,
-    embeddings: Iterator[SubmitEmbeddingRecord],
+    collection_id: UUID,
+    embeddings: Iterator[OperationRecord],
     n: int,
-) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
     submitted_embeddings = []
     seq_ids = []
     for _ in range(n):
         e = next(embeddings)
-        seq_id = producer.submit_embedding(topic, e)
+        seq_id = producer.submit_embedding(collection_id, e)
         submitted_embeddings.append(e)
         seq_ids.append(seq_id)
     return submitted_embeddings, seq_ids
@@ -481,16 +553,16 @@ def produce_n_single(
 
 def produce_n_batch(
     producer: Producer,
-    topic: str,
-    embeddings: Iterator[SubmitEmbeddingRecord],
+    collection_id: UUID,
+    embeddings: Iterator[OperationRecord],
     n: int,
-) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
     submitted_embeddings = []
     seq_ids: Sequence[SeqId] = []
     for _ in range(n):
         e = next(embeddings)
         submitted_embeddings.append(e)
-    seq_ids = producer.submit_embeddings(topic, submitted_embeddings)
+    seq_ids = producer.submit_embeddings(collection_id, submitted_embeddings)
     return submitted_embeddings, seq_ids
 
 

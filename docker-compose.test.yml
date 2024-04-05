@@ -10,9 +10,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./:/chroma
-      - test_index_data:/index_data
-    command: uvicorn chromadb.app:app --workers 1 --host 0.0.0.0 --port 8000 --log-config chromadb/log_config.yml --timeout-keep-alive 30
+      - chroma-data:/chroma/chroma
+    command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
     environment:
       - ANONYMIZED_TELEMETRY=False
       - ALLOW_RESET=True
@@ -23,7 +22,5 @@ services:
       - test_net
 
 volumes:
-  test_index_data:
-    driver: local
-  test_backups:
+  chroma-data:
     driver: local

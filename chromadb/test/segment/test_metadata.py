@@ -2,11 +2,25 @@ import os
 import shutil
 import tempfile
 import pytest
-from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
+from typing import (
+    Generator,
+    List,
+    Callable,
+    Iterator,
+    Dict,
+    Optional,
+    Union,
+    Sequence,
+    cast,
+)
+
+from chromadb.api.types import validate_metadata
 from chromadb.config import System, Settings
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     MetadataEmbeddingRecord,
     Operation,
     ScalarEncoding,
@@ -14,6 +28,7 @@ from chromadb.types import (
     SegmentScope,
     SeqId,
 )
+from pypika import Table
 from chromadb.ingest import Producer
 from chromadb.segment import MetadataReader
 import uuid
@@ -58,8 +73,8 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
 
 
 @pytest.fixture(scope="function")
-def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
-    def create_record(i: int) -> SubmitEmbeddingRecord:
+def sample_embeddings() -> Iterator[OperationRecord]:
+    def create_record(i: int) -> OperationRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
         metadata: Optional[Dict[str, Union[str, int, float, bool]]]
         if i == 0:
@@ -77,13 +92,12 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
                 metadata["bool_key"] = False
             metadata["chroma:document"] = _build_document(i)
 
-        record = SubmitEmbeddingRecord(
+        record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,
             encoding=ScalarEncoding.FLOAT32,
             metadata=metadata,
             operation=Operation.ADD,
-            collection_id=uuid.UUID(int=0),
         )
         return record
 
@@ -113,8 +127,15 @@ segment_definition = Segment(
     id=uuid.uuid4(),
     type="test_type",
     scope=SegmentScope.METADATA,
-    topic="persistent://test/test/test_topic_1",
-    collection=None,
+    collection=uuid.UUID(int=0),
+    metadata=None,
+)
+
+segment_definition2 = Segment(
+    id=uuid.uuid4(),
+    type="test_type",
+    scope=SegmentScope.METADATA,
+    collection=uuid.UUID(int=1),
     metadata=None,
 )
 
@@ -131,15 +152,17 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 
 def test_insert_and_count(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
 
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
-    max_id = produce_fns(producer, topic, sample_embeddings, 3)[1][-1]
+    max_id = produce_fns(producer, collection_id, sample_embeddings, 3)[1][-1]
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -149,7 +172,7 @@ def test_insert_and_count(
     assert segment.count() == 3
 
     for i in range(3):
-        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+        max_id = producer.submit_embedding(collection_id, next(sample_embeddings))
 
     sync(segment, max_id)
 
@@ -157,7 +180,7 @@ def test_insert_and_count(
 
 
 def assert_equiv_records(
-    expected: Sequence[SubmitEmbeddingRecord], actual: Sequence[MetadataEmbeddingRecord]
+    expected: Sequence[OperationRecord], actual: Sequence[MetadataEmbeddingRecord]
 ) -> None:
     assert len(expected) == len(actual)
     sorted_expected = sorted(expected, key=lambda r: r["id"])
@@ -169,14 +192,16 @@ def assert_equiv_records(
 
 def test_get(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
-    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -192,7 +217,6 @@ def test_get(
 
     # Get all records
     results = segment.get_metadata()
-    assert seq_ids == [r["seq_id"] for r in results]
     assert_equiv_records(embeddings, results)
 
     # get by ID
@@ -271,17 +295,19 @@ def test_get(
 
 def test_fulltext(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    max_id = produce_fns(producer, topic, sample_embeddings, 100)[1][-1]
+    max_id = produce_fns(producer, collection_id, sample_embeddings, 100)[1][-1]
 
     sync(segment, max_id)
 
@@ -293,9 +319,21 @@ def test_fulltext(
     result = segment.get_metadata(where_document={"$contains": "four two"})
     assert len(result) == 1
 
+    # Test not_contains
+    result = segment.get_metadata(where_document={"$not_contains": "four two"})
+    assert len(result) == len(
+        [i for i in range(1, 100) if "four two" not in _build_document(i)]
+    )
+
     # Test many results
     result = segment.get_metadata(where_document={"$contains": "zero"})
     assert len(result) == 9
+
+    # Test not_contains
+    result = segment.get_metadata(where_document={"$not_contains": "zero"})
+    assert len(result) == len(
+        [i for i in range(1, 100) if "zero" not in _build_document(i)]
+    )
 
     # test $and
     result = segment.get_metadata(
@@ -303,6 +341,17 @@ def test_fulltext(
     )
     assert len(result) == 2
     assert set([r["id"] for r in result]) == {"embedding_42", "embedding_24"}
+
+    result = segment.get_metadata(
+        where_document={"$and": [{"$not_contains": "four"}, {"$not_contains": "two"}]}
+    )
+    assert len(result) == len(
+        [
+            i
+            for i in range(1, 100)
+            if "four" not in _build_document(i) and "two" not in _build_document(i)
+        ]
+    )
 
     # test $or
     result = segment.get_metadata(
@@ -312,6 +361,17 @@ def test_fulltext(
     zeros = [i for i in range(1, 100) if "zero" in _build_document(i)]
     expected = set([f"embedding_{i}" for i in set(ones + zeros)])
     assert set([r["id"] for r in result]) == expected
+
+    result = segment.get_metadata(
+        where_document={"$or": [{"$not_contains": "zero"}, {"$not_contains": "one"}]}
+    )
+    assert len(result) == len(
+        [
+            i
+            for i in range(1, 100)
+            if "zero" not in _build_document(i) or "one" not in _build_document(i)
+        ]
+    )
 
     # test combo with where clause (negative case)
     result = segment.get_metadata(
@@ -332,17 +392,19 @@ def test_fulltext(
 
 def test_delete(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
     max_id = seq_ids[-1]
 
     sync(segment, max_id)
@@ -352,17 +414,16 @@ def test_delete(
     assert_equiv_records(embeddings[:1], results)
 
     # Delete by ID
-    delete_embedding = SubmitEmbeddingRecord(
+    delete_embedding = OperationRecord(
         id="embedding_0",
         embedding=None,
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
-        -1
-    ]
+    max_id = produce_fns(
+        producer, collection_id, (delete_embedding for _ in range(1)), 1
+    )[1][-1]
 
     sync(segment, max_id)
 
@@ -370,43 +431,42 @@ def test_delete(
     assert segment.get_metadata(ids=["embedding_0"]) == []
 
     # Delete is idempotent
-    max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
-        -1
-    ]
+    max_id = produce_fns(
+        producer, collection_id, (delete_embedding for _ in range(1)), 1
+    )[1][-1]
 
     sync(segment, max_id)
     assert segment.count() == 9
     assert segment.get_metadata(ids=["embedding_0"]) == []
 
     # re-add
-    max_id = producer.submit_embedding(topic, embeddings[0])
+    max_id = producer.submit_embedding(collection_id, embeddings[0])
     sync(segment, max_id)
     assert segment.count() == 10
     results = segment.get_metadata(ids=["embedding_0"])
 
 
-def test_update(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
-) -> None:
+def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    _test_update(sample_embeddings, producer, segment, topic, Operation.UPDATE)
+    _test_update(sample_embeddings, producer, segment, collection_id, Operation.UPDATE)
 
     # Update nonexisting ID
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="no_such_id",
         metadata={"foo": "bar"},
         embedding=None,
         encoding=None,
         operation=Operation.UPDATE,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["no_such_id"])
     assert len(results) == 0
@@ -415,30 +475,31 @@ def test_update(
 
 def test_upsert(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
-    topic = str(segment_definition["topic"])
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    _test_update(sample_embeddings, producer, segment, topic, Operation.UPSERT)
+    _test_update(sample_embeddings, producer, segment, collection_id, Operation.UPSERT)
 
     # upsert previously nonexisting ID
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="no_such_id",
         metadata={"foo": "bar"},
         embedding=None,
         encoding=None,
         operation=Operation.UPSERT,
-        collection_id=uuid.UUID(int=0),
     )
     max_id = produce_fns(
         producer=producer,
-        topic=topic,
+        collection_id=collection_id,
         embeddings=(update_record for _ in range(1)),
         n=1,
     )[1][-1]
@@ -448,10 +509,10 @@ def test_upsert(
 
 
 def _test_update(
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    sample_embeddings: Iterator[OperationRecord],
     producer: Producer,
     segment: MetadataReader,
-    topic: str,
+    collection_id: uuid.UUID,
     op: Operation,
 ) -> None:
     """test code common between update and upsert paths"""
@@ -460,7 +521,7 @@ def _test_update(
 
     max_id = 0
     for e in embeddings:
-        max_id = producer.submit_embedding(topic, e)
+        max_id = producer.submit_embedding(collection_id, e)
 
     sync(segment, max_id)
 
@@ -468,15 +529,14 @@ def _test_update(
     assert_equiv_records(embeddings[:1], results)
 
     # Update embedding with no metadata
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"chroma:document": "foo bar"},
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"chroma:document": "foo bar"}
@@ -484,15 +544,14 @@ def _test_update(
     assert results[0]["metadata"] == {"chroma:document": "foo bar"}
 
     # Update and overrwrite key
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"chroma:document": "biz buz"},
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"chroma:document": "biz buz"}
@@ -502,31 +561,199 @@ def _test_update(
     assert len(results) == 0
 
     # Update and add key
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"baz": 42},
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"chroma:document": "biz buz", "baz": 42}
 
     # Update and delete key
-    update_record = SubmitEmbeddingRecord(
+    update_record = OperationRecord(
         id="embedding_0",
         metadata={"chroma:document": None},
         embedding=None,
         encoding=None,
         operation=op,
-        collection_id=uuid.UUID(int=0),
     )
-    max_id = producer.submit_embedding(topic, update_record)
+    max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
+
+
+def test_limit(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+
+    collection_id = cast(uuid.UUID, segment_definition["collection"])
+    max_id = produce_fns(producer, collection_id, sample_embeddings, 3)[1][-1]
+
+    collection_id_2 = cast(uuid.UUID, segment_definition2["collection"])
+    max_id2 = produce_fns(producer, collection_id_2, sample_embeddings, 3)[1][-1]
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    segment2 = SqliteMetadataSegment(system, segment_definition2)
+    segment2.start()
+
+    sync(segment, max_id)
+    sync(segment2, max_id2)
+
+    assert segment.count() == 3
+
+    for i in range(3):
+        max_id = producer.submit_embedding(collection_id, next(sample_embeddings))
+
+    sync(segment, max_id)
+
+    assert segment.count() == 6
+
+    res = segment.get_metadata(limit=3)
+    assert len(res) == 3
+
+    # if limit is negative, throw error
+    with pytest.raises(ValueError):
+        segment.get_metadata(limit=-1)
+
+    # if offset is more than number of results, return empty list
+    res = segment.get_metadata(limit=3, offset=10)
+    assert len(res) == 0
+
+
+def test_delete_segment(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
+    max_id = seq_ids[-1]
+
+    sync(segment, max_id)
+
+    assert segment.count() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+    _id = segment._id
+    segment.delete()
+    _db = system.instance(SqliteDB)
+    t = Table("embeddings")
+    q = (
+        _db.querybuilder()
+        .from_(t)
+        .select(t.id)
+        .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+    )
+    sql, params = get_sql(q)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that the segment is gone
+        assert len(res.fetchall()) == 0
+
+    fts_t = Table("embedding_fulltext_search")
+    q_fts = (
+        _db.querybuilder()
+        .from_(fts_t)
+        .select()
+        .where(
+            fts_t.rowid.isin(
+                _db.querybuilder()
+                .from_(t)
+                .select(t.id)
+                .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+            )
+        )
+    )
+    sql, params = get_sql(q_fts)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that all FTS rows are gone
+        assert len(res.fetchall()) == 0
+
+
+def test_delete_single_fts_record(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = cast(uuid.UUID, collection_id)
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
+    max_id = seq_ids[-1]
+
+    sync(segment, max_id)
+
+    assert segment.count() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+    _id = segment._id
+    _db = system.instance(SqliteDB)
+    # Delete by ID
+    delete_embedding = OperationRecord(
+        id="embedding_0",
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+    )
+    max_id = produce_fns(
+        producer, collection_id, (delete_embedding for _ in range(1)), 1
+    )[1][-1]
+    t = Table("embeddings")
+
+    sync(segment, max_id)
+    fts_t = Table("embedding_fulltext_search")
+    q_fts = (
+        _db.querybuilder()
+        .from_(fts_t)
+        .select()
+        .where(
+            fts_t.rowid.isin(
+                _db.querybuilder()
+                .from_(t)
+                .select(t.id)
+                .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+                .where(t.embedding_id == ParameterValue(delete_embedding["id"]))
+            )
+        )
+    )
+    sql, params = get_sql(q_fts)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that the ids that are deleted from the segment are also gone from the fts table
+        assert len(res.fetchall()) == 0
+
+
+def test_metadata_validation_forbidden_key() -> None:
+    with pytest.raises(ValueError, match="chroma:document"):
+        validate_metadata(
+            {"chroma:document": "this is not the document you are looking for"}
+        )
