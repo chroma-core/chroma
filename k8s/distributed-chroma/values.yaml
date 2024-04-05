@@ -46,7 +46,7 @@ sysdb:
 logService:
   image:
     repository: 'local'
-    tag: 'sysdb'
+    tag: 'log-service'
   env:
   flags:
 
@@ -68,5 +68,12 @@ sysdbMigration:
   password: chroma
   netloc: postgres
   port: 5432
-  dbName: chroma
+  dbName: sysdb
   sslmode: disable
+
+logServiceMigration:
+  image:
+    repository: 'local'
+    tag: 'logservice-migration'
+  databaseUrl: 'postgres://chroma:chroma@postgres:5432/log?sslmode=disable'
+

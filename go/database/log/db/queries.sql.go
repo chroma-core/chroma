@@ -24,7 +24,7 @@ order by timestamp
 type GetAllCollectionsToCompactRow struct {
 	CollectionID string
 	Offset       int64
-	Timestamp    int32
+	Timestamp    int64
 	Rank         int64
 }
 
@@ -75,7 +75,7 @@ type GetRecordsForCollectionParams struct {
 	CollectionID string
 	Offset       int64
 	Limit        int32
-	Timestamp    int32
+	Timestamp    int64
 }
 
 func (q *Queries) GetRecordsForCollection(ctx context.Context, arg GetRecordsForCollectionParams) ([]RecordLog, error) {
@@ -129,6 +129,7 @@ type InsertRecordParams struct {
 	CollectionID string
 	Offset       int64
 	Record       []byte
+	Timestamp    int64
 }
 
 const updateCollectionCompactionOffsetPosition = `-- name: UpdateCollectionCompactionOffsetPosition :exec

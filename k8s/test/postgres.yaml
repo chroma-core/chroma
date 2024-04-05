@@ -15,10 +15,10 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:14.1-alpine
+          image: local:postgres
           env:
-            - name: POSTGRES_DB
-              value: chroma
+            - name: POSTGRES_MULTIPLE_DATABASES
+              value: "sysdb,log"
             - name: POSTGRES_USER
               value: chroma
             - name: POSTGRES_PASSWORD

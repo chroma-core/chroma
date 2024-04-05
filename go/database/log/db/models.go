@@ -15,6 +15,6 @@ type Collection struct {
 type RecordLog struct {
 	Offset       int64
 	CollectionID string
-	Timestamp    int32
+	Timestamp    int64
 	Record       []byte
 }
