@@ -1,9 +1,10 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Dict, Set, cast, Union, DefaultDict
+from hypothesis import given
+from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import ID, Include, IDs
+from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -403,3 +404,61 @@ def test_delete_success(api: ServerAPI, kwargs: dict):
     coll = api.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
+
+
+@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
+def test_autocasting_validate_embeddings_for_compatible_types(
+    supported_types: List[Any],
+) -> None:
+    embds = strategies.create_embeddings(10, 10, supported_types)
+    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
+    assert all(
+        [
+            isinstance(value, list)
+            and all(
+                [
+                    isinstance(vec, (int, float)) and not isinstance(vec, bool)
+                    for vec in value
+                ]
+            )
+            for value in validated_embeddings
+        ]
+    )
+
+
+@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
+def test_autocasting_validate_embeddings_with_ndarray(
+    supported_types: List[Any],
+) -> None:
+    embds = strategies.create_embeddings_ndarray(10, 10, supported_types)
+    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
+    assert all(
+        [
+            isinstance(value, list)
+            and all(
+                [
+                    isinstance(vec, (int, float)) and not isinstance(vec, bool)
+                    for vec in value
+                ]
+            )
+            for value in validated_embeddings
+        ]
+    )
+
+
+@given(unsupported_types=st.sampled_from([str, bool]))
+def test_autocasting_validate_embeddings_incompatible_types(
+    unsupported_types: List[Any],
+) -> None:
+    embds = strategies.create_embeddings(10, 10, unsupported_types)
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(Collection._normalize_embeddings(embds))
+
+    assert "Expected each value in the embedding to be a int or float" in str(e)
+
+
+def test_0dim_embedding_validation() -> None:
+    embds = [[]]
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(embds)
+    assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)

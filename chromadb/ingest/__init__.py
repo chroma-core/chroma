@@ -1,8 +1,8 @@
 from abc import abstractmethod
 from typing import Callable, Optional, Sequence
 from chromadb.types import (
-    SubmitEmbeddingRecord,
-    EmbeddingRecord,
+    OperationRecord,
+    LogRecord,
     SeqId,
     Vector,
     ScalarEncoding,
@@ -38,25 +38,21 @@ class Producer(Component):
     """Interface for writing embeddings to an ingest stream"""
 
     @abstractmethod
-    def create_topic(self, topic_name: str) -> None:
-        pass
-
-    @abstractmethod
-    def delete_topic(self, topic_name: str) -> None:
+    def delete_log(self, collection_id: UUID) -> None:
         pass
 
     @abstractmethod
     def submit_embedding(
-        self, topic_name: str, embedding: SubmitEmbeddingRecord
+        self, collection_id: UUID, embedding: OperationRecord
     ) -> SeqId:
-        """Add an embedding record to the given topic. Returns the SeqID of the record."""
+        """Add an embedding record to the given collections log. Returns the SeqID of the record."""
         pass
 
     @abstractmethod
     def submit_embeddings(
-        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+        self, collection_id: UUID, embeddings: Sequence[OperationRecord]
     ) -> Sequence[SeqId]:
-        """Add a batch of embedding records to the given topic. Returns the SeqIDs of
+        """Add a batch of embedding records to the given collections log. Returns the SeqIDs of
         the records. The returned SeqIDs will be in the same order as the given
         SubmitEmbeddingRecords. However, it is not guaranteed that the SeqIDs will be
         processed in the same order as the given SubmitEmbeddingRecords. If the number
@@ -71,7 +67,7 @@ class Producer(Component):
         pass
 
 
-ConsumerCallbackFn = Callable[[Sequence[EmbeddingRecord]], None]
+ConsumerCallbackFn = Callable[[Sequence[LogRecord]], None]
 
 
 class Consumer(Component):
@@ -80,14 +76,14 @@ class Consumer(Component):
     @abstractmethod
     def subscribe(
         self,
-        topic_name: str,
+        collection_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,
         id: Optional[UUID] = None,
     ) -> UUID:
         """Register a function that will be called to recieve embeddings for a given
-        topic. The given function may be called any number of times, with any number of
+        collections log stream. The given function may be called any number of times, with any number of
         records, and may be called concurrently.
 
         Only records between start (exclusive) and end (inclusive) SeqIDs will be
@@ -117,18 +113,4 @@ class Consumer(Component):
     @abstractmethod
     def max_seqid(self) -> SeqId:
         """Return the maximum possible SeqID in this implementation."""
-        pass
-
-
-class CollectionAssignmentPolicy(Component):
-    """Interface for assigning collections to topics"""
-
-    @abstractmethod
-    def assign_collection(self, collection_id: UUID) -> str:
-        """Return the topic that should be used for the given collection"""
-        pass
-
-    @abstractmethod
-    def get_topics(self) -> Sequence[str]:
-        """Return the list of topics that this policy is currently using"""
         pass

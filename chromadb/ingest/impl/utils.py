@@ -1,5 +1,6 @@
 import re
 from typing import Tuple
+from uuid import UUID
 
 topic_regex = r"persistent:\/\/(?P<tenant>.+)\/(?P<namespace>.+)\/(?P<topic>.+)"
 
@@ -12,9 +13,5 @@ def parse_topic_name(topic_name: str) -> Tuple[str, str, str]:
     return match.group("tenant"), match.group("namespace"), match.group("topic")
 
 
-def create_pulsar_connection_str(host: str, port: str) -> str:
-    return f"pulsar://{host}:{port}"
-
-
-def create_topic_name(tenant: str, namespace: str, topic: str) -> str:
-    return f"persistent://{tenant}/{namespace}/{topic}"
+def create_topic_name(tenant: str, namespace: str, collection_id: UUID) -> str:
+    return f"persistent://{tenant}/{namespace}/{str(collection_id)}"

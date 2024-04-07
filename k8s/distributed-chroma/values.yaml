@@ -1,0 +1,79 @@
+# Default values for distributed-chroma.
+# Strongly prefer single quotes.
+
+namespace: 'chroma'
+
+frontendService:
+  image:
+    repository: 'local'
+    tag: 'frontend-service'
+
+  # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
+  # populated from secrets or configMaps. So we let consumers fill these directly.
+  # TODO we could maybe have mutually exclusive pieces of config, e.g. isPersistentValue
+  # and isPersistentFromConfigMap or something.
+  isPersistent: 'value: "TRUE"'
+  producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
+  pulsarBrokerUrl: 'value: "pulsar.chroma"'
+  pulsarBrokerPort: 'value: "6650"'
+  pulsarAdminPort: 'value: "8080"'
+  allowReset: 'value: "TRUE"'
+  sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
+  serverGrpcPort: 'value: "50051"'
+  coordinatorHost: 'value: "sysdb.chroma"'
+  authProvider: 'value: ""'
+  authCredentialsProvider: 'value: ""'
+  authzProvider: 'value: ""'
+  authzConfigProvider: 'value: ""'
+  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"'
+  logServiceHost: 'value: "logservice.chroma"'
+  logServicePort: 'value: "50051"'
+  otherEnvConfig: ''
+
+sysdb:
+  image:
+    repository: 'local'
+    tag: 'sysdb'
+  replicaCount: 1
+  env:
+  flags:
+    pulsar-admin-url: "http://pulsar.chroma:8080"
+    pulsar-url: "pulsar://pulsar.chroma:6650"
+    notifier-provider: "pulsar"
+
+logService:
+  image:
+    repository: 'local'
+    tag: 'log-service'
+  env:
+  flags:
+
+queryService:
+  image:
+    repository: 'local'
+    tag: 'query-service'
+
+compactionService:
+  image:
+    repository: 'local'
+    tag: 'compaction-service'
+
+sysdbMigration:
+  image:
+    repository: 'local'
+    tag: 'sysdb-migration'
+  username: chroma
+  password: chroma
+  netloc: postgres
+  port: 5432
+  dbName: sysdb
+  sslmode: disable
+
+logServiceMigration:
+  image:
+    repository: 'local'
+    tag: 'logservice-migration'
+  databaseUrl: 'postgres://chroma:chroma@postgres:5432/log?sslmode=disable'
+

@@ -122,6 +122,7 @@ class User(TypedDict):
     id: str
     role: str
     tenant: Optional[str]
+    databases: Optional[List[str]]
     tokens: List[Token]
 
 
@@ -179,6 +180,7 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
         return SimpleUserIdentity(
             user_id=_user_id,
             tenant=_user["tenant"] if _user and "tenant" in _user else "*",
+            databases=_user["databases"] if _user and "databases" in _user else ["*"],
         )
 
 

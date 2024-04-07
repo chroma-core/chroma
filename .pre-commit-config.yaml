@@ -1,7 +1,7 @@
 exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2)\.(py|pyi|py_grpc\.py)' # Generated files
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: trailing-whitespace
       - id: mixed-line-ending
@@ -21,7 +21,7 @@ repos:
       - id: black
 
   - repo: https://github.com/PyCQA/flake8
-    rev: 6.0.0
+    rev: 6.1.0
     hooks:
       - id: flake8
         args:
@@ -32,5 +32,12 @@ repos:
     rev: "v1.2.0"
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract, --config-file=./mypy.ini]
+        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract, --config-file=./pyproject.toml]
         additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika", "numpy", "types-protobuf", "kubernetes"]
+
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: "v3.1.0"
+    hooks:
+      - id: prettier
+        files: "^clients/js/.+"
