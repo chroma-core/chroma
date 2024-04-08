@@ -7,7 +7,6 @@ import (
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
-	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma-core/chroma/go/pkg/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
@@ -36,12 +35,6 @@ type Config struct {
 	NotificationStoreProvider string
 	NotifierProvider          string
 	NotificationTopic         string
-
-	// Pulsar config
-	PulsarAdminURL  string
-	PulsarURL       string
-	PulsarTenant    string
-	PulsarNamespace string
 
 	// Kubernetes config
 	KubernetesNamespace string
@@ -106,32 +99,12 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	}
 
 	var notifier notification.Notifier
-	var client pulsar.Client
-	var producer pulsar.Producer
 	if config.NotifierProvider == "memory" {
 		log.Info("Using memory notifier")
 		notifier = notification.NewMemoryNotifier()
-	} else if config.NotifierProvider == "pulsar" {
-		log.Info("Using pulsar notifier")
-		pulsarNotifier, pulsarClient, pulsarProducer, err := createPulsarNotifer(config.PulsarURL, config.NotificationTopic)
-		notifier = pulsarNotifier
-		client = pulsarClient
-		producer = pulsarProducer
-		if err != nil {
-			log.Error("Failed to create pulsar notifier", zap.Error(err))
-			return nil, err
-		}
 	} else {
-		return nil, errors.New("invalid notifier provider, only memory and pulsar are supported")
+		return nil, errors.New("invalid notifier provider, only memory are supported")
 	}
-
-	if client != nil {
-		defer client.Close()
-	}
-	if producer != nil {
-		defer producer.Close()
-	}
-
 	coordinator, err := coordinator.NewCoordinator(ctx, db, notificationStore, notifier)
 	if err != nil {
 		return nil, err
@@ -187,27 +160,6 @@ func createMemberlistManager(namespace string, memberlistName string, podLabel s
 	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
 	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
 	return memberlist_manager, nil
-}
-
-func createPulsarNotifer(pulsarURL string, notificationTopic string) (*notification.PulsarNotifier, pulsar.Client, pulsar.Producer, error) {
-	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL: pulsarURL,
-	})
-	if err != nil {
-		log.Error("Failed to create pulsar client", zap.Error(err))
-		return nil, nil, nil, err
-	}
-
-	producer, err := client.CreateProducer(pulsar.ProducerOptions{
-		Topic: notificationTopic,
-	})
-	if err != nil {
-		log.Error("Failed to create producer", zap.Error(err))
-		return nil, nil, nil, err
-	}
-
-	notifier := notification.NewPulsarNotifier(producer)
-	return notifier, client, producer, nil
 }
 
 func (s *Server) Close() error {
