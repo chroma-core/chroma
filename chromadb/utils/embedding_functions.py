@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from enum import Enum
 from functools import cached_property
 
 from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
@@ -898,16 +899,20 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         )
 
 
-class VoyageAIEmbeddingFunction(EmbeddingFunction):
+class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
     """Embedding function for Voyageai.com. API docs - https://docs.voyageai.com/reference/embeddings-api"""
+
+    class InputType(str, Enum):
+        DOCUMENT = "document"
+        QUERY = "query"
 
     def __init__(
         self,
-        api_key: str,
+        api_key: Optional[str] = None,
         model_name: str = "voyage-2",
         max_batch_size: int = 128,
         truncation: Optional[bool] = True,
-        input_type: Optional[str] = None,
+        input_type: Optional[InputType] = None,
     ):
         """
         Initialize the VoyageAIEmbeddingFunction.
@@ -919,7 +924,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
         input_type (str, optional): The type of input text. Can be `None`, `query`, `document`. Defaults to `None`.
         """
 
-        if not api_key:
+        if not api_key and "VOYAGE_API_KEY" not in os.environ:
             raise ValueError("Please provide a VoyageAI API key.")
 
         try:
@@ -929,11 +934,10 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
                 raise ValueError(
                     f"The maximum batch size supported is {voyageai.VOYAGE_EMBED_BATCH_SIZE}."
                 )
-            voyageai.api_key = api_key  # Voyage API Key
             self._batch_size = max_batch_size
             self._model = model_name
             self._truncation = truncation
-            self._client = voyageai.Client()
+            self._client = voyageai.Client(api_key=api_key)
             self._input_type = input_type
         except ImportError:
             raise ValueError(
@@ -960,7 +964,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
             truncation=self._truncation,
             input_type=self._input_type,
         )
-        return results.embeddings
+        return cast(Embeddings, results.embeddings)
 
 
 def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
