@@ -1,6 +1,6 @@
-mod fulltext;
+// mod fulltext;
 mod hnsw;
-mod metadata;
+// mod metadata;
 mod types;
 mod utils;
 

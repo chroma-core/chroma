@@ -5,26 +5,28 @@ use arrow::array::{Array, BooleanArray, Int32Array, ListArray, StringArray, UInt
 /// An iterator over the contents of a block.
 /// This is a simple wrapper around the Arrow array data that is stored in the block.
 /// For now, it clones the data in the Block, since it is only used to populate BlockDeltas.
-pub(super) struct BlockIterator {
+pub(super) struct BlockIterator<'a> {
     block: Block,
     index: usize,
     key_type: KeyType,
     value_type: ValueType,
+    phantom: std::marker::PhantomData<&'a ()>,
 }
 
-impl BlockIterator {
+impl BlockIterator<'_> {
     pub fn new(block: Block, key_type: KeyType, value_type: ValueType) -> Self {
         Self {
             block,
             index: 0,
             key_type,
             value_type,
+            phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl Iterator for BlockIterator {
-    type Item = (BlockfileKey, Value);
+impl<'a> Iterator for BlockIterator<'a> {
+    type Item = (BlockfileKey, Value<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let data = &self.block.inner.read().data;

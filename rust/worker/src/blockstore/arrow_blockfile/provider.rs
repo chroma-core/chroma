@@ -9,12 +9,12 @@ use uuid::Uuid;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
-pub(super) struct ArrowBlockfileProvider {
+pub(super) struct ArrowBlockfileProvider<'a> {
     block_provider: ArrowBlockProvider,
-    files: HashMap<String, Box<dyn Blockfile>>,
+    files: HashMap<String, Box<dyn Blockfile<'a> + 'a>>,
 }
 
-impl BlockfileProvider for ArrowBlockfileProvider {
+impl<'a> BlockfileProvider<'a> for ArrowBlockfileProvider<'a> {
     fn new() -> Self {
         Self {
             block_provider: ArrowBlockProvider::new(),
@@ -22,9 +22,9 @@ impl BlockfileProvider for ArrowBlockfileProvider {
         }
     }
 
-    fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>> {
+    fn open(&self, path: &str) -> Result<Box<dyn Blockfile<'a> + 'a>, Box<OpenError>> {
         match self.files.get(path) {
-            Some(file) => Ok(file.clone()),
+            Some(file) => Ok(file.clone_box()),
             None => Err(Box::new(OpenError::NotFound)),
         }
     }
@@ -44,7 +44,7 @@ impl BlockfileProvider for ArrowBlockfileProvider {
                     self.block_provider.clone(),
                 ));
                 self.files.insert(path.to_string(), blockfile);
-                Ok(self.files.get(path).unwrap().clone())
+                Ok(self.files.get(path).unwrap().clone_box())
             }
         }
     }
