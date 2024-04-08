@@ -8,6 +8,7 @@ from hypothesis.stateful import (
 import logging
 import pytest
 
+import chromadb.api.types as types
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import Settings, System
 from chromadb.test.conftest import (
@@ -46,7 +47,52 @@ class SingletonTenantDatabaseCollectionStateMachine(
 
     @initialize()
     def initialize(self) -> None:
+        self.api = self.root_client
+        self.admin_client = self.root_admin_client
         super().initialize()
+
+    def get_tenant_model(
+        self,
+        tenant: str
+    ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
+        if self.api == self.singleton_client:
+            tenant = SINGLETON_TENANT
+        return self.tenant_to_database_to_model[tenant]
+
+    def set_tenant_model(
+        self,
+        tenant: str,
+        model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]]
+    ) -> None:
+        if self.api == self.singleton_client:
+            # This never happens because we never actually issue a
+            # create_tenant call on singleton_tenant:
+            # thanks to the above overriding of get_tenant_model(),
+            # the underlying state machine test should always expect an error
+            # when it sends the request, so shouldn't try to update the model.
+            raise ValueError('trying to overwrite the model for singleton??')
+        self.tenant_to_database_to_model[tenant] = model
+
+    def has_database_for_tenant(self, tenant: str, database: str) -> bool:
+        if self.api == self.singleton_client:
+            tenant = SINGLETON_TENANT
+            database = SINGLETON_DATABASE
+        return database in self.tenant_to_database_to_model[tenant]
+
+    def set_database_model_for_tenant(
+        self,
+        tenant: str,
+        database: str,
+        database_model: Dict[str, Optional[types.CollectionMetadata]]
+    ) -> None:
+        if self.api == self.singleton_client:
+            # This never happens because we never actually issue a
+            # create_database call on (singleton_tenant, singleton_database):
+            # thanks to the above overriding of has_database_for_tenant(),
+            # the underlying state machine test should always expect an error
+            # when it sends the request, so shouldn't try to update the model.
+            raise ValueError('trying to overwrite the model for singleton??')
+        self.tenant_to_database_to_model[tenant][database] = database_model
 
 
 def test_collections_with_tenant_database_overwrite(
@@ -60,7 +106,7 @@ def test_collections_with_tenant_database_overwrite(
     root_client = Client.from_system(sys)
     _root_admin_client = AdminClient.from_system(sys)
 
-    # This is a little awkward, but we have to create the tenant and DB
+    # This is a little awkward but we have to create the tenant and DB
     # before we can instantiate a Client which connects to them. This also
     # means we need to manually populate state in the state machine.
     _root_admin_client.create_tenant(SINGLETON_TENANT)
