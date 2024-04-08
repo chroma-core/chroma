@@ -17,7 +17,6 @@ from hypothesis.stateful import (
 from typing import Dict, Optional
 
 import numpy
-import uuid
 from chromadb.test.property.strategies import hashing_embedding_function
 
 

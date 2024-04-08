@@ -1,28 +1,15 @@
-from hypothesis import given, settings
-from overrides import override
-from starlette.datastructures import Headers
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 from hypothesis.stateful import (
     Bundle,
-    rule,
     initialize,
-    multiple,
     run_state_machine_as_test,
-    MultipleResults,
 )
-import hypothesis.strategies as st
 import logging
 import pytest
-import string
 
-from chromadb.auth import (
-    ServerAuthenticationProvider,
-    UserIdentity
-)
-from chromadb.api import ServerAPI
-from chromadb.api.client import Client
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+from chromadb.api.client import AdminClient, Client
+from chromadb.config import Settings, System
 from chromadb.test.conftest import (
   fastapi_fixture_admin_and_singleton_tenant_db_user
 )
@@ -31,20 +18,31 @@ from chromadb.test.property.test_collections_with_database_tenant import (
 )
 
 
-# This test reuses the state machines from test_collections.py and
-# test_collections_with_database_tenant.py. However instead of always using the
-# test's default api and admin_api (which have full permissions over all
-# tenants and dbs), we sometimes use api clients which only have access to
-# a single tenant and database. When this happens, we expect all requests
-# to be routed to that tenant and database regardless of which tenant and
-# database the request specifies.
+# See conftest.py
+SINGLETON_TENANT = 'singleton_tenant'
+SINGLETON_DATABASE = 'singleton_database'
 
 
 class SingletonTenantDatabaseCollectionStateMachine(
     TenantDatabaseCollectionStateMachine
 ):
+    clients: Bundle[Client]
+
+    singleton_client: Client
+    singleton_admin_client: AdminClient
+    root_client: Client
+    root_admin_client: AdminClient
+
     def __init__(self, singleton_client: Client, root_client: Client) -> None:
-        super().__init__(root_client)
+        super().__init__(singleton_client)
+
+        self.singleton_client = singleton_client
+        self.singleton_admin_client = AdminClient.from_system(singleton_client._system)
+        self.tenant_to_database_to_model[SINGLETON_TENANT] = {}
+        self.tenant_to_database_to_model[SINGLETON_TENANT][SINGLETON_DATABASE] = {}
+
+        self.root_client = root_client
+        self.root_admin_client = AdminClient.from_system(root_client._system)
 
     @initialize()
     def initialize(self) -> None:
@@ -59,17 +57,24 @@ def test_collections_with_tenant_database_overwrite(
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
     sys.reset_state()
-    client = Client.from_system(sys)
+    root_client = Client.from_system(sys)
+    _root_admin_client = AdminClient.from_system(sys)
 
-    root_settings = Settings(**dict(sys.settings))
-    root_settings.chroma_client_auth_credentials = "admin-token"
-    system = System(root_settings)
-    system.start()
-    root_client = Client.from_system(system)
+    # This is a little awkward, but we have to create the tenant and DB
+    # before we can instantiate a Client which connects to them. This also
+    # means we need to manually populate state in the state machine.
+    _root_admin_client.create_tenant(SINGLETON_TENANT)
+    _root_admin_client.create_database(SINGLETON_DATABASE, SINGLETON_TENANT)
+
+    singleton_settings = Settings(**dict(sys.settings))
+    singleton_settings.chroma_client_auth_credentials = "singleton-token"
+    singleton_system = System(singleton_settings)
+    singleton_system.start()
+    singleton_client = Client.from_system(singleton_system)
 
     run_state_machine_as_test(
         lambda: SingletonTenantDatabaseCollectionStateMachine(
-            client,
+            singleton_client,
             root_client,
         )
     )  # type: ignore

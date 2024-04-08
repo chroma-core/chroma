@@ -112,9 +112,8 @@ class ServerAuthenticationProvider(Component):
             return None, None
         tenant = None
         database = None
-        if (user.tenant and len(user.tenant) == 1 and
-                user.tenant[0] != "*"):
-            tenant = user.tenant[0]
+        if user.tenant and user.tenant != "*":
+            tenant = user.tenant
         if (user.databases and len(user.databases) == 1 and
                 user.databases[0] != "*"):
             database = user.databases[0]

@@ -390,7 +390,8 @@ users:
       - admin-token
   - id: singleton_user
     tenant: singleton_tenant
-    database: singleton_database
+    databases:
+      - singleton_database
     tokens:
       - singleton-token
 """
@@ -400,7 +401,7 @@ users:
         chroma_overwrite_singleton_tenant_database_access_from_auth=True,
 
         chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials="singleton-token",
+        chroma_client_auth_credentials="admin-token",
 
         chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
         chroma_server_authn_credentials_file=server_authn_file,

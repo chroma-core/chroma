@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import pytest
 from chromadb.api import AdminAPI
 import chromadb.api.types as types
@@ -23,7 +23,7 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
 
     tenants: Bundle[str]
     databases: Bundle[Tuple[str, str]]  # database to tenant it belongs to
-    tenant_to_database_to_model: Dict[
+    _tenant_to_database_to_model: Dict[
         str, Dict[str, Dict[str, Optional[types.CollectionMetadata]]]
     ]
     admin_client: AdminAPI
@@ -37,11 +37,12 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         super().__init__(client)
         self.api = client
         self.admin_client = AdminClient.from_system(client._system)
+        self._tenant_to_database_to_model = {}
 
     @initialize()
     def initialize(self) -> None:
         self.api.reset()
-        self.tenant_to_database_to_model = {}
+        self.set_tenant_to_database_to_model({})
         self.curr_tenant = DEFAULT_TENANT
         self.curr_database = DEFAULT_DATABASE
         self.api.set_tenant(DEFAULT_TENANT, DEFAULT_DATABASE)
@@ -51,7 +52,7 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     @rule(target=tenants, name=strategies.tenant_database_name)
     def create_tenant(self, name: str) -> MultipleResults[str]:
         # Check if tenant already exists
-        if name in self.tenant_to_database_to_model:
+        if name in self._tenant_to_database_to_model:
             with pytest.raises(Exception):
                 self.admin_client.create_tenant(name)
             return multiple()
@@ -92,9 +93,29 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.curr_tenant = tenant
         self.curr_database = DEFAULT_DATABASE
 
+    def set_tenant_to_database_to_model(self, d: Dict[str, Any]) -> None:
+        self._tenant_to_database_to_model = d
+
+    @property
+    def tenant_to_database_to_model(self) -> Dict[
+        str,
+        Dict[
+            str,
+            Dict[
+                str,
+                Optional[types.CollectionMetadata]
+            ]
+        ]
+    ]:
+        return self._tenant_to_database_to_model
+
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
-        return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
+        return self.tenant_to_database_to_model[
+            self.curr_tenant
+        ][
+            self.curr_database
+        ]
 
 
 def test_collections(caplog: pytest.LogCaptureFixture, client: Client) -> None:
