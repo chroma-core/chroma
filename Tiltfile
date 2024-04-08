@@ -134,7 +134,7 @@ k8s_resource('pulsar', resource_deps=['k8s_setup', 'namespace'], labels=["infras
 k8s_resource('sysdb-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
 k8s_resource('logservice-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['sysdb-migration'], labels=["chroma"], port_forwards='50052:50051')
-k8s_resource('sysdb', resource_deps=['pulsar', 'sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
+k8s_resource('sysdb', resource_deps=['sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('frontend-service', resource_deps=['pulsar', 'sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"])
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])

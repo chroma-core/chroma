@@ -39,9 +39,6 @@ sysdb:
   replicaCount: 1
   env:
   flags:
-    pulsar-admin-url: "http://pulsar.chroma:8080"
-    pulsar-url: "pulsar://pulsar.chroma:6650"
-    notifier-provider: "pulsar"
 
 logService:
   image:
@@ -76,4 +73,3 @@ logServiceMigration:
     repository: 'local'
     tag: 'logservice-migration'
   databaseUrl: 'postgres://chroma:chroma@postgres:5432/log?sslmode=disable'
-
