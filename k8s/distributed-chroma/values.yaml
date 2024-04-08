@@ -72,4 +72,6 @@ logServiceMigration:
   image:
     repository: 'local'
     tag: 'logservice-migration'
-  databaseUrl: 'postgres://chroma:chroma@postgres:5432/log?sslmode=disable'
+  env:
+  - name: CHROMA_DB_LOG_URL
+    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
