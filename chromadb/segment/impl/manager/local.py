@@ -99,6 +99,10 @@ class LocalSegmentManager(SegmentManager):
                 segment_limit, callback=lambda _, v: v.close_persistent_index()
             )
 
+    @trace_method(
+        "LocalSegmentManager.callback_cache_evict",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     def callback_cache_evict(self, segment: Segment):
         collection_id = segment["collection"]
         self.logger.info(f"LRU cache evict collection {collection_id}")
@@ -163,10 +167,6 @@ class LocalSegmentManager(SegmentManager):
                 self.segment_cache[SegmentScope.METADATA].pop(collection_id)
         return [s["id"] for s in segments]
 
-    @trace_method(
-        "LocalSegmentManager.get_segment",
-        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
-    )
     def _get_segment_disk_size(self, collection_id: UUID) -> int:
         segments = self._sysdb.get_segments(
             collection=collection_id, scope=SegmentScope.VECTOR
@@ -182,6 +182,10 @@ class LocalSegmentManager(SegmentManager):
         )
         return size
 
+    @trace_method(
+        "LocalSegmentManager._get_segment_sysdb",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     def _get_segment_sysdb(self, collection_id: UUID, scope: SegmentScope):
         segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
         known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
@@ -189,6 +193,10 @@ class LocalSegmentManager(SegmentManager):
         segment = next(filter(lambda s: s["type"] in known_types, segments))
         return segment
 
+    @trace_method(
+        "LocalSegmentManager.get_segment",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         if type == MetadataReader:
