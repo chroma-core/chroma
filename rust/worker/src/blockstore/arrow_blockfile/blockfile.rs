@@ -12,16 +12,18 @@ use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
+// RESUME POINT: make this use the reader/writer pattern
+
 /// ArrowBlockfile is a blockfile implementation that uses Apache Arrow for the block storage.
 /// It stores a sparse index over a set of blocks sorted by key.
 /// It uses a block provider to create new blocks and to retrieve existing blocks.
 #[derive(Clone)]
-pub(crate) struct ArrowBlockfile {
+pub(crate) struct ArrowBlockfile<'a> {
     key_type: KeyType,
     value_type: ValueType,
     block_provider: ArrowBlockProvider,
     sparse_index: Arc<Mutex<SparseIndex>>,
-    transaction_state: Option<Arc<TransactionState>>,
+    transaction_state: Option<Arc<TransactionState<'a>>>,
 }
 
 /// TransactionState is a helper struct to keep track of the state of a transaction.
@@ -29,12 +31,12 @@ pub(crate) struct ArrowBlockfile {
 /// sparse index that is created during the transaction. The sparse index is immutable
 /// so we can replace the sparse index of the blockfile with the new sparse index after
 /// the transaction is committed.
-struct TransactionState {
-    block_delta: Mutex<Vec<BlockDelta>>,
+struct TransactionState<'a> {
+    block_delta: Mutex<Vec<BlockDelta<'a>>>,
     sparse_index: Mutex<Option<Arc<Mutex<SparseIndex>>>>,
 }
 
-impl TransactionState {
+impl TransactionState<'_> {
     fn new() -> Self {
         Self {
             block_delta: Mutex::new(Vec::new()),
@@ -80,7 +82,7 @@ impl ChromaError for ArrowBlockfileError {
     }
 }
 
-impl Blockfile for ArrowBlockfile {
+impl<'a> Blockfile<'a> for ArrowBlockfile<'a> {
     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
         let target_block_id = self.sparse_index.lock().get_target_block_id(&key);
         let target_block = match self.block_provider.get_block(&target_block_id) {
@@ -197,6 +199,11 @@ impl Blockfile for ArrowBlockfile {
             }
             Value::RoaringBitmapValue(_) => {
                 if self.value_type != ValueType::RoaringBitmap {
+                    return Err(Box::new(BlockfileError::InvalidValueType));
+                }
+            }
+            Value::DataRecordValue(_) => {
+                if self.value_type != ValueType::DataRecord {
                     return Err(Box::new(BlockfileError::InvalidValueType));
                 }
             }
@@ -369,7 +376,7 @@ impl Blockfile for ArrowBlockfile {
     }
 }
 
-impl ArrowBlockfile {
+impl ArrowBlockfile<'_> {
     pub(super) fn new(
         key_type: KeyType,
         value_type: ValueType,

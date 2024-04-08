@@ -7,11 +7,28 @@ pub(super) struct MaterializedLogRecord<'a> {
     materialized_record: DataRecord<'a>,
 }
 
-pub(super) struct DataRecord<'a> {
-    id: &'a str,
-    embedding: &'a [f32],
-    metadata: &'a Option<Metadata>,
-    document: &'a Option<String>,
+#[derive(Debug, Clone)]
+pub(crate) struct DataRecord<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) embedding: &'a [f32],
+    pub(crate) metadata: &'a Option<Metadata>,
+    pub(crate) document: &'a Option<String>,
+    // Optional staged serialized version of the metadata
+    pub(crate) serialized_metadata: Option<Vec<u8>>,
+}
+
+impl DataRecord<'_> {
+    pub(crate) fn get_size(&self) -> usize {
+        let id_size = self.id.len();
+        let embedding_size = self.embedding.len() * std::mem::size_of::<f32>();
+        // TODO: use serialized_metadata size to calculate the size
+        let metadata_size = 0;
+        let document_size = match self.document {
+            Some(document) => document.len(),
+            None => 0,
+        };
+        id_size + embedding_size + metadata_size + document_size
+    }
 }
 
 pub(super) trait SegmentWriter {
@@ -84,6 +101,7 @@ mod tests {
                     embedding: &[],
                     metadata: &metadata_1,
                     document: &None,
+                    serialized_metadata: None,
                 },
             })
             .collect::<Vec<_>>();

@@ -21,12 +21,12 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - get_size: gets the size of the block delta.
 /// - split: splits the block delta into two block deltas.
 #[derive(Clone)]
-pub struct BlockDelta {
+pub struct BlockDelta<'a> {
     pub source_block: Arc<Block>,
-    inner: Arc<RwLock<BlockDeltaInner>>,
+    inner: Arc<RwLock<BlockDeltaInner<'a>>>,
 }
 
-impl BlockDelta {
+impl BlockDelta<'_> {
     /// Checks if a key value pair can be added to the block delta and still be within the
     /// max block size.
     pub fn can_add(&self, key: &BlockfileKey, value: &Value) -> bool {
@@ -122,11 +122,11 @@ impl BlockDelta {
     }
 }
 
-struct BlockDeltaInner {
-    new_data: BTreeMap<BlockfileKey, Value>,
+struct BlockDeltaInner<'a> {
+    new_data: BTreeMap<BlockfileKey, Value<'a>>,
 }
 
-impl BlockDeltaInner {
+impl BlockDeltaInner<'_> {
     fn add(&mut self, key: BlockfileKey, value: Value) {
         self.new_data.insert(key, value);
     }
@@ -310,7 +310,7 @@ impl BlockDeltaInner {
     }
 }
 
-impl TryFrom<&BlockDelta> for BlockData {
+impl TryFrom<&BlockDelta<'_>> for BlockData {
     type Error = super::BlockDataBuildError;
 
     fn try_from(delta: &BlockDelta) -> Result<BlockData, Self::Error> {
@@ -332,7 +332,7 @@ impl TryFrom<&BlockDelta> for BlockData {
     }
 }
 
-impl From<Arc<Block>> for BlockDelta {
+impl From<Arc<Block>> for BlockDelta<'_> {
     fn from(source_block: Arc<Block>) -> Self {
         // Read the exising block and put it into adds. We only create these
         // when we have a write to this block, so we don't care about the cost of

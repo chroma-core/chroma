@@ -1,10 +1,9 @@
 use super::types::{LogMaterializer, MaterializedLogRecord, SegmentWriter};
-use crate::blockstore::Blockfile;
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::LogRecord;
 
 struct RecordSegment {
-    records: Box<dyn Blockfile>,
+    // records: Box<dyn Blockfile>,
 }
 
 impl SegmentWriter for RecordSegment {
