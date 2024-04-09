@@ -1,18 +1,17 @@
 use super::{
-    super::{BlockfileError, BlockfileKey, Key, Value},
-    key::KeyWrapper,
+    super::{BlockfileError, Key, Value},
     storage::{Readable, Storage, StorageBuilder, StorageManager, Writeable},
 };
-use crate::errors::ChromaError;
+use crate::{blockstore::key::KeyWrapper, errors::ChromaError};
 
-pub(crate) struct HashMapBlockfileWriter<K: Key, V: Value> {
+pub(crate) struct MemoryBlockfileWriter<K: Key, V: Value> {
     builder: StorageBuilder,
     storage_manager: StorageManager,
     marker: std::marker::PhantomData<(K, V)>,
     id: uuid::Uuid,
 }
 
-impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> HashMapBlockfileWriter<K, V> {
+impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> MemoryBlockfileWriter<K, V> {
     pub(super) fn new(storage_manager: StorageManager) -> Self {
         let builder = storage_manager.create();
         let id = builder.id;
@@ -75,7 +74,7 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
     pub(crate) fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         todo!()
     }
 
@@ -83,7 +82,7 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         todo!()
     }
 
@@ -91,7 +90,7 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         todo!()
     }
 
@@ -99,7 +98,7 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         todo!()
     }
 
@@ -107,7 +106,7 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         todo!()
     }
 
@@ -126,7 +125,7 @@ mod tests {
     #[test]
     fn test_blockfile_string() {
         let storage_manager = StorageManager::new();
-        let mut writer = HashMapBlockfileWriter::new(storage_manager.clone());
+        let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let _ = writer.set("prefix", "key1".to_string(), &"value1".to_string());
         let _ = writer.commit_transaction();
 
@@ -139,7 +138,7 @@ mod tests {
     #[test]
     fn test_data_record() {
         let storage_manager = StorageManager::new();
-        let mut writer = HashMapBlockfileWriter::new(storage_manager.clone());
+        let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let id = uuid::Uuid::new_v4().to_string();
         let embedding = vec![1.0, 2.0, 3.0];
         let record = DataRecord {

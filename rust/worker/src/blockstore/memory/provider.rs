@@ -1,14 +1,12 @@
 use super::{
-    key::KeyWrapper,
-    reader_writer::{HashMapBlockfileReader, HashMapBlockfileWriter},
+    reader_writer::{HashMapBlockfileReader, MemoryBlockfileWriter},
     storage::{Readable, StorageManager, Writeable},
 };
 use crate::blockstore::{
+    key::KeyWrapper,
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileReader, BlockfileWriter, Key, Value,
 };
-use parking_lot::RwLock;
-use std::{collections::HashMap, sync::Arc};
 
 /// A BlockFileProvider that creates HashMapBlockfiles (in-memory blockfiles used for testing).
 /// It bookkeeps the blockfiles locally.
@@ -36,8 +34,8 @@ impl BlockfileProvider for HashMapBlockfileProvider {
     fn create<'new, K: Key + Into<KeyWrapper> + 'new, V: Value + Writeable + 'new>(
         &self,
     ) -> Result<BlockfileWriter<K, V>, Box<CreateError>> {
-        let writer: HashMapBlockfileWriter<K, V> =
-            HashMapBlockfileWriter::new(self.storage_manager.clone());
+        let writer: MemoryBlockfileWriter<K, V> =
+            MemoryBlockfileWriter::new(self.storage_manager.clone());
         Ok(BlockfileWriter::<K, V>::HashMapBlockfileWriter(writer))
     }
 

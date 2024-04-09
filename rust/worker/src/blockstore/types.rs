@@ -1,5 +1,5 @@
-use super::memory::key::KeyWrapper;
-use super::memory::reader_writer::{HashMapBlockfileReader, HashMapBlockfileWriter};
+use super::key::KeyWrapper;
+use super::memory::reader_writer::{HashMapBlockfileReader, MemoryBlockfileWriter};
 use super::memory::storage::{Readable, Writeable};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
@@ -36,13 +36,7 @@ impl ChromaError for BlockfileError {
 }
 
 // ===== Key Types =====
-#[derive(Clone)]
-pub(crate) struct BlockfileKey<K: Key> {
-    pub(crate) prefix: String,
-    pub(crate) key: K,
-}
-
-pub(crate) trait Key: PartialEq + Eq + Debug + Display {
+pub(crate) trait Key: PartialEq + Eq + Debug + Display + Into<KeyWrapper> + Clone {
     fn get_size(&self) -> usize;
 }
 
@@ -52,72 +46,24 @@ impl Key for String {
     }
 }
 
+// impl Key for f32 {
+//     fn get_size(&self) -> usize {
+//         4
+//     }
+//     fn get_type(&self) -> KeyType {
+//         KeyType::Float32
+//     }
+// }
+
 impl Key for bool {
     fn get_size(&self) -> usize {
         1
     }
 }
 
-impl<K: Key> BlockfileKey<K> {
-    pub(super) fn get_size(&self) -> usize {
-        self.get_prefix_size() + self.key.get_size()
-    }
-
-    pub(super) fn get_prefix_size(&self) -> usize {
-        self.prefix.len()
-    }
-}
-
-impl<K: Key> BlockfileKey<K> {
-    pub(crate) fn new(prefix: String, key: K) -> Self {
-        BlockfileKey { prefix, key }
-    }
-}
-
-impl<K: Key + Debug + Display> Debug for BlockfileKey<K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "BlockfileKey(prefix: {}, key: {})",
-            self.prefix, self.key
-        )
-    }
-}
-
-impl<K: Key> Hash for BlockfileKey<K> {
-    // Hash is only used for the HashMap implementation, which is a test/reference implementation
-    // Therefore this hash implementation is not used in production and allowed to be
-    // hacky
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.prefix.hash(state);
-    }
-}
-
-impl<K: Key> PartialEq for BlockfileKey<K> {
-    fn eq(&self, other: &Self) -> bool {
-        self.prefix == other.prefix && self.key == other.key
-    }
-}
-
-impl<K: Key + PartialOrd> PartialOrd for BlockfileKey<K> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.prefix == other.prefix {
-            self.key.partial_cmp(&other.key)
-        } else {
-            self.prefix.partial_cmp(&other.prefix)
-        }
-    }
-}
-
-impl<K: Key + Eq> Eq for BlockfileKey<K> {}
-
-impl<K: Key + Ord> Ord for BlockfileKey<K> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if self.prefix == other.prefix {
-            self.key.cmp(&other.key)
-        } else {
-            self.prefix.cmp(&other.prefix)
-        }
+impl Key for u32 {
+    fn get_size(&self) -> usize {
+        4
     }
 }
 
@@ -199,7 +145,7 @@ impl<'a> Value for DataRecord<'a> {
 }
 
 pub(crate) enum BlockfileWriter<K: Key, V: Value> {
-    HashMapBlockfileWriter(HashMapBlockfileWriter<K, V>),
+    HashMapBlockfileWriter(MemoryBlockfileWriter<K, V>),
 }
 
 impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> BlockfileWriter<K, V> {
@@ -248,7 +194,7 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
     pub(crate) fn get_by_prefix(
         &self,
         prefix: String,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::HashMapBlockfileReader(reader) => reader.get_by_prefix(prefix),
         }
@@ -258,7 +204,7 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::HashMapBlockfileReader(reader) => reader.get_gt(prefix, key),
         }
@@ -268,7 +214,7 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::HashMapBlockfileReader(reader) => reader.get_lt(prefix, key),
         }
@@ -278,7 +224,7 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::HashMapBlockfileReader(reader) => reader.get_gte(prefix, key),
         }
@@ -288,7 +234,7 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         &self,
         prefix: String,
         key: K,
-    ) -> Result<Vec<(BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::HashMapBlockfileReader(reader) => reader.get_lte(prefix, key),
         }

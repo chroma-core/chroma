@@ -1,4 +1,4 @@
-use super::memory::key::KeyWrapper;
+use super::key::KeyWrapper;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
