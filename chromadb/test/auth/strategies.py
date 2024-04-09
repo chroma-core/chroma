@@ -1,6 +1,6 @@
 import hypothesis.strategies as st
 import tempfile
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import yaml
 
 import string
@@ -18,7 +18,7 @@ def random_token(draw: st.DrawFn) -> str:
 
 
 @st.composite
-def random_token_transport_header(draw: st.DrawFn) -> str | None:
+def random_token_transport_header(draw: st.DrawFn) -> Optional[str]:
     return draw(
         st.sampled_from(
             [

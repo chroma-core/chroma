@@ -63,21 +63,23 @@ def test_fastapi_server_token_authn_rejects_when_it_should_reject(
             if t == unauthorized_token:
                 return
 
-    _api = _fastapi_fixture(
-        is_persistent=persistence,
-        chroma_auth_token_transport_header=transport_header,
+    for user in tconf["users"]:
+        for t in user["tokens"]:
+            _api = _fastapi_fixture(
+                is_persistent=persistence,
+                chroma_auth_token_transport_header=transport_header,
 
-        chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
-        chroma_server_authn_credentials_file=tconf["filename"],
+                chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
+                chroma_server_authn_credentials_file=tconf["filename"],
 
-        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials=unauthorized_token,
-    )
-    _sys: System = next(_api)
-    _sys.reset_state()
-    api = _sys.instance(ServerAPI)
-    api.heartbeat()
-    with pytest.raises(Exception) as e:
-        api.list_collections()
+                chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
+                chroma_client_auth_credentials=unauthorized_token,
+            )
+            _sys: System = next(_api)
+            _sys.reset_state()
+            api = _sys.instance(ServerAPI)
+            api.heartbeat()
+            with pytest.raises(Exception) as e:
+                api.list_collections()
 
-    assert "Unauthorized" in str(e)
+            assert "Unauthorized" in str(e)
