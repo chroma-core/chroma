@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 import pytest
 from chromadb.api import AdminAPI
 import chromadb.api.types as types
@@ -37,16 +37,16 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         super().__init__(client)
         self.api = client
         self.admin_client = AdminClient.from_system(client._system)
-        self.tenant_to_database_to_model = {}
 
     @initialize()
     def initialize(self) -> None:
         self.api.reset()
+        self.tenant_to_database_to_model = {}
         self.curr_tenant = DEFAULT_TENANT
         self.curr_database = DEFAULT_DATABASE
         self.api.set_tenant(DEFAULT_TENANT, DEFAULT_DATABASE)
         self.set_tenant_model(self.curr_tenant, {})
-        self.get_tenant_model(self.curr_tenant)[self.curr_database] = {}
+        self.set_database_model_for_tenant(self.curr_tenant, self.curr_database, {})
 
     @rule(target=tenants, name=strategies.tenant_database_name)
     def create_tenant(self, name: str) -> MultipleResults[str]:
@@ -82,13 +82,13 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         # Get a database and switch to the database and the tenant it belongs to
         database_name = database[0]
         tenant_name = database[1]
-        self.api.set_tenant(tenant_name, database_name)
+        self.set_api_tenant_database(tenant_name, database_name)
         self.curr_database = database_name
         self.curr_tenant = tenant_name
 
     @rule(tenant=tenants)
     def set_tenant(self, tenant: str) -> None:
-        self.api.set_tenant(tenant, DEFAULT_DATABASE)
+        self.set_api_tenant_database(tenant, DEFAULT_DATABASE)
         self.curr_tenant = tenant
         self.curr_database = DEFAULT_DATABASE
 
@@ -96,6 +96,9 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     # test_collections_with_database_tenant_override.py, to swap out the model
     # without needing to do a bunch of pythonic cleverness to fake a dict which
     # preteds to have every key.
+    def set_api_tenant_database(self, tenant: str, database: str) -> None:
+        self.api.set_tenant(tenant, database)
+
     def has_tenant(self, tenant: str) -> bool:
         return tenant in self.tenant_to_database_to_model
 
