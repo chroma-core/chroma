@@ -303,5 +303,8 @@ export class IsomorphicFetchClientAuthProtocolAdapter
 // TODOBEN
 export type AuthOptions = {
   provider: ClientAuthProvider | string | undefined;
+  credentialsProvider?: ClientAuthCredentialsProvider<any> | undefined;
+  configProvider?: ClientAuthConfigurationProvider<any> | undefined;
   credentials?: any | undefined;
+  providerOptions?: any | undefined;
 };
