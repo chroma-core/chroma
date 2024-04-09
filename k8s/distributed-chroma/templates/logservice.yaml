@@ -15,10 +15,13 @@ spec:
     spec:
       serviceAccountName: logservice-serviceaccount
       containers:
-        - command:
-            - "logservice"
-            - "logservice"
-          image: {{ .Values.logService.image }}
+        - env:
+            {{ range .Values.logService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+          image: "{{ .Values.logService.image.repository }}:{{ .Values.logService.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: logservice
           ports:

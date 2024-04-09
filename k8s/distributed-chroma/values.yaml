@@ -3,8 +3,10 @@
 
 namespace: 'chroma'
 
-frontend:
-  image: 'server'
+frontendService:
+  image:
+    repository: 'local'
+    tag: 'frontend-service'
 
   # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
   # populated from secrets or configMaps. So we let consumers fill these directly.
@@ -20,7 +22,7 @@ frontend:
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
-  coordinatorHost: 'value: "coordinator.chroma"'
+  coordinatorHost: 'value: "sysdb.chroma"'
   authProvider: 'value: ""'
   authCredentialsProvider: 'value: ""'
   authzProvider: 'value: ""'
@@ -30,20 +32,44 @@ frontend:
   logServicePort: 'value: "50051"'
   otherEnvConfig: ''
 
-coordinator:
-  image: 'coordinator'
+sysdb:
+  image:
+    repository: 'local'
+    tag: 'sysdb'
   replicaCount: 1
   env:
   flags:
-    pulsar-admin-url: "http://pulsar.chroma:8080"
-    pulsar-url: "pulsar://pulsar.chroma:6650"
-    notifier-provider: "pulsar"
 
 logService:
-  image: 'coordinator'
+  image:
+    repository: 'local'
+    tag: 'log-service'
+  env:
+  flags:
 
-worker:
-  image: 'worker'
+queryService:
+  image:
+    repository: 'local'
+    tag: 'query-service'
+
+compactionService:
+  image:
+    repository: 'local'
+    tag: 'compaction-service'
 
 sysdbMigration:
-  image: 'migration'
+  image:
+    repository: 'local'
+    tag: 'sysdb-migration'
+  username: chroma
+  password: chroma
+  netloc: postgres
+  port: 5432
+  dbName: sysdb
+  sslmode: disable
+
+logServiceMigration:
+  image:
+    repository: 'local'
+    tag: 'logservice-migration'
+  databaseUrl: 'postgres://chroma:chroma@postgres:5432/log?sslmode=disable'

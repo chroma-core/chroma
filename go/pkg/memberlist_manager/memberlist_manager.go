@@ -39,6 +39,7 @@ func NewMemberlistManager(nodeWatcher IWatcher, memberlistStore IMemberlistStore
 }
 
 func (m *MemberlistManager) Start() error {
+	log.Info("Starting memberlist manager")
 	m.nodeWatcher.RegisterCallback(func(nodeIp string) {
 		m.workqueue.Add(nodeIp)
 	})
@@ -110,7 +111,7 @@ func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
 	if !exists && status == Ready {
 		newMemberlist = append(newMemberlist, nodeIp)
 	}
-	return m.memberlistStore.UpdateMemberlist(context.TODO(), &newMemberlist, resourceVersion)
+	return m.memberlistStore.UpdateMemberlist(context.Background(), &newMemberlist, resourceVersion)
 }
 
 func (m *MemberlistManager) Stop() error {

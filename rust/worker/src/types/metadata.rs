@@ -5,7 +5,7 @@ use crate::{
 use std::collections::HashMap;
 use thiserror::Error;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum UpdateMetadataValue {
     Int(i32),
     Float(f64),
@@ -52,7 +52,7 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MetadataValue {
     Int(i32),
     Float(f64),
@@ -130,7 +130,6 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
 UpdateMetadata
 ===========================================
 */
-
 pub(crate) type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
 
 impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {

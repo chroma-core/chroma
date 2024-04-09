@@ -6,10 +6,12 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"time"
+
+	"github.com/chroma-core/chroma/go/pkg/types"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
-	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
@@ -117,39 +119,72 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
+func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
+	defaultTenant := &dbmodel.Tenant{
+		ID:                 common.DefaultTenant,
+		LastCompactionTime: time.Now().Unix(),
+	}
+	db.Model(&dbmodel.Tenant{}).Where("id = ?", common.DefaultTenant).Save(defaultTenant)
+
+	var database []dbmodel.Database
+	databaseId := types.NewUniqueID().String()
+	result := db.Model(&dbmodel.Database{}).
+		Where("name = ?", common.DefaultDatabase).
+		Where("tenant_id = ?", common.DefaultTenant).
+		Find(&database)
+	if result.Error != nil {
+		return ""
+	}
+
+	if result.RowsAffected == 0 {
+		db.Create(&dbmodel.Database{
+			ID:       databaseId,
+			Name:     common.DefaultDatabase,
+			TenantID: common.DefaultTenant,
+		})
+		return databaseId
+	}
+
+	err := result.Row().Scan(&database)
+	if err != nil {
+		return ""
+	}
+	return database[0].ID
+}
+
 func CreateTestTables(db *gorm.DB) {
-	// Setup tenant related tables
-	db.Migrator().DropTable(&dbmodel.Tenant{})
-	db.Migrator().CreateTable(&dbmodel.Tenant{})
-	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
-		ID: common.DefaultTenant,
-	})
+	log.Info("CreateTestTables")
+	tableExist := db.Migrator().HasTable(&dbmodel.Tenant{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Tenant{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Database{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Database{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.CollectionMetadata{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.CollectionMetadata{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Collection{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Collection{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.SegmentMetadata{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Segment{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Segment{})
+	}
+	tableExist = db.Migrator().HasTable(&dbmodel.Notification{})
+	if !tableExist {
+		db.Migrator().CreateTable(&dbmodel.Notification{})
+	}
 
-	// Setup database related tables
-	db.Migrator().DropTable(&dbmodel.Database{})
-	db.Migrator().CreateTable(&dbmodel.Database{})
-
-	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
-		ID:       types.NilUniqueID().String(),
-		Name:     common.DefaultDatabase,
-		TenantID: common.DefaultTenant,
-	})
-
-	// Setup collection related tables
-	db.Migrator().DropTable(&dbmodel.Collection{})
-	db.Migrator().DropTable(&dbmodel.CollectionMetadata{})
-	db.Migrator().CreateTable(&dbmodel.Collection{})
-	db.Migrator().CreateTable(&dbmodel.CollectionMetadata{})
-
-	// Setup segment related tables
-	db.Migrator().DropTable(&dbmodel.Segment{})
-	db.Migrator().DropTable(&dbmodel.SegmentMetadata{})
-	db.Migrator().CreateTable(&dbmodel.Segment{})
-	db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
-
-	// Setup notification related tables
-	db.Migrator().DropTable(&dbmodel.Notification{})
-	db.Migrator().CreateTable(&dbmodel.Notification{})
+	// create default tenant and database
+	CreateDefaultTenantAndDatabase(db)
 }
 
 func GetDBConfigForTesting() DBConfig {

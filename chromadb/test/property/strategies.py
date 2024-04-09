@@ -239,11 +239,12 @@ def embedding_function_strategy(
 class ExternalCollection:
     """
     An external view of a collection.
-    
+
     This strategy only contains information about a collection that a client of Chroma
     sees -- that is, it contains none of Chroma's internal bookkeeping. It should
     be used to test the API and client code.
     """
+
     name: str
     metadata: Optional[types.Metadata]
     embedding_function: Optional[types.EmbeddingFunction[Embeddable]]
@@ -258,10 +259,10 @@ class Collection(ExternalCollection):
     collection. It is a superset of ExternalCollection and should be used to test
     internal Chroma logic.
     """
+
     id: uuid.UUID
     dimension: int
     dtype: npt.DTypeLike
-    topic: str
     known_metadata_keys: types.Metadata
     known_document_keywords: List[str]
     has_documents: bool = False
@@ -332,7 +333,6 @@ def collections(
     return Collection(
         id=uuid.uuid4(),
         name=name,
-        topic="topic",
         metadata=metadata,
         dimension=dimension,
         dtype=dtype,

@@ -25,6 +25,7 @@ type LogServiceClient interface {
 	PushLogs(ctx context.Context, in *PushLogsRequest, opts ...grpc.CallOption) (*PushLogsResponse, error)
 	PullLogs(ctx context.Context, in *PullLogsRequest, opts ...grpc.CallOption) (*PullLogsResponse, error)
 	GetAllCollectionInfoToCompact(ctx context.Context, in *GetAllCollectionInfoToCompactRequest, opts ...grpc.CallOption) (*GetAllCollectionInfoToCompactResponse, error)
+	UpdateCollectionLogOffset(ctx context.Context, in *UpdateCollectionLogOffsetRequest, opts ...grpc.CallOption) (*UpdateCollectionLogOffsetResponse, error)
 }
 
 type logServiceClient struct {
@@ -62,6 +63,15 @@ func (c *logServiceClient) GetAllCollectionInfoToCompact(ctx context.Context, in
 	return out, nil
 }
 
+func (c *logServiceClient) UpdateCollectionLogOffset(ctx context.Context, in *UpdateCollectionLogOffsetRequest, opts ...grpc.CallOption) (*UpdateCollectionLogOffsetResponse, error) {
+	out := new(UpdateCollectionLogOffsetResponse)
+	err := c.cc.Invoke(ctx, "/chroma.LogService/UpdateCollectionLogOffset", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LogServiceServer is the server API for LogService service.
 // All implementations must embed UnimplementedLogServiceServer
 // for forward compatibility
@@ -69,6 +79,7 @@ type LogServiceServer interface {
 	PushLogs(context.Context, *PushLogsRequest) (*PushLogsResponse, error)
 	PullLogs(context.Context, *PullLogsRequest) (*PullLogsResponse, error)
 	GetAllCollectionInfoToCompact(context.Context, *GetAllCollectionInfoToCompactRequest) (*GetAllCollectionInfoToCompactResponse, error)
+	UpdateCollectionLogOffset(context.Context, *UpdateCollectionLogOffsetRequest) (*UpdateCollectionLogOffsetResponse, error)
 	mustEmbedUnimplementedLogServiceServer()
 }
 
@@ -84,6 +95,9 @@ func (UnimplementedLogServiceServer) PullLogs(context.Context, *PullLogsRequest)
 }
 func (UnimplementedLogServiceServer) GetAllCollectionInfoToCompact(context.Context, *GetAllCollectionInfoToCompactRequest) (*GetAllCollectionInfoToCompactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAllCollectionInfoToCompact not implemented")
+}
+func (UnimplementedLogServiceServer) UpdateCollectionLogOffset(context.Context, *UpdateCollectionLogOffsetRequest) (*UpdateCollectionLogOffsetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateCollectionLogOffset not implemented")
 }
 func (UnimplementedLogServiceServer) mustEmbedUnimplementedLogServiceServer() {}
 
@@ -152,6 +166,24 @@ func _LogService_GetAllCollectionInfoToCompact_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LogService_UpdateCollectionLogOffset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateCollectionLogOffsetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LogServiceServer).UpdateCollectionLogOffset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chroma.LogService/UpdateCollectionLogOffset",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LogServiceServer).UpdateCollectionLogOffset(ctx, req.(*UpdateCollectionLogOffsetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LogService_ServiceDesc is the grpc.ServiceDesc for LogService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,6 +202,10 @@ var LogService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAllCollectionInfoToCompact",
 			Handler:    _LogService_GetAllCollectionInfoToCompact_Handler,
+		},
+		{
+			MethodName: "UpdateCollectionLogOffset",
+			Handler:    _LogService_UpdateCollectionLogOffset_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -70,7 +70,7 @@ class QuotaEnforcer(Component):
                                                                          subject=collection_id)
         metadata_value_length_quota = self._quota_provider.get_for_subject(resource=Resource.METADATA_VALUE_LENGTH,
                                                                            subject=collection_id)
-        if metadatas and (metadata_key_length_quota or metadata_key_length_quota):
+        if metadatas and (metadata_key_length_quota or metadata_value_length_quota):
             for metadata in metadatas:
                 for key in metadata:
                     if metadata_key_length_quota and len(key) > metadata_key_length_quota:

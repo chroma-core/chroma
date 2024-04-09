@@ -9,7 +9,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/notification"
-	"github.com/chroma-core/chroma/go/pkg/types"
 	"gorm.io/gorm"
 )
 
@@ -19,38 +18,23 @@ var _ ICoordinator = (*Coordinator)(nil)
 // Currently, it only has the system catalog related APIs and will be extended to
 // support other functionalities such as membership managed and propagation.
 type Coordinator struct {
-	ctx                        context.Context
-	collectionAssignmentPolicy CollectionAssignmentPolicy
-	meta                       IMeta
-	notificationProcessor      notification.NotificationProcessor
+	ctx                   context.Context
+	notificationProcessor notification.NotificationProcessor
+	catalog               metastore.Catalog
 }
 
-func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPolicy, db *gorm.DB, notificationStore notification.NotificationStore, notifier notification.Notifier) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, db *gorm.DB, notificationStore notification.NotificationStore, notifier notification.Notifier) (*Coordinator, error) {
 	s := &Coordinator{
-		ctx:                        ctx,
-		collectionAssignmentPolicy: assignmentPolicy,
+		ctx: ctx,
 	}
 
 	notificationProcessor := notification.NewSimpleNotificationProcessor(ctx, notificationStore, notifier)
-
-	var catalog metastore.Catalog
-	// TODO: move this to server.go
-	if db == nil {
-		catalog = coordinator.NewMemoryCatalogWithNotification(notificationStore)
-	} else {
-		txnImpl := dbcore.NewTxImpl()
-		metaDomain := dao.NewMetaDomain()
-		catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
-	}
-	meta, err := NewMetaTable(s.ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-	meta.SetNotificationProcessor(notificationProcessor)
-
-	s.meta = meta
 	s.notificationProcessor = notificationProcessor
 
+	// catalog
+	txnImpl := dbcore.NewTxImpl()
+	metaDomain := dao.NewMetaDomain()
+	s.catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
 	return s, nil
 }
 
@@ -69,8 +53,4 @@ func (s *Coordinator) Stop() error {
 		log.Printf("Failed to stop notification processor: %v", err)
 	}
 	return nil
-}
-
-func (c *Coordinator) assignCollection(collectionID types.UniqueID) (string, error) {
-	return c.collectionAssignmentPolicy.AssignCollection(collectionID)
 }

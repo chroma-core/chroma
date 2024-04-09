@@ -1,3 +1,5 @@
+from functools import cached_property
+
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
@@ -52,7 +54,6 @@ from chromadb.telemetry.product.events import (
 )
 
 import chromadb.types as t
-
 from typing import Any, Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
@@ -112,6 +113,7 @@ class SegmentAPI(ServerAPI):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @trace_method("SegmentAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         if len(name) < 3:
@@ -123,10 +125,12 @@ class SegmentAPI(ServerAPI):
             tenant=tenant,
         )
 
+    @trace_method("SegmentAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
 
+    @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
         if len(name) < 3:
@@ -136,6 +140,7 @@ class SegmentAPI(ServerAPI):
             name=name,
         )
 
+    @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> t.Tenant:
         return self._sysdb.get_tenant(name=name)
@@ -175,10 +180,13 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
+        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
             segments = self._manager.create_segments(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
+        else:
+            logger.info(f"Collection {name} is not created.")
 
         # TODO: This event doesn't capture the get_or_create case appropriately
         self._product_telemetry_client.capture(
@@ -359,7 +367,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -370,7 +378,6 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.ADD,
             ids=ids,
-            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -378,7 +385,7 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
             CollectionAddEvent(
@@ -402,7 +409,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -413,7 +420,6 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.UPDATE,
             ids=ids,
-            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -421,7 +427,7 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
             CollectionUpdateEvent(
@@ -447,7 +453,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, collection_id)
+        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
@@ -458,7 +464,6 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.UPSERT,
             ids=ids,
-            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -466,7 +471,7 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         return True
 
@@ -628,12 +633,10 @@ class SegmentAPI(ServerAPI):
             return []
 
         records_to_submit = []
-        for r in _records(
-            operation=t.Operation.DELETE, ids=ids_to_delete, collection_id=collection_id
-        ):
+        for r in _records(operation=t.Operation.DELETE, ids=ids_to_delete):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
             CollectionDeleteEvent(
@@ -788,7 +791,7 @@ class SegmentAPI(ServerAPI):
     def get_settings(self) -> Settings:
         return self._settings
 
-    @property
+    @cached_property
     @override
     def max_batch_size(self) -> int:
         return self._producer.max_batch_size
@@ -799,7 +802,7 @@ class SegmentAPI(ServerAPI):
     # used for channel assignment in the distributed version of the system.
     @trace_method("SegmentAPI._validate_embedding_record", OpenTelemetryGranularity.ALL)
     def _validate_embedding_record(
-        self, collection: t.Collection, record: t.SubmitEmbeddingRecord
+        self, collection: t.Collection, record: t.OperationRecord
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
@@ -841,12 +844,11 @@ class SegmentAPI(ServerAPI):
 def _records(
     operation: t.Operation,
     ids: IDs,
-    collection_id: UUID,
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
     uris: Optional[URIs] = None,
-) -> Generator[t.SubmitEmbeddingRecord, None, None]:
+) -> Generator[t.OperationRecord, None, None]:
     """Convert parallel lists of embeddings, metadatas and documents to a sequence of
     SubmitEmbeddingRecords"""
 
@@ -873,13 +875,12 @@ def _records(
             else:
                 metadata = {"chroma:uri": uri}
 
-        record = t.SubmitEmbeddingRecord(
+        record = t.OperationRecord(
             id=id,
             embedding=embeddings[i] if embeddings else None,
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
             operation=operation,
-            collection_id=collection_id,
         )
         yield record
 

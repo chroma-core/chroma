@@ -1,27 +1,25 @@
-use async_trait::async_trait;
-use uuid::Uuid;
-
+use super::config::SysDbConfig;
 use crate::chroma_proto;
-use crate::config::{Configurable, WorkerConfig};
+use crate::config::Configurable;
 use crate::types::{CollectionConversionError, SegmentConversionError};
 use crate::{
     chroma_proto::sys_db_client,
     errors::{ChromaError, ErrorCodes},
     types::{Collection, Segment, SegmentScope},
 };
+use async_trait::async_trait;
+use std::fmt::Debug;
 use thiserror::Error;
-
-use super::config::SysDbConfig;
+use uuid::Uuid;
 
 const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
 #[async_trait]
-pub(crate) trait SysDb: Send + Sync + SysDbClone {
+pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
-        topic: Option<String>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
@@ -32,7 +30,6 @@ pub(crate) trait SysDb: Send + Sync + SysDbClone {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        topic: Option<String>,
         collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError>;
 }
@@ -59,7 +56,7 @@ impl Clone for Box<dyn SysDb> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
 pub(crate) struct GrpcSysDb {
@@ -81,9 +78,9 @@ impl ChromaError for GrpcSysDbError {
 }
 
 #[async_trait]
-impl Configurable for GrpcSysDb {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &worker_config.sysdb {
+impl Configurable<SysDbConfig> for GrpcSysDb {
+    async fn try_from_config(config: &SysDbConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
             SysDbConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;
@@ -108,7 +105,6 @@ impl SysDb for GrpcSysDb {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
-        topic: Option<String>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
@@ -128,7 +124,6 @@ impl SysDb for GrpcSysDb {
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
-                topic: topic,
                 name: name,
                 tenant: if tenant.is_some() {
                     tenant.unwrap()
@@ -172,7 +167,6 @@ impl SysDb for GrpcSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        topic: Option<String>,
         collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
@@ -190,7 +184,6 @@ impl SysDb for GrpcSysDb {
                 } else {
                     None
                 },
-                topic: topic,
                 collection: if collection.is_some() {
                     Some(collection.unwrap().to_string())
                 } else {

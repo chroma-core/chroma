@@ -2,6 +2,10 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/model"
@@ -87,7 +91,6 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		return res, nil
 	}
 	res.Collection = convertCollectionToProto(collection)
-	res.Created = collection.Created
 	res.Status = setResponseStatus(successCode)
 	return res, nil
 }
@@ -95,7 +98,6 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetCollectionsRequest) (*coordinatorpb.GetCollectionsResponse, error) {
 	collectionID := req.Id
 	collectionName := req.Name
-	collectionTopic := req.Topic
 	tenantID := req.Tenant
 	databaseName := req.Database
 
@@ -108,7 +110,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		return res, nil
 	}
 
-	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, collectionTopic, tenantID, databaseName)
+	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
 		res.Status = failResponseWithError(err, errorCode)
@@ -140,10 +142,11 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	}
 	err = s.coordinator.DeleteCollection(ctx, deleteCollection)
 	if err != nil {
-		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
-		if err == common.ErrCollectionDeleteNonExistingCollection {
+		if errors.Is(err, common.ErrCollectionDeleteNonExistingCollection) {
+			log.Error("ErrCollectionDeleteNonExistingCollection", zap.String("collectionpd.id", collectionID))
 			res.Status = failResponseWithError(err, 404)
 		} else {
+			log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
 			res.Status = failResponseWithError(err, errorCode)
 		}
 		return res, nil
@@ -166,7 +169,6 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	updateCollection := &model.UpdateCollection{
 		ID:        parsedCollectionID,
 		Name:      req.Name,
-		Topic:     req.Topic,
 		Dimension: req.Dimension,
 	}
 
@@ -207,6 +209,53 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	res.Status = setResponseStatus(successCode)
+	return res, nil
+}
+
+func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
+	blob, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("flush collection compaction", zap.String("request", string(blob)))
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
+	if err != nil {
+		return nil, err
+	}
+	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(req.SegmentCompactionInfo))
+	for _, flushSegmentCompaction := range req.SegmentCompactionInfo {
+		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
+		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
+		if err != nil {
+			return nil, err
+		}
+		filePaths := make(map[string][]string)
+		for key, filePath := range flushSegmentCompaction.FilePaths {
+			filePaths[key] = filePath.Paths
+		}
+		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
+			ID:        segmentID,
+			FilePaths: filePaths,
+		})
+	}
+	FlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       collectionID,
+		TenantID:                 req.TenantId,
+		LogPosition:              req.LogPosition,
+		CurrentCollectionVersion: req.CollectionVersion,
+		FlushSegmentCompactions:  segmentCompactionInfo,
+	}
+	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
+	if err != nil {
+		log.Error("error FlushCollectionCompaction", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res := &coordinatorpb.FlushCollectionCompactionResponse{
+		CollectionId:       flushCollectionInfo.ID,
+		CollectionVersion:  flushCollectionInfo.CollectionVersion,
+		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
+	}
 	return res, nil
 }
 
