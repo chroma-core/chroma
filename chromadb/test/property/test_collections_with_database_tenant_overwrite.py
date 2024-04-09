@@ -64,7 +64,6 @@ class SingletonTenantDatabaseCollectionStateMachine(
 
     @invariant()
     def check_api_and_admin_client_are_in_sync(self) -> None:
-        self._print()
         if self.api == self.singleton_client:
             assert self.admin_client == self.singleton_admin_client
         else:
@@ -93,7 +92,6 @@ class SingletonTenantDatabaseCollectionStateMachine(
         self,
         tenant: str
     ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
-        self._print()
         if self.api == self.singleton_client:
             tenant = SINGLETON_TENANT
         return self.tenant_to_database_to_model[tenant]
@@ -103,7 +101,6 @@ class SingletonTenantDatabaseCollectionStateMachine(
         tenant: str,
         model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]]
     ) -> None:
-        self._print()
         if self.api == self.singleton_client:
             # This never happens because we never actually issue a
             # create_tenant call on singleton_tenant:
@@ -125,7 +122,6 @@ class SingletonTenantDatabaseCollectionStateMachine(
         database: str,
         database_model: Dict[str, Optional[types.CollectionMetadata]]
     ) -> None:
-        self._print()
         if self.api == self.singleton_client:
             # This never happens because we never actually issue a
             # create_database call on (singleton_tenant, singleton_database):
@@ -140,9 +136,6 @@ class SingletonTenantDatabaseCollectionStateMachine(
         if self.api == self.singleton_client:
             return self.tenant_to_database_to_model[SINGLETON_TENANT][SINGLETON_DATABASE]
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
-
-    def _print(self) -> None:
-        print(self.tenant_to_database_to_model)
 
 
 def test_collections_with_tenant_database_overwrite(
