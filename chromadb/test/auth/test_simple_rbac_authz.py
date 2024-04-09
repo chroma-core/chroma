@@ -1,7 +1,7 @@
 from hypothesis import given, Phase, settings
 import hypothesis.strategies as st
 import pytest
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from chromadb.api import ServerAPI
 from chromadb.config import Settings, System
@@ -29,7 +29,7 @@ def test_basic_authn_rbac_authz_unit_test(
 def test_token_authn_rbac_authz(
     rbac_conf: Dict[str, Any],
     persistence: bool,
-    header: str | None,
+    header: Optional[str],
     data: Any
 ) -> None:
     for user in rbac_conf["users"]:
