@@ -2,9 +2,9 @@ import base64
 import importlib
 import logging
 
+from fastapi import HTTPException
 from overrides import override
 from pydantic import SecretStr
-from typing import Optional
 
 from chromadb.auth import (
     UserIdentity,
@@ -76,34 +76,32 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
             )
 
         self._creds: Dict[str, SecretStr] = {}
+        creds = self.read_creds_or_creds_file()
 
-        system.settings.require("chroma_server_authn_credentials_file")
-        _creds_file = str(system.settings.chroma_server_authn_credentials_file)
-        with open(_creds_file, "r") as f:
-            for line in f:
-                _raw_creds = [v for v in line.strip().split(":")]
-                if len(_raw_creds) != 2 or not all(_raw_creds):
-                    raise ValueError(
-                        "Invalid Htpasswd credentials found in "
-                        "[chroma_server_auth_credentials]. "
-                        "Lines must be exactly <username>:<bcrypt passwd>."
-                    )
-                username = _raw_creds[0]
-                password = _raw_creds[1]
-                if username in self._creds:
-                    raise ValueError(
-                        "Duplicate username found in "
-                        "[chroma_server_auth_credentials]. "
-                        "Usernames must be unique."
-                    )
-                self._creds[username] = SecretStr(password)
+        for line in creds:
+            _raw_creds = [v for v in line.strip().split(":")]
+            if len(_raw_creds) != 2 or not all(_raw_creds):
+                raise ValueError(
+                    "Invalid htpasswd credentials found in "
+                    "[chroma_server_auth_credentials]. "
+                    "Lines must be exactly <username>:<bcrypt passwd>."
+                )
+            username = _raw_creds[0]
+            password = _raw_creds[1]
+            if username in self._creds:
+                raise ValueError(
+                    "Duplicate username found in "
+                    "[chroma_server_auth_credentials]. "
+                    "Usernames must be unique."
+                )
+            self._creds[username] = SecretStr(password)
 
     @trace_method("BasicAuthenticationServerProvider.authenticate",
                   OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(
+    def authenticate_or_raise(
         self, headers: Headers
-    ) -> Optional[UserIdentity]:
+    ) -> UserIdentity:
         try:
             _auth_header = headers["Authorization"]
             _auth_header = _auth_header.replace("Basic ", "")
@@ -112,7 +110,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
             base64_decoded = base64.b64decode(_auth_header).decode("utf-8")
             username, password = base64_decoded.split(":")
             if not username or not password:
-                return None
+                raise HTTPException(status_code=401, detail="Unauthorized")
 
             _usr_check = username in self._creds
             _pwd_check = self.bc.checkpw(
@@ -127,4 +125,4 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 "BasicAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
-        return None
+        raise HTTPException(status_code=401, detail="Unauthorized")

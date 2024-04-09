@@ -47,6 +47,10 @@ class UserIdentity:
     UserIdentity represents the identity of a user. In general, not all fields
     will be populated, and the fields that are populated will depend on the
     authentication provider.
+
+    The idea is that the AuthenticationProvider is responsible for populating
+    _all_ information known about the user, and the AuthorizationProvider is
+    responsible for making decisions based on that information.
     """
     user_id: str
     tenant: Optional[str] = None
@@ -78,9 +82,9 @@ class ServerAuthenticationProvider(Component):
         )
 
     @abstractmethod
-    def authenticate(
+    def authenticate_or_raise(
         self, headers: Headers
-    ) -> Optional[UserIdentity]:
+    ) -> UserIdentity:
         pass
 
     def ignore_operation(self, verb: str, path: str) -> bool:
@@ -90,6 +94,28 @@ class ServerAuthenticationProvider(Component):
         ):
             return True
         return False
+
+    def read_creds_or_creds_file(self) -> str:
+        _creds_file = self._system.settings[
+            "chroma_server_authn_credentials_file"
+        ]
+        _creds = str(self._system.settings["chroma_server_auth_credentials"])
+        if not _creds_file or not _creds:
+            raise ValueError(
+                "No credentials file or credentials found in "
+                "[chroma_server_auth_credentials]."
+            )
+        if _creds_file and _creds:
+            raise ValueError(
+                "Both credentials file and credentials found in "
+                "[chroma_server_auth_credentials]. "
+                "Please provide only one."
+            )
+        if _creds:
+            return _creds
+        else:
+            with open(_creds_file, "r") as f:
+                return f.read()
 
     def singleton_tenant_database_if_applicable(
         self, user: Optional[UserIdentity]
@@ -169,8 +195,30 @@ class ServerAuthorizationProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def authorize(self,
-                  user: UserIdentity,
-                  action: AuthzAction,
-                  resource: AuthzResource) -> None:
+    def authorize_or_raise(self,
+                           user: UserIdentity,
+                           action: AuthzAction,
+                           resource: AuthzResource) -> None:
         pass
+
+    def read_config_or_config_file(self) -> str:
+        _config_file = self._system.settings[
+            "chroma_server_authz_config_file"
+        ]
+        _config = str(self._system.settings["chroma_server_authz_config"])
+        if not _config_file or not _config:
+            raise ValueError(
+                "No configuration file or configuration found in "
+                "[chroma_server_authz_config]."
+            )
+        if _config_file and _config:
+            raise ValueError(
+                "Both configuration file and configuration found in "
+                "[chroma_server_authz_config]. "
+                "Please provide only one."
+            )
+        if _config:
+            return _config
+        else:
+            with open(_config_file, "r") as f:
+                return f.read()

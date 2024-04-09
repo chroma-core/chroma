@@ -3,6 +3,7 @@ import string
 from enum import Enum
 from typing import List, Optional, TypedDict, cast, TypeVar
 
+from fastapi import HTTPException
 from overrides import override
 from pydantic import SecretStr
 import yaml
@@ -121,14 +122,8 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         else:
             self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
-        if not system.settings.chroma_server_authn_credentials_file:
-            raise ValueError("chroma_server_authn_credentials_file not set")
-
-        users_file = str(
-            system.settings.chroma_server_authn_credentials_file
-        )
-        with open(users_file) as f:
-            self._users = cast(List[User], yaml.safe_load(f)["users"])
+        creds = self.read_creds_or_creds_file()
+        self._users = cast(List[User], yaml.safe_load(creds)["users"])
 
         self._token_user_mapping: Dict[str, User] = {}
         for user in self._users:
@@ -152,9 +147,9 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     @trace_method("TokenAuthenticationServerProvider.authenticate",
                   OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(
+    def authenticate_or_raise(
         self, headers: Headers
-    ) -> Optional[UserIdentity]:
+    ) -> UserIdentity:
         try:
             token = headers[
                 self._token_transport_header.value
@@ -162,14 +157,14 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
             if (self._token_transport_header ==
                     TokenTransportHeader.AUTHORIZATION):
                 if not token.startswith("Bearer "):
-                    return None
+                    raise HTTPException(status_code=401, detail="Unauthorized")
                 token = token.replace("Bearer ", "")
 
             token = token.strip()
             _check_token(token)
 
             if token not in self._token_user_mapping:
-                return None
+                raise HTTPException(status_code=401, detail="Unauthorized")
 
             user_identity = UserIdentity(
                 user_id=self._token_user_mapping[token]["id"],
@@ -182,4 +177,4 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                 "TokenAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
-            return None
+            raise HTTPException(status_code=401, detail="Unauthorized")

@@ -182,6 +182,8 @@ class Settings(BaseSettings):  # type: ignore
     # ============
 
     chroma_server_authn_provider: Optional[str] = None
+    # Only one of the below may be specified.
+    chroma_server_authn_credentials: Optional[str] = None
     chroma_server_authn_credentials_file: Optional[str] = None
 
     # ============
@@ -189,6 +191,8 @@ class Settings(BaseSettings):  # type: ignore
     # ============
 
     chroma_server_authz_provider: Optional[str] = None
+    # Only one of the below may be specified.
+    chroma_server_authz_config: Optional[str] = None
     chroma_server_authz_config_file: Optional[str] = None
 
     # =========

@@ -1,4 +1,4 @@
-from typing import Any, Callable, cast, Dict, List, Sequence, Optional
+from typing import Any, Callable, cast, Dict, List, Sequence, Optional, Tuple
 import fastapi
 import orjson
 
@@ -341,55 +341,57 @@ class FastAPI(Server):
     async def version(self) -> str:
         return self._api.get_version()
 
-    def authenticate_and_authorize_or_raise(
+    def auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
         action: AuthzAction,
         tenant: Optional[str],
         database: Optional[str],
         collection: Optional[str],
-    ) -> Optional[UserIdentity]:
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Authenticate and authorize the request, or raise an authorization error
-        if the request is not authorized. Uses the authn and authz providers
-        configured for this Component. Returns the UserIdentity if the request
-        is authenticated. Returns None if authn is disabled.
+        Authenticates and authorizes the request based on the given headers
+        and other parameters. If the request cannot be authenticated or cannot
+        be authorized (with the configured providers), raises an HTTP 401.
 
-        If self.overwrite_singleton_tenant_database_access_from_auth is True
-        and the user only has access to a single tenant and/or database, this
-        function will ignore the passed tenant and db, and check authorization
-        as if the user-accessible tenant and/or database had been passed.
-
-        If self.overwrite_singleton_tenant_database_access_from_auth is False
-        or the user instead has access to multiple tenants and/or databases,
-        authorization will execute as normal.
+        If the request is authenticated and authorized, returns the tenant and
+        database to be used for the request. These will differ from the passed
+        tenant and database if and only if:
+        - The request is authenticated
+        - chroma_overwrite_singleton_tenant_database_access_from_auth = True
+        - The passed tenant or database are None or default_{tenant, database}
+            (can be overwritten separately)
+        - The user has access to a single tenant and/or single database.
         """
         if not self.authn_provider:
-            return None
+            return (tenant, database)
 
-        user_identity = self.authn_provider.authenticate(headers)
-        if not user_identity:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        user_identity = self.authn_provider.authenticate_or_raise(headers)
+
+        (new_tenant, new_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:
+            tenant = new_tenant
+        if (not database or database == DEFAULT_DATABASE) and new_database:
+            database = new_database
 
         if not self.authz_provider:
-            return user_identity
+            return (tenant, database)
 
         authz_resource = AuthzResource(
             tenant=tenant,
             database=database,
             collection=collection,
         )
-        (new_tenant, new_database) = self.authn_provider.\
-            singleton_tenant_database_if_applicable(
-            user_identity
-        )
-        if new_tenant:
-            authz_resource.tenant = new_tenant
-        if new_database:
-            authz_resource.database = new_database
 
-        self.authz_provider.authorize(user_identity, action, authz_resource)
-        return user_identity
+        self.authz_provider.authorize_or_raise(
+            user_identity,
+            action,
+            authz_resource
+        )
+        return (tenant, database)
 
     @trace_method("FastAPI.create_database",
                   OpenTelemetryGranularity.OPERATION)

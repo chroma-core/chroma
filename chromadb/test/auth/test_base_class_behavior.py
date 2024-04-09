@@ -19,7 +19,7 @@ class DummyServerAuthenticationProvider(ServerAuthenticationProvider):
     to implement it here.
     """
     @override
-    def authenticate(self, headers: Headers) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
         return UserIdentity(user_id="test_user")
 
 
@@ -103,8 +103,8 @@ def test_chroma_overwrite_singleton_tenant_database_access_from_auth(
         assert database is None
         return
 
-    if user.tenant and len(user.tenant) == 1 and user.tenant[0] != "*":
-        assert tenant == user.tenant[0]
+    if user.tenant and user.tenant != "*":
+        assert tenant == user.tenant
     else:
         assert tenant is None
     if user.databases and len(user.databases) == 1 and user.databases[0] != "*":

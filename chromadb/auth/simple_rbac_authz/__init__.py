@@ -36,14 +36,7 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-        if not self._settings.chroma_server_authz_config_file:
-            raise ValueError(
-                "No configuration file (`chroma_server_authz_config_file`) "
-                "provided for SimpleRBACAuthorizationProvider"
-            )
-        config_file = str(system.settings.chroma_server_authz_config_file)
-        with open(config_file, "r") as f:
-            self._config = yaml.safe_load(f)
+        self._config = yaml.safe_load(self.read_config_or_config_file())
 
         # We favor preprocessing here to avoid having to parse the config file
         # on every request. This AuthorizationProvider does not support
