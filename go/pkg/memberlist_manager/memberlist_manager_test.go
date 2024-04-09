@@ -47,11 +47,12 @@ func TestNodeWatcher(t *testing.T) {
 
 	// Get the status of the node
 	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.1")
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == Ready
+
+		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
 
 	// Add a not ready pod
@@ -75,13 +76,12 @@ func TestNodeWatcher(t *testing.T) {
 	}, metav1.CreateOptions{})
 
 	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.2")
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == NotReady
+		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
-
 }
 
 func TestMemberlistStore(t *testing.T) {
@@ -206,42 +206,4 @@ func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, exp
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
 	return reflect.DeepEqual(expected_memberlist, *memberlist)
-}
-
-func TestReconcileBatch(t *testing.T) {
-	member_1 := "10.0.0.1"
-	member_2 := "10.0.0.2"
-	member_3 := "10.0.0.3"
-	updates := make(map[string]Status)
-	updates[member_1] = Ready
-	updates[member_2] = NotReady
-	updates[member_3] = Ready
-
-	old_memberlist := Memberlist{member_1, member_2}
-	new_memberlist, err := reconcileBatch(old_memberlist, updates)
-	if err != nil {
-		t.Fatalf("Error reconciling batch: %v", err)
-	}
-	assert.ElementsMatch(t, Memberlist{member_1, member_3}, new_memberlist)
-
-	updates[member_1] = Ready
-	updates[member_2] = Ready
-	updates[member_3] = Ready
-
-	old_memberlist = Memberlist{member_1, member_2}
-	new_memberlist, err = reconcileBatch(old_memberlist, updates)
-	if err != nil {
-		t.Fatalf("Error reconciling batch: %v", err)
-	}
-	assert.ElementsMatch(t, Memberlist{member_1, member_2, member_3}, new_memberlist)
-
-	updates[member_1] = NotReady
-	updates[member_2] = NotReady
-	updates[member_3] = NotReady
-	old_memberlist = Memberlist{member_1, member_2}
-	new_memberlist, err = reconcileBatch(old_memberlist, updates)
-	if err != nil {
-		t.Fatalf("Error reconciling batch: %v", err)
-	}
-	assert.ElementsMatch(t, Memberlist{}, new_memberlist)
 }

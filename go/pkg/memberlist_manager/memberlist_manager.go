@@ -56,8 +56,8 @@ func (m *MemberlistManager) Start() error {
 
 func (m *MemberlistManager) run() {
 	count := uint(0)
-	updates := make(map[string]Status)
 	lastUpdate := time.Now()
+	updates := map[string]bool{}
 	for {
 		interface_key, shutdown := m.workqueue.Get()
 		if shutdown {
@@ -72,23 +72,18 @@ func (m *MemberlistManager) run() {
 			continue
 		}
 
-		nodeUpdate, err := m.nodeWatcher.GetStatus(key)
-		updates[key] = nodeUpdate
 		count++
-		if err != nil {
-			log.Error("Error while getting status of node", zap.Error(err))
-			m.workqueue.Done(key)
-			continue
-		}
+		updates[key] = true
 		if count >= m.reconcileCount || time.Since(lastUpdate) > m.reconcileInterval {
 			memberlist, resourceVersion, err := m.getOldMemberlist()
 			if err != nil {
 				log.Error("Error while getting memberlist", zap.Error(err))
 				continue
 			}
-			newMemberlist, err := reconcileBatch(memberlist, updates)
+			log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
+			newMemberlist, err := m.nodeWatcher.ListReadyMembers()
 			if err != nil {
-				log.Error("Error while reconciling memberlist", zap.Error(err))
+				log.Error("Error while getting ready members", zap.Error(err))
 				continue
 			}
 			err = m.updateMemberlist(newMemberlist, *resourceVersion)
@@ -100,9 +95,9 @@ func (m *MemberlistManager) run() {
 			for key := range updates {
 				m.workqueue.Done(key)
 			}
-			updates = make(map[string]Status)
 			count = uint(0)
 			lastUpdate = time.Now()
+			updates = map[string]bool{}
 		}
 	}
 }
@@ -116,28 +111,6 @@ func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
 		return nil, nil, errors.New("Memberlist recieved is nil")
 	}
 	return *memberlist, &resourceVersion, nil
-}
-
-func reconcileBatch(memberlist Memberlist, updates map[string]Status) (Memberlist, error) {
-	newMemberlist := Memberlist{}
-	exists := map[string]bool{}
-	for _, node := range memberlist {
-		if status, ok := updates[node]; ok {
-			if status == Ready {
-				newMemberlist = append(newMemberlist, node)
-			}
-			exists[node] = true
-		} else {
-			newMemberlist = append(newMemberlist, node)
-		}
-	}
-	for node, status := range updates {
-		if _, ok := exists[node]; !ok && status == Ready {
-			newMemberlist = append(newMemberlist, node)
-		}
-	}
-	log.Info("Getting new memberlist", zap.Any("newMemberlist", newMemberlist))
-	return newMemberlist, nil
 }
 
 func (m *MemberlistManager) updateMemberlist(memberlist Memberlist, resourceVersion string) error {
