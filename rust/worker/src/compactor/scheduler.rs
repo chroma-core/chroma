@@ -1,33 +1,42 @@
+use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
-use crate::compactor::types::Task;
+use crate::compactor::types::CompactionJob;
 use crate::log::log::CollectionInfo;
 use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
+use crate::memberlist::Memberlist;
 use crate::sysdb::sysdb::SysDb;
 use uuid::Uuid;
 
-#[derive(Clone)]
 pub(crate) struct Scheduler {
+    my_ip: String,
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     policy: Box<dyn SchedulerPolicy>,
-    task_queue: Vec<Task>,
-    max_concurrent_tasks: usize,
+    job_queue: Vec<CompactionJob>,
+    max_concurrent_jobs: usize,
+    memberlist: Option<Memberlist>,
+    assignment_policy: Box<dyn AssignmentPolicy>,
 }
 
 impl Scheduler {
     pub(crate) fn new(
+        my_ip: String,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         policy: Box<dyn SchedulerPolicy>,
-        max_concurrent_tasks: usize,
+        max_concurrent_jobs: usize,
+        assignment_policy: Box<dyn AssignmentPolicy>,
     ) -> Scheduler {
         Scheduler {
+            my_ip,
             log,
             sysdb,
             policy,
-            task_queue: Vec::with_capacity(max_concurrent_tasks),
-            max_concurrent_tasks,
+            job_queue: Vec::with_capacity(max_concurrent_jobs),
+            max_concurrent_jobs,
+            memberlist: None,
+            assignment_policy,
         }
     }
 
@@ -86,20 +95,48 @@ impl Scheduler {
                 }
             }
         }
-        collection_records
+        self.filter_collections(collection_records)
+    }
+
+    fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
+        let mut filtered_collections = Vec::new();
+        let members = self.memberlist.as_ref().unwrap();
+        self.assignment_policy.set_members(members.clone());
+        for collection in collections {
+            let result = self.assignment_policy.assign(collection.id.as_str());
+            match result {
+                Ok(member) => {
+                    if member == self.my_ip {
+                        filtered_collections.push(collection);
+                    }
+                }
+                Err(e) => {
+                    // TODO: Log error
+                    println!("Error: {:?}", e);
+                    continue;
+                }
+            }
+        }
+
+        filtered_collections
     }
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
-        let tasks = self
+        let jobs = self
             .policy
-            .determine(collection_records, self.max_concurrent_tasks as i32);
+            .determine(collection_records, self.max_concurrent_jobs as i32);
         {
-            self.task_queue.clear();
-            self.task_queue.extend(tasks);
+            self.job_queue.clear();
+            self.job_queue.extend(jobs);
         }
     }
 
     pub(crate) async fn schedule(&mut self) {
+        if self.memberlist.is_none() {
+            // TODO: Log error
+            println!("Memberlist is not set");
+            return;
+        }
         let collections = self.get_collections_with_new_data().await;
         if collections.is_empty() {
             return;
@@ -108,14 +145,19 @@ impl Scheduler {
         self.schedule_internal(collection_records).await;
     }
 
-    pub(crate) fn get_tasks(&self) -> impl Iterator<Item = &Task> {
-        self.task_queue.iter()
+    pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {
+        self.job_queue.iter()
+    }
+
+    pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
+        self.memberlist = Some(memberlist);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -198,18 +240,48 @@ mod tests {
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
-        let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
-        let mut scheduler = Scheduler::new(log, sysdb, scheduler_policy, 1000);
 
+        let my_ip = "0.0.0.1".to_string();
+        let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
+        let max_concurrent_jobs = 1000;
+
+        // Set assignment policy
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
+        assignment_policy.set_members(vec![my_ip.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_ip.clone(),
+            log,
+            sysdb,
+            scheduler_policy,
+            max_concurrent_jobs,
+            assignment_policy,
+        );
+        // Scheduler does nothing without memberlist
         scheduler.schedule().await;
-        let tasks = scheduler.get_tasks();
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 0);
+
+        // Set memberlist
+        scheduler.set_memberlist(vec![my_ip.clone()]);
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
 
         // TODO: 3/9 Tasks may be out of order since we have not yet implemented SysDB Get last compaction time. Use contains instead of equal.
-        let task_ids = tasks
+        let job_ids = jobs
             .map(|t| t.collection_id.clone())
             .collect::<Vec<String>>();
-        assert_eq!(task_ids.len(), 2);
-        assert!(task_ids.contains(&collection_id_1));
-        assert!(task_ids.contains(&collection_id_2));
+        assert_eq!(job_ids.len(), 2);
+        assert!(job_ids.contains(&collection_id_1));
+        assert!(job_ids.contains(&collection_id_2));
+
+        // Test filter_collections
+        let member_1 = "0.0.0.1".to_string();
+        let member_2 = "0.0.0.2".to_string();
+        let members = vec![member_1.clone(), member_2.clone()];
+        scheduler.set_memberlist(members.clone());
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 1);
     }
 }

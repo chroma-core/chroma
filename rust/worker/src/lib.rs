@@ -16,6 +16,7 @@ mod system;
 mod types;
 
 use config::Configurable;
+use memberlist::MemberlistProvider;
 
 mod chroma_proto {
     tonic::include_proto!("chroma");
@@ -23,17 +24,18 @@ mod chroma_proto {
 
 pub async fn query_service_entrypoint() {
     let config = config::RootConfig::load();
+    let config = config.query_service;
     let system: system::System = system::System::new();
-    let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
-    {
-        Ok(dispatcher) => dispatcher,
-        Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
-            return;
-        }
-    };
+    let dispatcher =
+        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
+    let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
         Ok(worker_server) => worker_server,
         Err(err) => {
             println!("Failed to create worker server component: {:?}", err);
@@ -44,7 +46,7 @@ pub async fn query_service_entrypoint() {
     worker_server.set_dispatcher(dispatcher_handle.receiver());
 
     let server_join_handle = tokio::spawn(async move {
-        crate::server::WorkerServer::run(worker_server).await;
+        let _ = crate::server::WorkerServer::run(worker_server).await;
     });
 
     let _ = tokio::join!(server_join_handle, dispatcher_handle.join());
@@ -52,18 +54,32 @@ pub async fn query_service_entrypoint() {
 
 pub async fn compaction_service_entrypoint() {
     let config = config::RootConfig::load();
+    let config = config.compaction_service;
     let system: system::System = system::System::new();
-    let dispatcher = match execution::dispatcher::Dispatcher::try_from_config(&config.worker).await
+
+    let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
+        &config.memberlist_provider,
+    )
+    .await
     {
-        Ok(dispatcher) => dispatcher,
+        Ok(memberlist) => memberlist,
         Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
+            println!("Failed to create memberlist component: {:?}", err);
             return;
         }
     };
+
+    let dispatcher =
+        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut compaction_manager =
-        match crate::compactor::CompactionManager::try_from_config(&config.worker).await {
+        match crate::compactor::CompactionManager::try_from_config(&config).await {
             Ok(compaction_manager) => compaction_manager,
             Err(err) => {
                 println!("Failed to create compaction manager component: {:?}", err);
@@ -72,47 +88,15 @@ pub async fn compaction_service_entrypoint() {
         };
     compaction_manager.set_dispatcher(dispatcher_handle.receiver());
     compaction_manager.set_system(system.clone());
+
     let mut compaction_manager_handle = system.start_component(compaction_manager);
-    tokio::join!(compaction_manager_handle.join(), dispatcher_handle.join());
-}
+    memberlist.subscribe(compaction_manager_handle.receiver());
 
-pub async fn worker_entrypoint() {
-    let config = config::RootConfig::load();
-    // Create all the core components and start them
-    // TODO: This should be handled by an Application struct and we can push the config into it
-    // for now we expose the config to pub and inject it into the components
-
-    // The two root components are ingest, and the gRPC server
-    let mut system: system::System = system::System::new();
-
-    let mut memberlist =
-        match memberlist::CustomResourceMemberlistProvider::try_from_config(&config.worker).await {
-            Ok(memberlist) => memberlist,
-            Err(err) => {
-                println!("Failed to create memberlist component: {:?}", err);
-                return;
-            }
-        };
-
-    let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
-        Ok(worker_server) => worker_server,
-        Err(err) => {
-            println!("Failed to create worker server component: {:?}", err);
-            return;
-        }
-    };
-
-    // Boot the system
-    // memberlist -> (This is broken for now until we have compaction manager) NUM_THREADS x segment_ingestor -> segment_manager
-    // server <- segment_manager
-
-    // memberlist.subscribe(recv);
     let mut memberlist_handle = system.start_component(memberlist);
 
-    let server_join_handle = tokio::spawn(async move {
-        crate::server::WorkerServer::run(worker_server).await;
-    });
-
-    // Join on all handles
-    let _ = tokio::join!(memberlist_handle.join(), server_join_handle,);
+    tokio::join!(
+        memberlist_handle.join(),
+        compaction_manager_handle.join(),
+        dispatcher_handle.join()
+    );
 }

@@ -1,7 +1,9 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+use crate::assignment::assignment_policy::AssignmentPolicy;
+use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
-use crate::compactor::types::Task;
+use crate::config::CompactionServiceConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
@@ -9,6 +11,7 @@ use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
+use crate::memberlist::Memberlist;
 use crate::system::Component;
 use crate::system::ComponentContext;
 use crate::system::Handler;
@@ -33,7 +36,6 @@ pub(crate) struct CompactionManager {
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Config
     compaction_manager_queue_size: usize,
-    max_concurrent_tasks: usize,
     compaction_interval: Duration,
 }
 
@@ -56,7 +58,6 @@ impl CompactionManager {
         scheduler: Scheduler,
         log: Box<dyn Log>,
         compaction_manager_queue_size: usize,
-        max_concurrent_tasks: usize,
         compaction_interval: Duration,
     ) -> Self {
         CompactionManager {
@@ -65,13 +66,15 @@ impl CompactionManager {
             log,
             dispatcher: None,
             compaction_manager_queue_size,
-            max_concurrent_tasks,
             compaction_interval,
         }
     }
 
-    async fn compact(&self, task: &Task) -> Result<CompactionResponse, Box<dyn ChromaError>> {
-        let collection_uuid = Uuid::from_str(&task.collection_id);
+    async fn compact(
+        &self,
+        compaction_job: &CompactionJob,
+    ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
+        let collection_uuid = Uuid::from_str(&compaction_job.collection_id);
         if collection_uuid.is_err() {
             // handle error properly
             println!("Failed to parse collection id");
@@ -89,7 +92,7 @@ impl CompactionManager {
         match self.system {
             Some(ref system) => {
                 let orchestrator = CompactOrchestrator::new(
-                    task.clone(),
+                    compaction_job.clone(),
                     system.clone(),
                     collection_uuid.unwrap(),
                     self.log.clone(),
@@ -118,25 +121,25 @@ impl CompactionManager {
     // TODO: make the return type more informative
     pub(crate) async fn compact_batch(&mut self) -> (u32, u32) {
         self.scheduler.schedule().await;
-        let mut tasks = FuturesUnordered::new();
-        for task in self.scheduler.get_tasks() {
-            tasks.push(self.compact(task));
+        let mut jobs = FuturesUnordered::new();
+        for job in self.scheduler.get_jobs() {
+            jobs.push(self.compact(job));
         }
-        let mut num_completed_tasks = 0;
-        let mut num_failed_tasks = 0;
-        while let Some(task) = tasks.next().await {
-            match task {
+        let mut num_completed_jobs = 0;
+        let mut num_failed_jobs = 0;
+        while let Some(job) = jobs.next().await {
+            match job {
                 Ok(result) => {
                     println!("Compaction completed: {:?}", result);
-                    num_completed_tasks += 1;
+                    num_completed_jobs += 1;
                 }
                 Err(e) => {
                     println!("Compaction failed: {:?}", e);
-                    num_failed_tasks += 1;
+                    num_failed_jobs += 1;
                 }
             }
         }
-        (num_completed_tasks, num_failed_tasks)
+        (num_completed_jobs, num_failed_jobs)
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
@@ -149,33 +152,51 @@ impl CompactionManager {
 }
 
 #[async_trait]
-impl Configurable for CompactionManager {
+impl Configurable<CompactionServiceConfig> for CompactionManager {
     async fn try_from_config(
-        config: &crate::config::WorkerConfig,
+        config: &crate::config::CompactionServiceConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb = match crate::sysdb::from_config(&config).await {
+        let sysdb_config = &config.sysdb;
+        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
             }
         };
-        let log = match crate::log::from_config(&config).await {
+        let log_config = &config.log;
+        let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
             }
         };
 
+        let my_ip = config.my_ip.clone();
         let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
-        let scheduler = Scheduler::new(log.clone(), sysdb.clone(), policy, 1000);
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
-        let max_concurrent_tasks = config.compactor.max_concurrent_tasks;
+        let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
+
+        let assignment_policy_config = &config.assignment_policy;
+        let assignment_policy = match crate::assignment::from_config(assignment_policy_config).await
+        {
+            Ok(assignment_policy) => assignment_policy,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        let scheduler = Scheduler::new(
+            my_ip,
+            log.clone(),
+            sysdb.clone(),
+            policy,
+            max_concurrent_jobs,
+            assignment_policy,
+        );
         Ok(CompactionManager::new(
             scheduler,
             log,
             compaction_manager_queue_size,
-            max_concurrent_tasks,
             Duration::from_secs(compaction_interval_sec),
         ))
     }
@@ -185,7 +206,7 @@ impl Configurable for CompactionManager {
 #[async_trait]
 impl Component for CompactionManager {
     fn queue_size(&self) -> usize {
-        1000 // TODO: make configurable
+        self.compaction_manager_queue_size
     }
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
@@ -210,16 +231,24 @@ impl Debug for CompactionManager {
 impl Handler<ScheduleMessage> for CompactionManager {
     async fn handle(
         &mut self,
-        message: ScheduleMessage,
-        ctx: &ComponentContext<CompactionManager>,
+        _message: ScheduleMessage,
+        _ctx: &ComponentContext<CompactionManager>,
     ) {
         self.compact_batch().await;
+    }
+}
+
+#[async_trait]
+impl Handler<Memberlist> for CompactionManager {
+    async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
+        self.scheduler.set_memberlist(message);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -303,17 +332,31 @@ mod tests {
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
 
+        let my_ip = "127.0.0.1".to_string();
+        let compaction_manager_queue_size = 1000;
+        let max_concurrent_jobs = 10;
+        let compaction_interval = Duration::from_secs(1);
+
+        // Set assignment policy
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
+        assignment_policy.set_members(vec![my_ip.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_ip.clone(),
+            log.clone(),
+            sysdb.clone(),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            max_concurrent_jobs,
+            assignment_policy,
+        );
+        // Set memberlist
+        scheduler.set_memberlist(vec![my_ip.clone()]);
+
         let mut manager = CompactionManager::new(
-            Scheduler::new(
-                log.clone(),
-                sysdb.clone(),
-                Box::new(LasCompactionTimeSchedulerPolicy {}),
-                1000,
-            ),
+            scheduler,
             log,
-            1000,
-            10,
-            Duration::from_secs(1),
+            compaction_manager_queue_size,
+            compaction_interval,
         );
 
         let system = System::new();

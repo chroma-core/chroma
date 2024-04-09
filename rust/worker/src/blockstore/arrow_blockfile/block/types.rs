@@ -1,8 +1,7 @@
 use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use crate::errors::{ChromaError, ErrorCodes};
 use arrow::array::{
-    BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
-    GenericByteBuilder, UInt32Array, UInt32Builder,
+    BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder, UInt32Array, UInt32Builder,
 };
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},

@@ -113,6 +113,8 @@ class Settings(BaseSettings):  # type: ignore
         return v
 
     chroma_server_nofile: Optional[int] = None
+    # the number of maximum threads to handle synchronous tasks in the FastAPI server
+    chroma_server_thread_pool_size: int = 40
 
     # ==================
     # Client-mode config
