@@ -1,6 +1,7 @@
-use crate::segment::DataRecord;
-
-use super::key::{KeyWrapper, StoredBlockfileKey};
+use crate::{
+    blockstore::key::{CompositeKey, KeyWrapper},
+    segment::DataRecord,
+};
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
@@ -24,7 +25,7 @@ impl Writeable for String {
             .as_mut()
             .unwrap()
             .insert(
-                StoredBlockfileKey {
+                CompositeKey {
                     prefix: prefix.to_string(),
                     key,
                 },
@@ -39,7 +40,7 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data String {
         key: KeyWrapper,
         storage: &'referred_data Storage,
     ) -> Option<Self> {
-        storage.string_value_storage.get(&StoredBlockfileKey {
+        storage.string_value_storage.get(&CompositeKey {
             prefix: prefix.to_string(),
             key,
         })
@@ -54,7 +55,7 @@ impl Writeable for DataRecord<'_> {
             .as_mut()
             .unwrap()
             .insert(
-                StoredBlockfileKey {
+                CompositeKey {
                     prefix: prefix.to_string(),
                     key: key.clone(),
                 },
@@ -66,7 +67,7 @@ impl Writeable for DataRecord<'_> {
             .as_mut()
             .unwrap()
             .insert(
-                StoredBlockfileKey {
+                CompositeKey {
                     prefix: prefix.to_string(),
                     key,
                 },
@@ -81,16 +82,14 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
         key: KeyWrapper,
         storage: &'referred_data Storage,
     ) -> Option<Self> {
-        let id = storage.data_record_id_storage.get(&StoredBlockfileKey {
+        let id = storage.data_record_id_storage.get(&CompositeKey {
             prefix: prefix.to_string(),
             key: key.clone(),
         });
-        let embedding = storage
-            .data_record_embedding_storage
-            .get(&StoredBlockfileKey {
-                prefix: prefix.to_string(),
-                key,
-            });
+        let embedding = storage.data_record_embedding_storage.get(&CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        });
         // TODO: don't unwrap
         Some(DataRecord {
             id: &id.unwrap(),
@@ -121,25 +120,25 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
 #[derive(Clone)]
 pub(crate) struct StorageBuilder {
     // String Value
-    string_value_storage: Arc<RwLock<Option<HashMap<StoredBlockfileKey, String>>>>,
+    string_value_storage: Arc<RwLock<Option<HashMap<CompositeKey, String>>>>,
     // Data Record Fields
-    data_record_id_storage: Arc<RwLock<Option<HashMap<StoredBlockfileKey, String>>>>,
-    data_record_embedding_storage: Arc<RwLock<Option<HashMap<StoredBlockfileKey, Vec<f32>>>>>,
+    data_record_id_storage: Arc<RwLock<Option<HashMap<CompositeKey, String>>>>,
+    data_record_embedding_storage: Arc<RwLock<Option<HashMap<CompositeKey, Vec<f32>>>>>,
     pub(super) id: uuid::Uuid,
 }
 
 #[derive(Clone)]
 pub(crate) struct Storage {
     // String Value
-    string_value_storage: Arc<HashMap<StoredBlockfileKey, String>>,
+    string_value_storage: Arc<HashMap<CompositeKey, String>>,
     // Data Record Fields
-    data_record_id_storage: Arc<HashMap<StoredBlockfileKey, String>>,
-    data_record_embedding_storage: Arc<HashMap<StoredBlockfileKey, Vec<f32>>>,
+    data_record_id_storage: Arc<HashMap<CompositeKey, String>>,
+    data_record_embedding_storage: Arc<HashMap<CompositeKey, Vec<f32>>>,
     pub(super) id: uuid::Uuid,
 }
 
 #[derive(Clone)]
-pub(super) struct StorageManager {
+pub(crate) struct StorageManager {
     read_cache: Arc<RwLock<HashMap<uuid::Uuid, Storage>>>,
     write_cache: Arc<RwLock<HashMap<uuid::Uuid, StorageBuilder>>>,
 }
