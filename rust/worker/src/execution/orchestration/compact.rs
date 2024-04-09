@@ -119,7 +119,7 @@ impl CompactOrchestrator {
             }
         };
         let input = PullLogsInput::new(collection_id, 0, 100, None, Some(end_timestamp));
-        let task = wrap(operator, input, self_address);
+        let task = wrap(operator, input, self_address, None);
         match self.dispatcher.send(task).await {
             Ok(_) => (),
             Err(e) => {
@@ -138,7 +138,7 @@ impl CompactOrchestrator {
         let max_partition_size = 100;
         let operator = PartitionOperator::new();
         let input = PartitionInput::new(records, max_partition_size);
-        let task = wrap(operator, input, self_address);
+        let task = wrap(operator, input, self_address, None);
         match self.dispatcher.send(task).await {
             Ok(_) => (),
             Err(e) => {

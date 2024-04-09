@@ -2,6 +2,7 @@ use super::{dispatcher::TaskRequestMessage, operator::TaskMessage};
 use crate::system::{Component, ComponentContext, ComponentRuntime, Handler, Receiver};
 use async_trait::async_trait;
 use std::fmt::{Debug, Formatter, Result};
+use tracing::{debug_span, instrument, Instrument};
 
 /// A worker thread is responsible for executing tasks
 /// It sends requests to the dispatcher for new tasks.
@@ -50,7 +51,11 @@ impl Component for WorkerThread {
 #[async_trait]
 impl Handler<TaskMessage> for WorkerThread {
     async fn handle(&mut self, task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
-        task.run().await;
+        // Execute the task with the caller span
+        let parent_id = (*task).getTracingContext();
+        let child_span = debug_span!(parent: parent_id, "worker task execution");
+        let task_future = task.run();
+        task_future.instrument(child_span).await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.sender.as_receiver());
         let res = self.dispatcher.send(req).await;
         // TODO: task run should be able to error and we should send it as part of the result

@@ -3,6 +3,7 @@ use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use tracing::debug;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -114,6 +115,12 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         }
         let mut data_chunk = data_chunk.clone();
         data_chunk.set_visibility(visibility);
+        debug!(
+            "Brute force Knn result. data: {:?}, indices: {:?}, distances: {:?}",
+            data_chunk,
+            sorted_indices,
+            sorted_distances
+        );
         Ok(BruteForceKnnOperatorOutput {
             data: data_chunk,
             indices: sorted_indices,

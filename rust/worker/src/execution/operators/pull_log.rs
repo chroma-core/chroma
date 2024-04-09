@@ -3,6 +3,7 @@ use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use async_trait::async_trait;
+use tracing::debug;
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.
@@ -130,8 +131,10 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
                 break;
             }
         }
+        debug!("Log records {:?}", result);
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
+            debug!("Truncated log records {:?}", result);
         }
         // Convert to DataChunk
         let data_chunk = DataChunk::new(result.into());

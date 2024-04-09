@@ -264,7 +264,12 @@ mod tests {
     #[async_trait]
     impl Handler<()> for MockDispatchUser {
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
+            let task = wrap(
+                Box::new(MockOperator {}),
+                42.0,
+                ctx.sender.as_receiver(),
+                None,
+            );
             let res = self.dispatcher.send(task).await;
         }
     }
