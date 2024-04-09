@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from hypothesis.stateful import (
     initialize,
@@ -45,7 +45,9 @@ class SingletonTenantDatabaseCollectionStateMachine(
         self.root_admin_client = self.admin_client
 
         self.singleton_client = singleton_client
-        self.singleton_admin_client = AdminClient.from_system(singleton_client._system)
+        self.singleton_admin_client = AdminClient.from_system(
+            singleton_client._system
+        )
 
     @initialize()
     def initialize(self) -> None:
@@ -57,10 +59,17 @@ class SingletonTenantDatabaseCollectionStateMachine(
         super().initialize()
 
         self.root_admin_client.create_tenant(SINGLETON_TENANT)
-        self.root_admin_client.create_database(SINGLETON_DATABASE, SINGLETON_TENANT)
+        self.root_admin_client.create_database(
+            SINGLETON_DATABASE,
+            SINGLETON_TENANT
+        )
 
         self.set_tenant_model(SINGLETON_TENANT, {})
-        self.set_database_model_for_tenant(SINGLETON_TENANT, SINGLETON_DATABASE, {})
+        self.set_database_model_for_tenant(
+            SINGLETON_TENANT,
+            SINGLETON_DATABASE,
+            {}
+        )
 
     @invariant()
     def check_api_and_admin_client_are_in_sync(self) -> None:
@@ -134,15 +143,19 @@ class SingletonTenantDatabaseCollectionStateMachine(
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
         if self.api == self.singleton_client:
-            return self.tenant_to_database_to_model[SINGLETON_TENANT][SINGLETON_DATABASE]
-        return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
+            return self.tenant_to_database_to_model[
+                SINGLETON_TENANT
+            ][
+                SINGLETON_DATABASE
+            ]
+        return self.tenant_to_database_to_model[
+            self.curr_tenant
+        ][
+            self.curr_database
+        ]
 
 
-def test_collections_with_tenant_database_overwrite(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.ERROR)
-
+def _singleton_and_root_clients() -> Tuple[Client, Client]:
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
     sys.reset_state()
@@ -161,9 +174,52 @@ def test_collections_with_tenant_database_overwrite(
     singleton_system.start()
     singleton_client = Client.from_system(singleton_system)
 
+    return singleton_client, root_client
+
+
+def test_collections_with_tenant_database_overwrite(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    singleton_client, root_client = _singleton_and_root_clients()
     run_state_machine_as_test(
         lambda: SingletonTenantDatabaseCollectionStateMachine(
             singleton_client,
             root_client,
         )
     )  # type: ignore
+
+
+def test_repeat_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    singleton_client, root_client = _singleton_and_root_clients()
+
+    state = SingletonTenantDatabaseCollectionStateMachine(
+        singleton_client,
+        root_client,
+    )
+    state.initialize()
+    state.check_api_and_admin_client_are_in_sync()
+    state.change_clients()
+    state.check_api_and_admin_client_are_in_sync()
+    state.create_coll(
+        coll=strategies.Collection(
+            name='A00',
+            metadata=None,
+            embedding_function=strategies.hashing_embedding_function(
+                dim=2, dtype=numpy.float16
+            ),
+            id=uuid.UUID('c9bcb72f-92b1-4604-a8cb-084162dfe98b'),
+            dimension=2,
+            dtype=numpy.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True
+        )
+    )
+    state.teardown()  # type: ignore

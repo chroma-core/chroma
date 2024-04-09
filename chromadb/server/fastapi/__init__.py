@@ -1,5 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence, Optional, Union
-from typing_extensions import Annotated
+from typing import Any, Callable, cast, Dict, List, Sequence, Optional
 import fastapi
 import orjson
 
@@ -12,7 +11,7 @@ from fastapi.responses import JSONResponse, ORJSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from fastapi import Header, HTTPException, status
+from fastapi import HTTPException, status
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
@@ -45,7 +44,6 @@ from chromadb.server.fastapi.types import (
     UpdateEmbedding,
 )
 from starlette.datastructures import Headers
-from starlette.requests import Request
 
 import logging
 
@@ -94,7 +92,7 @@ async def check_http_version_middleware(
     return await call_next(request)
 
 
-class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
+class ChromaAPIRouter(fastapi.APIRouter):
     # A simple subclass of fastapi's APIRouter which treats URLs with a
     # trailing "/" the same as URLs without. Docs will only contain URLs
     # without trailing "/"s.
@@ -127,7 +125,10 @@ class FastAPI(Server):
         super().__init__(settings)
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         # https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
-        self._app = fastapi.FastAPI(debug=True, default_response_class=ORJSONResponse)
+        self._app = fastapi.FastAPI(
+            debug=True,
+            default_response_class=ORJSONResponse
+        )
         self._system = System(settings)
         self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
@@ -165,12 +166,27 @@ class FastAPI(Server):
 
         self.router = ChromaAPIRouter()
 
-        self.router.add_api_route("/api/v1", self.root, methods=["GET"])
-        self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
-        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
-            "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
+            "/api/v1",
+            self.root, methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/reset",
+            self.reset, methods=["POST"]
+        )
+        self.router.add_api_route(
+            "/api/v1/version",
+            self.version, methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/heartbeat",
+            self.heartbeat,
+            methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/pre-flight-checks",
+            self.pre_flight_checks,
+            methods=["GET"]
         )
 
         self.router.add_api_route(
@@ -293,19 +309,26 @@ class FastAPI(Server):
     def app(self) -> fastapi.FastAPI:
         return self._app
 
-    async def rate_limit_exception_handler(self, request: Request,
-                                           exc: RateLimitError):
+    async def rate_limit_exception_handler(
+            self, request: Request,
+            exc: RateLimitError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
             content={
-                "message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"
+                "message":
+                f"rate limit. resource: {exc.resource} quota: {exc.quota}"
             },
         )
 
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
 
-    async def quota_exception_handler(self, request: Request, exc: QuotaError):
+    async def quota_exception_handler(
+            self,
+            request: Request,
+            exc: QuotaError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
             content={"message": f"quota error. resource: {exc.resource} "
@@ -320,7 +343,7 @@ class FastAPI(Server):
 
     def authenticate_and_authorize_or_raise(
         self,
-        auth_headers: Dict[str, Optional[str]],
+        headers: Headers,
         action: AuthzAction,
         tenant: Optional[str],
         database: Optional[str],
@@ -334,7 +357,7 @@ class FastAPI(Server):
 
         If self.overwrite_singleton_tenant_database_access_from_auth is True
         and the user only has access to a single tenant and/or database, this
-        function will ignore the passed parameters and check authorization
+        function will ignore the passed tenant and db, and check authorization
         as if the user-accessible tenant and/or database had been passed.
 
         If self.overwrite_singleton_tenant_database_access_from_auth is False
@@ -343,10 +366,6 @@ class FastAPI(Server):
         """
         if not self.authn_provider:
             return None
-
-        # TODO this is a hack until we have fastapi requests in all our method
-        # handlers and can pass headers directly.
-        headers = Headers({k: v for k, v in auth_headers.items() if v})
 
         user_identity = self.authn_provider.authenticate(headers)
         if not user_identity:
@@ -377,8 +396,11 @@ class FastAPI(Server):
     async def create_database(
         self, request: Request, tenant: str = DEFAULT_TENANT
     ) -> None:
-        # TODOBEN header type?
-        def process_create_database(tenant: str, headers, raw_body: bytes) -> None:
+        def process_create_database(
+                tenant: str,
+                headers: Headers,
+                raw_body: bytes
+        ) -> None:
             db = CreateDatabase.model_validate(orjson.loads(raw_body))
 
             user_identity = self.authenticate_and_authorize_or_raise(
@@ -411,16 +433,12 @@ class FastAPI(Server):
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
     async def get_database(
         self,
+        request: Request,
         database: str,
         tenant: str = DEFAULT_TENANT,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Database:
         user_identity = self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.GET_DATABASE,
             tenant,
             database,
@@ -478,15 +496,11 @@ class FastAPI(Server):
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     async def get_tenant(
         self,
+        request: Request,
         tenant: str,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Tenant:
         user_identity = self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.GET_TENANT,
             tenant,
             None,
@@ -513,18 +527,14 @@ class FastAPI(Server):
                   OpenTelemetryGranularity.OPERATION)
     async def list_collections(
         self,
+        request: Request,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Sequence[Collection]:
         user_identity = self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.LIST_COLLECTIONS,
             tenant,
             database,
@@ -551,24 +561,17 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
-        return self._api.list_collections(
-            limit=limit, offset=offset, tenant=tenant, database=database
-        )
 
     @trace_method("FastAPI.count_collections",
                   OpenTelemetryGranularity.OPERATION)
     async def count_collections(
         self,
+        request: Request,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> int:
         user_identity = self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.COUNT_COLLECTIONS,
             tenant,
             database,
@@ -602,25 +605,31 @@ class FastAPI(Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        user_identity = self.authenticate_and_authorize_or_raise(
-            request.Headers,
-            AuthzAction.CREATE_COLLECTION,
-            tenant,
-            database,
-            None,
-        )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
-            if overwrite_database:
-                database = overwrite_database
-
-        def process_create_collection(raw_body: bytes) -> Collection:
+        def process_create_collection(
+                request: Request,
+                tenant: str,
+                database: str,
+                raw_body: bytes
+        ) -> Collection:
             create = CreateCollection.model_validate(orjson.loads(raw_body))
+
+            user_identity = self.authenticate_and_authorize_or_raise(
+                request.headers,
+                AuthzAction.CREATE_COLLECTION,
+                tenant,
+                create.name,
+                None,
+            )
+            if self.authn_provider:
+                (overwrite_tenant, overwrite_database) = self.authn_provider.\
+                    singleton_tenant_database_if_applicable(
+                    user_identity
+                )
+                if overwrite_tenant:
+                    tenant = overwrite_tenant
+                if overwrite_database:
+                    database = overwrite_database
+
             return self._api.create_collection(
                 name=create.name,
                 metadata=create.metadata,
@@ -633,6 +642,9 @@ class FastAPI(Server):
             Collection,
             await to_thread.run_sync(
                 process_create_collection,
+                request,
+                tenant,
+                database,
                 await request.body(),
                 limiter=self._capacity_limiter,
             ),
@@ -641,17 +653,13 @@ class FastAPI(Server):
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     async def get_collection(
         self,
+        request: Request,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> Collection:
         user_identity = self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.GET_COLLECTION,
             tenant,
             database,
@@ -688,19 +696,19 @@ class FastAPI(Server):
         collection_id: str,
         request: Request,
     ) -> None:
-        self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
-            AuthzAction.UPDATE_COLLECTION,
-            None,
-            None,
-            collection_id,
-        )
-
-        def process_update_collection(raw_body: bytes) -> None:
+        def process_update_collection(
+                request: Request,
+                collection_id: str,
+                raw_body: bytes
+        ) -> None:
             update = UpdateCollection.model_validate(orjson.loads(raw_body))
+            self.authenticate_and_authorize_or_raise(
+                request.headers,
+                AuthzAction.UPDATE_COLLECTION,
+                None,
+                None,
+                collection_id,
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
@@ -709,6 +717,8 @@ class FastAPI(Server):
 
         await to_thread.run_sync(
             process_update_collection,
+            request,
+            collection_id,
             await request.body(),
             limiter=self._capacity_limiter,
         )
@@ -717,17 +727,13 @@ class FastAPI(Server):
                   OpenTelemetryGranularity.OPERATION)
     async def delete_collection(
         self,
+        request: Request,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> None:
         user_identity = self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.DELETE_COLLECTION,
             tenant,
             database,
@@ -753,16 +759,16 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     async def add(self, request: Request, collection_id: str) -> bool:
-        self.authenticate_and_authorize_or_raise(
-            request.Headers,
-            AuthzAction.ADD,
-            None,
-            None,
-            collection_id,
-        )
         try:
-            def process_add(raw_body: bytes) -> bool:
+            def process_add(request: Request, raw_body: bytes) -> bool:
                 add = AddEmbedding.model_validate(orjson.loads(raw_body))
+                self.authenticate_and_authorize_or_raise(
+                    request.headers,
+                    AuthzAction.ADD,
+                    None,
+                    None,
+                    collection_id,
+                )
                 return self._api._add(
                     collection_id=_uuid(collection_id),
                     ids=add.ids,
@@ -776,6 +782,7 @@ class FastAPI(Server):
                 bool,
                 await to_thread.run_sync(
                     process_add,
+                    request,
                     await request.body(),
                     limiter=self._capacity_limiter,
                 ),
@@ -904,15 +911,11 @@ class FastAPI(Server):
     @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
     async def count(
         self,
+        request: Request,
         collection_id: str,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
     ) -> int:
         self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.COUNT,
             None,
             None,
@@ -931,14 +934,10 @@ class FastAPI(Server):
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
     async def reset(
         self,
-        x_chroma_token: Annotated[Union[str, None], Header()] = None,
-        authorization: Annotated[Union[str, None], Header()] = None
+        request: Request,
     ) -> bool:
         self.authenticate_and_authorize_or_raise(
-            {
-                "x-chroma-token": x_chroma_token,
-                "authorization": authorization,
-            },
+            request.headers,
             AuthzAction.RESET,
             None,
             None,
@@ -975,8 +974,8 @@ class FastAPI(Server):
                 collection_id=_uuid(collection_id),
                 query_embeddings=query.query_embeddings,
                 n_results=query.n_results,
-                where=query.where,
-                where_document=query.where_document,
+                where=query.where,  # type: ignore
+                where_document=query.where_document,  # type: ignore
                 include=query.include,
             )
 
