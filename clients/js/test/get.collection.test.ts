@@ -44,7 +44,7 @@ test("wrong code returns an error", async () => {
     expect(error).toBeDefined();
     expect(error).toBeInstanceOf(ChromaValueError);
     expect(error.message).toMatchInlineSnapshot(
-      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`
+      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
     );
   }
 });

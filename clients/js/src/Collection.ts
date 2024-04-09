@@ -70,7 +70,7 @@ export class Collection {
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
-    documents?: string | string[]
+    documents?: string | string[],
   ) {
     if (require_embeddings_or_documents) {
       if (embeddings === undefined && documents === undefined) {
@@ -84,7 +84,7 @@ export class Collection {
         embeddings = await this.embeddingFunction.generate(documentsArray);
       } else {
         throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function"
+          "embeddingFunction is undefined. Please configure an embedding function",
         );
       }
     }
@@ -185,7 +185,7 @@ export class Collection {
           // @ts-ignore
           metadatas: metadatasArray,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -232,7 +232,7 @@ export class Collection {
           //@ts-ignore
           metadatas: metadatasArray,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -279,7 +279,7 @@ export class Collection {
           new_name: name,
           new_metadata: metadata,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -335,7 +335,7 @@ export class Collection {
           include,
           where_document: whereDocument,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
   }
@@ -371,7 +371,7 @@ export class Collection {
       metadatas === undefined
     ) {
       throw new Error(
-        "embeddings, documents, and metadatas cannot all be undefined"
+        "embeddings, documents, and metadatas cannot all be undefined",
       );
     } else if (embeddings === undefined && documents !== undefined) {
       const documentsArray = toArray(documents);
@@ -379,7 +379,7 @@ export class Collection {
         embeddings = await this.embeddingFunction.generate(documentsArray);
       } else {
         throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function"
+          "embeddingFunction is undefined. Please configure an embedding function",
         );
       }
     }
@@ -397,7 +397,7 @@ export class Collection {
           documents: documents,
           metadatas: metadatas,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -448,7 +448,7 @@ export class Collection {
     if (nResults === undefined) nResults = 10;
     if (queryEmbeddings === undefined && queryTexts === undefined) {
       throw new Error(
-        "queryEmbeddings and queryTexts cannot both be undefined"
+        "queryEmbeddings and queryTexts cannot both be undefined",
       );
     } else if (queryEmbeddings === undefined && queryTexts !== undefined) {
       const queryTextsArray = toArray(queryTexts);
@@ -477,7 +477,7 @@ export class Collection {
           //@ts-ignore
           include: include,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
   }
@@ -537,7 +537,7 @@ export class Collection {
       .aDelete(
         this.id,
         { ids: idsArray, where: where, where_document: whereDocument },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
   }

@@ -67,7 +67,7 @@ export class ChromaClient {
     if (auth !== undefined) {
       this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(
         new DefaultApi(apiConfig, undefined, chromaFetch),
-        auth
+        auth,
       );
       this.api = this.apiAdapter.getApi();
     } else {
@@ -176,7 +176,7 @@ export class ChromaClient {
           name,
           metadata,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -234,7 +234,7 @@ export class ChromaClient {
           metadata,
           get_or_create: true,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -243,7 +243,7 @@ export class ChromaClient {
       newCollection.id,
       this.api,
       newCollection.metadata,
-      embeddingFunction
+      embeddingFunction,
     );
   }
 
@@ -272,7 +272,7 @@ export class ChromaClient {
       this.database,
       limit,
       offset,
-      this.api.options
+      this.api.options,
     );
     return handleSuccess(response);
   }
@@ -292,7 +292,7 @@ export class ChromaClient {
     const response = await this.api.countCollections(
       this.tenant,
       this.database,
-      this.api.options
+      this.api.options,
     );
     return handleSuccess(response);
   }
