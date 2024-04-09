@@ -1,6 +1,7 @@
 import { expect, test } from "@jest/globals";
 import chroma from "./initClient";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
+import { ChromaValueError } from "../src/Errors";
 
 test("it should get a collection", async () => {
   await chroma.reset();
@@ -32,14 +33,20 @@ test("wrong code returns an error", async () => {
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
   });
-  const results = await collection.get({
-    where: {
-      //@ts-ignore supposed to fail
-      test: { $contains: "hello" },
-    },
-  });
-  expect(results.error).toBeDefined();
-  expect(results.error).toContain("ValueError");
+  try {
+    await collection.get({
+      where: {
+        //@ts-ignore supposed to fail
+        test: { $contains: "hello" },
+      },
+    });
+  } catch (error: any) {
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(ChromaValueError);
+    expect(error.message).toMatchInlineSnapshot(
+      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`
+    );
+  }
 });
 
 test("it should get embedding with matching documents", async () => {
