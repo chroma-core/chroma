@@ -743,9 +743,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 
 
 class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
-    def __init__(
-        self, api_key: str = "", api_url = "https://infer.roboflow.com"
-    ) -> None:
+    def __init__(self, api_key: str = "", api_url="https://infer.roboflow.com") -> None:
         """
         Create a RoboflowEmbeddingFunction.
 
@@ -757,7 +755,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             api_key = os.environ.get("ROBOFLOW_API_KEY")
 
         self._api_url = api_url
-        self._api_key = api_key 
+        self._api_key = api_key
 
         try:
             self._PILImage = importlib.import_module("PIL.Image")
@@ -789,10 +787,10 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     json=infer_clip_payload,
                 )
 
-                result = res.json()['embeddings']
+                result = res.json()["embeddings"]
 
                 embeddings.append(result[0])
-            
+
             elif is_document(item):
                 infer_clip_payload = {
                     "text": input,
@@ -803,13 +801,13 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     json=infer_clip_payload,
                 )
 
-                result = res.json()['embeddings']
+                result = res.json()["embeddings"]
 
                 embeddings.append(result[0])
 
         return embeddings
 
-      
+
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
@@ -909,7 +907,8 @@ def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
         )
 
     class ChromaLangchainEmbeddingFunction(
-        LangchainEmbeddings, EmbeddingFunction[Union[Documents, Images]]  # type: ignore
+        LangchainEmbeddings,
+        EmbeddingFunction[Union[Documents, Images]],  # type: ignore
     ):
         """
         This class is used as bridge between langchain embedding functions and custom chroma embedding functions.
@@ -962,7 +961,7 @@ def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
 
     return ChromaLangchainEmbeddingFunction(embedding_function=langchain_embdding_fn)
 
- 
+
 class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the Ollama Embedding API (https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
@@ -1018,7 +1017,64 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             ],
         )
 
-      
+
+class FastEmbedEmbeddingFunction(EmbeddingFunction[Documents]):
+    """
+    This class is used to generate embeddings for a list of texts using FastEmbed - https://qdrant.github.io/fastembed/.
+    Find the list of supported models at https://qdrant.github.io/fastembed/examples/Supported_Models/.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-small-en-v1.5",
+        cache_dir: Optional[str] = None,
+        threads: Optional[int] = None,
+        **kwargs,
+    ) -> None:
+        """
+        Initialize fastembed.TextEmbedding
+
+        Args:
+            model_name (str): The name of the model to use.
+            cache_dir (str, optional): The path to the model cache directory.
+                                       Can also be set using the `FASTEMBED_CACHE_PATH` env variable.
+            threads (int, optional): The number of threads single onnxruntime session can use..
+
+        Raises:
+            ValueError: If the model_name is not in the format <org>/<model> e.g. BAAI/bge-base-en.
+        """
+        try:
+            from fastembed import TextEmbedding
+        except ImportError:
+            raise ValueError(
+                "The 'fastembed' package is not installed. Please install it with `pip install fastembed`"
+            )
+        self._model = TextEmbedding(
+            model_name=model_name, cache_dir=cache_dir, threads=threads, **kwargs
+        )
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            input (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> fastembed_ef = FastEmbedEmbeddingFunction(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = fastembed_ef(texts)
+        """
+        embeddings = self._model.embed(input)
+        return cast(
+            Embeddings,
+            [embedding.tolist() for embedding in embeddings],
+        )
+
+
 # List of all classes in this module
 _classes = [
     name
