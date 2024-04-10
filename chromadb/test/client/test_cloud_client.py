@@ -20,11 +20,8 @@ def valid_token() -> str:
 
 @pytest.fixture(scope="module")
 def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
-    chroma_server_authn_provider: str = "chromadb.auth.token.TokenAuthenticationServerProvider"
-    chroma_server_auth_credentials_provider: str = (
-        "chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-    )
-    chroma_server_auth_credentials: str = valid_token
+    chroma_server_authn_provider: str = "chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+    chroma_server_authn_credentials: str = valid_token
     chroma_auth_token_transport_header: str = TOKEN_TRANSPORT_HEADER
 
     port = find_free_port()
@@ -39,16 +36,14 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
         Optional[str],
         Optional[str],
         Optional[str],
-        Optional[str],
         Optional[Dict[str, Any]],
     ] = (
         port,
         False,
         None,
         chroma_server_authn_provider,
-        chroma_server_auth_credentials_provider,
         None,
-        chroma_server_auth_credentials,
+        chroma_server_authn_credentials,
         chroma_auth_token_transport_header,
         None,
         None,
@@ -62,7 +57,7 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host=TEST_CLOUD_HOST,
         chroma_server_http_port=port,
-        chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
+        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
         chroma_client_auth_credentials=valid_token,
         chroma_auth_token_transport_header=TOKEN_TRANSPORT_HEADER,
     )

@@ -15,25 +15,22 @@ function setup_auth {
     basic)
       docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
       cat <<EOF > .chroma_env
-CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
-CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
+CHROMA_SERVER_AUTHN_CREDENTIALS_FILE="/chroma/server.htpasswd"
+CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.basic_authn.BasicAuthnServerProvider"
 EOF
       ;;
     token)
       cat <<EOF > .chroma_env
-CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
 CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
-CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthenticationServerProvider"
+CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
+CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 EOF
       ;;
     xtoken)
           cat <<EOF > .chroma_env
-CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
 CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
-CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthenticationServerProvider"
+CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
+CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 EOF
     ;;
     *)

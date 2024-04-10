@@ -160,7 +160,6 @@ class Settings(BaseSettings):  # type: ignore
     chroma_client_auth_provider: Optional[str] = None
     # If needed by the provider (e.g. BasicAuthClientProvider),
     # the credentials to use.
-    # TODO should be a file
     chroma_client_auth_credentials: Optional[str] = None
 
     # ================

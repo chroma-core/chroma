@@ -118,7 +118,7 @@ class ServerAuthenticationProvider(Component):
                 "Please provide only one."
             )
         if _creds:
-            return _creds.split("\n")
+            return [c for c in _creds.split("\n") if c]
         elif _creds_file:
             with open(_creds_file, "r") as f:
                 return f.readlines()
@@ -229,7 +229,7 @@ class ServerAuthorizationProvider(Component):
                 "Please provide only one."
             )
         if _config:
-            return _config.split('\n')
+            return [c for c in _config.split('\n') if c]
         elif _config_file:
             with open(_config_file, "r") as f:
                 return f.readlines()
