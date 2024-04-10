@@ -279,7 +279,10 @@ def _count_executor(
             max_size=20
         )
     )
-    root_col = root_api.create_collection(collection)
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.count()

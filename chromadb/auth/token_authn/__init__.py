@@ -173,7 +173,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
             )
             return user_identity
         except Exception as e:
-            logger.error(
+            logger.debug(
                 "TokenAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
