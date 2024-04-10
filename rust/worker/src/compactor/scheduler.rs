@@ -132,9 +132,9 @@ impl Scheduler {
     }
 
     pub(crate) async fn schedule(&mut self) {
-        if self.memberlist.is_none() {
+        if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
             // TODO: Log error
-            println!("Memberlist is not set");
+            println!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
         let collections = self.get_collections_with_new_data().await;
@@ -258,6 +258,13 @@ mod tests {
             assignment_policy,
         );
         // Scheduler does nothing without memberlist
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 0);
+
+        // Set empty memberlist
+        // Scheduler does nothing with empty memberlist
+        scheduler.set_memberlist(vec![]);
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
         assert_eq!(jobs.count(), 0);
