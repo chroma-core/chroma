@@ -144,7 +144,7 @@ def _get_or_create_collection_executor(
 @given(st.data())
 def _delete_collection_executor(
     api: ServerAPI,
-    _root_api: ServerAPI,
+    root_api: ServerAPI,
     data: Any
 ) -> None:
     collection = data.draw(
@@ -154,6 +154,10 @@ def _delete_collection_executor(
             max_size=20
         )
     )
+    try:
+        root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     api.delete_collection(collection)
 
 
