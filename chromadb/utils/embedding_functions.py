@@ -55,6 +55,8 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
     # https://docs.together.ai/docs/embeddings-rest
     # Models List
     # https://docs.together.ai/docs/embedding-models
+    # You can get your API Keys from here :
+    # https://api.together.xyz/settings/api-keys
     
     def __init__(
         self,
