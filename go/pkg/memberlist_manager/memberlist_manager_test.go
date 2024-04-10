@@ -207,3 +207,41 @@ func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, exp
 	}
 	return reflect.DeepEqual(expected_memberlist, *memberlist)
 }
+
+func TestReconcileBatch(t *testing.T) {
+	member_1 := "10.0.0.1"
+	member_2 := "10.0.0.2"
+	member_3 := "10.0.0.3"
+	updates := make(map[string]Status)
+	updates[member_1] = Ready
+	updates[member_2] = NotReady
+	updates[member_3] = Ready
+
+	old_memberlist := Memberlist{member_1, member_2}
+	new_memberlist, err := reconcileBatch(old_memberlist, updates)
+	if err != nil {
+		t.Fatalf("Error reconciling batch: %v", err)
+	}
+	assert.ElementsMatch(t, Memberlist{member_1, member_3}, new_memberlist)
+
+	updates[member_1] = Ready
+	updates[member_2] = Ready
+	updates[member_3] = Ready
+
+	old_memberlist = Memberlist{member_1, member_2}
+	new_memberlist, err = reconcileBatch(old_memberlist, updates)
+	if err != nil {
+		t.Fatalf("Error reconciling batch: %v", err)
+	}
+	assert.ElementsMatch(t, Memberlist{member_1, member_2, member_3}, new_memberlist)
+
+	updates[member_1] = NotReady
+	updates[member_2] = NotReady
+	updates[member_3] = NotReady
+	old_memberlist = Memberlist{member_1, member_2}
+	new_memberlist, err = reconcileBatch(old_memberlist, updates)
+	if err != nil {
+		t.Fatalf("Error reconciling batch: %v", err)
+	}
+	assert.ElementsMatch(t, Memberlist{}, new_memberlist)
+}

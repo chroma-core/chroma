@@ -9,7 +9,7 @@ CREATE TABLE "public"."collection" (
 CREATE TABLE "public"."record_log" (
   "offset" bigint NOT NULL,
   "collection_id" text NOT NULL,
-  "timestamp" integer NOT NULL DEFAULT (EXTRACT(epoch FROM now()))::integer,
+  "timestamp" bigint NOT NULL,
   "record" bytea NOT NULL,
   PRIMARY KEY ("collection_id", "offset")
 );

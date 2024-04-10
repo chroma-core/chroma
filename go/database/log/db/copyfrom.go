@@ -32,6 +32,7 @@ func (r iteratorForInsertRecord) Values() ([]interface{}, error) {
 		r.rows[0].CollectionID,
 		r.rows[0].Offset,
 		r.rows[0].Record,
+		r.rows[0].Timestamp,
 	}, nil
 }
 
@@ -40,5 +41,5 @@ func (r iteratorForInsertRecord) Err() error {
 }
 
 func (q *Queries) InsertRecord(ctx context.Context, arg []InsertRecordParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"record_log"}, []string{"collection_id", "offset", "record"}, &iteratorForInsertRecord{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"record_log"}, []string{"collection_id", "offset", "record", "timestamp"}, &iteratorForInsertRecord{rows: arg})
 }

@@ -95,7 +95,9 @@ func (w *KubernetesWatcher) Start() error {
 			if err == nil {
 				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
+				w.mu.Lock()
 				w.ipToKey[ip] = key
+				w.mu.Unlock()
 				w.notify(ip)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
@@ -111,7 +113,9 @@ func (w *KubernetesWatcher) Start() error {
 				log.Info("Kubernetes Pod Deleted", zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
 				// The contract for GetStatus is that if the ip is not in this map, then it returns NotReady
+				w.mu.Lock()
 				delete(w.ipToKey, ip)
+				w.mu.Unlock()
 				w.notify(ip)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
