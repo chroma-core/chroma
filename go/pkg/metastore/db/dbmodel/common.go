@@ -15,7 +15,6 @@ type IMetaDomain interface {
 	SegmentDb(ctx context.Context) ISegmentDb
 	SegmentMetadataDb(ctx context.Context) ISegmentMetadataDb
 	NotificationDb(ctx context.Context) INotificationDb
-	RecordLogDb(ctx context.Context) IRecordLogDb
 }
 
 //go:generate mockery --name=ITransaction
