@@ -336,7 +336,7 @@ api_executors: Dict[
     "db:get_database": _get_database_executor,
     "db:list_collections": _list_collections_executor,
     "collection:get_collection": _get_collection_executor,
-    "collection:create_collection": _create_collection_executor,
+    "db:create_collection": _create_collection_executor,
     "db:get_or_create_collection": _get_or_create_collection_executor,
     "collection:delete_collection": _delete_collection_executor,
     "collection:update_collection": _update_collection_executor,
