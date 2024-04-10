@@ -2,7 +2,6 @@ package memberlist_manager
 
 import (
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -13,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	lister_v1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -21,7 +21,7 @@ type NodeWatcherCallback func(node_ip string)
 type IWatcher interface {
 	common.Component
 	RegisterCallback(callback NodeWatcherCallback)
-	GetStatus(node_ip string) (Status, error)
+	ListReadyMembers() (Memberlist, error)
 }
 
 type Status int
@@ -36,13 +36,12 @@ const (
 const MemberLabel = "member-type"
 
 type KubernetesWatcher struct {
-	mu             sync.Mutex
 	stopCh         chan struct{}
 	isRunning      bool
-	clientSet      kubernetes.Interface      // clientset for the coordinator
-	informer       cache.SharedIndexInformer // informer for the coordinator
+	clientSet      kubernetes.Interface      // clientset for the service
+	informer       cache.SharedIndexInformer // informer for the service
+	lister         lister_v1.PodLister       // lister for the service
 	callbacks      []NodeWatcherCallback
-	ipToKey        map[string]string
 	informerHandle cache.ResourceEventHandlerRegistration
 }
 
@@ -51,13 +50,13 @@ func NewKubernetesWatcher(clientset kubernetes.Interface, coordinator_namespace 
 	labelSelector := labels.SelectorFromSet(map[string]string{MemberLabel: pod_label})
 	factory := informers.NewSharedInformerFactoryWithOptions(clientset, resyncPeriod, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
 	podInformer := factory.Core().V1().Pods().Informer()
-	ipToKey := make(map[string]string)
+	podLister := factory.Core().V1().Pods().Lister()
 
 	w := &KubernetesWatcher{
 		isRunning: false,
 		clientSet: clientset,
 		informer:  podInformer,
-		ipToKey:   ipToKey,
+		lister:    podLister,
 	}
 
 	return w
@@ -78,9 +77,6 @@ func (w *KubernetesWatcher) Start() error {
 			if err == nil {
 				log.Info("Kubernetes Pod Added", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
-				w.mu.Lock()
-				w.ipToKey[ip] = key
-				w.mu.Unlock()
 				w.notify(ip)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
@@ -95,9 +91,6 @@ func (w *KubernetesWatcher) Start() error {
 			if err == nil {
 				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
-				w.mu.Lock()
-				w.ipToKey[ip] = key
-				w.mu.Unlock()
 				w.notify(ip)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
@@ -113,9 +106,6 @@ func (w *KubernetesWatcher) Start() error {
 				log.Info("Kubernetes Pod Deleted", zap.String("ip", objPod.Status.PodIP))
 				ip := objPod.Status.PodIP
 				// The contract for GetStatus is that if the ip is not in this map, then it returns NotReady
-				w.mu.Lock()
-				delete(w.ipToKey, ip)
-				w.mu.Unlock()
 				w.notify(ip)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
@@ -165,32 +155,20 @@ func (w *KubernetesWatcher) notify(update string) {
 	}
 }
 
-func (w *KubernetesWatcher) GetStatus(node_ip string) (Status, error) {
-	w.mu.Lock()
-	key, ok := w.ipToKey[node_ip]
-	w.mu.Unlock()
-	if !ok {
-		return NotReady, nil
-	}
-
-	obj, exists, err := w.informer.GetIndexer().GetByKey(key)
+func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
+	pods, err := w.lister.List(labels.Everything())
 	if err != nil {
-		return Unknown, err
+		return nil, err
 	}
-	if !exists {
-		return Unknown, errors.New("node does not exist")
-	}
-
-	pod, ok := obj.(*v1.Pod)
-	if !ok {
-		return Unknown, errors.New("object is not a pod")
-	}
-	conditions := pod.Status.Conditions
-	for _, condition := range conditions {
-		if condition.Type == v1.PodReady && condition.Status == v1.ConditionTrue {
-			return Ready, nil
+	memberlist := Memberlist{}
+	for _, pod := range pods {
+		conditions := pod.Status.Conditions
+		for _, condition := range conditions {
+			if condition.Type == v1.PodReady && condition.Status == v1.ConditionTrue {
+				memberlist = append(memberlist, pod.Status.PodIP)
+			}
 		}
 	}
-	return NotReady, nil
-
+	log.Info("ListReadyMembers", zap.Any("memberlist", memberlist))
+	return memberlist, nil
 }
