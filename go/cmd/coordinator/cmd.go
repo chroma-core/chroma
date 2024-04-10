@@ -1,13 +1,14 @@
 package main
 
 import (
-	"github.com/chroma/chroma-coordinator/internal/coordinator/grpc"
-	"github.com/chroma/chroma-coordinator/internal/grpcutils"
 	"io"
 	"time"
 
-	"github.com/chroma/chroma-coordinator/cmd/flag"
-	"github.com/chroma/chroma-coordinator/internal/utils"
+	"github.com/chroma-core/chroma/go/pkg/coordinator/grpc"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
+
+	"github.com/chroma-core/chroma/go/cmd/flag"
+	"github.com/chroma-core/chroma/go/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -53,8 +54,8 @@ func init() {
 
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
-	Cmd.Flags().StringVar(&conf.WorkerMemberlistName, "worker-memberlist-name", "worker-memberlist", "Worker memberlist name")
-	Cmd.Flags().StringVar(&conf.AssignmentPolicy, "assignment-policy", "rendezvous", "Assignment policy")
+	Cmd.Flags().StringVar(&conf.WorkerMemberlistName, "worker-memberlist-name", "query-service-memberlist", "Worker memberlist name")
+	Cmd.Flags().StringVar(&conf.WorkerPodLabel, "worker-pod-label", "query-service", "Worker pod label")
 	Cmd.Flags().DurationVar(&conf.WatchInterval, "watch-interval", 60*time.Second, "Watch interval")
 }
 

@@ -29,8 +29,15 @@ services:
       - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME}
       - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY}
       - CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE}
+    restart: unless-stopped # possible values are: "no", always", "on-failure", "unless-stopped"
     ports:
-      - 8000:8000
+      - "8000:8000"
+    healthcheck:
+      # Adjust below to match your container port
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - net
 

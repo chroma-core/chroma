@@ -26,7 +26,6 @@ class SegmentScope(Enum):
 class Collection(TypedDict):
     id: UUID
     name: str
-    topic: str
     metadata: Optional[Metadata]
     dimension: Optional[int]
     tenant: str
@@ -47,9 +46,6 @@ class Segment(TypedDict):
     id: UUID
     type: NamespacedName
     scope: SegmentScope
-    # If a segment has a topic, it implies that this segment is a consumer of the topic
-    # and indexes the contents of the topic.
-    topic: Optional[str]
     # If a segment has a collection, it implies that this segment implements the full
     # collection and can be used to service queries (for it's given scope.)
     collection: Optional[UUID]
@@ -57,9 +53,9 @@ class Segment(TypedDict):
 
 
 # SeqID can be one of three types of value in our current and future plans:
-# 1. A Pulsar MessageID encoded as a 192-bit integer
-# 2. A Pulsar MessageIndex (a 64-bit integer)
-# 3. A SQL RowID (a 64-bit integer)
+# 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
+# 2. A Pulsar MessageIndex (a 64-bit integer) -  This is no longer used as we removed pulsar
+# 3. A SQL RowID (a 64-bit integer) - This is used by both sqlite and the new log-service
 
 # All three of these types can be expressed as a Python int, so that is the type we
 # use in the internal Python API. However, care should be taken that the larger 192-bit
@@ -108,13 +104,12 @@ class EmbeddingRecord(TypedDict):
     collection_id: Optional[UUID]
 
 
-class SubmitEmbeddingRecord(TypedDict):
+class OperationRecord(TypedDict):
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
-    collection_id: UUID  # The collection the operation is being performed on
 
 
 class VectorQuery(TypedDict):

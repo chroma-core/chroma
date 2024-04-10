@@ -109,6 +109,8 @@ pub(crate) struct WorkerConfig {
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) segment_manager: crate::segment::config::SegmentManagerConfig,
     pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) log: crate::log::config::LogConfig,
+    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
 }
 
 /// # Description
@@ -160,6 +162,14 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -204,6 +214,14 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
 
                 "#,
             );
@@ -264,7 +282,14 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
-
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -305,6 +330,14 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -316,5 +349,11 @@ mod tests {
             assert_eq!(config.worker.kube_namespace, "C");
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_default_config_path() {
+        // Sanity check that root config loads from default path correctly
+        let _ = RootConfig::load();
     }
 }

@@ -1,4 +1,4 @@
-import { ChromaClient } from '../../src/ChromaClient';
+import { ChromaClient } from "../../src/ChromaClient";
 // import env.ts
 
 window.onload = async () => {
@@ -27,7 +27,7 @@ window.onload = async () => {
   const queryData = await collection.query({
     queryEmbeddings: [1, 2, 3, 4, 5],
     nResults: 5,
-    where: { test: "test" }
+    where: { test: "test" },
   });
 
   console.log("queryData", queryData);

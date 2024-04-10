@@ -1,16 +1,17 @@
+import json
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
 from chromadb.ingest import (
     Producer,
     Consumer,
-    encode_vector,
-    decode_vector,
     ConsumerCallbackFn,
+    decode_vector,
+    encode_vector,
 )
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     EmbeddingRecord,
-    SeqId,
     ScalarEncoding,
+    SeqId,
     Operation,
 )
 from chromadb.config import System
@@ -21,12 +22,13 @@ from chromadb.telemetry.opentelemetry import (
 )
 from overrides import override
 from collections import defaultdict
-from typing import Sequence, Tuple, Optional, Dict, Set, cast
+from typing import Sequence, Optional, Dict, Set, Tuple, cast
 from uuid import UUID
 from pypika import Table, functions
 import uuid
-import json
 import logging
+from chromadb.ingest.impl.utils import create_topic_name
+
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,8 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     _subscriptions: Dict[str, Set[Subscription]]
     _max_batch_size: Optional[int]
+    _tenant: str
+    _topic_namespace: str
     # How many variables are in the insert statement for a single record
     VARIABLES_PER_RECORD = 6
 
@@ -85,6 +89,8 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         self._subscriptions = defaultdict(set)
         self._max_batch_size = None
         self._opentelemetry_client = system.require(OpenTelemetryClient)
+        self._tenant = system.settings.require("tenant_id")
+        self._topic_namespace = system.settings.require("topic_namespace")
         super().__init__(system)
 
     @trace_method("SqlEmbeddingsQueue.reset_state", OpenTelemetryGranularity.ALL)
@@ -93,14 +99,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         super().reset_state()
         self._subscriptions = defaultdict(set)
 
-    @override
-    def create_topic(self, topic_name: str) -> None:
-        # Topic creation is implicit for this impl
-        pass
-
     @trace_method("SqlEmbeddingsQueue.delete_topic", OpenTelemetryGranularity.ALL)
     @override
-    def delete_topic(self, topic_name: str) -> None:
+    def delete_log(self, collection_id: UUID) -> None:
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
         t = Table("embeddings_queue")
         q = (
             self.querybuilder()
@@ -115,17 +119,17 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @trace_method("SqlEmbeddingsQueue.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
     def submit_embedding(
-        self, topic_name: str, embedding: SubmitEmbeddingRecord
+        self, collection_id: UUID, embedding: OperationRecord
     ) -> SeqId:
         if not self._running:
             raise RuntimeError("Component not running")
 
-        return self.submit_embeddings(topic_name, [embedding])[0]
+        return self.submit_embeddings(collection_id, [embedding])[0]
 
     @trace_method("SqlEmbeddingsQueue.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
     def submit_embeddings(
-        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+        self, collection_id: UUID, embeddings: Sequence[OperationRecord]
     ) -> Sequence[SeqId]:
         if not self._running:
             raise RuntimeError("Component not running")
@@ -141,6 +145,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     {self.max_batch_size:,} or less.
                     """
             )
+
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
 
         t = Table("embeddings_queue")
         insert = (
@@ -187,6 +195,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     encoding=submit_embedding_record["encoding"],
                     metadata=submit_embedding_record["metadata"],
                     operation=submit_embedding_record["operation"],
+                    collection_id=collection_id,
                 )
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
@@ -196,7 +205,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @override
     def subscribe(
         self,
-        topic_name: str,
+        collection_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,
@@ -204,6 +213,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     ) -> UUID:
         if not self._running:
             raise RuntimeError("Component not running")
+
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
 
         subscription_id = id or uuid.uuid4()
         start, end = self._validate_range(start, end)
@@ -265,7 +278,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         OpenTelemetryGranularity.ALL,
     )
     def _prepare_vector_encoding_metadata(
-        self, embedding: SubmitEmbeddingRecord
+        self, embedding: OperationRecord
     ) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
         if embedding["embedding"]:
             encoding_type = cast(ScalarEncoding, embedding["encoding"])

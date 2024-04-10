@@ -17,7 +17,6 @@ spec:
         - name: pulsar
           image: apachepulsar/pulsar
           command: [ "/pulsar/bin/pulsar", "standalone" ]
-
           ports:
             - containerPort: 6650
             - containerPort: 8080

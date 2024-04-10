@@ -18,7 +18,8 @@ jobs:
         platform: ['16core-64gb-ubuntu-latest']
         testfile: ["chromadb/test/db/test_system.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
-                   "chromadb/test/segment/distributed/test_memberlist_provider.py"]
+                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
+                   "chromadb/test/test_logservice.py"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -65,4 +66,4 @@ jobs:
     - name: Start Tilt
       run: tilt ci
     - name: Test
-      run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager'
+      run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'

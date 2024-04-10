@@ -36,6 +36,7 @@ from chromadb.errors import (
     InvalidHTTPVersion,
 )
 from chromadb.quota import QuotaError
+from chromadb.rate_limiting import RateLimitError
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CreateDatabase,
@@ -142,6 +143,7 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
         self._app.add_exception_handler(QuotaError, self.quota_exception_handler)
+        self._app.add_exception_handler(RateLimitError, self.rate_limit_exception_handler)
 
         self._app.on_event("shutdown")(self.shutdown)
 
@@ -289,6 +291,13 @@ class FastAPI(chromadb.server.Server):
 
     def app(self) -> fastapi.FastAPI:
         return self._app
+
+    async def rate_limit_exception_handler(self, request: Request, exc: RateLimitError):
+        return JSONResponse(
+            status_code=429,
+            content={"message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"},
+        )
+
 
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
