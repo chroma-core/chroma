@@ -133,6 +133,8 @@ impl SysDb for GrpcSysDb {
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
                 name: name,
+                limit: None,
+                offset: None,
                 tenant: if tenant.is_some() {
                     tenant.unwrap()
                 } else {
