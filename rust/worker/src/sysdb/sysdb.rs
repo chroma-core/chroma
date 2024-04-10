@@ -1,12 +1,15 @@
 use super::config::SysDbConfig;
 use crate::chroma_proto;
+use crate::chroma_proto::sys_db_client;
 use crate::config::Configurable;
-use crate::types::{CollectionConversionError, SegmentConversionError};
-use crate::{
-    chroma_proto::sys_db_client,
-    errors::{ChromaError, ErrorCodes},
-    types::{Collection, Segment, SegmentScope},
-};
+use crate::errors::ChromaError;
+use crate::errors::ErrorCodes;
+use crate::types::Collection;
+use crate::types::CollectionConversionError;
+use crate::types::Segment;
+use crate::types::SegmentConversionError;
+use crate::types::SegmentScope;
+use crate::types::Tenant;
 use async_trait::async_trait;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -32,6 +35,11 @@ pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
         scope: Option<SegmentScope>,
         collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError>;
+
+    async fn get_last_compaction_time(
+        &mut self,
+        tanant_ids: Vec<String>,
+    ) -> Result<Vec<Tenant>, GetLastCompactionTimeError>;
 }
 
 // We'd like to be able to clone the trait object, so we need to use the
@@ -213,6 +221,33 @@ impl SysDb for GrpcSysDb {
             }
         }
     }
+
+    async fn get_last_compaction_time(
+        &mut self,
+        tenant_ids: Vec<String>,
+    ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
+        let res = self
+            .client
+            .get_last_compaction_time_for_tenant(
+                chroma_proto::GetLastCompactionTimeForTenantRequest {
+                    tenant_id: tenant_ids,
+                },
+            )
+            .await;
+        match res {
+            Ok(res) => {
+                let last_compaction_times = res.into_inner().tenant_last_compaction_time;
+                let last_compaction_times = last_compaction_times
+                    .into_iter()
+                    .map(|proto_tenant| proto_tenant.try_into())
+                    .collect::<Result<Vec<Tenant>, ()>>();
+                return Ok(last_compaction_times.unwrap());
+            }
+            Err(e) => {
+                return Err(GetLastCompactionTimeError::FailedToGetLastCompactionTime(e));
+            }
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -235,6 +270,8 @@ impl ChromaError for GetCollectionsError {
 }
 
 #[derive(Error, Debug)]
+// TODO: This should use our sysdb errors from the proto definition
+// We will have to do an error uniformization pass at some point
 pub(crate) enum GetSegmentsError {
     #[error("Failed to fetch")]
     FailedToGetSegments(#[from] tonic::Status),
@@ -247,6 +284,24 @@ impl ChromaError for GetSegmentsError {
         match self {
             GetSegmentsError::FailedToGetSegments(_) => ErrorCodes::Internal,
             GetSegmentsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum GetLastCompactionTimeError {
+    #[error("Failed to fetch")]
+    FailedToGetLastCompactionTime(#[from] tonic::Status),
+
+    #[error("Tenant not found in sysdb")]
+    TenantNotFound,
+}
+
+impl ChromaError for GetLastCompactionTimeError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetLastCompactionTimeError::FailedToGetLastCompactionTime(_) => ErrorCodes::Internal,
+            GetLastCompactionTimeError::TenantNotFound => ErrorCodes::Internal,
         }
     }
 }

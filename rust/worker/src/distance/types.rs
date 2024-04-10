@@ -95,7 +95,6 @@ impl Into<String> for DistanceFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
 
     #[test]
     fn test_distance_function_try_from() {

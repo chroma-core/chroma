@@ -4,7 +4,6 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
 };
 use std::collections::HashMap;
-use std::vec::Vec;
 use thiserror::Error;
 use uuid::Uuid;
 
