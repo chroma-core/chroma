@@ -96,7 +96,10 @@ def _get_collection_executor(
             max_size=20
         )
     )
-    root_api.create_collection(collection)
+    try:
+        root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     api.get_collection(collection)
 
 
@@ -167,7 +170,10 @@ def _update_collection_executor(
             max_size=20
         )
     )
-    root_api.create_collection(collection)
+    try:
+        root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     col = api.get_collection(collection)
     col.modify(metadata={"foo": "bar"})
 
@@ -185,7 +191,10 @@ def _add_executor(
             max_size=20
         )
     )
-    root_api.create_collection(collection)
+    try:
+        root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     col = api.get_collection(collection)
     col.add(ids=["1"], documents=["test document"])
 
@@ -203,7 +212,10 @@ def _delete_executor(
             max_size=20
         )
     )
-    root_col = root_api.create_collection(collection)
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.delete(ids=["1"])
@@ -222,7 +234,10 @@ def _get_executor(
             max_size=20
         )
     )
-    root_col = root_api.create_collection(collection)
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.get(ids=["1"])
@@ -241,7 +256,10 @@ def _query_executor(
             max_size=20
         )
     )
-    root_col = root_api.create_collection(collection)
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.query(query_texts=["test query text"])
@@ -260,7 +278,10 @@ def _peek_executor(
             max_size=20
         )
     )
-    root_col = root_api.create_collection(collection)
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.peek()
@@ -301,7 +322,10 @@ def _update_executor(
             max_size=20
         )
     )
-    root_col = root_api.create_collection(collection)
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.update(ids=["1"], documents=["different test document"])
