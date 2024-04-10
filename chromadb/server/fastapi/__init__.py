@@ -405,22 +405,17 @@ class FastAPI(Server):
         ) -> None:
             db = CreateDatabase.model_validate(orjson.loads(raw_body))
 
-            user_identity = self.authenticate_and_authorize_or_raise(
+            maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
                 headers,
                 AuthzAction.CREATE_DATABASE,
                 tenant,
-                None,
+                db.name,
                 None,
             )
-            if self.authn_provider:
-                (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                    singleton_tenant_database_if_applicable(
-                    user_identity
-                )
-                if overwrite_tenant:
-                    tenant = overwrite_tenant
-                if overwrite_database:
-                    db.name = overwrite_database
+            if maybe_tenant:
+                tenant = maybe_tenant
+            if maybe_database:
+                db.name = maybe_database
 
             return self._api.create_database(db.name, tenant)
 
@@ -439,22 +434,17 @@ class FastAPI(Server):
         database: str,
         tenant: str = DEFAULT_TENANT,
     ) -> Database:
-        user_identity = self.authenticate_and_authorize_or_raise(
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.GET_DATABASE,
             tenant,
             database,
             None,
         )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
-            if overwrite_database:
-                database = overwrite_database
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
 
         return cast(
             Database,
@@ -471,20 +461,15 @@ class FastAPI(Server):
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = CreateTenant.model_validate(orjson.loads(raw_body))
 
-            user_identity = self.authenticate_and_authorize_or_raise(
+            maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_TENANT,
                 tenant.name,
                 None,
                 None,
             )
-            if self.authn_provider:
-                (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                    singleton_tenant_database_if_applicable(
-                    user_identity
-                )
-                if overwrite_tenant:
-                    tenant.name = overwrite_tenant
+            if maybe_tenant:
+                tenant.name = maybe_tenant
 
             return self._api.create_tenant(tenant.name)
 
@@ -501,20 +486,15 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
-        user_identity = self.authenticate_and_authorize_or_raise(
+        maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.GET_TENANT,
             tenant,
             None,
             None,
         )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
+        if maybe_tenant:
+            tenant = maybe_tenant
 
         return cast(
             Tenant,
@@ -535,22 +515,17 @@ class FastAPI(Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
-        user_identity = self.authenticate_and_authorize_or_raise(
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.LIST_COLLECTIONS,
             tenant,
             database,
             None,
         )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
-            if overwrite_database:
-                database = overwrite_database
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
 
         return cast(
             Sequence[Collection],
@@ -572,22 +547,17 @@ class FastAPI(Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        user_identity = self.authenticate_and_authorize_or_raise(
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
             tenant,
             database,
             None,
         )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
-            if overwrite_database:
-                database = overwrite_database
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
 
         return cast(
             int,
@@ -615,22 +585,17 @@ class FastAPI(Server):
         ) -> Collection:
             create = CreateCollection.model_validate(orjson.loads(raw_body))
 
-            user_identity = self.authenticate_and_authorize_or_raise(
+            maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_COLLECTION,
                 tenant,
+                database,
                 create.name,
-                None,
             )
-            if self.authn_provider:
-                (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                    singleton_tenant_database_if_applicable(
-                    user_identity
-                )
-                if overwrite_tenant:
-                    tenant = overwrite_tenant
-                if overwrite_database:
-                    database = overwrite_database
+            if maybe_tenant:
+                tenant = maybe_tenant
+            if maybe_database:
+                database = maybe_database
 
             return self._api.create_collection(
                 name=create.name,
@@ -660,22 +625,17 @@ class FastAPI(Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        user_identity = self.authenticate_and_authorize_or_raise(
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
             tenant,
             database,
             collection_name,
         )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
-            if overwrite_database:
-                database = overwrite_database
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
 
         return cast(
             Collection,
@@ -704,7 +664,7 @@ class FastAPI(Server):
                 raw_body: bytes
         ) -> None:
             update = UpdateCollection.model_validate(orjson.loads(raw_body))
-            self.authenticate_and_authorize_or_raise(
+            self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
                 None,
@@ -734,22 +694,17 @@ class FastAPI(Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        user_identity = self.authenticate_and_authorize_or_raise(
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
             tenant,
             database,
             collection_name,
         )
-        if self.authn_provider:
-            (overwrite_tenant, overwrite_database) = self.authn_provider.\
-                singleton_tenant_database_if_applicable(
-                user_identity
-            )
-            if overwrite_tenant:
-                tenant = overwrite_tenant
-            if overwrite_database:
-                database = overwrite_database
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
 
         await to_thread.run_sync(
             self._api.delete_collection,
@@ -764,7 +719,7 @@ class FastAPI(Server):
         try:
             def process_add(request: Request, raw_body: bytes) -> bool:
                 add = AddEmbedding.model_validate(orjson.loads(raw_body))
-                self.authenticate_and_authorize_or_raise(
+                self.auth_and_get_tenant_and_database_for_request(
                     request.headers,
                     AuthzAction.ADD,
                     None,
@@ -797,7 +752,7 @@ class FastAPI(Server):
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
 
-            self.authenticate_and_authorize_or_raise(
+            self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE,
                 None,
@@ -826,7 +781,7 @@ class FastAPI(Server):
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
 
-            self.authenticate_and_authorize_or_raise(
+            self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPSERT,
                 None,
@@ -854,7 +809,7 @@ class FastAPI(Server):
     async def get(self, collection_id: str, request: Request) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = GetEmbedding.model_validate(orjson.loads(raw_body))
-            self.authenticate_and_authorize_or_raise(
+            self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
                 None,
@@ -886,7 +841,7 @@ class FastAPI(Server):
     async def delete(self, collection_id: str, request: Request) -> List[UUID]:
         def process_delete(request: Request, raw_body: bytes) -> List[str]:
             delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
-            self.authenticate_and_authorize_or_raise(
+            self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
                 None,
@@ -916,7 +871,7 @@ class FastAPI(Server):
         request: Request,
         collection_id: str,
     ) -> int:
-        self.authenticate_and_authorize_or_raise(
+        self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.COUNT,
             None,
@@ -938,7 +893,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
-        self.authenticate_and_authorize_or_raise(
+        self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.RESET,
             None,
@@ -964,7 +919,7 @@ class FastAPI(Server):
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = QueryEmbedding.model_validate(orjson.loads(raw_body))
 
-            self.authenticate_and_authorize_or_raise(
+            self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.RESET,
                 None,

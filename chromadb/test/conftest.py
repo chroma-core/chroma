@@ -367,7 +367,7 @@ users:
         chroma_client_auth_credentials="admin:admin",
 
         chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
-        chroma_server_authn_credentials_file="./server.htpasswd",
+        chroma_server_authn_credentials_file=server_authn_file,
         chroma_server_authz_provider="chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider",
         chroma_server_authz_config_file=server_authz_file,
     ):

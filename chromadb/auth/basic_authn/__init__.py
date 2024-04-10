@@ -82,8 +82,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
             _raw_creds = [v for v in line.strip().split(":")]
             if len(_raw_creds) != 2 or not all(_raw_creds):
                 raise ValueError(
-                    "Invalid htpasswd credentials found in "
-                    "[chroma_server_auth_credentials]. "
+                    f"Invalid htpasswd credentials found: {_raw_creds}"
                     "Lines must be exactly <username>:<bcrypt passwd>."
                 )
             username = _raw_creds[0]
@@ -91,7 +90,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
             if username in self._creds:
                 raise ValueError(
                     "Duplicate username found in "
-                    "[chroma_server_auth_credentials]. "
+                    "[chroma_server_authn_credentials]. "
                     "Usernames must be unique."
                 )
             self._creds[username] = SecretStr(password)

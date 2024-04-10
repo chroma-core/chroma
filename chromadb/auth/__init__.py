@@ -95,27 +95,36 @@ class ServerAuthenticationProvider(Component):
             return True
         return False
 
-    def read_creds_or_creds_file(self) -> str:
-        _creds_file = self._system.settings[
-            "chroma_server_authn_credentials_file"
-        ]
-        _creds = str(self._system.settings["chroma_server_auth_credentials"])
-        if not _creds_file or not _creds:
+    def read_creds_or_creds_file(self) -> List[str]:
+        _creds_file = None
+        _creds = None
+
+        if self._system.settings.chroma_server_authn_credentials_file:
+            _creds_file = str(self._system.settings[
+                "chroma_server_authn_credentials_file"
+            ])
+        if self._system.settings.chroma_server_authn_credentials:
+            _creds = str(self._system.settings[
+                "chroma_server_authn_credentials"
+            ])
+        if not _creds_file and not _creds:
             raise ValueError(
                 "No credentials file or credentials found in "
-                "[chroma_server_auth_credentials]."
+                "[chroma_server_authn_credentials]."
             )
         if _creds_file and _creds:
             raise ValueError(
-                "Both credentials file and credentials found in "
-                "[chroma_server_auth_credentials]. "
+                "Both credentials file and credentials found."
                 "Please provide only one."
             )
         if _creds:
-            return _creds
-        else:
+            return _creds.split("\n")
+        elif _creds_file:
             with open(_creds_file, "r") as f:
-                return f.read()
+                return f.readlines()
+        raise ValueError(
+            "Should never happen"
+        )
 
     def singleton_tenant_database_if_applicable(
         self, user: Optional[UserIdentity]
@@ -201,24 +210,29 @@ class ServerAuthorizationProvider(Component):
                            resource: AuthzResource) -> None:
         pass
 
-    def read_config_or_config_file(self) -> str:
-        _config_file = self._system.settings[
-            "chroma_server_authz_config_file"
-        ]
-        _config = str(self._system.settings["chroma_server_authz_config"])
-        if not _config_file or not _config:
+    def read_config_or_config_file(self) -> List[str]:
+        _config_file = None
+        _config = None
+        if self._system.settings.chroma_server_authz_config_file:
+            _config_file = self._system.settings[
+                "chroma_server_authz_config_file"
+            ]
+        if self._system.settings.chroma_server_authz_config:
+            _config = str(self._system.settings["chroma_server_authz_config"])
+        if not _config_file and not _config:
             raise ValueError(
-                "No configuration file or configuration found in "
-                "[chroma_server_authz_config]."
+                "No authz configuration file or authz configuration found."
             )
         if _config_file and _config:
             raise ValueError(
-                "Both configuration file and configuration found in "
-                "[chroma_server_authz_config]. "
+                "Both authz configuration file and authz configuration found."
                 "Please provide only one."
             )
         if _config:
-            return _config
-        else:
+            return _config.split('\n')
+        elif _config_file:
             with open(_config_file, "r") as f:
-                return f.read()
+                return f.readlines()
+        raise ValueError(
+            "Should never happen"
+        )

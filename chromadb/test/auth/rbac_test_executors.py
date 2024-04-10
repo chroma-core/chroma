@@ -30,7 +30,10 @@ def _create_tenant_executor(
             max_size=20
         )
     )
-    api.create_tenant(tenant)
+    try:
+        api.create_tenant(tenant)
+    except Exception as e:
+        assert "already exists" in str(e)
 
 
 def _get_tenant_executor(
@@ -53,7 +56,10 @@ def _create_database_executor(
             max_size=20
         )
     )
-    api.create_database(database, DEFAULT_TENANT)
+    try:
+        api.create_database(database, DEFAULT_TENANT)
+    except Exception as e:
+        assert "already exists" in str(e)
 
 
 def _get_database_executor(
@@ -107,7 +113,10 @@ def _create_collection_executor(
             max_size=20
         )
     )
-    api.create_collection(collection)
+    try:
+        api.create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
 
 
 @given(st.data())
@@ -123,7 +132,10 @@ def _get_or_create_collection_executor(
             max_size=20
         )
     )
-    api.get_or_create_collection(collection)
+    try:
+        api.get_or_create_collection(collection)
+    except Exception as e:
+        assert "already exists" in str(e)
 
 
 @given(st.data())

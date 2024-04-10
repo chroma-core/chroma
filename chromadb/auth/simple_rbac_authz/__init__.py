@@ -36,7 +36,9 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-        self._config = yaml.safe_load(self.read_config_or_config_file())
+        self._config = yaml.safe_load(
+            '\n'.join(self.read_config_or_config_file())
+        )
 
         # We favor preprocessing here to avoid having to parse the config file
         # on every request. This AuthorizationProvider does not support
@@ -58,10 +60,10 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         OpenTelemetryGranularity.ALL,
     )
     @override
-    def authorize(self,
-                  user: UserIdentity,
-                  action: AuthzAction,
-                  resource: AuthzResource) -> None:
+    def authorize_or_raise(self,
+                           user: UserIdentity,
+                           action: AuthzAction,
+                           resource: AuthzResource) -> None:
 
         policy_decision = False
         if (user.user_id in self._permissions and

@@ -16,7 +16,8 @@ from chromadb.test.conftest import _fastapi_fixture
 
 def test_basic_authn_rbac_authz_unit_test(
         api_with_authn_rbac_authz: ServerAPI) -> None:
-    api_with_authn_rbac_authz.create_collection('test')
+    api_with_authn_rbac_authz.reset()
+    api_with_authn_rbac_authz.create_collection('test_collection')
 
 
 @settings(max_examples=10, phases=[Phase.generate, Phase.target])

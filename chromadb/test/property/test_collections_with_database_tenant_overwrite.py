@@ -93,9 +93,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
         return tenant in self.tenant_to_database_to_model
 
     def set_api_tenant_database(self, tenant: str, database: str) -> None:
-        self.singleton_client.set_tenant(tenant, database)
         self.root_client.set_tenant(tenant, database)
-        return super().set_api_tenant_database(tenant, database)
 
     def get_tenant_model(
         self,

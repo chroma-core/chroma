@@ -123,7 +123,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
             self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
         creds = self.read_creds_or_creds_file()
-        self._users = cast(List[User], yaml.safe_load(creds)["users"])
+        self._users = cast(List[User], yaml.safe_load('\n'.join(creds))["users"])
 
         self._token_user_mapping: Dict[str, User] = {}
         for user in self._users:
