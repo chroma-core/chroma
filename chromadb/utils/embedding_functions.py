@@ -1,6 +1,5 @@
 import hashlib
 import logging
-from enum import Enum
 from functools import cached_property
 
 from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
