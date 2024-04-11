@@ -48,34 +48,32 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
 
   public async generate(texts: string[]) {
     try {
-      const result: number[][] = [];
-      let index = 0;
-    
-      while (index < texts.length) {
-        const response = await fetch(this.apiUrl, {
-          method: 'POST',
-          headers: this.headers,
-          body: JSON.stringify({
-            input: texts.slice(index, index + this.batchSize),
-            model: this.modelName,
-            truncation: this.truncation,
-            input_type: this.inputType,
-          }),
-        });
-
-        const data = (await response.json()) as { data: any[]; detail: string };
-        if (!data || !data.data) {
-          throw new Error(data.detail);
-        }
-
-        const embeddings: any[] = data.data;
-        const sortedEmbeddings = embeddings.sort((a, b) => a.index - b.index);
-
-        const embeddingsChunks = sortedEmbeddings.map((result) => result.embedding);
-        result.push(...embeddingsChunks);
-        index += this.batchSize;
+      if(texts.length > this.batchSize) {
+        throw new Error(`The number of texts to embed exceeds the maximum batch size of ${this.batchSize}`);
       }
-      return result;
+
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify({
+          input: texts,
+          model: this.modelName,
+          truncation: this.truncation,
+          input_type: this.inputType,
+        }),
+      });
+
+      const data = (await response.json()) as { data: any[]; detail: string };
+      if (!data || !data.data) {
+        throw new Error(data.detail);
+      }
+
+      const embeddings: any[] = data.data;
+      const sortedEmbeddings = embeddings.sort((a, b) => a.index - b.index);
+
+      const embeddingsChunks = sortedEmbeddings.map((result) => result.embedding);
+
+      return embeddingsChunks;
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Error calling VoyageAI API: ${error.message}`);

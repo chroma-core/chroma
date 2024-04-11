@@ -9,7 +9,7 @@ if (!process.env.VOYAGE_API_KEY) {
 } else {
   test("it should add VoyageAI embeddings", async () => {
     await chroma.reset();
-    const embedder = new VoyageAIEmbeddingFunction({ voyageaiApiKey: process.env.VOYAGE_API_KEY || "", modelName: "voyage-2", batchSize: 2, inputType: InputType.DOCUMENT })
+    const embedder = new VoyageAIEmbeddingFunction({ voyageaiApiKey: process.env.VOYAGE_API_KEY || "", modelName: "voyage-2", batchSize: 5, inputType: InputType.DOCUMENT })
     const collection = await chroma.createCollection({ name: "test" ,embeddingFunction: embedder});
     const embeddings = await embedder.generate(DOCUMENTS);
     await collection.add({ ids: IDS, embeddings: embeddings });
@@ -25,5 +25,17 @@ if (!process.env.VOYAGE_API_KEY) {
       ]
     });
     expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+  });
+
+  test("it should throw an exception when the batch size is smaller than the number of texts", async () => {
+    await chroma.reset();
+    const embedder = new VoyageAIEmbeddingFunction({ voyageaiApiKey: process.env.VOYAGE_API_KEY || "", modelName: "voyage-2", batchSize: 2, inputType: InputType.DOCUMENT })
+    const collection = await chroma.createCollection({ name: "test" ,embeddingFunction: embedder});
+    try {
+      const embeddings = await embedder.generate(DOCUMENTS);
+      fail("Should throw an exception");
+    } catch(e: any) {
+      expect(e.message).toBe("Error calling VoyageAI API: The number of texts to embed exceeds the maximum batch size of 2");
+    }
   });
 }
