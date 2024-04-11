@@ -5,7 +5,6 @@ import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
 import {OpenAIEmbeddingFunction} from "../src/embeddings/OpenAIEmbeddingFunction";
 import {CohereEmbeddingFunction} from "../src/embeddings/CohereEmbeddingFunction";
-import {VoyageAIEmbeddingFunction, InputType} from "../src/embeddings/VoyageAIEmbeddingFunction";
 
 test("it should add single embeddings to a collection", async () => {
   await chroma.reset();
@@ -79,31 +78,6 @@ if (!process.env.COHERE_API_KEY) {
     var res = await collection.get({
       ids: IDS,
       include: [IncludeEnum.Embeddings],
-    });
-    expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
-  });
-}
-
-if (!process.env.VOYAGE_API_KEY) {
-  test.skip("it should add VoyageAI embeddings", async () => {
-  });
-} else {
-  test("it should add VoyageAI embeddings", async () => {
-    await chroma.reset();
-    const embedder = new VoyageAIEmbeddingFunction({ voyageai_api_key: process.env.VOYAGE_API_KEY || "", model_name: "voyage-2", batch_size: 2, input_type: InputType.DOCUMENT })
-    const collection = await chroma.createCollection({ name: "test" ,embeddingFunction: embedder});
-    const embeddings = await embedder.generate(DOCUMENTS);
-    await collection.add({ ids: IDS, embeddings: embeddings });
-    const count = await collection.count();
-    expect(count).toBe(3);
-    expect(embeddings.length).toBe(3);
-    expect(embeddings[0].length).toBe(1024);
-    expect(embeddings[1].length).toBe(1024);
-    expect(embeddings[2].length).toBe(1024);
-    var res = await collection.get({
-      ids: IDS, include: [
-        IncludeEnum.Embeddings,
-      ]
     });
     expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
   });

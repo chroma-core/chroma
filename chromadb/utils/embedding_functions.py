@@ -245,67 +245,6 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         ]
 
 
-class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
-    class InputType(Enum):
-        DOCUMENT = "document"
-        QUERY = "query"
-
-    def __init__(
-            self,
-            api_key: str,
-            model_name: str,
-            embed_batch_size: Optional[int] = None,
-            truncation: Optional[bool] = None,
-            input_type: Optional[InputType] = None,
-            show_progress_bar: Optional[bool] = False,
-    ):
-        try:
-            import voyageai
-        except ImportError:
-            raise ValueError(
-                "The voyageai python package is not installed. Please install it with `pip install -U voyageai`"
-            )
-
-        if embed_batch_size is None:
-            embed_batch_size = 72 if model_name in ["voyage-2", "voyage-02"] else 7
-
-        self._client = voyageai.Client(api_key=api_key)
-        self._model_name = model_name
-        self._batch_size = embed_batch_size
-        self._truncation = truncation
-        self._show_progress_bar = show_progress_bar
-        self._input_type = input_type.value
-
-    def __call__(self, input: Documents) -> Embeddings:
-        # Call VoyageAI Embedding API for each document.
-        embeddings: List[List[float]] = []
-
-        if self._show_progress_bar:
-            try:
-                from tqdm.auto import tqdm
-            except ImportError as e:
-                raise ImportError(
-                    "Must have tqdm installed if `show_progress_bar` is set to True. "
-                    "Please install with `pip install tqdm`."
-                ) from e
-
-            _iter = tqdm(range(0, len(input), self._batch_size))
-        else:
-            _iter = range(0, len(input), self._batch_size)
-
-        for i in _iter:
-            embeddings.extend(
-                self._client.embed(
-                    input[i : i + self._batch_size],
-                    model=self._model_name,
-                    truncation=self._truncation,
-                    input_type=self._input_type
-                ).embeddings
-            )
-
-        return embeddings
-
-
 class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to get embeddings for a list of texts using the HuggingFace API.

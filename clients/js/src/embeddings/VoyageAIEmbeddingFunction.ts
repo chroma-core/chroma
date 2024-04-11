@@ -6,42 +6,42 @@ export enum InputType {
 }
 
 export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
-  private model_name: string;
-  private api_url: string;
-  private batch_size: number;
+  private modelName: string;
+  private apiUrl: string;
+  private batchSize: number;
   private truncation?: boolean;
-  private input_type?: InputType;
+  private inputType?: InputType;
   private headers: { [key: string]: string };
 
   constructor({
-    voyageai_api_key,
-    model_name,
-    batch_size,
+    voyageaiApiKey,
+    modelName,
+    batchSize,
     truncation,
-    input_type,
+    inputType,
   }: {
-    voyageai_api_key: string;
-    model_name: string;
-    batch_size?: number;
+    voyageaiApiKey: string;
+    modelName: string;
+    batchSize?: number;
     truncation?: boolean;
-    input_type?: InputType;
+    inputType?: InputType;
   }) {
-    this.api_url = "https://api.voyageai.com/v1/embeddings";
+    this.apiUrl = "https://api.voyageai.com/v1/embeddings";
     this.headers = {
-      Authorization: `Bearer ${voyageai_api_key}`,
+      Authorization: `Bearer ${voyageaiApiKey}`,
       "Content-Type": "application/json",
     };
 
-    this.model_name = model_name;
+    this.modelName = modelName;
     this.truncation = truncation;
-    this.input_type = input_type;
-    if (batch_size) {
-      this.batch_size = batch_size;
+    this.inputType = inputType;
+    if (batchSize) {
+      this.batchSize = batchSize;
     } else {
-      if (model_name in ["voyage-2", "voyage-02"]) {
-        this.batch_size = 72;
+      if (modelName in ["voyage-2", "voyage-02"]) {
+        this.batchSize = 72;
       } else {
-        this.batch_size = 7;
+        this.batchSize = 7;
       }
     }
   }
@@ -52,14 +52,14 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
       let index = 0;
     
       while (index < texts.length) {
-        const response = await fetch(this.api_url, {
+        const response = await fetch(this.apiUrl, {
           method: 'POST',
           headers: this.headers,
           body: JSON.stringify({
-            input: texts.slice(index, index + this.batch_size),
-            model: this.model_name,
+            input: texts.slice(index, index + this.batchSize),
+            model: this.modelName,
             truncation: this.truncation,
-            input_type: this.input_type,
+            input_type: this.inputType,
           }),
         });
 
@@ -73,7 +73,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
 
         const embeddingsChunks = sortedEmbeddings.map((result) => result.embedding);
         result.push(...embeddingsChunks);
-        index += this.batch_size;
+        index += this.batchSize;
       }
       return result;
     } catch (error) {
