@@ -165,7 +165,7 @@ def random_action(draw: st.DrawFn) -> str:
 @st.composite
 def random_allowed_actions_for_role(draw: st.DrawFn) -> List[str]:
     actions = draw(
-        st.lists(
+        st.sets(
             random_action(),
             min_size=1,
             max_size=10
@@ -183,24 +183,18 @@ def random_allowed_actions_for_role(draw: st.DrawFn) -> List[str]:
             "collection:update",
             "collection:upsert",
             "collection:count",
+            "collection:update_collection",
+            "collection:delete_collection",
         ]
     ):
-        actions.append("collection:get_collection")
+        actions.add("collection:get_collection")
 
-    if any(
-        action in actions
-        for action in [
-            "collection:peek",
-        ]
-    ):
-        actions.append("collection:get")
-    actions.extend(
-        [
-            "tenant:get_tenant",
-            "db:get_database",
-        ]
-    )
-    return actions
+    if "collection:peek" in actions:
+        actions.add("collection:get")
+
+    actions.add("tenant:get_tenant")
+    actions.add("db:get_database")
+    return list(actions)
 
 
 @st.composite
