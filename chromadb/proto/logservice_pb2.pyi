@@ -33,56 +33,56 @@ class PushLogsResponse(_message.Message):
     def __init__(self, record_count: _Optional[int] = ...) -> None: ...
 
 class PullLogsRequest(_message.Message):
-    __slots__ = ["collection_id", "start_from_id", "batch_size", "end_timestamp"]
+    __slots__ = ["collection_id", "start_from_offset", "batch_size", "end_timestamp"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
-    START_FROM_ID_FIELD_NUMBER: _ClassVar[int]
+    START_FROM_OFFSET_FIELD_NUMBER: _ClassVar[int]
     BATCH_SIZE_FIELD_NUMBER: _ClassVar[int]
     END_TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
-    start_from_id: int
+    start_from_offset: int
     batch_size: int
     end_timestamp: int
     def __init__(
         self,
         collection_id: _Optional[str] = ...,
-        start_from_id: _Optional[int] = ...,
+        start_from_offset: _Optional[int] = ...,
         batch_size: _Optional[int] = ...,
         end_timestamp: _Optional[int] = ...,
     ) -> None: ...
 
-class RecordLog(_message.Message):
-    __slots__ = ["log_id", "record"]
-    LOG_ID_FIELD_NUMBER: _ClassVar[int]
+class LogRecord(_message.Message):
+    __slots__ = ["log_offset", "record"]
+    LOG_OFFSET_FIELD_NUMBER: _ClassVar[int]
     RECORD_FIELD_NUMBER: _ClassVar[int]
-    log_id: int
+    log_offset: int
     record: _chroma_pb2.OperationRecord
     def __init__(
         self,
-        log_id: _Optional[int] = ...,
+        log_offset: _Optional[int] = ...,
         record: _Optional[_Union[_chroma_pb2.OperationRecord, _Mapping]] = ...,
     ) -> None: ...
 
 class PullLogsResponse(_message.Message):
     __slots__ = ["records"]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
-    records: _containers.RepeatedCompositeFieldContainer[RecordLog]
+    records: _containers.RepeatedCompositeFieldContainer[LogRecord]
     def __init__(
-        self, records: _Optional[_Iterable[_Union[RecordLog, _Mapping]]] = ...
+        self, records: _Optional[_Iterable[_Union[LogRecord, _Mapping]]] = ...
     ) -> None: ...
 
 class CollectionInfo(_message.Message):
-    __slots__ = ["collection_id", "first_log_id", "first_log_id_ts"]
+    __slots__ = ["collection_id", "first_log_offset", "first_log_ts"]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
-    FIRST_LOG_ID_FIELD_NUMBER: _ClassVar[int]
-    FIRST_LOG_ID_TS_FIELD_NUMBER: _ClassVar[int]
+    FIRST_LOG_OFFSET_FIELD_NUMBER: _ClassVar[int]
+    FIRST_LOG_TS_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
-    first_log_id: int
-    first_log_id_ts: int
+    first_log_offset: int
+    first_log_ts: int
     def __init__(
         self,
         collection_id: _Optional[str] = ...,
-        first_log_id: _Optional[int] = ...,
-        first_log_id_ts: _Optional[int] = ...,
+        first_log_offset: _Optional[int] = ...,
+        first_log_ts: _Optional[int] = ...,
     ) -> None: ...
 
 class GetAllCollectionInfoToCompactRequest(_message.Message):

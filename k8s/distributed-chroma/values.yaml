@@ -16,9 +16,6 @@ frontendService:
   producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
-  pulsarBrokerUrl: 'value: "pulsar.chroma"'
-  pulsarBrokerPort: 'value: "6650"'
-  pulsarAdminPort: 'value: "8080"'
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
@@ -39,14 +36,11 @@ sysdb:
   replicaCount: 1
   env:
   flags:
-    pulsar-admin-url: "http://pulsar.chroma:8080"
-    pulsar-url: "pulsar://pulsar.chroma:6650"
-    notifier-provider: "pulsar"
 
 logService:
   image:
     repository: 'local'
-    tag: 'sysdb'
+    tag: 'log-service'
   env:
   flags:
 
@@ -54,6 +48,11 @@ queryService:
   image:
     repository: 'local'
     tag: 'query-service'
+
+compactionService:
+  image:
+    repository: 'local'
+    tag: 'compaction-service'
 
 sysdbMigration:
   image:
@@ -63,5 +62,13 @@ sysdbMigration:
   password: chroma
   netloc: postgres
   port: 5432
-  dbName: chroma
+  dbName: sysdb
   sslmode: disable
+
+logServiceMigration:
+  image:
+    repository: 'local'
+    tag: 'logservice-migration'
+  env:
+  - name: CHROMA_DB_LOG_URL
+    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'

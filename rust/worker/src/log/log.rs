@@ -1,25 +1,27 @@
 use crate::chroma_proto;
 use crate::chroma_proto::log_service_client::LogServiceClient;
 use crate::config::Configurable;
-use crate::config::WorkerConfig;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
-use crate::types::EmbeddingRecord;
-use crate::types::EmbeddingRecordConversionError;
+use crate::types::LogRecord;
+use crate::types::RecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
 use uuid::Uuid;
 
-// CollectionInfo is a struct that contains information about a collection for the
-// compacting process. It contains information about the collection id, the first log id,
-// and the first log id timestamp since last compaction.
+/// CollectionInfo is a struct that contains information about a collection for the
+/// compacting process.
+/// Fields:
+/// - collection_id: the id of the collection that needs to be compacted
+/// - first_log_offset: the offset of the first log entry in the collection that needs to be compacted
+/// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
 pub(crate) struct CollectionInfo {
     pub(crate) collection_id: String,
-    pub(crate) first_log_id: i64,
-    pub(crate) first_log_id_ts: i64,
+    pub(crate) first_log_offset: i64,
+    pub(crate) first_log_ts: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -39,7 +41,7 @@ pub(crate) trait Log: Send + Sync + LogClone + Debug {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<EmbeddingRecord>, PullLogsError>;
+    ) -> Result<Vec<LogRecord>, PullLogsError>;
 
     async fn get_collections_with_new_data(
         &mut self,
@@ -91,9 +93,9 @@ impl ChromaError for GrpcLogError {
 }
 
 #[async_trait]
-impl Configurable for GrpcLog {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &worker_config.log {
+impl Configurable<LogConfig> for GrpcLog {
+    async fn try_from_config(config: &LogConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
             LogConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;
@@ -122,14 +124,14 @@ impl Log for GrpcLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
+    ) -> Result<Vec<LogRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => -1,
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
             collection_id: collection_id.to_string(),
-            start_from_id: offset,
+            start_from_offset: offset,
             batch_size,
             end_timestamp,
         });
@@ -138,11 +140,11 @@ impl Log for GrpcLog {
             Ok(response) => {
                 let logs = response.into_inner().records;
                 let mut result = Vec::new();
-                for log in logs {
-                    let embedding_record = (log, collection_id).try_into();
-                    match embedding_record {
-                        Ok(embedding_record) => {
-                            result.push(embedding_record);
+                for log_record_proto in logs {
+                    let log_record = log_record_proto.try_into();
+                    match log_record {
+                        Ok(log_record) => {
+                            result.push(log_record);
                         }
                         Err(err) => {
                             return Err(PullLogsError::ConversionError(err));
@@ -174,8 +176,8 @@ impl Log for GrpcLog {
                 for collection in collections {
                     result.push(CollectionInfo {
                         collection_id: collection.collection_id,
-                        first_log_id: collection.first_log_id,
-                        first_log_id_ts: collection.first_log_id_ts,
+                        first_log_offset: collection.first_log_offset,
+                        first_log_ts: collection.first_log_ts,
                     });
                 }
                 Ok(result)
@@ -194,7 +196,7 @@ pub(crate) enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]
-    ConversionError(#[from] EmbeddingRecordConversionError),
+    ConversionError(#[from] RecordConversionError),
 }
 
 impl ChromaError for PullLogsError {
@@ -222,21 +224,22 @@ impl ChromaError for GetCollectionsWithNewDataError {
     }
 }
 
-// This is used for testing only
+// This is used for testing only, it represents a log record that is stored in memory
+// internal to a mock log implementation
 #[derive(Clone)]
-pub(crate) struct LogRecord {
+pub(crate) struct InternalLogRecord {
     pub(crate) collection_id: String,
-    pub(crate) log_id: i64,
-    pub(crate) log_id_ts: i64,
-    pub(crate) record: EmbeddingRecord,
+    pub(crate) log_offset: i64,
+    pub(crate) log_ts: i64,
+    pub(crate) record: LogRecord,
 }
 
-impl Debug for LogRecord {
+impl Debug for InternalLogRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogRecord")
             .field("collection_id", &self.collection_id)
-            .field("log_id", &self.log_id)
-            .field("log_id_ts", &self.log_id_ts)
+            .field("log_offset", &self.log_offset)
+            .field("log_ts", &self.log_ts)
             .field("record", &self.record)
             .finish()
     }
@@ -245,7 +248,7 @@ impl Debug for LogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
-    logs: HashMap<String, Vec<Box<LogRecord>>>,
+    logs: HashMap<String, Vec<Box<InternalLogRecord>>>,
 }
 
 impl InMemoryLog {
@@ -255,7 +258,7 @@ impl InMemoryLog {
         }
     }
 
-    pub fn add_log(&mut self, collection_id: String, log: Box<LogRecord>) {
+    pub fn add_log(&mut self, collection_id: String, log: Box<InternalLogRecord>) {
         let logs = self.logs.entry(collection_id).or_insert(Vec::new());
         logs.push(log);
     }
@@ -269,7 +272,7 @@ impl Log for InMemoryLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<EmbeddingRecord>, PullLogsError> {
+    ) -> Result<Vec<LogRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
@@ -281,7 +284,7 @@ impl Log for InMemoryLog {
         };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
-            if i < logs.len() as i64 && logs[i as usize].log_id_ts <= end_timestamp {
+            if i < logs.len() as i64 && logs[i as usize].log_ts <= end_timestamp {
                 result.push(logs[i as usize].record.clone());
             }
         }
@@ -296,13 +299,13 @@ impl Log for InMemoryLog {
             if log_record.is_empty() {
                 continue;
             }
-            // sort the logs by log_id
+            // sort the logs by log_offset
             let mut logs = log_record.clone();
-            logs.sort_by(|a, b| a.log_id.cmp(&b.log_id));
+            logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {
                 collection_id: collection_id.clone(),
-                first_log_id: logs[0].log_id,
-                first_log_id_ts: logs[0].log_id_ts,
+                first_log_offset: logs[0].log_offset,
+                first_log_ts: logs[0].log_ts,
             });
         }
         Ok(collections)

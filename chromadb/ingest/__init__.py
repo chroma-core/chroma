@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Callable, Optional, Sequence
 from chromadb.types import (
     OperationRecord,
-    EmbeddingRecord,
+    LogRecord,
     SeqId,
     Vector,
     ScalarEncoding,
@@ -67,7 +67,7 @@ class Producer(Component):
         pass
 
 
-ConsumerCallbackFn = Callable[[Sequence[EmbeddingRecord]], None]
+ConsumerCallbackFn = Callable[[Sequence[LogRecord]], None]
 
 
 class Consumer(Component):

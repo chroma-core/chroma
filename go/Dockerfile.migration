@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim as sysdb-migration
 
 RUN apt update
 RUN apt upgrade -y
@@ -7,3 +7,11 @@ RUN curl -sSf https://atlasgo.sh | sh -s -- --community
 
 COPY ./go/migrations migrations
 COPY ./go/atlas.hcl atlas.hcl
+
+FROM debian:bookworm-slim as logservice-migration
+RUN apt update
+RUN apt upgrade -y
+RUN apt install -y curl jq
+RUN curl -sSf https://atlasgo.sh | sh -s -- --community
+COPY ./go/database/log/migrations migrations
+COPY ./go/database/log/atlas.hcl atlas.hcl

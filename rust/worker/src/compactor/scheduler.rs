@@ -1,44 +1,42 @@
+use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
-use crate::compactor::types::Task;
+use crate::compactor::types::CompactionJob;
 use crate::log::log::CollectionInfo;
 use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
+use crate::memberlist::Memberlist;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::Component;
-use crate::system::ComponentContext;
-use crate::system::Handler;
-use async_trait::async_trait;
-use parking_lot::Mutex;
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-use std::time::Duration;
 use uuid::Uuid;
 
-#[derive(Clone)]
 pub(crate) struct Scheduler {
+    my_ip: String,
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     policy: Box<dyn SchedulerPolicy>,
-    task_queue: Arc<Mutex<Vec<Task>>>,
-    max_queue_size: usize,
-    schedule_interval: Duration,
+    job_queue: Vec<CompactionJob>,
+    max_concurrent_jobs: usize,
+    memberlist: Option<Memberlist>,
+    assignment_policy: Box<dyn AssignmentPolicy>,
 }
 
 impl Scheduler {
     pub(crate) fn new(
+        my_ip: String,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         policy: Box<dyn SchedulerPolicy>,
-        max_queue_size: usize,
-        schedule_interval: Duration,
+        max_concurrent_jobs: usize,
+        assignment_policy: Box<dyn AssignmentPolicy>,
     ) -> Scheduler {
         Scheduler {
+            my_ip,
             log,
             sysdb,
             policy,
-            task_queue: Arc::new(Mutex::new(Vec::with_capacity(max_queue_size))),
-            max_queue_size,
-            schedule_interval,
+            job_queue: Vec::with_capacity(max_concurrent_jobs),
+            max_concurrent_jobs,
+            memberlist: None,
+            assignment_policy,
         }
     }
 
@@ -82,13 +80,28 @@ impl Scheduler {
                         println!("Collection not found: {:?}", collection_info.collection_id);
                         continue;
                     }
+
+                    // TODO: make querying the last compaction time in batch
+                    let tenant_ids = vec![collection[0].tenant.clone()];
+                    let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
+
+                    let last_compaction_time = match tenant {
+                        Ok(tenant) => tenant[0].last_compaction_time,
+                        Err(e) => {
+                            // TODO: Log error
+                            println!("Error: {:?}", e);
+                            // Ignore this collection id for this compaction iteration
+                            println!("Ignoring collection: {:?}", collection_info.collection_id);
+                            continue;
+                        }
+                    };
+
                     collection_records.push(CollectionRecord {
                         id: collection[0].id.to_string(),
                         tenant_id: collection[0].tenant.clone(),
-                        // TODO: get the last compaction time from the sysdb
-                        last_compaction_time: 0,
-                        first_record_time: collection_info.first_log_id_ts,
-                        offset: collection_info.first_log_id,
+                        last_compaction_time,
+                        first_record_time: collection_info.first_log_ts,
+                        offset: collection_info.first_log_offset,
                     });
                 }
                 Err(e) => {
@@ -97,21 +110,46 @@ impl Scheduler {
                 }
             }
         }
-        collection_records
+        self.filter_collections(collection_records)
+    }
+
+    fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
+        let mut filtered_collections = Vec::new();
+        let members = self.memberlist.as_ref().unwrap();
+        self.assignment_policy.set_members(members.clone());
+        for collection in collections {
+            let result = self.assignment_policy.assign(collection.id.as_str());
+            match result {
+                Ok(member) => {
+                    if member == self.my_ip {
+                        filtered_collections.push(collection);
+                    }
+                }
+                Err(e) => {
+                    // TODO: Log error
+                    println!("Error: {:?}", e);
+                    continue;
+                }
+            }
+        }
+
+        filtered_collections
     }
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
-        let tasks = self
+        let jobs = self
             .policy
-            .determine(collection_records, self.max_queue_size as i32);
-        {
-            let mut task_queue = self.task_queue.lock();
-            task_queue.clear();
-            task_queue.extend(tasks);
-        }
+            .determine(collection_records, self.max_concurrent_jobs as i32);
+        self.job_queue.clear();
+        self.job_queue.extend(jobs);
     }
 
     pub(crate) async fn schedule(&mut self) {
+        if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
+            // TODO: Log error
+            println!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
+            return;
+        }
         let collections = self.get_collections_with_new_data().await;
         if collections.is_empty() {
             return;
@@ -120,147 +158,34 @@ impl Scheduler {
         self.schedule_internal(collection_records).await;
     }
 
-    pub(crate) fn take_task(&self) -> Option<Task> {
-        let mut task_queue = self.task_queue.lock();
-        if task_queue.is_empty() {
-            return None;
-        }
-        Some(task_queue.remove(0))
+    pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {
+        self.job_queue.iter()
     }
 
-    pub(crate) fn get_tasks(&self) -> Vec<Task> {
-        let task_queue = self.task_queue.lock();
-        task_queue.clone()
-    }
-}
-
-#[async_trait]
-impl Component for Scheduler {
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        ctx.scheduler.schedule_interval(
-            ctx.sender.clone(),
-            ScheduleMessage {},
-            self.schedule_interval,
-            None,
-            ctx,
-        );
+    pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
+        self.memberlist = Some(memberlist);
     }
 
-    fn queue_size(&self) -> usize {
-        // TODO: make this comfigurable
-        1000
-    }
-}
-
-impl Debug for Scheduler {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Scheduler")
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ScheduleMessage {}
-
-#[async_trait]
-impl Handler<ScheduleMessage> for Scheduler {
-    async fn handle(&mut self, _event: ScheduleMessage, _ctx: &ComponentContext<Scheduler>) {
-        self.schedule().await;
+    // For testing
+    pub(crate) fn set_sysdb(&mut self, sysdb: Box<dyn SysDb>) {
+        self.sysdb = sysdb;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
-    use crate::log::log::LogRecord;
-    use crate::sysdb::sysdb::GetCollectionsError;
-    use crate::sysdb::sysdb::GetSegmentsError;
+    use crate::log::log::InternalLogRecord;
+    use crate::sysdb::test_sysdb::TestSysDb;
     use crate::types::Collection;
-    use crate::types::EmbeddingRecord;
+    use crate::types::LogRecord;
     use crate::types::Operation;
-    use crate::types::Segment;
-    use crate::types::SegmentScope;
-    use num_bigint::BigInt;
-    use std::collections::HashMap;
+    use crate::types::OperationRecord;
     use std::str::FromStr;
-    use std::time::Duration;
     use uuid::Uuid;
-
-    #[derive(Clone, Debug)]
-    pub(crate) struct TestSysDb {
-        collections: HashMap<Uuid, Collection>,
-    }
-
-    impl TestSysDb {
-        pub(crate) fn new() -> Self {
-            TestSysDb {
-                collections: HashMap::new(),
-            }
-        }
-
-        pub(crate) fn add_collection(&mut self, collection: Collection) {
-            self.collections.insert(collection.id, collection);
-        }
-
-        fn filter_collections(
-            collection: &Collection,
-            collection_id: Option<Uuid>,
-            name: Option<String>,
-            tenant: Option<String>,
-            database: Option<String>,
-        ) -> bool {
-            if collection_id.is_some() && collection_id.unwrap() != collection.id {
-                return false;
-            }
-            if name.is_some() && name.unwrap() != collection.name {
-                return false;
-            }
-            if tenant.is_some() && tenant.unwrap() != collection.tenant {
-                return false;
-            }
-            if database.is_some() && database.unwrap() != collection.database {
-                return false;
-            }
-            true
-        }
-    }
-
-    #[async_trait]
-    impl SysDb for TestSysDb {
-        async fn get_collections(
-            &mut self,
-            collection_id: Option<Uuid>,
-            name: Option<String>,
-            tenant: Option<String>,
-            database: Option<String>,
-        ) -> Result<Vec<Collection>, GetCollectionsError> {
-            let mut collections = Vec::new();
-            for collection in self.collections.values() {
-                if !TestSysDb::filter_collections(
-                    &collection,
-                    collection_id,
-                    name.clone(),
-                    tenant.clone(),
-                    database.clone(),
-                ) {
-                    continue;
-                }
-                collections.push(collection.clone());
-            }
-            Ok(collections)
-        }
-
-        async fn get_segments(
-            &mut self,
-            id: Option<Uuid>,
-            r#type: Option<String>,
-            scope: Option<SegmentScope>,
-            collection: Option<Uuid>,
-        ) -> Result<Vec<Segment>, GetSegmentsError> {
-            Ok(Vec::new())
-        }
-    }
 
     #[tokio::test]
     async fn test_scheduler() {
@@ -270,18 +195,19 @@ mod tests {
         let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
             collection_id_1.clone(),
-            Box::new(LogRecord {
+            Box::new(InternalLogRecord {
                 collection_id: collection_id_1.clone(),
-                log_id: 1,
-                log_id_ts: 1,
-                record: EmbeddingRecord {
-                    id: "embedding_id_1".to_string(),
-                    seq_id: BigInt::from(1),
-                    embedding: None,
-                    encoding: None,
-                    metadata: None,
-                    operation: Operation::Add,
-                    collection_id: collection_uuid_1,
+                log_offset: 1,
+                log_ts: 1,
+                record: LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        operation: Operation::Add,
+                    },
                 },
             }),
         );
@@ -290,60 +216,109 @@ mod tests {
         let collection_id_2 = collection_uuid_2.to_string();
         log.add_log(
             collection_id_2.clone(),
-            Box::new(LogRecord {
+            Box::new(InternalLogRecord {
                 collection_id: collection_id_2.clone(),
-                log_id: 2,
-                log_id_ts: 2,
-                record: EmbeddingRecord {
-                    id: "embedding_id_2".to_string(),
-                    seq_id: BigInt::from(2),
-                    embedding: None,
-                    encoding: None,
-                    metadata: None,
-                    operation: Operation::Add,
-                    collection_id: collection_uuid_2,
+                log_offset: 2,
+                log_ts: 2,
+                record: LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        operation: Operation::Add,
+                    },
                 },
             }),
         );
 
         let mut sysdb = Box::new(TestSysDb::new());
 
+        let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_1".to_string(),
+            tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
         };
 
+        let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_2".to_string(),
+            tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
-        let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
-        let mut scheduler =
-            Scheduler::new(log, sysdb, scheduler_policy, 1000, Duration::from_secs(1));
 
+        let last_compaction_time_1 = 2;
+        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+
+        let my_ip = "0.0.0.1".to_string();
+        let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
+        let max_concurrent_jobs = 1000;
+
+        // Set assignment policy
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
+        assignment_policy.set_members(vec![my_ip.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_ip.clone(),
+            log,
+            sysdb.clone(),
+            scheduler_policy,
+            max_concurrent_jobs,
+            assignment_policy,
+        );
+        // Scheduler does nothing without memberlist
         scheduler.schedule().await;
-        let tasks = scheduler.get_tasks();
-        assert_eq!(tasks.len(), 2);
-        // TODO: 3/9 Tasks may be out of order since we have not yet implemented SysDB Get last compaction time. Use contains instead of equal.
-        let task_ids = tasks
-            .iter()
-            .map(|t| t.collection_id.clone())
-            .collect::<Vec<String>>();
-        assert!(task_ids.contains(&collection_id_1));
-        assert!(task_ids.contains(&collection_id_2));
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 0);
+
+        // Set empty memberlist
+        // Scheduler does nothing with empty memberlist
+        scheduler.set_memberlist(vec![]);
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 0);
+
+        // Set memberlist
+        scheduler.set_memberlist(vec![my_ip.clone()]);
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        // Scheduler ignores collection that failed to fetch last compaction time
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_id_1,);
+
+        let last_compaction_time_2 = 1;
+        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+        scheduler.set_sysdb(sysdb.clone());
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        // Scheduler schedules collections based on last compaction time
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].collection_id, collection_id_2,);
+        assert_eq!(jobs[1].collection_id, collection_id_1,);
+
+        // Test filter_collections
+        let member_1 = "0.0.0.1".to_string();
+        let member_2 = "0.0.0.2".to_string();
+        let members = vec![member_1.clone(), member_2.clone()];
+        scheduler.set_memberlist(members.clone());
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 1);
     }
 }

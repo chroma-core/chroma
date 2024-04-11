@@ -207,7 +207,6 @@ def test_get_vectors(
         assert approx_equal_vector(
             actual["embedding"], cast(Vector, expected["embedding"])
         )
-        assert actual["seq_id"] == seq_id
 
     # Get selected IDs
     ids = [e["id"] for e in embeddings[5:]]
@@ -219,7 +218,6 @@ def test_get_vectors(
         assert approx_equal_vector(
             actual["embedding"], cast(Vector, expected["embedding"])
         )
-        assert actual["seq_id"] == seq_id
 
 
 def test_ann_query(

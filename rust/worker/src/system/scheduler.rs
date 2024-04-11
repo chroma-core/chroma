@@ -4,10 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{executor, Component, ComponentContext, ComponentHandle, Handler, StreamHandler};
-use super::{
-    executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
-};
+use super::sender::Sender;
+use super::{Component, ComponentContext, Handler};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
@@ -141,6 +139,7 @@ impl Scheduler {
 
 mod tests {
     use super::*;
+    use crate::system::System;
     use async_trait::async_trait;
     use std::sync::Arc;
     use std::time::Duration;
@@ -199,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schedule() {
-        let mut system = System::new();
+        let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let _handle = system.start_component(component);

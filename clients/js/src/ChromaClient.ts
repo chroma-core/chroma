@@ -1,6 +1,6 @@
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError } from "./utils";
+import { handleSuccess } from "./utils";
 import { Collection } from "./Collection";
 import {
   ChromaClientParams,
@@ -20,6 +20,8 @@ import {
 } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
 import { AdminClient } from "./AdminClient";
+import { chromaFetch } from "./ChromaFetch";
+import { ChromaConnectionError, ChromaServerError } from "./Errors";
 
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -64,12 +66,12 @@ export class ChromaClient {
 
     if (auth !== undefined) {
       this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(
-        new DefaultApi(apiConfig),
+        new DefaultApi(apiConfig, undefined, chromaFetch),
         auth,
       );
       this.api = this.apiAdapter.getApi();
     } else {
-      this.api = new DefaultApi(apiConfig);
+      this.api = new DefaultApi(apiConfig, undefined, chromaFetch);
     }
 
     this._adminClient = new AdminClient({
@@ -92,7 +94,8 @@ export class ChromaClient {
    * Resets the state of the object by making an API call to the reset endpoint.
    *
    * @returns {Promise<boolean>} A promise that resolves when the reset operation is complete.
-   * @throws {Error} If there is an issue resetting the state.
+   * @throws {ChromaConnectionError} If the client is unable to connect to the server.
+   * @throws {ChromaServerError} If the server experienced an error while the state.
    *
    * @example
    * ```typescript
@@ -106,6 +109,7 @@ export class ChromaClient {
   /**
    * Returns the version of the Chroma API.
    * @returns {Promise<string>} A promise that resolves to the version of the Chroma API.
+   * @throws {ChromaConnectionError} If the client is unable to connect to the server.
    *
    * @example
    * ```typescript
@@ -120,6 +124,7 @@ export class ChromaClient {
   /**
    * Returns a heartbeat from the Chroma API.
    * @returns {Promise<number>} A promise that resolves to the heartbeat from the Chroma API.
+   * @throws {ChromaConnectionError} If the client is unable to connect to the server.
    *
    * @example
    * ```typescript
@@ -141,7 +146,8 @@ export class ChromaClient {
    * @param {IEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
    *
    * @returns {Promise<Collection>} A promise that resolves to the created collection.
-   * @throws {Error} If there is an issue creating the collection.
+   * @throws {ChromaConnectionError} If the client is unable to connect to the server.
+   * @throws {ChromaServerError} If there is an issue creating the collection.
    *
    * @example
    * ```typescript
@@ -172,11 +178,12 @@ export class ChromaClient {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     if (newCollection.error) {
-      throw new Error(newCollection.error);
+      throw newCollection.error instanceof Error
+        ? newCollection.error
+        : new Error(newCollection.error);
     }
 
     return new Collection(
@@ -229,12 +236,7 @@ export class ChromaClient {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
-
-    if (newCollection.error) {
-      throw new Error(newCollection.error);
-    }
+      .then(handleSuccess);
 
     return new Collection(
       name,
@@ -316,12 +318,7 @@ export class ChromaClient {
   }: GetCollectionParams): Promise<Collection> {
     const response = await this.api
       .getCollection(name, this.tenant, this.database, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
-
-    if (response.error) {
-      throw new Error(response.error);
-    }
+      .then(handleSuccess);
 
     return new Collection(
       response.name,
@@ -351,7 +348,6 @@ export class ChromaClient {
   }: DeleteCollectionParams): Promise<void> {
     return await this.api
       .deleteCollection(name, this.tenant, this.database, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
   }
 }

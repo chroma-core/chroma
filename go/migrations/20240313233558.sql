@@ -1,4 +1,4 @@
-CREATE SCHEMA "public";
+CREATE SCHEMA IF NOT EXISTS "public";
 
 -- Create "collection_metadata" table
 CREATE TABLE "public"."collection_metadata" (
@@ -12,6 +12,7 @@ CREATE TABLE "public"."collection_metadata" (
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("collection_id", "key")
 );
+
 -- Create "collections" table
 CREATE TABLE "public"."collections" (
   "id" text NOT NULL,
@@ -27,8 +28,10 @@ CREATE TABLE "public"."collections" (
   "version" integer NULL DEFAULT 0,
   PRIMARY KEY ("id")
 );
+
 -- Create index "uni_collections_name" to table: "collections"
 CREATE UNIQUE INDEX "uni_collections_name" ON "public"."collections" ("name");
+
 -- Create "databases" table
 CREATE TABLE "public"."databases" (
   "id" text NOT NULL,
@@ -40,8 +43,10 @@ CREATE TABLE "public"."databases" (
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("id")
 );
+
 -- Create index "idx_tenantid_name" to table: "databases"
 CREATE UNIQUE INDEX "idx_tenantid_name" ON "public"."databases" ("name", "tenant_id");
+
 -- Create "notifications" table
 CREATE TABLE "public"."notifications" (
   "id" bigserial NOT NULL,
@@ -50,6 +55,7 @@ CREATE TABLE "public"."notifications" (
   "status" text NULL,
   PRIMARY KEY ("id")
 );
+
 -- Create "record_logs" table
 CREATE TABLE "public"."record_logs" (
   "collection_id" text NOT NULL,
@@ -58,6 +64,7 @@ CREATE TABLE "public"."record_logs" (
   "record" bytea NULL,
   PRIMARY KEY ("collection_id", "id")
 );
+
 -- Create "segment_metadata" table
 CREATE TABLE "public"."segment_metadata" (
   "segment_id" text NOT NULL,
@@ -70,6 +77,7 @@ CREATE TABLE "public"."segment_metadata" (
   "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("segment_id", "key")
 );
+
 -- Create "segments" table
 CREATE TABLE "public"."segments" (
   "collection_id" text NOT NULL,
@@ -84,6 +92,7 @@ CREATE TABLE "public"."segments" (
   "file_paths" text NULL DEFAULT '{}',
   PRIMARY KEY ("collection_id", "id")
 );
+
 -- Create "tenants" table
 CREATE TABLE "public"."tenants" (
   "id" text NOT NULL,

@@ -321,7 +321,7 @@ pub mod test {
         let tmp_dir = tempdir().unwrap();
         let persist_path = tmp_dir.path().to_str().unwrap().to_string();
         let distance_function = DistanceFunction::Euclidean;
-        let mut index = HnswIndex::init(
+        let index = HnswIndex::init(
             &IndexConfig {
                 dimensionality: d as i32,
                 distance_function: distance_function,
@@ -382,9 +382,9 @@ pub mod test {
 
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
         let mut datas = Vec::new();
-        for i in 0..n {
+        for _ in 0..n {
             let mut data: Vec<f32> = Vec::new();
-            for i in 0..960 {
+            for _ in 0..960 {
                 data.push(rng.gen());
             }
             datas.push(data);

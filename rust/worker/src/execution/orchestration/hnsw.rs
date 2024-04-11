@@ -14,7 +14,6 @@ use crate::{
     system::{Component, Handler, Receiver},
 };
 use async_trait::async_trait;
-use num_bigint::BigInt;
 use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -207,7 +206,7 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
     async fn handle(
         &mut self,
         message: BruteForceKnnOperatorResult,
-        ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
+        _ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         // This is an example of the final state transition and result
         let result_channel = match self.result_channel.take() {
@@ -225,7 +224,6 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
                 for (index, distance) in output.indices.iter().zip(output.distances.iter()) {
                     let query_result = VectorQueryResult {
                         id: index.to_string(),
-                        seq_id: BigInt::from(0),
                         distance: *distance,
                         vector: None,
                     };

@@ -1,14 +1,14 @@
 import sys
 
 import grpc
-
+import time
 from chromadb.ingest import (
     Producer,
     Consumer,
     ConsumerCallbackFn,
 )
 from chromadb.proto.convert import to_proto_submit
-from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, RecordLog
+from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, LogRecord
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
@@ -148,13 +148,13 @@ class LogService(Producer, Consumer):
         return response.record_count  # type: ignore
 
     def pull_logs(
-        self, collection_id: UUID, start_id: int, batch_size: int
-    ) -> Sequence[RecordLog]:
+        self, collection_id: UUID, start_offset: int, batch_size: int
+    ) -> Sequence[LogRecord]:
         request = PullLogsRequest(
             collection_id=str(collection_id),
-            start_from_id=start_id,
+            start_from_offset=start_offset,
             batch_size=batch_size,
-            end_timestamp=-1,
+            end_timestamp=time.time_ns(),
         )
         response = self._log_service_stub.PullLogs(request)
         return response.records  # type: ignore

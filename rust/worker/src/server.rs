@@ -2,12 +2,11 @@ use crate::chroma_proto;
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use crate::config::{Configurable, WorkerConfig};
+use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::HnswQueryOrchestrator;
 use crate::log::log::Log;
-use crate::segment::SegmentManager;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{Receiver, System};
 use crate::types::ScalarEncoding;
@@ -19,7 +18,6 @@ pub struct WorkerServer {
     // System
     system: Option<System>,
     // Component dependencies
-    segment_manager: Option<SegmentManager>,
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Service dependencies
     log: Box<dyn Log>,
@@ -28,22 +26,23 @@ pub struct WorkerServer {
 }
 
 #[async_trait]
-impl Configurable for WorkerServer {
-    async fn try_from_config(config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb = match crate::sysdb::from_config(&config).await {
+impl Configurable<QueryServiceConfig> for WorkerServer {
+    async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
+        let sysdb_config = &config.sysdb;
+        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
             }
         };
-        let log = match crate::log::from_config(&config).await {
+        let log_config = &config.log;
+        let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
             }
         };
         Ok(WorkerServer {
-            segment_manager: None,
             dispatcher: None,
             system: None,
             sysdb,
@@ -57,7 +56,7 @@ impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
-        let server = Server::builder()
+        let _server = Server::builder()
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
                 worker,
             ))
@@ -66,10 +65,6 @@ impl WorkerServer {
         println!("Worker shutting down");
 
         Ok(())
-    }
-
-    pub(crate) fn set_segment_manager(&mut self, segment_manager: SegmentManager) {
-        self.segment_manager = Some(segment_manager);
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
@@ -88,55 +83,14 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         request: Request<GetVectorsRequest>,
     ) -> Result<Response<GetVectorsResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
             Ok(uuid) => uuid,
             Err(_) => {
                 return Err(Status::invalid_argument("Invalid UUID"));
             }
         };
 
-        let segment_manager = match self.segment_manager {
-            Some(ref segment_manager) => segment_manager,
-            None => {
-                return Err(Status::internal("No segment manager found"));
-            }
-        };
-
-        let records = match segment_manager
-            .get_records(&segment_uuid, request.ids)
-            .await
-        {
-            Ok(records) => records,
-            Err(e) => {
-                return Err(Status::internal(format!("Error getting records: {}", e)));
-            }
-        };
-
-        let mut proto_records = Vec::new();
-        for record in records {
-            let sed_id_bytes = record.seq_id.to_bytes_le();
-            let dim = record.vector.len();
-            let proto_vector = (record.vector, ScalarEncoding::FLOAT32, dim).try_into();
-            match proto_vector {
-                Ok(proto_vector) => {
-                    let proto_record = chroma_proto::VectorEmbeddingRecord {
-                        id: record.id,
-                        seq_id: sed_id_bytes.1,
-                        vector: Some(proto_vector),
-                    };
-                    proto_records.push(proto_record);
-                }
-                Err(e) => {
-                    return Err(Status::internal(format!("Error converting vector: {}", e)));
-                }
-            }
-        }
-
-        let resp = chroma_proto::GetVectorsResponse {
-            records: proto_records,
-        };
-
-        Ok(Response::new(resp))
+        Err(Status::unimplemented("Not yet implemented"))
     }
 
     async fn query_vectors(
@@ -151,18 +105,11 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             }
         };
 
-        let segment_manager = match self.segment_manager {
-            Some(ref segment_manager) => segment_manager,
-            None => {
-                return Err(Status::internal("No segment manager found"));
-            }
-        };
-
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
         for proto_query_vector in request.vectors {
-            let (query_vector, encoding) = match proto_query_vector.try_into() {
+            let (query_vector, _encoding) = match proto_query_vector.try_into() {
                 Ok((vector, encoding)) => (vector, encoding),
                 Err(e) => {
                     return Err(Status::internal(format!("Error converting vector: {}", e)));
@@ -213,7 +160,6 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             for query_result in result_set {
                 let proto_result = chroma_proto::VectorQueryResult {
                     id: query_result.id,
-                    seq_id: query_result.seq_id.to_bytes_le().1,
                     distance: query_result.distance,
                     vector: match query_result.vector {
                         Some(vector) => {

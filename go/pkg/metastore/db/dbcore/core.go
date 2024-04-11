@@ -3,11 +3,12 @@ package dbcore
 import (
 	"context"
 	"fmt"
-	"github.com/chroma-core/chroma/go/pkg/types"
 	"os"
 	"reflect"
 	"strconv"
 	"time"
+
+	"github.com/chroma-core/chroma/go/pkg/types"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"

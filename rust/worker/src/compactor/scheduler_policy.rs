@@ -1,8 +1,9 @@
-use crate::compactor::types::Task;
+use crate::compactor::types::CompactionJob;
 use crate::log::log::CollectionRecord;
 
 pub(crate) trait SchedulerPolicy: Send + Sync + SchedulerPolicyClone {
-    fn determine(&self, collections: Vec<CollectionRecord>, number_tasks: i32) -> Vec<Task>;
+    fn determine(&self, collections: Vec<CollectionRecord>, number_jobs: i32)
+        -> Vec<CompactionJob>;
 }
 
 pub(crate) trait SchedulerPolicyClone {
@@ -28,17 +29,21 @@ impl Clone for Box<dyn SchedulerPolicy> {
 pub(crate) struct LasCompactionTimeSchedulerPolicy {}
 
 impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
-    fn determine(&self, collections: Vec<CollectionRecord>, number_tasks: i32) -> Vec<Task> {
+    fn determine(
+        &self,
+        collections: Vec<CollectionRecord>,
+        number_jobs: i32,
+    ) -> Vec<CompactionJob> {
         let mut collections = collections;
         collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
-        let number_tasks = if number_tasks > collections.len() as i32 {
+        let number_tasks = if number_jobs > collections.len() as i32 {
             collections.len() as i32
         } else {
-            number_tasks
+            number_jobs
         };
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
-            tasks.push(Task {
+            tasks.push(CompactionJob {
                 collection_id: collection.id.clone(),
                 tenant_id: collection.tenant_id.clone(),
                 offset: collection.offset,
@@ -71,13 +76,13 @@ mod tests {
                 offset: 0,
             },
         ];
-        let tasks = scheduler_policy.determine(collections.clone(), 1);
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].collection_id, "test2");
+        let jobs = scheduler_policy.determine(collections.clone(), 1);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, "test2");
 
-        let tasks = scheduler_policy.determine(collections.clone(), 2);
-        assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].collection_id, "test2");
-        assert_eq!(tasks[1].collection_id, "test1");
+        let jobs = scheduler_policy.determine(collections.clone(), 2);
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].collection_id, "test2");
+        assert_eq!(jobs[1].collection_id, "test1");
     }
 }
