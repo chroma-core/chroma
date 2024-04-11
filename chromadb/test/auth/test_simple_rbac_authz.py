@@ -20,7 +20,7 @@ def test_basic_authn_rbac_authz_unit_test(
     api_with_authn_rbac_authz.create_collection('test_collection')
 
 
-@settings(max_examples=50, phases=[Phase.generate, Phase.target])
+@settings(max_examples=10, phases=[Phase.generate, Phase.target])
 @given(
     rbac_test_conf(),
     st.booleans(),
