@@ -1,3 +1,6 @@
+import contextvars
+import threading
+
 from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
@@ -26,19 +29,35 @@ class TxWrapper(base.TxWrapper):
     _conn: Connection
     _pool: Pool
 
-    def __init__(self, conn_pool: Pool, stack: local):
-        self._tx_stack = stack
+    def __init__(self, conn_pool: Pool): #, stack: local):
+        # self._tx_stack = stack
         self._conn = conn_pool.connect()
         self._pool = conn_pool
+        self._lock = threading.RLock()
+        self._conn_stack = []
 
     @override
     def __enter__(self) -> base.Cursor:
-        if len(self._tx_stack.stack) == 0:
+        # if len(self._tx_stack.stack) == 0:
+        print("Checking out: ",id(self._conn))
+        if len(tx_stack.get()) == 0:
             self._conn.execute("PRAGMA case_sensitive_like = ON")
-            self._conn.execute("BEGIN;")
-        self._tx_stack.stack.append(self)
-        return self._conn.cursor()  # type: ignore
+            try:
+                self._conn.execute("BEGIN;")
+                self._conn_stack.append(id(self._conn))
+            except Exception as e:
+                print("Stack: ",self._conn_stack)
+                print("=======",id(self._conn))
+                raise e
 
+        # self._tx_stack.stack.append(self)
+        tx_stack.get().append(self)
+        con_stack.get().append(self._conn)
+        return self._conn.cursor()  # type: ignore
+    def _release_conn_stack(self)->None:
+        self._pool.return_to_pool(con_stack.get())
+        print("Checking stack: ",con_stack.get())
+        con_stack.get().clear()
     @override
     def __exit__(
         self,
@@ -46,23 +65,29 @@ class TxWrapper(base.TxWrapper):
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Literal[False]:
-        self._tx_stack.stack.pop()
-        if len(self._tx_stack.stack) == 0:
+
+        # with self._lock:
+            # self._tx_stack.stack.pop()
+        tx_stack.get().pop()
+        # if len(self._tx_stack.stack) == 0:
+        # print([id(t._conn) for t in tx_stack.get()],exc_type)
+        if len(tx_stack.get()) == 0:
             if exc_type is None:
                 self._conn.commit()
+                self._release_conn_stack()
             else:
                 self._conn.rollback()
+                self._release_conn_stack()
         self._conn.cursor().close()
-        self._pool.return_to_pool(self._conn)
         return False
-
-
+con_stack = contextvars.ContextVar("con_stack", default=[])
+tx_stack = contextvars.ContextVar("tx_stack", default=[])
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn_pool: Pool
     _settings: Settings
     _migration_imports: Sequence[Traversable]
     _db_file: str
-    _tx_stack: local
+    # _tx_stack: local
     _is_persistent: bool
 
     def __init__(self, system: System):
@@ -88,7 +113,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             if not os.path.exists(self._db_file):
                 os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
             self._conn_pool = PerThreadPool(self._db_file)
-        self._tx_stack = local()
+        # self._tx_stack = local()
         super().__init__(system)
 
     @trace_method("SqliteDB.start", OpenTelemetryGranularity.ALL)
@@ -127,9 +152,11 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def tx(self) -> TxWrapper:
-        if not hasattr(self._tx_stack, "stack"):
-            self._tx_stack.stack = []
-        return TxWrapper(self._conn_pool, stack=self._tx_stack)
+        # if not hasattr(self._tx_stack, "stack"):
+        if tx_stack.get() is None:
+            # self._tx_stack.stack = []
+            tx_stack.set([])
+        return TxWrapper(self._conn_pool) #, stack=self._tx_stack)
 
     @trace_method("SqliteDB.reset_state", OpenTelemetryGranularity.ALL)
     @override
