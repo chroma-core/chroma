@@ -79,10 +79,13 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
         creds = self.read_creds_or_creds_file()
 
         for line in creds:
+            if not line.strip():
+                continue
             _raw_creds = [v for v in line.strip().split(":")]
-            if len(_raw_creds) != 2 or not all(_raw_creds):
+            if (_raw_creds and _raw_creds[0] and
+                    len(_raw_creds) != 2 or not all(_raw_creds)):
                 raise ValueError(
-                    f"Invalid htpasswd credentials found: {_raw_creds}"
+                    f"Invalid htpasswd credentials found: {_raw_creds}. "
                     "Lines must be exactly <username>:<bcrypt passwd>."
                 )
             username = _raw_creds[0]

@@ -122,10 +122,21 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         else:
             self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
-        creds = self.read_creds_or_creds_file()
-        self._users = cast(List[User], yaml.safe_load('\n'.join(creds))["users"])
-
         self._token_user_mapping: Dict[str, User] = {}
+        creds = self.read_creds_or_creds_file()
+
+        # If we only get one cred, assume it's just a valid token.
+        if len(creds) == 1:
+            self._token_user_mapping[creds[0]] = User(
+                id='anonymous',
+                tenant='*',
+                databases=['*'],
+                role='anonymous',
+                tokens=[creds[0]]
+            )
+            return
+
+        self._users = cast(List[User], yaml.safe_load('\n'.join(creds))["users"])
         for user in self._users:
             if "tokens" not in user:
                 raise ValueError("User missing tokens")
