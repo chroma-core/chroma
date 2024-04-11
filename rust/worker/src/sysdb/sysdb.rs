@@ -6,11 +6,17 @@ use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::types::Collection;
 use crate::types::CollectionConversionError;
+use crate::types::FlushCompactionResponse;
+use crate::types::FlushCompactionResponseConversionError;
 use crate::types::Segment;
 use crate::types::SegmentConversionError;
+use crate::types::SegmentFlushInfo;
+use crate::types::SegmentFlushInfoConversionError;
 use crate::types::SegmentScope;
 use crate::types::Tenant;
 use async_trait::async_trait;
+use std::sync::Arc;
+
 use std::fmt::Debug;
 use thiserror::Error;
 use uuid::Uuid;
@@ -40,6 +46,15 @@ pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
         &mut self,
         tanant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError>;
+
+    async fn flush_compaction(
+        &mut self,
+        tenant_id: String,
+        collection_id: String,
+        log_position: i64,
+        collection_version: i32,
+        segment_flush_info: Arc<[SegmentFlushInfo]>,
+    ) -> Result<FlushCompactionResponse, FlushCompactionError>;
 }
 
 // We'd like to be able to clone the trait object, so we need to use the
@@ -248,6 +263,58 @@ impl SysDb for GrpcSysDb {
             }
         }
     }
+
+    async fn flush_compaction(
+        &mut self,
+        tenant_id: String,
+        collection_id: String,
+        log_position: i64,
+        collection_version: i32,
+        segment_flush_info: Arc<[SegmentFlushInfo]>,
+    ) -> Result<FlushCompactionResponse, FlushCompactionError> {
+        let segment_compaction_info =
+            segment_flush_info
+                .iter()
+                .map(|segment_flush_info| segment_flush_info.try_into())
+                .collect::<Result<
+                    Vec<chroma_proto::FlushSegmentCompactionInfo>,
+                    SegmentFlushInfoConversionError,
+                >>();
+
+        let segment_compaction_info = match segment_compaction_info {
+            Ok(segment_compaction_info) => segment_compaction_info,
+            Err(e) => {
+                return Err(FlushCompactionError::SegmentFlushInfoConversionError(e));
+            }
+        };
+
+        let req = chroma_proto::FlushCollectionCompactionRequest {
+            tenant_id,
+            collection_id,
+            log_position,
+            collection_version,
+            segment_compaction_info,
+        };
+
+        let res = self.client.flush_collection_compaction(req).await;
+        match res {
+            Ok(res) => {
+                let res = res.into_inner();
+                let res = match res.try_into() {
+                    Ok(res) => res,
+                    Err(e) => {
+                        return Err(
+                            FlushCompactionError::FlushCompactionResponseConversionError(e),
+                        );
+                    }
+                };
+                return Ok(res);
+            }
+            Err(e) => {
+                return Err(FlushCompactionError::FailedToFlushCompaction(e));
+            }
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -302,6 +369,32 @@ impl ChromaError for GetLastCompactionTimeError {
         match self {
             GetLastCompactionTimeError::FailedToGetLastCompactionTime(_) => ErrorCodes::Internal,
             GetLastCompactionTimeError::TenantNotFound => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum FlushCompactionError {
+    #[error("Failed to flush compaction")]
+    FailedToFlushCompaction(#[from] tonic::Status),
+    #[error("Failed to convert segment flush info")]
+    SegmentFlushInfoConversionError(#[from] SegmentFlushInfoConversionError),
+    #[error("Failed to convert flush compaction response")]
+    FlushCompactionResponseConversionError(#[from] FlushCompactionResponseConversionError),
+    #[error("Collection not found in sysdb")]
+    CollectionNotFound,
+    #[error("Segment not found in sysdb")]
+    SegmentNotFound,
+}
+
+impl ChromaError for FlushCompactionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FlushCompactionError::FailedToFlushCompaction(_) => ErrorCodes::Internal,
+            FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
+            FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
+            FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
+            FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
         }
     }
 }

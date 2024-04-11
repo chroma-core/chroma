@@ -1,12 +1,17 @@
+use crate::sysdb::sysdb::FlushCompactionError;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
 use crate::types::Collection;
+use crate::types::FlushCompactionResponse;
 use crate::types::Segment;
+use crate::types::SegmentFlushInfo;
 use crate::types::SegmentScope;
+use crate::types::SegmentType;
 use crate::types::Tenant;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use super::sysdb::GetLastCompactionTimeError;
@@ -14,6 +19,7 @@ use super::sysdb::GetLastCompactionTimeError;
 #[derive(Clone, Debug)]
 pub(crate) struct TestSysDb {
     collections: HashMap<Uuid, Collection>,
+    segments: HashMap<Uuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
 }
 
@@ -21,12 +27,17 @@ impl TestSysDb {
     pub(crate) fn new() -> Self {
         TestSysDb {
             collections: HashMap::new(),
+            segments: HashMap::new(),
             tenant_last_compaction_time: HashMap::new(),
         }
     }
 
     pub(crate) fn add_collection(&mut self, collection: Collection) {
         self.collections.insert(collection.id, collection);
+    }
+
+    pub(crate) fn add_segment(&mut self, segment: Segment) {
+        self.segments.insert(segment.id, segment);
     }
 
     pub(crate) fn add_tenant_last_compaction_time(
@@ -55,6 +66,37 @@ impl TestSysDb {
             return false;
         }
         if database.is_some() && database.unwrap() != collection.database {
+            return false;
+        }
+        true
+    }
+
+    fn filter_segments(
+        segment: &Segment,
+        id: Option<Uuid>,
+        r#type: Option<String>,
+        scope: Option<SegmentScope>,
+        collection: Option<Uuid>,
+    ) -> bool {
+        if id.is_some() && id.unwrap() != segment.id {
+            return false;
+        }
+        if r#type.is_some() {
+            match r#type.unwrap().as_str() {
+                "hnsw" => {
+                    if segment.r#type != SegmentType::HnswDistributed {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        if scope.is_some() && scope.unwrap() != segment.scope {
+            return false;
+        }
+        if collection.is_some()
+            && (segment.collection.is_none() || collection.unwrap() != segment.collection.unwrap())
+        {
             return false;
         }
         true
@@ -88,12 +130,20 @@ impl SysDb for TestSysDb {
 
     async fn get_segments(
         &mut self,
-        _id: Option<Uuid>,
-        _type: Option<String>,
-        _scope: Option<SegmentScope>,
-        _collection: Option<Uuid>,
+        id: Option<Uuid>,
+        r#type: Option<String>,
+        scope: Option<SegmentScope>,
+        collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
-        Ok(Vec::new())
+        let mut segments = Vec::new();
+        for segment in self.segments.values() {
+            if !TestSysDb::filter_segments(&segment, id, r#type.clone(), scope.clone(), collection)
+            {
+                continue;
+            }
+            segments.push(segment.clone());
+        }
+        Ok(segments)
     }
 
     async fn get_last_compaction_time(
@@ -115,5 +165,49 @@ impl SysDb for TestSysDb {
             });
         }
         Ok(tenants)
+    }
+
+    async fn flush_compaction(
+        &mut self,
+        tenant_id: String,
+        collection_id: String,
+        log_position: i64,
+        collection_version: i32,
+        segment_flush_info: Arc<[SegmentFlushInfo]>,
+    ) -> Result<FlushCompactionResponse, FlushCompactionError> {
+        let collection = self
+            .collections
+            .get(&Uuid::parse_str(&collection_id).unwrap());
+        if collection.is_none() {
+            return Err(FlushCompactionError::CollectionNotFound);
+        }
+        let collection = collection.unwrap();
+        let mut collection = collection.clone();
+        collection.log_position = log_position;
+        let new_collection_version = collection_version + 1;
+        collection.version = new_collection_version;
+        self.collections.insert(collection.id, collection);
+        let mut last_compaction_time = match self.tenant_last_compaction_time.get(&tenant_id) {
+            Some(last_compaction_time) => *last_compaction_time,
+            None => 0,
+        };
+        last_compaction_time += 1;
+
+        // update segments
+        for segment_flush_info in segment_flush_info.iter() {
+            let segment = self.segments.get(&segment_flush_info.segment_id);
+            if segment.is_none() {
+                return Err(FlushCompactionError::SegmentNotFound);
+            }
+            let mut segment = segment.unwrap().clone();
+            segment.file_path = segment_flush_info.file_paths.clone();
+            self.segments.insert(segment.id, segment);
+        }
+
+        Ok(FlushCompactionResponse::new(
+            collection_id,
+            new_collection_version,
+            last_compaction_time,
+        ))
     }
 }
