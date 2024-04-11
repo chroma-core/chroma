@@ -20,7 +20,7 @@ def test_basic_authn_rbac_authz_unit_test(
     api_with_authn_rbac_authz.create_collection('test_collection')
 
 
-@settings(max_examples=10, phases=[Phase.generate, Phase.target])
+@settings(max_examples=50, phases=[Phase.generate, Phase.target])
 @given(
     rbac_test_conf(),
     st.booleans(),
@@ -82,25 +82,19 @@ def test_token_authn_rbac_authz(
         assert len(role_matches) == 1
         role = role_matches[0]
 
-        try:
-            for action in role["actions"]:
-                api_executors[action](
+        for action in role["actions"]:
+            api_executors[action](
+                api,
+                root_api,
+                data.draw,
+            )
+            root_api.reset()
+
+        for unauthorized_action in unauthorized_actions(role["actions"]):
+            with pytest.raises(Exception) as ex:
+                api_executors[unauthorized_action](
                     api,
                     root_api,
                     data.draw,
                 )
-                root_api.reset()
-
-            for unauthorized_action in unauthorized_actions(role["actions"]):
-                with pytest.raises(Exception) as ex:
-                    api_executors[unauthorized_action](
-                        api,
-                        root_api,
-                        data.draw,
-                    )
-                    assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
-        except Exception as e:
-            print(f"Error: {e}")
-            print(f"User: {user}")
-            print(f"Role: {role}")
-            raise e
+                assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)

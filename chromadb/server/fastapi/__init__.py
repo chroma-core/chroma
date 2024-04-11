@@ -921,7 +921,7 @@ class FastAPI(Server):
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
-                AuthzAction.RESET,
+                AuthzAction.QUERY,
                 None,
                 None,
                 collection_id,
