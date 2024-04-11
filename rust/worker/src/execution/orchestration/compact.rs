@@ -11,6 +11,7 @@ use crate::execution::operators::partition::PartitionResult;
 use crate::execution::operators::pull_log::PullLogsInput;
 use crate::execution::operators::pull_log::PullLogsOperator;
 use crate::execution::operators::pull_log::PullLogsResult;
+use crate::execution::operators::write_segments::WriteSegmentsResult;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
