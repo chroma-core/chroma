@@ -86,10 +86,13 @@ func (m *MemberlistManager) run() {
 				log.Error("Error while getting ready members", zap.Error(err))
 				continue
 			}
-			err = m.updateMemberlist(newMemberlist, *resourceVersion)
-			if err != nil {
-				log.Error("Error while updating memberlist", zap.Error(err))
-				continue
+			// do not update memberlist if there's no change
+			if !memberlistSame(memberlist, newMemberlist) {
+				err = m.updateMemberlist(newMemberlist, *resourceVersion)
+				if err != nil {
+					log.Error("Error while updating memberlist", zap.Error(err))
+					continue
+				}
 			}
 
 			for key := range updates {
@@ -100,6 +103,23 @@ func (m *MemberlistManager) run() {
 			updates = map[string]bool{}
 		}
 	}
+}
+
+func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
+	if len(oldMemberlist) != len(newMemberlist) {
+		return false
+	}
+	// use a map to check if the new memberlist contains all the old members
+	newMemberlistMap := make(map[string]bool)
+	for _, member := range newMemberlist {
+		newMemberlistMap[member] = true
+	}
+	for _, member := range oldMemberlist {
+		if _, ok := newMemberlistMap[member]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
