@@ -677,7 +677,8 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             ).json()
 
             if "predictions" in response:
-                embeddings.append(response["predictions"]["embeddings"]["values"])
+                for prediction in response["predictions"]:
+                    embeddings.append(prediction["embeddings"]["values"])
 
         return embeddings
 
