@@ -82,16 +82,25 @@ def test_token_authn_rbac_authz(
         assert len(role_matches) == 1
         role = role_matches[0]
 
-        for action in role["actions"]:
-            api_executors[action](
-                api,
-                root_api,
-            )
-
-        for unauthorized_action in unauthorized_actions(role["actions"]):
-            with pytest.raises(Exception) as ex:
-                api_executors[unauthorized_action](
+        try:
+            for action in role["actions"]:
+                api_executors[action](
                     api,
                     root_api,
+                    data.draw,
                 )
-                assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
+                root_api.reset()
+
+            for unauthorized_action in unauthorized_actions(role["actions"]):
+                with pytest.raises(Exception) as ex:
+                    api_executors[unauthorized_action](
+                        api,
+                        root_api,
+                        data.draw,
+                    )
+                    assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
+        except Exception as e:
+            print(f"Error: {e}")
+            print(f"User: {user}")
+            print(f"Role: {role}")
+            raise e

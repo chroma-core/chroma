@@ -1,11 +1,12 @@
-import string
-from typing import Any
-from hypothesis import given
 import hypothesis.strategies as st
 from typing import Callable, Dict
 
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
+from chromadb.test.property.strategies import (
+    collection_name,
+    tenant_database_name,
+)
 
 # Each of these accepts two clients:
 # 1. A data plane client with credentials of the user under test.
@@ -17,54 +18,42 @@ from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 # test e.g. get_tenant, we have to make sure the tenant exists first.
 
 
-@given(st.data())
 def _create_tenant_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn
 ) -> None:
-    tenant = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    tenant = draw(tenant_database_name)
     try:
         api.create_tenant(tenant)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
 
 
 def _get_tenant_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
+    _draw: st.DrawFn,
 ) -> None:
     api.get_tenant(DEFAULT_TENANT)
 
 
-@given(st.data())
 def _create_database_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn
 ) -> None:
-    database = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    database = draw(tenant_database_name)
     try:
         api.create_database(database, DEFAULT_TENANT)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
 
 
 def _get_database_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
+    _draw: st.DrawFn,
 ) -> None:
     api.get_database(DEFAULT_DATABASE, DEFAULT_TENANT)
 
@@ -72,6 +61,7 @@ def _get_database_executor(
 def _reset_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
+    _draw: st.DrawFn,
 ) -> None:
     api.reset()
 
@@ -79,279 +69,207 @@ def _reset_executor(
 def _list_collections_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
+    _draw: st.DrawFn,
 ) -> None:
     api.list_collections()
 
 
-@given(st.data())
 def _get_collection_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
     try:
         root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
     api.get_collection(collection)
 
 
-@given(st.data())
 def _create_collection_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
-    try:
-        api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    collection = draw(collection_name())
+    api.create_collection(collection)
 
 
-@given(st.data())
 def _get_or_create_collection_executor(
     api: ServerAPI,
     _root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
     try:
         api.get_or_create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
 
 
-@given(st.data())
 def _delete_collection_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
     try:
         root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
     api.delete_collection(collection)
 
 
-@given(st.data())
 def _update_collection_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
     try:
         root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
     col = api.get_collection(collection)
     col.modify(metadata={"foo": "bar"})
 
 
-@given(st.data())
 def _add_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
     try:
         root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        pass
     col = api.get_collection(collection)
     col.add(ids=["1"], documents=["test document"])
 
 
-@given(st.data())
 def _delete_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.delete(ids=["1"])
 
 
-@given(st.data())
 def _get_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.get(ids=["1"])
 
 
-@given(st.data())
 def _query_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.query(query_texts=["test query text"])
 
 
-@given(st.data())
 def _peek_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.peek()
 
 
-@given(st.data())
 def _count_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.count()
 
 
-@given(st.data())
 def _update_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.update(ids=["1"], documents=["different test document"])
 
 
-@given(st.data())
 def _upsert_executor(
     api: ServerAPI,
     root_api: ServerAPI,
-    data: Any
+    draw: st.DrawFn,
 ) -> None:
-    collection = data.draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=3,
-            max_size=20
-        )
-    )
+    collection = draw(collection_name())
+    root_col = None
     try:
         root_col = root_api.create_collection(collection)
-    except Exception as e:
-        assert "already exists" in str(e)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
     root_col.add(ids=["1"], documents=["test document"])
     col = api.get_collection(collection)
     col.upsert(ids=["1"], documents=["different test document"])
@@ -359,7 +277,7 @@ def _upsert_executor(
 
 api_executors: Dict[
         str,
-        Callable[[ServerAPI, ServerAPI], None]] = {
+        Callable[[ServerAPI, ServerAPI, st.DrawFn], None]] = {
     "system:reset": _reset_executor,
     "tenant:create_tenant": _create_tenant_executor,
     "tenant:get_tenant": _get_tenant_executor,

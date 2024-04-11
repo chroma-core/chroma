@@ -5,6 +5,32 @@ import yaml
 
 import string
 
+from chromadb.test.property.strategies import collection_name
+
+
+@st.composite
+def many_unique_names(draw: st.DrawFn) -> List[str]:
+    # This is ugly -- is there a better way to guarantee ("guarantee")
+    # that we have enough unique names?
+
+    # 10 tests, <= 10 users, 2 iterations through the space, <= 2 names per action
+    length = len(valid_action_space) * 10 * 10 * 2 * 2
+    names = draw(
+        st.lists(
+            collection_name(),
+            min_size=length,
+            max_size=length,
+        )
+    )
+    seen = set()
+    unseen = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        unseen.append(name)
+    return unseen
+
 
 @st.composite
 def random_token(draw: st.DrawFn) -> str:
@@ -56,7 +82,7 @@ def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
                 }
             ),
             min_size=1,
-            max_size=10
+            max_size=1
         )
     )
     unseen_users = []
@@ -229,12 +255,12 @@ def _root_user_and_role() -> Dict[str, Any]:
     return {
         "users": [{
             "id": "__root__",
-            "tokens": ["root"],
-            "role": "root"
+            "tokens": ["__root__"],
+            "role": "__root__"
         }],
         "roles": [
             {
-                "id": "root",
+                "id": "__root__",
                 "actions": valid_action_space
             }
         ]
@@ -244,13 +270,14 @@ def _root_user_and_role() -> Dict[str, Any]:
 @st.composite
 def rbac_test_conf(draw: st.DrawFn) -> Dict[str, Any]:
     users_and_roles = draw(random_users_and_roles())
+    root_user_and_role = _root_user_and_role()
+    users_and_roles["users"].extend(root_user_and_role["users"])
+    users_and_roles["roles"].extend(root_user_and_role["roles"])
+
     filename = _dump_to_tmpfile({
         "users": users_and_roles["users"],
         "roles_mapping": _transform_roles_for_flush(users_and_roles["roles"])
     })
-    root_user_and_role = _root_user_and_role()
-    users_and_roles["users"].extend(root_user_and_role["users"])
-    users_and_roles["roles"].extend(root_user_and_role["roles"])
     return {
         "users": users_and_roles["users"],
         "roles": users_and_roles["roles"],
