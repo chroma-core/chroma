@@ -308,29 +308,36 @@ mod tests {
 
         let mut sysdb = Box::new(TestSysDb::new());
 
+        let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_1".to_string(),
+            tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
         };
 
+        let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_2".to_string(),
+            tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
+
+        let last_compaction_time_1 = 2;
+        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+        let last_compaction_time_2 = 1;
+        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
 
         let my_ip = "127.0.0.1".to_string();
         let compaction_manager_queue_size = 1000;

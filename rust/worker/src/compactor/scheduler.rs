@@ -80,11 +80,26 @@ impl Scheduler {
                         println!("Collection not found: {:?}", collection_info.collection_id);
                         continue;
                     }
+
+                    // TODO: make querying the last compaction time in batch
+                    let tenant_ids = vec![collection[0].tenant.clone()];
+                    let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
+
+                    let last_compaction_time = match tenant {
+                        Ok(tenant) => tenant[0].last_compaction_time,
+                        Err(e) => {
+                            // TODO: Log error
+                            println!("Error: {:?}", e);
+                            // Ignore this collection id for this compaction iteration
+                            println!("Ignoring collection: {:?}", collection_info.collection_id);
+                            continue;
+                        }
+                    };
+
                     collection_records.push(CollectionRecord {
                         id: collection[0].id.to_string(),
                         tenant_id: collection[0].tenant.clone(),
-                        // TODO: get the last compaction time from the sysdb
-                        last_compaction_time: 0,
+                        last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
                         offset: collection_info.first_log_offset,
                     });
@@ -125,10 +140,8 @@ impl Scheduler {
         let jobs = self
             .policy
             .determine(collection_records, self.max_concurrent_jobs as i32);
-        {
-            self.job_queue.clear();
-            self.job_queue.extend(jobs);
-        }
+        self.job_queue.clear();
+        self.job_queue.extend(jobs);
     }
 
     pub(crate) async fn schedule(&mut self) {
@@ -151,6 +164,11 @@ impl Scheduler {
 
     pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
         self.memberlist = Some(memberlist);
+    }
+
+    // For testing
+    pub(crate) fn set_sysdb(&mut self, sysdb: Box<dyn SysDb>) {
+        self.sysdb = sysdb;
     }
 }
 
@@ -217,29 +235,34 @@ mod tests {
 
         let mut sysdb = Box::new(TestSysDb::new());
 
+        let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_1".to_string(),
+            tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
         };
 
+        let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_2".to_string(),
+            tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
+
+        let last_compaction_time_1 = 2;
+        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
 
         let my_ip = "0.0.0.1".to_string();
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
@@ -252,7 +275,7 @@ mod tests {
         let mut scheduler = Scheduler::new(
             my_ip.clone(),
             log,
-            sysdb,
+            sysdb.clone(),
             scheduler_policy,
             max_concurrent_jobs,
             assignment_policy,
@@ -273,14 +296,21 @@ mod tests {
         scheduler.set_memberlist(vec![my_ip.clone()]);
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        // Scheduler ignores collection that failed to fetch last compaction time
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_id_1,);
 
-        // TODO: 3/9 Tasks may be out of order since we have not yet implemented SysDB Get last compaction time. Use contains instead of equal.
-        let job_ids = jobs
-            .map(|t| t.collection_id.clone())
-            .collect::<Vec<String>>();
-        assert_eq!(job_ids.len(), 2);
-        assert!(job_ids.contains(&collection_id_1));
-        assert!(job_ids.contains(&collection_id_2));
+        let last_compaction_time_2 = 1;
+        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+        scheduler.set_sysdb(sysdb.clone());
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        // Scheduler schedules collections based on last compaction time
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].collection_id, collection_id_2,);
+        assert_eq!(jobs[1].collection_id, collection_id_1,);
 
         // Test filter_collections
         let member_1 = "0.0.0.1".to_string();

@@ -4,24 +4,38 @@ use crate::sysdb::sysdb::SysDb;
 use crate::types::Collection;
 use crate::types::Segment;
 use crate::types::SegmentScope;
+use crate::types::Tenant;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use super::sysdb::GetLastCompactionTimeError;
+
 #[derive(Clone, Debug)]
 pub(crate) struct TestSysDb {
     collections: HashMap<Uuid, Collection>,
+    tenant_last_compaction_time: HashMap<String, i64>,
 }
 
 impl TestSysDb {
     pub(crate) fn new() -> Self {
         TestSysDb {
             collections: HashMap::new(),
+            tenant_last_compaction_time: HashMap::new(),
         }
     }
 
     pub(crate) fn add_collection(&mut self, collection: Collection) {
         self.collections.insert(collection.id, collection);
+    }
+
+    pub(crate) fn add_tenant_last_compaction_time(
+        &mut self,
+        tenant: String,
+        last_compaction_time: i64,
+    ) {
+        self.tenant_last_compaction_time
+            .insert(tenant, last_compaction_time);
     }
 
     fn filter_collections(
@@ -80,5 +94,26 @@ impl SysDb for TestSysDb {
         _collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         Ok(Vec::new())
+    }
+
+    async fn get_last_compaction_time(
+        &mut self,
+        tenant_ids: Vec<String>,
+    ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
+        let mut tenants = Vec::new();
+        for tenant_id in tenant_ids {
+            let last_compaction_time = match self.tenant_last_compaction_time.get(&tenant_id) {
+                Some(last_compaction_time) => *last_compaction_time,
+                None => {
+                    // TODO: Log an error
+                    return Err(GetLastCompactionTimeError::TenantNotFound);
+                }
+            };
+            tenants.push(Tenant {
+                id: tenant_id,
+                last_compaction_time,
+            });
+        }
+        Ok(tenants)
     }
 }
