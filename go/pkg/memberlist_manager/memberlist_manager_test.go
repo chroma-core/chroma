@@ -190,6 +190,31 @@ func TestMemberlistManager(t *testing.T) {
 	}, 10, 1*time.Second)
 }
 
+func TestMemberlistSame(t *testing.T) {
+	memberlist := Memberlist{""}
+	assert.True(t, memberlistSame(memberlist, memberlist))
+
+	newMemberlist := Memberlist{"10.0.0.1"}
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+	assert.True(t, memberlistSame(newMemberlist, newMemberlist))
+
+	memberlist = Memberlist{"10.0.0.2"}
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(memberlist, memberlist))
+
+	memberlist = Memberlist{"10.0.0.1", "10.0.0.2"}
+	newMemberlist = Memberlist{"10.0.0.1", "10.0.0.2"}
+	assert.True(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(newMemberlist, memberlist))
+
+	memberlist = Memberlist{"10.0.0.1", "10.0.0.2"}
+	newMemberlist = Memberlist{"10.0.0.2", "10.0.0.1"}
+	assert.True(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(newMemberlist, memberlist))
+}
+
 func retryUntilCondition(t *testing.T, f func() bool, retry_count int, retry_interval time.Duration) {
 	for i := 0; i < retry_count; i++ {
 		if f() {
