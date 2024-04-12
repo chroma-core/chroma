@@ -1,5 +1,4 @@
 import { expect, test } from "@jest/globals";
-import { ChromaClient } from "../src/ChromaClient";
 import {
   chromaTokenDefault,
   chromaTokenBearer,

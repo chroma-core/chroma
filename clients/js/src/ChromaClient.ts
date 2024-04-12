@@ -1,10 +1,8 @@
-import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import { Configuration, ApiApi as DefaultApi } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from "./Collection";
 import {
   ChromaClientParams,
-  CollectionMetadata,
   CollectionType,
   ConfigOptions,
   CreateCollectionParams,
@@ -14,9 +12,8 @@ import {
   ListCollectionsParams,
 } from "./types";
 import {
-  AuthOptions,
-  ClientAuthProtocolAdapter,
-  IsomorphicFetchClientAuthProtocolAdapter,
+  authOptionsToAuthProvider,
+  ClientAuthProvider,
 } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
 import { AdminClient } from "./AdminClient";
@@ -29,10 +26,10 @@ export class ChromaClient {
    * @ignore
    */
   private api: DefaultApi & ConfigOptions;
-  private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
   private tenant: string = DEFAULT_TENANT;
   private database: string = DEFAULT_DATABASE;
   private _adminClient?: AdminClient;
+  private authProvider: ClientAuthProvider | undefined;
 
   /**
    * Creates a new ChromaClient instance.
@@ -57,19 +54,21 @@ export class ChromaClient {
     if (path === undefined) path = "http://localhost:8000";
     this.tenant = tenant;
     this.database = database;
+    this.authProvider = undefined
 
     const apiConfig: Configuration = new Configuration({
       basePath: path,
     });
 
+    this.api = new DefaultApi(apiConfig);
+    this.api.options = fetchOptions ?? {};
+
     if (auth !== undefined) {
-      this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(
-        new DefaultApi(apiConfig),
-        auth,
-      );
-      this.api = this.apiAdapter.getApi();
-    } else {
-      this.api = new DefaultApi(apiConfig);
+      this.authProvider = authOptionsToAuthProvider(auth);
+      this.api.options.headers = {
+        ...this.api.options.headers,
+        ...this.authProvider.authenticate(),
+      };
     }
 
     this._adminClient = new AdminClient({
@@ -84,8 +83,6 @@ export class ChromaClient {
     // this got tricky because:
     // - the constructor is sync but the generated api is async
     // - we need to inject auth information so a simple rewrite/fetch does not work
-
-    this.api.options = fetchOptions ?? {};
   }
 
   /**

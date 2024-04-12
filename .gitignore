@@ -6,6 +6,8 @@ go/bin/
 go/**/testdata/
 go/coordinator/bin/
 
+clients/js/package-lock.json
+
 *.log
 
 **/data__nogit
