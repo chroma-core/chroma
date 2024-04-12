@@ -68,10 +68,11 @@ class TxWrapper(base.TxWrapper):
     ) -> Literal[False]:
         # with self._lock:
         # self._tx_stack.stack.pop()
-        tx_stack.get().pop()
+        if tx_stack.get() is not None:
+            tx_stack.get().pop()
         # if len(self._tx_stack.stack) == 0:
         # print([id(t._conn) for t in tx_stack.get()],exc_type)
-        if len(tx_stack.get()) == 0:
+        if tx_stack.get() is not None and len(tx_stack.get()) == 0:
             tx_stack.set(None)
             if exc_type is None:
                 self._conn.commit()

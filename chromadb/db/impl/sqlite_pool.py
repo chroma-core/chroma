@@ -94,18 +94,26 @@ class LockPool(Pool):
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
         self._lock.acquire()
-        if len(self._connections) > 0:
-            return self._connections.pop()
+        if context_connection.get() is not None:
+            return context_connection.get()
         else:
+            with self._lock:
+                if len(self._connections) > 0:
+                    conn = self._connections.pop()
+                    context_connection.set(conn)
+                    return conn
             new_connection = Connection(
                 self, self._db_file, self._is_uri, *args, **kwargs
             )
+            context_connection.set(new_connection)
             return new_connection
 
     @override
     def return_to_pool(self, conn: Connection) -> None:
         try:
-            self._connections.add(conn)
+            with self._lock:
+                self._connections.add(conn)
+            context_connection.set(None)
             self._lock.release()
         except RuntimeError:
             pass
