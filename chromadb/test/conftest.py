@@ -165,6 +165,7 @@ def _fastapi_fixture(
     chroma_server_authn_provider: Optional[str] = None,
     chroma_client_auth_provider: Optional[str] = None,
     chroma_server_authn_credentials_file: Optional[str] = None,
+    chroma_server_authn_credentials: Optional[str] = None,
     chroma_client_auth_credentials: Optional[str] = None,
     chroma_auth_token_transport_header: Optional[str] = None,
     chroma_server_authz_provider: Optional[str] = None,
@@ -189,6 +190,7 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[str],
+        Optional[str],
         Optional[bool]
     ] = (
         port,
@@ -196,6 +198,7 @@ def _fastapi_fixture(
         None,
         chroma_server_authn_provider,
         chroma_server_authn_credentials_file,
+        chroma_server_authn_credentials,
         chroma_auth_token_transport_header,
         chroma_server_authz_provider,
         chroma_server_authz_config_file,
@@ -212,6 +215,7 @@ def _fastapi_fixture(
             persist_directory,
             chroma_server_authn_provider,
             chroma_server_authn_credentials_file,
+            chroma_server_authn_credentials,
             chroma_auth_token_transport_header,
             chroma_server_authz_provider,
             chroma_server_authz_config_file,
@@ -368,7 +372,6 @@ users:
         is_persistent=False,
         chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
         chroma_client_auth_credentials="admin:admin",
-
         chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
         chroma_server_authn_credentials_file=server_authn_file,
         chroma_server_authz_provider="chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider",
