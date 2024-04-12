@@ -151,7 +151,7 @@ func TestMemberlistManager(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), initialCrMemberlist)
 
 	// Create a node watcher
-	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 60*time.Second)
+	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 1*time.Second)
 
 	// Create a memberlist store
 	memberlistStore := NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
