@@ -5,7 +5,6 @@ set -e
 export CHROMA_PORT=8000
 
 function cleanup {
-  docker compose -f docker-compose.test.yml down --rmi local --volumes
   rm server.htpasswd .chroma_env
 }
 
@@ -42,8 +41,6 @@ EOF
 
 trap cleanup EXIT
 
-docker compose -f docker-compose.test.yml up --build -d
-
 export CHROMA_INTEGRATION_TEST_ONLY=1
 export CHROMA_API_IMPL=chromadb.api.fastapi.FastAPI
 export CHROMA_SERVER_HOST=localhost
@@ -56,7 +53,6 @@ cd clients/js
 npm install
 npm run test:run
 
-docker compose down
 cd ../..
 for auth_type in basic token xtoken; do
   echo "Testing $auth_type auth"
