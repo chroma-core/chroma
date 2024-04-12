@@ -133,7 +133,6 @@ impl Scheduler {
                 }
             }
         }
-
         filtered_collections
     }
 
@@ -165,11 +164,6 @@ impl Scheduler {
 
     pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
         self.memberlist = Some(memberlist);
-    }
-
-    // For testing
-    pub(crate) fn set_sysdb(&mut self, sysdb: Box<dyn SysDb>) {
-        self.sysdb = sysdb;
     }
 }
 
@@ -303,7 +297,6 @@ mod tests {
 
         let last_compaction_time_2 = 1;
         sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
-        scheduler.set_sysdb(sysdb.clone());
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
         let jobs = jobs.collect::<Vec<&CompactionJob>>();

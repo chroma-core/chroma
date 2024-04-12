@@ -187,7 +187,7 @@ mod tests {
             log_position,
             collection_version,
             segment_flush_info.into(),
-            sysdb,
+            sysdb.clone(),
         );
 
         let result = operator.run(&input).await;
@@ -196,5 +196,24 @@ mod tests {
         let result = result.unwrap();
         assert_eq!(result.result.collection_id, collection_uuid_1.to_string());
         assert_eq!(result.result.collection_version, collection_version + 1);
+
+        let collections = sysdb
+            .get_collections(Some(collection_uuid_1), None, None, None)
+            .await;
+
+        assert!(collections.is_ok());
+        let collection = collections.unwrap();
+        assert_eq!(collection.len(), 1);
+        let collection = collection[0].clone();
+        assert_eq!(collection.log_position, log_position);
+
+        let segments = sysdb.get_segments(None, None, None, None).await;
+        assert!(segments.is_ok());
+        let segments = segments.unwrap();
+        assert_eq!(segments.len(), 2);
+        let segment_1 = segments.iter().find(|s| s.id == segment_id_1).unwrap();
+        assert_eq!(segment_1.file_path, file_path_3);
+        let segment_2 = segments.iter().find(|s| s.id == segment_id_2).unwrap();
+        assert_eq!(segment_2.file_path, file_path_4);
     }
 }
