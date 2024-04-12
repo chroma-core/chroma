@@ -19,6 +19,7 @@ use crate::system::Handler;
 use crate::system::Receiver;
 use crate::system::System;
 use crate::types::SegmentFlushInfo;
+use arrow::compute::kernels::partition;
 use async_trait::async_trait;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -46,6 +47,7 @@ enum ExecutionState {
     Partition,
     Write,
     Flush,
+    Register,
     Finished,
 }
 
@@ -62,6 +64,8 @@ pub struct CompactOrchestrator {
     sysdb: Box<dyn SysDb>,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
+    // number of write segments tasks
+    num_write_tasks: i32,
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
@@ -96,6 +100,7 @@ impl CompactOrchestrator {
             log,
             sysdb,
             dispatcher,
+            num_write_tasks: 0,
             result_channel,
         }
     }
@@ -142,12 +147,18 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn write(&mut self, records: Vec<DataChunk>) {
+    async fn write(&mut self, partitions: Vec<DataChunk>) {
         self.state = ExecutionState::Write;
 
-        for record in records {
+        self.num_write_tasks = partitions.len() as i32;
+        for partition in partitions {
             // TODO: implement write
         }
+    }
+
+    async fn flush_s3(&mut self, self_address: Box<dyn Receiver<WriteSegmentsResult>>) {
+        self.state = ExecutionState::Flush;
+        // TODO: implement flush to s3
     }
 
     async fn flush_sysdb(
@@ -156,7 +167,7 @@ impl CompactOrchestrator {
         segment_flush_info: Vec<SegmentFlushInfo>,
         self_address: Box<dyn Receiver<FlushSysDbResult>>,
     ) {
-        self.state = ExecutionState::Flush;
+        self.state = ExecutionState::Register;
         let operator = FlushSysDbOperator::new();
         let input = FlushSysDbInput::new(
             self.compaction_job.tenant_id.clone(),
@@ -263,5 +274,27 @@ impl Handler<PartitionResult> for CompactOrchestrator {
             message: "Compaction Complete".to_string(),
         };
         let _ = result_channel.send(Ok(response));
+    }
+}
+
+#[async_trait]
+impl Handler<WriteSegmentsResult> for CompactOrchestrator {
+    async fn handle(
+        &mut self,
+        message: WriteSegmentsResult,
+        _ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+    ) {
+        match message {
+            Ok(result) => {
+                // Log an error
+                self.num_write_tasks -= 1;
+            }
+            Err(e) => {
+                // Log an error
+            }
+        }
+        if self.num_write_tasks == 0 {
+            self.flush_s3(_ctx.sender.as_receiver()).await;
+        }
     }
 }
