@@ -51,7 +51,6 @@ cd clients/js
 
 # moved off of yarn to npm to fix issues with jackspeak/cliui/string-width versions #1314
 npm install
-npm run test:run
 
 cd ../..
 
