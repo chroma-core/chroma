@@ -1,9 +1,7 @@
 use crate::execution::data::data_chunk::DataChunk;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
-use std::cmp::Ord;
 use std::cmp::Ordering;
-use std::cmp::PartialOrd;
 use std::collections::BinaryHeap;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors

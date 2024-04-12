@@ -2,6 +2,9 @@ use super::super::operator::{wrap, TaskMessage};
 use crate::compactor::CompactionJob;
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::operators::flush_sysdb::FlushSysDbInput;
+use crate::execution::operators::flush_sysdb::FlushSysDbOperator;
+use crate::execution::operators::flush_sysdb::FlushSysDbResult;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionResult;
@@ -9,10 +12,12 @@ use crate::execution::operators::pull_log::PullLogsInput;
 use crate::execution::operators::pull_log::PullLogsOperator;
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::log::log::Log;
+use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::Handler;
 use crate::system::Receiver;
 use crate::system::System;
+use crate::types::SegmentFlushInfo;
 use async_trait::async_trait;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -46,13 +51,14 @@ enum ExecutionState {
 #[derive(Debug)]
 pub struct CompactOrchestrator {
     id: Uuid,
-    task: CompactionJob,
+    compaction_job: CompactionJob,
     state: ExecutionState,
     // Component Execution
     system: System,
     collection_id: Uuid,
     // Dependencies
     log: Box<dyn Log>,
+    sysdb: Box<dyn SysDb>,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // Result Channel
@@ -64,16 +70,17 @@ pub struct CompactOrchestrator {
 #[derive(Debug)]
 pub struct CompactionResponse {
     id: Uuid,
-    task: CompactionJob,
+    compaction_job: CompactionJob,
     message: String,
 }
 
 impl CompactOrchestrator {
     pub fn new(
-        task: CompactionJob,
+        compaction_job: CompactionJob,
         system: System,
         collection_id: Uuid,
         log: Box<dyn Log>,
+        sysdb: Box<dyn SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         result_channel: Option<
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
@@ -81,11 +88,12 @@ impl CompactOrchestrator {
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
-            task,
+            compaction_job,
             state: ExecutionState::Pending,
             system,
             collection_id,
             log,
+            sysdb,
             dispatcher,
             result_channel,
         }
@@ -138,6 +146,32 @@ impl CompactOrchestrator {
 
         for record in records {
             // TODO: implement write
+        }
+    }
+
+    async fn flush_sysdb(
+        &mut self,
+        log_position: i64,
+        segment_flush_info: Vec<SegmentFlushInfo>,
+        self_address: Box<dyn Receiver<FlushSysDbResult>>,
+    ) {
+        self.state = ExecutionState::Flush;
+        let operator = FlushSysDbOperator::new();
+        let input = FlushSysDbInput::new(
+            self.compaction_job.tenant_id.clone(),
+            self.compaction_job.collection_id.clone(),
+            log_position,
+            self.compaction_job.collection_version,
+            segment_flush_info.into(),
+            self.sysdb.clone(),
+        );
+
+        let task = wrap(operator, input, self_address);
+        match self.dispatcher.send(task).await {
+            Ok(_) => (),
+            Err(e) => {
+                // TODO: log an error and reply to caller
+            }
         }
     }
 
@@ -224,7 +258,7 @@ impl Handler<PartitionResult> for CompactOrchestrator {
         };
         let response = CompactionResponse {
             id: self.id,
-            task: self.task.clone(),
+            compaction_job: self.compaction_job.clone(),
             message: "Compaction Complete".to_string(),
         };
         let _ = result_channel.send(Ok(response));

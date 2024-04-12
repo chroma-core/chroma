@@ -1,6 +1,7 @@
 #[macro_use]
 mod types;
 mod collection;
+mod flush;
 mod metadata;
 mod operation;
 mod record;
@@ -11,6 +12,7 @@ mod tenant;
 
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub(crate) use collection::*;
+pub(crate) use flush::*;
 pub(crate) use metadata::*;
 pub(crate) use operation::*;
 pub(crate) use record::*;

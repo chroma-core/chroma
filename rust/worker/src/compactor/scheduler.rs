@@ -102,6 +102,7 @@ impl Scheduler {
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
                         offset: collection_info.first_log_offset,
+                        collection_version: collection[0].version,
                     });
                 }
                 Err(e) => {
@@ -185,7 +186,6 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_scheduler() {

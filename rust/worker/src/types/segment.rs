@@ -101,7 +101,6 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
     use crate::types::MetadataValue;
