@@ -3,6 +3,7 @@ package memberlist_manager
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/pingcap/log"
@@ -23,9 +24,11 @@ type IMemberlistManager interface {
 }
 
 type MemberlistManager struct {
-	workqueue       workqueue.RateLimitingInterface // workqueue for the coordinator
-	nodeWatcher     IWatcher                        // node watcher for the coordinator
-	memberlistStore IMemberlistStore                // memberlist store for the coordinator
+	workqueue         workqueue.RateLimitingInterface // workqueue for the coordinator
+	nodeWatcher       IWatcher                        // node watcher for the coordinator
+	memberlistStore   IMemberlistStore                // memberlist store for the coordinator
+	reconcileInterval time.Duration                   // interval for reconciliation
+	reconcileCount    uint                            // number of updates to reconcile at once
 }
 
 func NewMemberlistManager(nodeWatcher IWatcher, memberlistStore IMemberlistStore) *MemberlistManager {
@@ -52,6 +55,9 @@ func (m *MemberlistManager) Start() error {
 }
 
 func (m *MemberlistManager) run() {
+	count := uint(0)
+	lastUpdate := time.Now()
+	updates := map[string]bool{}
 	for {
 		interface_key, shutdown := m.workqueue.Get()
 		if shutdown {
@@ -66,52 +72,77 @@ func (m *MemberlistManager) run() {
 			continue
 		}
 
-		nodeUpdate, err := m.nodeWatcher.GetStatus(key)
-		if err != nil {
-			log.Error("Error while getting status of node", zap.Error(err))
-			m.workqueue.Done(key)
-			continue
-		}
+		count++
+		updates[key] = true
+		if count >= m.reconcileCount || time.Since(lastUpdate) > m.reconcileInterval {
+			memberlist, resourceVersion, err := m.getOldMemberlist()
+			if err != nil {
+				log.Error("Error while getting memberlist", zap.Error(err))
+				continue
+			}
+			log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
+			newMemberlist, err := m.nodeWatcher.ListReadyMembers()
+			if err != nil {
+				log.Error("Error while getting ready members", zap.Error(err))
+				continue
+			}
+			// do not update memberlist if there's no change
+			if !memberlistSame(memberlist, newMemberlist) {
+				err = m.updateMemberlist(newMemberlist, *resourceVersion)
+				if err != nil {
+					log.Error("Error while updating memberlist", zap.Error(err))
+					continue
+				}
+			}
 
-		err = m.reconcile(key, nodeUpdate)
-		if err != nil {
-			log.Error("Error while reconciling memberlist", zap.Error(err))
+			for key := range updates {
+				m.workqueue.Done(key)
+			}
+			count = uint(0)
+			lastUpdate = time.Now()
+			updates = map[string]bool{}
 		}
-
-		m.workqueue.Done(key)
 	}
 }
 
-func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
-	memberlist, resourceVersion, err := m.memberlistStore.GetMemberlist(context.Background())
-	if err != nil {
-		return err
+func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
+	if len(oldMemberlist) != len(newMemberlist) {
+		return false
 	}
-	if memberlist == nil {
-		return errors.New("Memberlist recieved is nil")
+	// use a map to check if the new memberlist contains all the old members
+	newMemberlistMap := make(map[string]bool)
+	for _, member := range newMemberlist {
+		newMemberlistMap[member] = true
 	}
-	exists := false
-	// Loop through the memberlist and generate a new one based on the update
-	// If we find the node in the existing list and the status is Ready, we add it to the new list
-	// If we find the node in the existing list and the status is NotReady, we don't add it to the new list
-	// If we don't find the node in the existing list and the status is Ready, we add it to the new list
-	newMemberlist := Memberlist{}
-	for _, node := range *memberlist {
-		if node == nodeIp {
-			if status == Ready {
-				newMemberlist = append(newMemberlist, node)
-			}
-			// Else here implies the node is not ready, so we don't add it to the new memberlist
-			exists = true
-		} else {
-			// This update doesn't pertains to this node, so we just add it to the new memberlist
-			newMemberlist = append(newMemberlist, node)
+	for _, member := range oldMemberlist {
+		if _, ok := newMemberlistMap[member]; !ok {
+			return false
 		}
 	}
-	if !exists && status == Ready {
-		newMemberlist = append(newMemberlist, nodeIp)
+	return true
+}
+
+func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
+	memberlist, resourceVersion, err := m.memberlistStore.GetMemberlist(context.Background())
+	if err != nil {
+		return nil, nil, err
 	}
-	return m.memberlistStore.UpdateMemberlist(context.Background(), &newMemberlist, resourceVersion)
+	if memberlist == nil {
+		return nil, nil, errors.New("Memberlist recieved is nil")
+	}
+	return *memberlist, &resourceVersion, nil
+}
+
+func (m *MemberlistManager) updateMemberlist(memberlist Memberlist, resourceVersion string) error {
+	return m.memberlistStore.UpdateMemberlist(context.Background(), &memberlist, resourceVersion)
+}
+
+func (m *MemberlistManager) SetReconcileInterval(interval time.Duration) {
+	m.reconcileInterval = interval
+}
+
+func (m *MemberlistManager) SetReconcileCount(count uint) {
+	m.reconcileCount = count
 }
 
 func (m *MemberlistManager) Stop() error {

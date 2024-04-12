@@ -1,5 +1,5 @@
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError, validateTenantDatabase } from "./utils";
+import { handleSuccess, validateTenantDatabase } from "./utils";
 import { ConfigOptions } from "./types";
 import {
   AuthOptions,
@@ -154,8 +154,7 @@ export class AdminClient {
   public async createTenant({ name }: { name: string }): Promise<Tenant> {
     const newTenant = await this.api
       .createTenant({ name }, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     // newTenant is null if successful
     if (newTenant && newTenant.error) {
@@ -184,8 +183,7 @@ export class AdminClient {
   public async getTenant({ name }: { name: string }): Promise<Tenant> {
     const getTenant = await this.api
       .getTenant(name, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     if (getTenant.error) {
       throw new Error(getTenant.error);
@@ -221,8 +219,7 @@ export class AdminClient {
   }): Promise<Database> {
     const newDatabase = await this.api
       .createDatabase(tenantName, { name }, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     // newDatabase is null if successful
     if (newDatabase && newDatabase.error) {
@@ -259,8 +256,7 @@ export class AdminClient {
   }): Promise<Database> {
     const getDatabase = await this.api
       .getDatabase(name, tenantName, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     if (getDatabase.error) {
       throw new Error(getDatabase.error);

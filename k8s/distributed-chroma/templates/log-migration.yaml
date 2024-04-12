@@ -14,7 +14,7 @@ spec:
         - command:
             - "/bin/sh"
             - "-c"
-            - "atlas migrate apply --url {{ .Values.logServiceMigration.databaseUrl }}"
+            - "atlas migrate apply --env prod"
           image: "{{ .Values.logServiceMigration.image.repository }}:{{ .Values.logServiceMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration
