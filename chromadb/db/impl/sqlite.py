@@ -15,49 +15,50 @@ from chromadb.telemetry.opentelemetry import (
 import sqlite3
 from overrides import override
 import pypika
-from typing import Sequence, cast, Optional, Type, Any
+from typing import Sequence, cast, Optional, Type, Any, List
 from typing_extensions import Literal
 from types import TracebackType
 import os
 from uuid import UUID
-from threading import local
 from importlib_resources import files
 from importlib_resources.abc import Traversable
+
+
+tx_stack: contextvars.ContextVar[Optional[List["TxWrapper"]]] = contextvars.ContextVar(
+    "tx_stack", default=None
+)
 
 
 class TxWrapper(base.TxWrapper):
     _conn: Connection
     _pool: Pool
 
-    def __init__(self, conn_pool: Pool): #, stack: local):
+    def __init__(
+        self, conn_pool: Pool, req_id: Optional[str] = None
+    ):  # , stack: local):
         # self._tx_stack = stack
+        self._lock = threading.RLock()
         self._conn = conn_pool.connect()
         self._pool = conn_pool
-        self._lock = threading.RLock()
-        self._conn_stack = []
+        self._conn_pool = conn_pool
+        self._req_id = req_id
 
     @override
     def __enter__(self) -> base.Cursor:
         # if len(self._tx_stack.stack) == 0:
-        print("Checking out: ",id(self._conn))
-        if len(tx_stack.get()) == 0:
+        # with self._lock:
+        # self._conn = self._conn_pool.connect()
+        # print("Checking out: ",id(self._conn), threading.get_native_id(), id(self), "ReqID: ",self._req_id,tx_stack.get())
+        if tx_stack.get() is None or len(tx_stack.get()) == 0:
+            tx_stack.set(list())
             self._conn.execute("PRAGMA case_sensitive_like = ON")
-            try:
-                self._conn.execute("BEGIN;")
-                self._conn_stack.append(id(self._conn))
-            except Exception as e:
-                print("Stack: ",self._conn_stack)
-                print("=======",id(self._conn))
-                raise e
+            self._conn.execute("BEGIN;")
 
-        # self._tx_stack.stack.append(self)
-        tx_stack.get().append(self)
-        con_stack.get().append(self._conn)
+            # self._tx_stack.stack.append(self)
+
+            tx_stack.get().append(self)
         return self._conn.cursor()  # type: ignore
-    def _release_conn_stack(self)->None:
-        self._pool.return_to_pool(con_stack.get())
-        print("Checking stack: ",con_stack.get())
-        con_stack.get().clear()
+
     @override
     def __exit__(
         self,
@@ -65,23 +66,29 @@ class TxWrapper(base.TxWrapper):
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Literal[False]:
-
         # with self._lock:
-            # self._tx_stack.stack.pop()
+        # self._tx_stack.stack.pop()
         tx_stack.get().pop()
         # if len(self._tx_stack.stack) == 0:
         # print([id(t._conn) for t in tx_stack.get()],exc_type)
         if len(tx_stack.get()) == 0:
+            tx_stack.set(None)
             if exc_type is None:
                 self._conn.commit()
-                self._release_conn_stack()
+                self._pool.return_to_pool(self._conn)
             else:
                 self._conn.rollback()
-                self._release_conn_stack()
+                self._pool.return_to_pool(self._conn)
         self._conn.cursor().close()
+        # print("Closing cursor: ",id(self._conn), threading.get_native_id(), id(self))
+        # try:
+        #     stack = inspect.stack()
+        #     print(f"{stack[3].function} > {stack[2].function} > {stack[1].function} > {stack[0].function}")
+        # except IndexError:
+        #     pass
         return False
-con_stack = contextvars.ContextVar("con_stack", default=[])
-tx_stack = contextvars.ContextVar("tx_stack", default=[])
+
+
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn_pool: Pool
     _settings: Settings
@@ -151,12 +158,12 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         return self._migration_imports
 
     @override
-    def tx(self) -> TxWrapper:
+    def tx(self, req_id: Optional[str] = None) -> TxWrapper:
         # if not hasattr(self._tx_stack, "stack"):
         if tx_stack.get() is None:
             # self._tx_stack.stack = []
             tx_stack.set([])
-        return TxWrapper(self._conn_pool) #, stack=self._tx_stack)
+        return TxWrapper(self._conn_pool, req_id)  # , stack=self._tx_stack)
 
     @trace_method("SqliteDB.reset_state", OpenTelemetryGranularity.ALL)
     @override
