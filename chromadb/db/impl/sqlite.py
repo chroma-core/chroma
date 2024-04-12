@@ -45,17 +45,10 @@ class TxWrapper(base.TxWrapper):
 
     @override
     def __enter__(self) -> base.Cursor:
-        # if len(self._tx_stack.stack) == 0:
-        # with self._lock:
-        # self._conn = self._conn_pool.connect()
-        # print("Checking out: ",id(self._conn), threading.get_native_id(), id(self), "ReqID: ",self._req_id,tx_stack.get())
         if tx_stack.get() is None or len(tx_stack.get()) == 0:
             tx_stack.set(list())
             self._conn.execute("PRAGMA case_sensitive_like = ON")
             self._conn.execute("BEGIN;")
-
-            # self._tx_stack.stack.append(self)
-
             tx_stack.get().append(self)
         return self._conn.cursor()  # type: ignore
 
@@ -66,27 +59,16 @@ class TxWrapper(base.TxWrapper):
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Literal[False]:
-        # with self._lock:
-        # self._tx_stack.stack.pop()
         if tx_stack.get() is not None:
             tx_stack.get().pop()
-        # if len(self._tx_stack.stack) == 0:
-        # print([id(t._conn) for t in tx_stack.get()],exc_type)
         if tx_stack.get() is not None and len(tx_stack.get()) == 0:
             tx_stack.set(None)
             if exc_type is None:
                 self._conn.commit()
-                self._pool.return_to_pool(self._conn)
             else:
                 self._conn.rollback()
-                self._pool.return_to_pool(self._conn)
         self._conn.cursor().close()
-        # print("Closing cursor: ",id(self._conn), threading.get_native_id(), id(self))
-        # try:
-        #     stack = inspect.stack()
-        #     print(f"{stack[3].function} > {stack[2].function} > {stack[1].function} > {stack[0].function}")
-        # except IndexError:
-        #     pass
+        self._pool.return_to_pool(self._conn)
         return False
 
 

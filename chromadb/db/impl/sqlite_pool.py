@@ -82,6 +82,7 @@ class LockPool(Pool):
 
     _connections: Set[Connection]
     _lock: threading.RLock
+    _connection: threading.local
     _db_file: str
     _is_uri: bool
 
@@ -111,9 +112,6 @@ class LockPool(Pool):
     @override
     def return_to_pool(self, conn: Connection) -> None:
         try:
-            with self._lock:
-                self._connections.add(conn)
-            context_connection.set(None)
             self._lock.release()
         except RuntimeError:
             pass
@@ -121,8 +119,7 @@ class LockPool(Pool):
     @override
     def close(self) -> None:
         for conn in self._connections:
-            if conn is not None:
-                conn.close_actual()
+            conn.close_actual()
         self._connections.clear()
         try:
             self._lock.release()
@@ -170,12 +167,17 @@ class PerThreadPool(Pool):
     @override
     def close(self) -> None:
         with self._lock:
-            for conn in self._connections:
-                conn.close_actual()
-            self._connections.clear()
+            try:
+                for conn in self._connections:
+                    conn.close_actual()
+                self._connections.clear()
+            finally:
+                context_connection.set(None)
 
     @override
     def return_to_pool(self, conn: Connection) -> None:
         with self._lock:
-            self._connections.add(conn)
-        context_connection.set(None)
+            try:
+                self._connections.add(conn)
+            finally:
+                context_connection.set(None)
