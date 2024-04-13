@@ -27,7 +27,6 @@ where
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
     reply_channel: Box<dyn Receiver<Result<Output, Error>>>,
-    tracing_context: Option<tracing::Id>,
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
@@ -38,7 +37,6 @@ pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
 #[async_trait]
 pub(crate) trait TaskWrapper: Send + Debug {
     async fn run(&self);
-    fn getTracingContext(&self) -> Option<tracing::Id>;
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -53,12 +51,8 @@ where
 {
     async fn run(&self) {
         let output = self.operator.run(&self.input).await;
-        let res = self.reply_channel.send(output).await;
+        let res = self.reply_channel.send(output, None).await;
         // TODO: if this errors, it means the caller was dropped
-    }
-
-    fn getTracingContext(&self) -> Option<tracing::Id> {
-        self.tracing_context.clone()
     }
 }
 
@@ -67,7 +61,6 @@ pub(super) fn wrap<Input, Output, Error>(
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
     reply_channel: Box<dyn Receiver<Result<Output, Error>>>,
-    tracing_context: Option<tracing::Id>,
 ) -> TaskMessage
 where
     Error: Debug + 'static,
@@ -78,6 +71,5 @@ where
         operator,
         input,
         reply_channel,
-        tracing_context,
     })
 }

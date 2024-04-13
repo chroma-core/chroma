@@ -104,7 +104,7 @@ where
             message = stream.next() => {
                 match message {
                     Some(message) => {
-                        let res = ctx.sender.send(message).await;
+                        let res = ctx.sender.send(message, None).await;
                         match res {
                             Ok(_) => {}
                             Err(e) => {

@@ -114,9 +114,13 @@ impl HnswQueryOrchestrator {
     async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
-        let child_span = debug_span!(parent: Span::current(), "get collection id for segment id");
+        let child_span: tracing::Span =
+            debug_span!(parent: Span::current(), "get collection id for segment id");
         let get_collection_id_future = self.get_collection_id_for_segment_id(self.segment_id);
-        let collection_id = match get_collection_id_future.instrument(child_span).await {
+        let collection_id = match get_collection_id_future
+            .instrument(child_span.clone())
+            .await
+        {
             Some(collection_id) => collection_id,
             None => {
                 // Log an error and reply + return
@@ -133,10 +137,10 @@ impl HnswQueryOrchestrator {
             }
         };
         let input = PullLogsInput::new(collection_id, 0, 100, None, Some(end_timestamp));
+        let task = wrap(operator, input, self_address);
         // Wrap the task with current span as the parent. The worker then executes it
         // inside a child span with this parent.
-        let task = wrap(operator, input, self_address, Span::current().id().clone());
-        match self.dispatcher.send(task).await {
+        match self.dispatcher.send(task, Some(child_span.clone())).await {
             Ok(_) => (),
             Err(e) => {
                 // TODO: log an error and reply to caller
@@ -193,13 +197,13 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
                     distance_metric: DistanceFunction::Euclidean,
                 };
                 let operator = Box::new(BruteForceKnnOperator {});
-                let task = wrap(
-                    operator,
-                    bf_input,
-                    ctx.sender.as_receiver(),
-                    Span::current().id().clone(),
-                );
-                match self.dispatcher.send(task).await {
+                let task = wrap(operator, bf_input, ctx.sender.as_receiver());
+                println!("Current span {:?}", Span::current());
+                match self
+                    .dispatcher
+                    .send(task, Some(Span::current().clone()))
+                    .await
+                {
                     Ok(_) => (),
                     Err(e) => {
                         // TODO: log an error and reply to caller

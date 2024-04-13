@@ -7,6 +7,7 @@ use super::{
 use crate::system::ComponentContext;
 use std::sync::Arc;
 use tokio::select;
+use tracing::{debug_span, instrument, span, Id, Instrument, Span};
 
 struct Inner<C>
 where
@@ -69,14 +70,24 @@ where
                 message = channel.recv() => {
                     match message {
                         Some(mut message) => {
-                            message.handle(&mut self.handler,
-                                &ComponentContext{
+                            let parent_span: tracing::Span;
+                            match message.get_tracing_context() {
+                                Some(spn) => {
+                                    parent_span = spn;
+                                },
+                                None => {
+                                    parent_span = Span::current().clone();
+                                }
+                            }
+                            let child_span = debug_span!(parent: parent_span, "task handler");
+                            let component_context = ComponentContext {
                                     system: self.inner.system.clone(),
                                     sender: self.inner.sender.clone(),
                                     cancellation_token: self.inner.cancellation_token.clone(),
                                     scheduler: self.inner.scheduler.clone(),
-                                }
-                            ).await;
+                            };
+                            let task_future = message.handle(&mut self.handler, &component_context);
+                            task_future.instrument(child_span).await;
                         }
                         None => {
                             // TODO: Log error
