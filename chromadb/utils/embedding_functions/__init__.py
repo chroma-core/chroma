@@ -6,3 +6,4 @@ from chromadb.utils.embedding_functions.google_embedding_function import (Google
 from chromadb.utils.embedding_functions.huggingface_embedding_function import (HuggingFaceEmbeddingFunction, HuggingFaceEmbeddingServer)
 from chromadb.utils.embedding_functions.instructor_embedding_function import InstructorEmbeddingFunction
 from chromadb.utils.embedding_functions.jina_embedding_function import JinaEmbeddingFunction
+from chromadb.utils.embedding_functions.ollama_embedding_function import OllamaEmbeddingFunction
