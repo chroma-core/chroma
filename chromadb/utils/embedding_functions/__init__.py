@@ -8,3 +8,4 @@ from chromadb.utils.embedding_functions.instructor_embedding_function import Ins
 from chromadb.utils.embedding_functions.jina_embedding_function import JinaEmbeddingFunction
 from chromadb.utils.embedding_functions.ollama_embedding_function import OllamaEmbeddingFunction
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2, _verify_sha256
+from chromadb.utils.embedding_functions.open_clip_embedding_function import OpenCLIPEmbeddingFunction
