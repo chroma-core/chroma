@@ -1,4 +1,8 @@
+import inspect
+import sys
+from typing import List, Optional
 
+from chromadb.api.types import Documents, EmbeddingFunction
 from chromadb.utils.embedding_functions.amazon_bedrock_embedding_function import AmazonBedrockEmbeddingFunction
 from chromadb.utils.embedding_functions.chroma_langchain_embedding_function import create_langchain_embedding
 from chromadb.utils.embedding_functions.cohere_embedding_function import CohereEmbeddingFunction
@@ -13,3 +17,27 @@ from chromadb.utils.embedding_functions.openai_embedding_function import OpenAIE
 from chromadb.utils.embedding_functions.roboflow_embedding_function import RoboflowEmbeddingFunction
 from chromadb.utils.embedding_functions.sentence_transformer_embedding_function import SentenceTransformerEmbeddingFunction
 from chromadb.utils.embedding_functions.text2vec_embedding_function import Text2VecEmbeddingFunction
+
+
+try:
+    from chromadb.is_thin_client import is_thin_client
+except ImportError:
+    is_thin_client = False
+
+
+def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction[Documents]]:
+    if is_thin_client:
+        return None
+    else:
+        return ONNXMiniLM_L6_V2()
+
+
+_classes = [
+    name
+    for name, obj in inspect.getmembers(sys.modules[__name__], inspect.isclass)
+    if obj.__module__ == __name__
+]
+
+
+def get_builtins() -> List[str]:
+    return _classes
