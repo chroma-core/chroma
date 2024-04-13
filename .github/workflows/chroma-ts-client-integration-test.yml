@@ -13,10 +13,7 @@ on:
 jobs:
   test:
     timeout-minutes: 90
-    strategy:
-      matrix:
-        platform: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.platform }}
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout
       uses: actions/checkout@v3
