@@ -1,7 +1,6 @@
 import { expect, test } from "@jest/globals";
 import { chromaBasic } from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
-import { ChromaUnauthorizedError } from "../src/Errors";
 
 test("it should get the version without auth needed", async () => {
   const version = await chromaNoAuth.version();
@@ -16,9 +15,9 @@ test("it should get the heartbeat without auth needed", async () => {
 });
 
 test("it should raise error when non authenticated", async () => {
-  await expect(chromaNoAuth.listCollections()).rejects.
-    ChromaUnauthorizedError
-  );
+  await expect(chromaNoAuth.listCollections()).rejects.toMatchObject({
+    status: 401,
+  });
 });
 
 test("it should list collections", async () => {
