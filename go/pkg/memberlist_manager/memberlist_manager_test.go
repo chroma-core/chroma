@@ -47,11 +47,12 @@ func TestNodeWatcher(t *testing.T) {
 
 	// Get the status of the node
 	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.1")
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == Ready
+
+		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
 
 	// Add a not ready pod
@@ -75,13 +76,12 @@ func TestNodeWatcher(t *testing.T) {
 	}, metav1.CreateOptions{})
 
 	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.2")
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == NotReady
+		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
-
 }
 
 func TestMemberlistStore(t *testing.T) {
@@ -151,7 +151,7 @@ func TestMemberlistManager(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), initialCrMemberlist)
 
 	// Create a node watcher
-	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 60*time.Second)
+	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 1*time.Second)
 
 	// Create a memberlist store
 	memberlistStore := NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
@@ -188,6 +188,31 @@ func TestMemberlistManager(t *testing.T) {
 	retryUntilCondition(t, func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.50"})
 	}, 10, 1*time.Second)
+}
+
+func TestMemberlistSame(t *testing.T) {
+	memberlist := Memberlist{""}
+	assert.True(t, memberlistSame(memberlist, memberlist))
+
+	newMemberlist := Memberlist{"10.0.0.1"}
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+	assert.True(t, memberlistSame(newMemberlist, newMemberlist))
+
+	memberlist = Memberlist{"10.0.0.2"}
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(memberlist, memberlist))
+
+	memberlist = Memberlist{"10.0.0.1", "10.0.0.2"}
+	newMemberlist = Memberlist{"10.0.0.1", "10.0.0.2"}
+	assert.True(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(newMemberlist, memberlist))
+
+	memberlist = Memberlist{"10.0.0.1", "10.0.0.2"}
+	newMemberlist = Memberlist{"10.0.0.2", "10.0.0.1"}
+	assert.True(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(newMemberlist, memberlist))
 }
 
 func retryUntilCondition(t *testing.T, f func() bool, retry_count int, retry_interval time.Duration) {

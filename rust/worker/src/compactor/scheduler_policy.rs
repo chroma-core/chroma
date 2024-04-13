@@ -47,6 +47,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
                 collection_id: collection.id.clone(),
                 tenant_id: collection.tenant_id.clone(),
                 offset: collection.offset,
+                collection_version: collection.collection_version,
             });
         }
         tasks
@@ -67,6 +68,7 @@ mod tests {
                 last_compaction_time: 1,
                 first_record_time: 1,
                 offset: 0,
+                collection_version: 0,
             },
             CollectionRecord {
                 id: "test2".to_string(),
@@ -74,6 +76,7 @@ mod tests {
                 last_compaction_time: 0,
                 first_record_time: 0,
                 offset: 0,
+                collection_version: 0,
             },
         ];
         let jobs = scheduler_policy.determine(collections.clone(), 1);

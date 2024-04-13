@@ -12,6 +12,7 @@ use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
+use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::ComponentContext;
 use crate::system::Handler;
@@ -32,6 +33,7 @@ pub(crate) struct CompactionManager {
     scheduler: Scheduler,
     // Dependencies
     log: Box<dyn Log>,
+    sysdb: Box<dyn SysDb>,
     // Dispatcher
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Config
@@ -57,6 +59,7 @@ impl CompactionManager {
     pub(crate) fn new(
         scheduler: Scheduler,
         log: Box<dyn Log>,
+        sysdb: Box<dyn SysDb>,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
     ) -> Self {
@@ -64,6 +67,7 @@ impl CompactionManager {
             system: None,
             scheduler,
             log,
+            sysdb,
             dispatcher: None,
             compaction_manager_queue_size,
             compaction_interval,
@@ -96,6 +100,7 @@ impl CompactionManager {
                     system.clone(),
                     collection_uuid.unwrap(),
                     self.log.clone(),
+                    self.sysdb.clone(),
                     dispatcher.clone(),
                     None,
                 );
@@ -196,6 +201,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         Ok(CompactionManager::new(
             scheduler,
             log,
+            sysdb,
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
         ))
@@ -257,8 +263,6 @@ mod tests {
     use crate::types::LogRecord;
     use crate::types::Operation;
     use crate::types::OperationRecord;
-    use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_compaction_manager() {
@@ -308,29 +312,36 @@ mod tests {
 
         let mut sysdb = Box::new(TestSysDb::new());
 
+        let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_1".to_string(),
+            tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
         };
 
+        let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
-            tenant: "tenant_2".to_string(),
+            tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
+
+        let last_compaction_time_1 = 2;
+        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+        let last_compaction_time_2 = 1;
+        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
 
         let my_ip = "127.0.0.1".to_string();
         let compaction_manager_queue_size = 1000;
@@ -355,6 +366,7 @@ mod tests {
         let mut manager = CompactionManager::new(
             scheduler,
             log,
+            sysdb,
             compaction_manager_queue_size,
             compaction_interval,
         );

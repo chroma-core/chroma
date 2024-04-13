@@ -16,9 +16,6 @@ frontendService:
   producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
-  pulsarBrokerUrl: 'value: "pulsar.chroma"'
-  pulsarBrokerPort: 'value: "6650"'
-  pulsarAdminPort: 'value: "8080"'
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
@@ -72,4 +69,6 @@ logServiceMigration:
   image:
     repository: 'local'
     tag: 'logservice-migration'
-  databaseUrl: 'postgres://chroma:chroma@postgres:5432/log?sslmode=disable'
+  env:
+  - name: CHROMA_DB_LOG_URL
+    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
