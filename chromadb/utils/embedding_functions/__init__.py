@@ -5,3 +5,4 @@ from chromadb.utils.embedding_functions.cohere_embedding_function import CohereE
 from chromadb.utils.embedding_functions.google_embedding_function import (GoogleGenerativeAiEmbeddingFunction, GooglePalmEmbeddingFunction, GoogleVertexEmbeddingFunction)
 from chromadb.utils.embedding_functions.huggingface_embedding_function import (HuggingFaceEmbeddingFunction, HuggingFaceEmbeddingServer)
 from chromadb.utils.embedding_functions.instructor_embedding_function import InstructorEmbeddingFunction
+from chromadb.utils.embedding_functions.jina_embedding_function import JinaEmbeddingFunction
