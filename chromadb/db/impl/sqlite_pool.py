@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Set
 import threading
 from overrides import override
+from typing_extensions import Annotated
 
 
 class Connection:
@@ -71,7 +72,7 @@ class LockPool(Pool):
     shared cache mode. We use the shared cache mode to allow multiple threads to share a database.
     """
 
-    _connections: Set[weakref.ReferenceType[Connection]]
+    _connections: Set[Annotated[weakref.ReferenceType, Connection]]
     _lock: threading.RLock
     _connection: threading.local
     _db_file: str
@@ -122,7 +123,7 @@ class PerThreadPool(Pool):
     extended to do so and block on connect() if the cap is reached.
     """
 
-    _connections: Set[weakref.ReferenceType[Connection]]
+    _connections: Set[Annotated[weakref.ReferenceType, Connection]]
     _lock: threading.Lock
     _connection: threading.local
     _db_file: str
