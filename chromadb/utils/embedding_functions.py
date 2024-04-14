@@ -78,7 +78,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 from sentence_transformers import SentenceTransformer
             except ImportError:
                 raise ValueError(
-                    "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
+                    "The sentence_transformers python package is not installed. Please install it with `pip install sentence-transformers`"
                 )
             self.models[model_name] = SentenceTransformer(
                 model_name, device=device, **kwargs
