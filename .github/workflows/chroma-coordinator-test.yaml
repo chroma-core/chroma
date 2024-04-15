@@ -16,8 +16,26 @@ jobs:
       matrix:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: chroma
+          POSTGRES_PASSWORD: chroma
+          POSTGRES_DB: chroma
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
     - name: Checkout
       uses: actions/checkout@v3
+    - uses: ariga/setup-atlas@v0
     - name: Build and test
-      run: cd go/coordinator && make test
+      run: cd go && make test
+      env:
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432

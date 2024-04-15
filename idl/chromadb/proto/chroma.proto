@@ -2,19 +2,14 @@ syntax = "proto3";
 
 package chroma;
 
-option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 message Status {
   string reason = 1;
   int32 code = 2; // TODO: What is the enum of this code?
 }
 
-message ChromaResponse {
-  Status status = 1;
-}
-
 // Types here should mirror chromadb/types.py
-
 enum Operation {
     ADD = 0;
     UPDATE = 1;
@@ -38,25 +33,28 @@ enum SegmentScope {
     METADATA = 1;
 }
 
+message FilePaths {
+    repeated string paths = 1;
+}
+
 message Segment {
     string id = 1;
     string type = 2;
     SegmentScope scope = 3;
-    optional string topic = 4; // TODO should channel <> segment binding exist here?
-    // If a segment has a collection, it implies that this segment implements the full
-    // collection and can be used to service queries (for it's given scope.)
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
+    map<string,FilePaths> file_paths = 7;
 }
 
 message Collection {
   string id = 1;
   string name = 2;
-  string topic = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
   string tenant = 6;
   string database = 7;
+  int64 log_position = 8;
+  int32 version = 9;
 }
 
 message Database {
@@ -81,23 +79,21 @@ message UpdateMetadata {
     map<string, UpdateMetadataValue> metadata = 1;
 }
 
-message SubmitEmbeddingRecord {
+// Represents an operation the user submits
+message OperationRecord {
     string id = 1;
     optional Vector vector = 2;
     optional UpdateMetadata metadata = 3;
     Operation operation = 4;
-    string collection_id = 5;
 }
 
 message VectorEmbeddingRecord {
     string id = 1;
-    bytes seq_id = 2;
     Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
 }
 
 message VectorQueryResult {
     string id = 1;
-    bytes seq_id = 2;
     float distance = 3;
     optional Vector vector = 4;
 }

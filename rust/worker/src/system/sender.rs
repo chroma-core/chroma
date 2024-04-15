@@ -51,7 +51,6 @@ where
 }
 
 // Sender
-
 pub(crate) struct Sender<C>
 where
     C: Component + Send + 'static,
@@ -78,6 +77,14 @@ where
             Err(_) => Err(ChannelError::SendError),
         }
     }
+
+    pub(crate) fn as_receiver<M>(&self) -> Box<dyn Receiver<M>>
+    where
+        C: Component + Handler<M>,
+        M: Debug + Send + 'static,
+    {
+        Box::new(ReceiverImpl::new(self.sender.clone()))
+    }
 }
 
 impl<C> Clone for Sender<C>
@@ -94,7 +101,7 @@ where
 // Reciever Traits
 
 #[async_trait]
-pub(crate) trait Receiver<M>: Send + Sync + ReceiverClone<M> {
+pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
     async fn send(&self, message: M) -> Result<(), ChannelError>;
 }
 
@@ -118,7 +125,7 @@ where
 }
 
 // Reciever Impls
-
+#[derive(Debug)]
 pub(super) struct ReceiverImpl<C>
 where
     C: Component,

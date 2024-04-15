@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logservice
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logservice
+  template:
+    metadata:
+      labels:
+        app: logservice
+    spec:
+      serviceAccountName: logservice-serviceaccount
+      containers:
+        - env:
+            {{ range .Values.logService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+          image: "{{ .Values.logService.image.repository }}:{{ .Values.logService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          name: logservice
+          ports:
+            - containerPort: 50051
+              name: grpc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logservice
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: logservice
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: logservice-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

@@ -19,29 +19,44 @@ test("it should create a collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
   expect(collection).toBeDefined();
   expect(collection).toHaveProperty("name");
-  expect(collection).toHaveProperty('id')
+  expect(collection).toHaveProperty("id");
   expect(collection.name).toBe("test");
   let collections = await chroma.listCollections();
-  expect([{ name: "test", metadata: null, id: collection.id, database: "default_database", tenant: "default_tenant" }]).toEqual(
-    expect.arrayContaining(collections)
-  );
+  expect([
+    {
+      name: "test",
+      metadata: null,
+      id: collection.id,
+      database: "default_database",
+      tenant: "default_tenant",
+    },
+  ]).toEqual(expect.arrayContaining(collections));
   expect([{ name: "test2", metadata: null }]).not.toEqual(
-    expect.arrayContaining(collections)
+    expect.arrayContaining(collections),
   );
 
   await chroma.reset();
-  const collection2 = await chroma.createCollection({ name: "test2", metadata: { test: "test" } });
+  const collection2 = await chroma.createCollection({
+    name: "test2",
+    metadata: { test: "test" },
+  });
   expect(collection2).toBeDefined();
   expect(collection2).toHaveProperty("name");
-  expect(collection2).toHaveProperty('id')
+  expect(collection2).toHaveProperty("id");
   expect(collection2.name).toBe("test2");
   expect(collection2).toHaveProperty("metadata");
   expect(collection2.metadata).toHaveProperty("test");
   expect(collection2.metadata).toEqual({ test: "test" });
   let collections2 = await chroma.listCollections();
-  expect([{ name: "test2", metadata: { test: "test" }, id: collection2.id, database: "default_database", tenant: "default_tenant" }]).toEqual(
-    expect.arrayContaining(collections2)
-  );
+  expect([
+    {
+      name: "test2",
+      metadata: { test: "test" },
+      id: collection2.id,
+      database: "default_database",
+      tenant: "default_tenant",
+    },
+  ]).toEqual(expect.arrayContaining(collections2));
 });
 
 test("it should get a collection", async () => {

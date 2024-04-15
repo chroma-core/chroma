@@ -1,14 +1,12 @@
-use std::sync::Arc;
-
-use tokio::select;
-
-use crate::system::ComponentContext;
-
 use super::{
+    scheduler::Scheduler,
     sender::{Sender, Wrapper},
     system::System,
     Component,
 };
+use crate::system::ComponentContext;
+use std::sync::Arc;
+use tokio::select;
 
 struct Inner<C>
 where
@@ -17,6 +15,7 @@ where
     pub(super) sender: Sender<C>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
     pub(super) system: System,
+    pub(super) scheduler: Scheduler,
 }
 
 #[derive(Clone)]
@@ -40,38 +39,49 @@ where
         cancellation_token: tokio_util::sync::CancellationToken,
         handler: C,
         system: System,
+        scheduler: Scheduler,
     ) -> Self {
         ComponentExecutor {
             inner: Arc::new(Inner {
                 sender,
                 cancellation_token,
                 system,
+                scheduler,
             }),
             handler,
         }
     }
 
     pub(super) async fn run(&mut self, mut channel: tokio::sync::mpsc::Receiver<Wrapper<C>>) {
+        self.handler
+            .on_start(&ComponentContext {
+                system: self.inner.system.clone(),
+                sender: self.inner.sender.clone(),
+                cancellation_token: self.inner.cancellation_token.clone(),
+                scheduler: self.inner.scheduler.clone(),
+            })
+            .await;
         loop {
             select! {
-                    _ = self.inner.cancellation_token.cancelled() => {
-                        break;
-                    }
-                    message = channel.recv() => {
-                        match message {
-                            Some(mut message) => {
-                                message.handle(&mut self.handler,
-                                    &ComponentContext{
-                                        system: self.inner.system.clone(),
-                                        sender: self.inner.sender.clone(),
-                                        cancellation_token: self.inner.cancellation_token.clone(),
-                                    }
-                                ).await;
-                            }
-                            None => {
-                                // TODO: Log error
-                            }
+                _ = self.inner.cancellation_token.cancelled() => {
+                    break;
+                }
+                message = channel.recv() => {
+                    match message {
+                        Some(mut message) => {
+                            message.handle(&mut self.handler,
+                                &ComponentContext{
+                                    system: self.inner.system.clone(),
+                                    sender: self.inner.sender.clone(),
+                                    cancellation_token: self.inner.cancellation_token.clone(),
+                                    scheduler: self.inner.scheduler.clone(),
+                                }
+                            ).await;
                         }
+                        None => {
+                            // TODO: Log error
+                        }
+                    }
                 }
             }
         }

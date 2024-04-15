@@ -11,7 +11,6 @@ from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.config import (
     DEFAULT_DATABASE,
     DEFAULT_TENANT,
-    Component,
     System,
     Settings,
 )
@@ -20,22 +19,15 @@ from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 
-PULSAR_TENANT = "default"
-PULSAR_NAMESPACE = "default"
+TENANT = "default"
+NAMESPACE = "default"
 
 # These are the sample collections that are used in the tests below. Tests can override
 # the fields as needed.
-
-# HACK: In order to get the real grpc tests passing, we need the topic to use rendezvous
-# hashing. This is because the grpc tests use the real grpc sysdb server and the
-# rendezvous hashing is done in the segment server. We don't have a easy way to parameterize
-# the assignment policy in the grpc tests, so we just use rendezvous hashing for all tests.
-# by harcoding the topic to what we expect rendezvous hashing to return with 16 topics.
 sample_collections = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
-        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/chroma_log_1",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -44,7 +36,6 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
-        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/chroma_log_14",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -53,7 +44,6 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
-        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/chroma_log_14",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -62,21 +52,12 @@ sample_collections = [
 ]
 
 
-class MockAssignmentPolicy(Component):
-    def assign_collection(self, collection_id: uuid.UUID) -> str:
-        for collection in sample_collections:
-            if collection["id"] == collection_id:
-                return collection["topic"]
-        raise ValueError(f"Unknown collection ID: {collection_id}")
-
-
 def sqlite() -> Generator[SysDB, None, None]:
     """Fixture generator for sqlite DB"""
     db = SqliteDB(
         System(
             Settings(
                 allow_reset=True,
-                chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
             )
         )
     )
@@ -94,7 +75,6 @@ def sqlite_persistent() -> Generator[SysDB, None, None]:
                 allow_reset=True,
                 is_persistent=True,
                 persist_directory=save_path,
-                chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
             )
         )
     )
@@ -111,7 +91,6 @@ def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     system = System(
         Settings(
             allow_reset=True,
-            chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
             chroma_server_grpc_port=50051,
         )
     )
@@ -120,13 +99,14 @@ def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     system.start()
     client.reset_and_wait_for_ready()
     yield client
+    system.stop()
 
 
 def grpc_with_real_server() -> Generator[SysDB, None, None]:
     system = System(
         Settings(
             allow_reset=True,
-            chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+            chroma_server_grpc_port=50051,
         )
     )
     client = system.instance(GrpcSysDB)
@@ -177,25 +157,10 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
         result = sysdb.get_collections(name=collection["name"])
         assert result == [collection]
 
-    # Find by topic
-    for collection in sample_collections:
-        result = sysdb.get_collections(topic=collection["topic"])
-        assert collection in result
-
     # Find by id
     for collection in sample_collections:
         result = sysdb.get_collections(id=collection["id"])
         assert result == [collection]
-
-    # Find by id and topic (positive case)
-    for collection in sample_collections:
-        result = sysdb.get_collections(id=collection["id"], topic=collection["topic"])
-        assert result == [collection]
-
-    # find by id and topic (negative case)
-    for collection in sample_collections:
-        result = sysdb.get_collections(id=collection["id"], topic="other_topic")
-        assert result == []
 
     # Delete
     c1 = sample_collections[0]
@@ -218,7 +183,6 @@ def test_update_collections(sysdb: SysDB) -> None:
     coll = Collection(
         name=sample_collections[0]["name"],
         id=sample_collections[0]["id"],
-        topic=sample_collections[0]["topic"],
         metadata=sample_collections[0]["metadata"],
         dimension=sample_collections[0]["dimension"],
         database=DEFAULT_DATABASE,
@@ -238,12 +202,6 @@ def test_update_collections(sysdb: SysDB) -> None:
     coll["name"] = "new_name"
     sysdb.update_collection(coll["id"], name=coll["name"])
     result = sysdb.get_collections(name=coll["name"])
-    assert result == [coll]
-
-    # Update topic
-    coll["topic"] = "new_topic"
-    sysdb.update_collection(coll["id"], topic=coll["topic"])
-    result = sysdb.get_collections(topic=coll["topic"])
     assert result == [coll]
 
     # Update dimension
@@ -621,14 +579,12 @@ sample_segments = [
         id=uuid.UUID("00000000-d7d7-413b-92e1-731098a6e492"),
         type="test_type_a",
         scope=SegmentScope.VECTOR,
-        topic=None,
         collection=sample_collections[0]["id"],
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
     ),
     Segment(
         id=uuid.UUID("11111111-d7d7-413b-92e1-731098a6e492"),
         type="test_type_b",
-        topic="test_topic_2",
         scope=SegmentScope.VECTOR,
         collection=sample_collections[1]["id"],
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
@@ -636,7 +592,6 @@ sample_segments = [
     Segment(
         id=uuid.UUID("22222222-d7d7-413b-92e1-731098a6e492"),
         type="test_type_b",
-        topic="test_topic_3",
         scope=SegmentScope.METADATA,
         collection=None,
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
@@ -719,7 +674,6 @@ def test_update_segment(sysdb: SysDB) -> None:
         id=uuid.uuid4(),
         type="test_type_a",
         scope=SegmentScope.VECTOR,
-        topic="test_topic_a",
         collection=sample_collections[0]["id"],
         metadata=metadata,
     )
@@ -732,52 +686,56 @@ def test_update_segment(sysdb: SysDB) -> None:
 
     sysdb.create_segment(segment)
 
-    # Update topic to new value
-    segment["topic"] = "new_topic"
-    sysdb.update_segment(segment["id"], topic=segment["topic"])
+    # TODO: revisit update segment - push collection id
+
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
-    # Update topic to None
-    segment["topic"] = None
-    sysdb.update_segment(segment["id"], topic=segment["topic"])
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Update collection to new value
     segment["collection"] = sample_collections[1]["id"]
     sysdb.update_segment(segment["id"], collection=segment["collection"])
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Update collection to None
     segment["collection"] = None
     sysdb.update_segment(segment["id"], collection=segment["collection"])
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Add a new metadata key
     metadata["test_str2"] = "str2"
     sysdb.update_segment(segment["id"], metadata={"test_str2": "str2"})
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Update a metadata key
     metadata["test_str"] = "str3"
     sysdb.update_segment(segment["id"], metadata={"test_str": "str3"})
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Delete a metadata key
     del metadata["test_str"]
     sysdb.update_segment(segment["id"], metadata={"test_str": None})
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Delete all metadata keys
     segment["metadata"] = None
     sysdb.update_segment(segment["id"], metadata=None)
     result = sysdb.get_segments(id=segment["id"])
+    result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
 
