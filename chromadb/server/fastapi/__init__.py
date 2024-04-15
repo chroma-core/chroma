@@ -340,7 +340,6 @@ class FastAPI(Server):
 
     async def version(self) -> str:
         return self._api.get_version()
-
     def auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
@@ -376,6 +375,24 @@ class FastAPI(Server):
             tenant = new_tenant
         if (not database or database == DEFAULT_DATABASE) and new_database:
             database = new_database
+
+        if (self._system.settings.overwrite_singleton_tenant_database_access_from_auth
+                and collection is not None):
+            collec = self._api.get_collection(
+                id=_uuid(collection),
+                name=collection
+            )
+            if not collec:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"collection {collection} not found",
+                )
+            if not tenant:
+                tenant = collec.tenant
+            if not database:
+                database = collec.database
+
+        user_identity = self.authn_provider.authenticate_or_raise(headers)
 
         if not self.authz_provider:
             return (tenant, database)
