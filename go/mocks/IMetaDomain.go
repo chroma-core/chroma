@@ -94,8 +94,6 @@ func (_m *IMetaDomain) NotificationDb(ctx context.Context) dbmodel.INotification
 	return r0
 }
 
-
-
 // SegmentDb provides a mock function with given fields: ctx
 func (_m *IMetaDomain) SegmentDb(ctx context.Context) dbmodel.ISegmentDb {
 	ret := _m.Called(ctx)

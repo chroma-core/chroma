@@ -193,9 +193,9 @@ func (_m *ICoordinator) FlushCollectionCompaction(ctx context.Context, flushColl
 	return r0, r1
 }
 
-// GetCollections provides a mock function with given fields: ctx, collectionID, collectionName, tenantID, dataName
-func (_m *ICoordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, dataName string) ([]*model.Collection, error) {
-	ret := _m.Called(ctx, collectionID, collectionName, tenantID, dataName)
+// GetCollections provides a mock function with given fields: ctx, collectionID, collectionName, tenantID, dataName, limit, offset
+func (_m *ICoordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, dataName string, limit *int32, offset *int32) ([]*model.Collection, error) {
+	ret := _m.Called(ctx, collectionID, collectionName, tenantID, dataName, limit, offset)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollections")
@@ -203,19 +203,19 @@ func (_m *ICoordinator) GetCollections(ctx context.Context, collectionID types.U
 
 	var r0 []*model.Collection
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, string, string) ([]*model.Collection, error)); ok {
-		return rf(ctx, collectionID, collectionName, tenantID, dataName)
+	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, string, string, *int32, *int32) ([]*model.Collection, error)); ok {
+		return rf(ctx, collectionID, collectionName, tenantID, dataName, limit, offset)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, string, string) []*model.Collection); ok {
-		r0 = rf(ctx, collectionID, collectionName, tenantID, dataName)
+	if rf, ok := ret.Get(0).(func(context.Context, types.UniqueID, *string, string, string, *int32, *int32) []*model.Collection); ok {
+		r0 = rf(ctx, collectionID, collectionName, tenantID, dataName, limit, offset)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*model.Collection)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.UniqueID, *string, string, string) error); ok {
-		r1 = rf(ctx, collectionID, collectionName, tenantID, dataName)
+	if rf, ok := ret.Get(1).(func(context.Context, types.UniqueID, *string, string, string, *int32, *int32) error); ok {
+		r1 = rf(ctx, collectionID, collectionName, tenantID, dataName, limit, offset)
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -100,6 +100,8 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	collectionName := req.Name
 	tenantID := req.Tenant
 	databaseName := req.Database
+	limit := req.Limit
+	offset := req.Offset
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 
@@ -110,7 +112,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		return res, nil
 	}
 
-	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName)
+	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
 		res.Status = failResponseWithError(err, errorCode)
