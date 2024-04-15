@@ -1,7 +1,15 @@
 #!/bin/bash
+set -e
 
-echo "Rebuilding hnsw to ensure architecture compatibility"
-pip install --force-reinstall --no-cache-dir chroma-hnswlib
 export IS_PERSISTENT=1
 export CHROMA_SERVER_NOFILE=65535
-exec uvicorn chromadb.app:app --workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30
+args="$@"
+
+if [[ $args =~ ^uvicorn.* ]]; then
+    echo "Starting server with args: $(eval echo "$args")"
+    echo -e "\033[31mWARNING: Please remove 'uvicorn chromadb.app:app' from your command line arguments. This is now handled by the entrypoint script."
+    exec $(eval echo "$args")
+else
+    echo "Starting 'uvicorn chromadb.app:app' with args: $(eval echo "$args")"
+    exec uvicorn chromadb.app:app $(eval echo "$args")
+fi

@@ -1,3 +1,5 @@
+import asyncio
+
 import chromadb
 from contextvars import ContextVar
 from functools import wraps
@@ -9,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+import chromadb
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
@@ -28,7 +31,7 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import resolve_provider
 from chromadb.errors import AuthorizationError
-from chromadb.server.fastapi.utils import fastapi_json_response
+from chromadb.utils.fastapi import fastapi_json_response
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -117,7 +120,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
@@ -173,7 +176,7 @@ def authz_context(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
-        def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+        async def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
             _dynamic_kwargs = {
                 "api": args[0]._api,
                 "function": f,
@@ -213,6 +216,7 @@ def authz_context(
                     )
 
                     if _provider:
+                        # TODO this will block the event loop if it takes too long - refactor for async
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
@@ -239,6 +243,8 @@ def authz_context(
                         ):
                             kwargs["database"].name = desired_database
 
+            if asyncio.iscoroutinefunction(f):
+                return await f(*args, **kwargs)
             return f(*args, **kwargs)
 
         return wrapped
@@ -302,7 +308,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, authz_middleware: FastAPIChromaAuthzMiddleware
     ) -> None:

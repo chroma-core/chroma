@@ -1,5 +1,7 @@
 # type: ignore
+import traceback
 import requests
+from urllib3.connectionpool import InsecureRequestWarning
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
@@ -360,6 +362,7 @@ def test_modify_error_on_existing_name(api):
     with pytest.raises(Exception):
         c2.modify(name="testspace")
 
+
 def test_modify_warn_on_DF_change(api, caplog):
     api.reset()
 
@@ -367,6 +370,7 @@ def test_modify_warn_on_DF_change(api, caplog):
 
     with pytest.raises(Exception, match="not supported") as e:
         collection.modify(metadata={"hnsw:space": "cosine"})
+
 
 def test_metadata_cru(api):
     api.reset()
@@ -1437,6 +1441,7 @@ def test_invalid_embeddings(api):
 
 # test to make sure update shows exception for bad dimensionality
 
+
 def test_dimensionality_exception_update(api):
     api.reset()
     collection = api.create_collection("test_dimensionality_update_exception")
@@ -1446,7 +1451,9 @@ def test_dimensionality_exception_update(api):
         collection.update(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
 
+
 # test to make sure upsert shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_upsert(api):
     api.reset()
@@ -1456,3 +1463,39 @@ def test_dimensionality_exception_upsert(api):
     with pytest.raises(Exception) as e:
         collection.upsert(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
+
+
+def test_ssl_self_signed(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
+    client_ssl.heartbeat()
+
+
+def test_ssl_self_signed_without_ssl_verify(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
+    client_ssl.heartbeat()
+    _port = client_ssl._server._settings.chroma_server_http_port
+    with pytest.raises(ValueError) as e:
+        chromadb.HttpClient(ssl=True, port=_port)
+    stack_trace = traceback.format_exception(
+        type(e.value), e.value, e.value.__traceback__
+    )
+    client_ssl.clear_system_cache()
+    assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
+
+
+def test_ssl_self_signed_with_verify_false(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
+    client_ssl.heartbeat()
+    _port = client_ssl._server._settings.chroma_server_http_port
+    with pytest.warns(InsecureRequestWarning) as record:
+        client = chromadb.HttpClient(
+            ssl=True,
+            port=_port,
+            settings=chromadb.Settings(chroma_server_ssl_verify=False),
+        )
+        client.heartbeat()
+    client_ssl.clear_system_cache()
+    assert "Unverified HTTPS request" in str(record[0].message)

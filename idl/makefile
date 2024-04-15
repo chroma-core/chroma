@@ -10,13 +10,14 @@ proto_python:
 proto_go:
 	@echo "Generating gRPC code for golang..."
 	@protoc \
-		--go_out=../go/coordinator/internal/proto/coordinatorpb \
+		--go_out=../go/pkg/proto/coordinatorpb \
 		--go_opt paths=source_relative \
 		--plugin protoc-gen-go="${GOPATH}/bin/protoc-gen-go" \
-    	--go-grpc_out=../go/coordinator/internal/proto/coordinatorpb \
+    	--go-grpc_out=../go/pkg/proto/coordinatorpb \
     	--go-grpc_opt paths=source_relative \
     	--plugin protoc-gen-go-grpc="${GOPATH}/bin/protoc-gen-go-grpc" \
 	    chromadb/proto/*.proto
-	@mv ../go/coordinator/internal/proto/coordinatorpb/chromadb/proto/*.go ../go/coordinator/internal/proto/coordinatorpb/
-	@rm -rf ../go/coordinator/internal/proto/coordinatorpb/chromadb
+	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/logservice*.go ../go/pkg/proto/logservicepb/
+	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/*.go ../go/pkg/proto/coordinatorpb/
+	@rm -rf ../go/pkg/proto/coordinatorpb/chromadb
 	@echo "Done"

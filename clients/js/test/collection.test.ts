@@ -24,7 +24,7 @@ test("it should modify collection", async () => {
 
   const collection3 = await chroma.createCollection({
     name: original_name,
-    metadata: original_metadata
+    metadata: original_metadata,
   });
   expect(collection3.name).toBe(original_name);
   expect(collection3.metadata).toEqual(original_metadata);
@@ -48,7 +48,10 @@ test("it should modify collection", async () => {
 
 test("it should store metadata", async () => {
   await chroma.reset();
-  const collection = await chroma.createCollection({ name: "test", metadata: { test: "test" } });
+  const collection = await chroma.createCollection({
+    name: "test",
+    metadata: { test: "test" },
+  });
   expect(collection.metadata).toEqual({ test: "test" });
 
   // get the collection

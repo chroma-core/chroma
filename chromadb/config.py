@@ -4,7 +4,7 @@ import logging
 import os
 from abc import ABC
 from graphlib import TopologicalSorter
-from typing import Optional, List, Any, Dict, Set, Iterable
+from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
 
 from overrides import EnforceOverrides
@@ -70,11 +70,12 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
-    "chromadb.ingest.CollectionAssignmentPolicy": "chroma_collection_assignment_policy_impl",  # noqa
+    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
+    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
 }
 
 DEFAULT_TENANT = "default_tenant"
@@ -84,9 +85,12 @@ DEFAULT_DATABASE = "default_database"
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
-    # Legacy config has to be kept around because pydantic will error
+    # Legacy config that has to be kept around because pydantic will error
     # on nonexisting keys
     chroma_db_impl: Optional[str] = None
+    chroma_collection_assignment_policy_impl: str = (
+        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
+    )
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
     chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
@@ -101,14 +105,17 @@ class Settings(BaseSettings):  # type: ignore
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
 
+    chroma_quota_provider_impl: Optional[str] = None
+    chroma_rate_limiting_provider_impl: Optional[str] = None
+
     # Distributed architecture specific components
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
-    chroma_collection_assignment_policy_impl: str = (
-        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
-    )
-    worker_memberlist_name: str = "worker-memberlist"
+    worker_memberlist_name: str = "query-service-memberlist"
     chroma_coordinator_host = "localhost"
+
+    chroma_logservice_host = "localhost"
+    chroma_logservice_port = 50052
 
     tenant_id: str = "default"
     topic_namespace: str = "default"
@@ -116,12 +123,17 @@ class Settings(BaseSettings):  # type: ignore
     is_persistent: bool = False
     persist_directory: str = "./chroma"
 
+    chroma_memory_limit_bytes: int = 0
+    chroma_segment_cache_policy: Optional[str] = None
+
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
-    chroma_server_http_port: Optional[str] = None
+    chroma_server_http_port: Optional[int] = None
     chroma_server_ssl_enabled: Optional[bool] = False
+    # the below config value is only applicable to Chroma HTTP clients
+    chroma_server_ssl_verify: Optional[Union[bool, str]] = None
     chroma_server_api_default_path: Optional[str] = "/api/v1"
-    chroma_server_grpc_port: Optional[str] = None
+    chroma_server_grpc_port: Optional[int] = None
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
@@ -132,10 +144,8 @@ class Settings(BaseSettings):  # type: ignore
         return v
 
     chroma_server_nofile: Optional[int] = None
-
-    pulsar_broker_url: Optional[str] = None
-    pulsar_admin_port: Optional[str] = "8080"
-    pulsar_broker_port: Optional[str] = "6650"
+    # the number of maximum threads to handle synchronous tasks in the FastAPI server
+    chroma_server_thread_pool_size: int = 40
 
     chroma_server_auth_provider: Optional[str] = None
 
@@ -312,6 +322,18 @@ class System(Component):
         for key in _legacy_config_keys:
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
+
+        if (
+            settings["chroma_segment_cache_policy"] is not None
+            and settings["chroma_segment_cache_policy"] != "LRU"
+        ):
+            logger.error(
+                "Failed to set chroma_segment_cache_policy: Only LRU is available."
+            )
+            if settings["chroma_memory_limit_bytes"] == 0:
+                logger.error(
+                    "Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
+                )
 
         # Apply the nofile limit if set
         if settings["chroma_server_nofile"] is not None:

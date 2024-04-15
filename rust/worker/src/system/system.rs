@@ -1,60 +1,58 @@
-use std::fmt::Debug;
-use std::sync::Arc;
-
+use super::scheduler::Scheduler;
+use super::sender::Sender;
+use super::ComponentContext;
+use super::ComponentRuntime;
+use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
 use futures::Stream;
 use futures::StreamExt;
+use std::fmt::Debug;
+use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::{pin, select};
 
-use super::ComponentRuntime;
-// use super::executor::StreamComponentExecutor;
-use super::sender::{self, Sender, Wrapper};
-use super::{executor, ComponentContext};
-use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
-use std::sync::Mutex;
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct System {
-    inner: Arc<Mutex<Inner>>,
+    inner: Arc<Inner>,
 }
 
-struct Inner {}
+#[derive(Debug)]
+struct Inner {
+    scheduler: Scheduler,
+}
 
 impl System {
     pub(crate) fn new() -> System {
         System {
-            inner: Arc::new(Mutex::new(Inner {})),
+            inner: Arc::new(Inner {
+                scheduler: Scheduler::new(),
+            }),
         }
     }
 
-    pub(crate) fn start_component<C>(&mut self, mut component: C) -> ComponentHandle<C>
+    pub(crate) fn start_component<C>(&self, component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
         let sender = Sender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
-        let _ = component.on_start(&ComponentContext {
-            system: self.clone(),
-            sender: sender.clone(),
-            cancellation_token: cancel_token.clone(),
-        });
         let mut executor = ComponentExecutor::new(
             sender.clone(),
             cancel_token.clone(),
             component,
             self.clone(),
+            self.inner.scheduler.clone(),
         );
 
         match C::runtime() {
-            ComponentRuntime::Global => {
+            ComponentRuntime::Inherit => {
                 let join_handle = tokio::spawn(async move { executor.run(rx).await });
                 return ComponentHandle::new(cancel_token, Some(join_handle), sender);
             }
             ComponentRuntime::Dedicated => {
                 println!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
-                let mut rt = Builder::new_current_thread().enable_all().build().unwrap();
+                let rt = Builder::new_current_thread().enable_all().build().unwrap();
                 let join_handle = std::thread::spawn(move || {
                     rt.block_on(async move { executor.run(rx).await });
                 });
@@ -74,8 +72,17 @@ impl System {
             system: self.clone(),
             sender: ctx.sender.clone(),
             cancellation_token: ctx.cancellation_token.clone(),
+            scheduler: ctx.scheduler.clone(),
         };
         tokio::spawn(async move { stream_loop(stream, &ctx).await });
+    }
+
+    pub(crate) async fn stop(&self) {
+        self.inner.scheduler.stop();
+    }
+
+    pub(crate) async fn join(&self) {
+        self.inner.scheduler.join().await;
     }
 }
 

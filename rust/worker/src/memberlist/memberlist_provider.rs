@@ -1,32 +1,31 @@
-use std::sync::Arc;
 use std::{fmt::Debug, sync::RwLock};
 
-use super::config::{CustomResourceMemberlistProviderConfig, MemberlistProviderConfig};
-use crate::system::{Receiver, Sender};
+use super::config::MemberlistProviderConfig;
+use crate::system::Receiver;
 use crate::{
-    config::{Configurable, WorkerConfig},
+    config::Configurable,
     errors::{ChromaError, ErrorCodes},
     system::{Component, ComponentContext, Handler, StreamHandler},
 };
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
-use k8s_openapi::api::events::v1::Event;
+use futures::StreamExt;
+use kube::runtime::watcher::Config;
 use kube::{
     api::Api,
-    config,
-    runtime::{watcher, watcher::Error as WatchError, WatchStreamExt},
+    runtime::{watcher, WatchStreamExt},
     Client, CustomResource,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio_util::sync::CancellationToken;
 
 /* =========== Basic Types ============== */
 pub(crate) type Memberlist = Vec<String>;
 
 #[async_trait]
-pub(crate) trait MemberlistProvider: Component + Configurable {
+pub(crate) trait MemberlistProvider:
+    Component + Configurable<MemberlistProviderConfig>
+{
     fn subscribe(&mut self, receiver: Box<dyn Receiver<Memberlist> + Send>) -> ();
 }
 
@@ -79,7 +78,7 @@ pub(crate) enum CustomResourceMemberlistProviderConfigurationError {
 impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
     fn code(&self) -> crate::errors::ErrorCodes {
         match self {
-            CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(e) => {
+            CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(_e) => {
                 ErrorCodes::Internal
             }
         }
@@ -87,9 +86,11 @@ impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
 }
 
 #[async_trait]
-impl Configurable for CustomResourceMemberlistProvider {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let my_config = match &worker_config.memberlist_provider {
+impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider {
+    async fn try_from_config(
+        config: &MemberlistProviderConfig,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let my_config = match &config {
             MemberlistProviderConfig::CustomResource(config) => config,
         };
         let kube_client = match Client::try_default().await {
@@ -102,14 +103,14 @@ impl Configurable for CustomResourceMemberlistProvider {
         };
         let memberlist_cr_client = Api::<MemberListKubeResource>::namespaced(
             kube_client.clone(),
-            &worker_config.kube_namespace,
+            &my_config.kube_namespace,
         );
 
         let c: CustomResourceMemberlistProvider = CustomResourceMemberlistProvider {
             memberlist_name: my_config.memberlist_name.clone(),
-            kube_ns: worker_config.kube_namespace.clone(),
-            kube_client: kube_client,
-            memberlist_cr_client: memberlist_cr_client,
+            kube_ns: my_config.kube_namespace.clone(),
+            kube_client,
+            memberlist_cr_client,
             queue_size: my_config.queue_size,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
@@ -128,11 +129,11 @@ impl CustomResourceMemberlistProvider {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(kube_client.clone(), &kube_ns);
         CustomResourceMemberlistProvider {
-            memberlist_name: memberlist_name,
-            kube_ns: kube_ns,
-            kube_client: kube_client,
-            memberlist_cr_client: memberlist_cr_client,
-            queue_size: queue_size,
+            memberlist_name,
+            kube_ns,
+            kube_client,
+            memberlist_cr_client,
+            queue_size,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
         }
@@ -142,17 +143,21 @@ impl CustomResourceMemberlistProvider {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(self.kube_client.clone(), &self.kube_ns);
 
-        let stream = watcher(memberlist_cr_client, watcher::Config::default())
+        let field_selector = format!("metadata.name={}", self.memberlist_name);
+        let conifg = Config::default().fields(&field_selector);
+
+        let stream = watcher(memberlist_cr_client, conifg)
             .default_backoff()
             .applied_objects();
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
                     let event = event;
+                    println!("Kube stream event: {:?}", event);
                     Some(event)
                 }
                 Err(err) => {
-                    println!("Error A: {}", err);
+                    println!("Error acquiring memberlist: {}", err);
                     None
                 }
             }
@@ -163,7 +168,7 @@ impl CustomResourceMemberlistProvider {
     async fn notify_subscribers(&self) -> () {
         let curr_memberlist = match self.current_memberlist.read() {
             Ok(curr_memberlist) => curr_memberlist.clone(),
-            Err(err) => {
+            Err(_err) => {
                 // TODO: Log error and attempt recovery
                 return;
             }
@@ -175,12 +180,13 @@ impl CustomResourceMemberlistProvider {
     }
 }
 
+#[async_trait]
 impl Component for CustomResourceMemberlistProvider {
     fn queue_size(&self) -> usize {
         self.queue_size
     }
 
-    fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
         self.connect_to_kube_stream(ctx);
     }
 }
@@ -194,6 +200,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
     ) {
         match event {
             Some(memberlist) => {
+                println!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {
@@ -215,7 +222,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                         Ok(mut curr_memberlist) => {
                             *curr_memberlist = memberlist;
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             // TODO: Log an error
                         }
                     }
@@ -255,7 +262,7 @@ mod tests {
         let kube_ns = "chroma".to_string();
         let kube_client = Client::try_default().await.unwrap();
         let memberlist_provider = CustomResourceMemberlistProvider::new(
-            "worker-memberlist".to_string(),
+            "query-service-memberlist".to_string(),
             kube_client.clone(),
             kube_ns.clone(),
             10,
