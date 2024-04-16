@@ -25,7 +25,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from overrides import override
 from collections import defaultdict
-from typing import Sequence, Tuple, Optional, Dict, Set, Tuple, cast, Any
+from typing import Sequence, Optional, Dict, Set, Tuple, cast, Any
 from uuid import UUID
 from pypika import Table, functions
 import uuid
@@ -94,7 +94,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         self._subscriptions = defaultdict(set)
         self._max_batch_size = None
         self._opentelemetry_client = system.require(OpenTelemetryClient)
-        self._batch_ingestion = system.settings.require("batch_ingest")
+        self._batch_ingestion = system.settings.require("background_ingest")
         self._tenant = system.settings.require("tenant_id")
         self._topic_namespace = system.settings.require("topic_namespace")
         super().__init__(system)
@@ -318,7 +318,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     def _get_backfill_batch(
         self, topic_name: str, min_seq_id: int, max_seq_id: int
-    ) -> Sequence[EmbeddingRecord]:
+    ) -> Sequence[OperationRecord]:
         """Backfill batch with data for the given topic and seq_id range"""
         t = Table("embeddings_queue")
         q = (
@@ -343,8 +343,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     encoding = None
                     vector = None
                 embedding_records.append(
-                    EmbeddingRecord(
-                        seq_id=row[0],
+                    OperationRecord(
                         operation=_operation_codes_inv[row[1]],
                         id=row[2],
                         embedding=vector,

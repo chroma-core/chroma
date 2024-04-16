@@ -122,7 +122,7 @@ class Settings(BaseSettings):  # type: ignore
 
     is_persistent: bool = False
     persist_directory: str = "./chroma"
-    batch_ingest: bool = False
+    background_ingest: bool = False
 
     chroma_memory_limit_bytes: int = 0
     chroma_segment_cache_policy: Optional[str] = None
