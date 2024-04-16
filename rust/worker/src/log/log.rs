@@ -31,6 +31,7 @@ pub(crate) struct CollectionRecord {
     pub(crate) last_compaction_time: i64,
     pub(crate) first_record_time: i64,
     pub(crate) offset: i64,
+    pub(crate) collection_version: i32,
 }
 
 #[async_trait]

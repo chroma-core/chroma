@@ -32,7 +32,7 @@ type CollectionAndMetadata struct {
 
 //go:generate mockery --name=ICollectionDb
 type ICollectionDb interface {
-	GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string) ([]*CollectionAndMetadata, error)
+	GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
 	DeleteCollectionByID(collectionID string) (int, error)
 	Insert(in *Collection) error
 	Update(in *Collection) error

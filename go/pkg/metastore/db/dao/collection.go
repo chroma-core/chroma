@@ -26,7 +26,7 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	var getCollectionInput strings.Builder
 	getCollectionInput.WriteString("GetCollections input: ")
 
@@ -37,6 +37,15 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.id")
+	if limit != nil {
+		query = query.Limit(int(*limit))
+		getCollectionInput.WriteString("limit: " + string(*limit) + ", ")
+	}
+
+	if offset != nil {
+		query = query.Offset(int(*offset))
+		getCollectionInput.WriteString("offset: " + string(*offset) + ", ")
+	}
 
 	if databaseName != "" {
 		query = query.Where("databases.name = ?", databaseName)

@@ -148,7 +148,6 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_pull_logs() {

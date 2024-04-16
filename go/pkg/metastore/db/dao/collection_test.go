@@ -65,7 +65,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 		suite.NoError(err)
 		suite.Equal(collectionID, scanedCollectionID)
 	}
-	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName)
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
@@ -75,16 +75,37 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 
 	// Test when filtering by ID
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test when filtering by name
-	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseName)
+	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
+
+	// Test limit and offset
+	collection2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
+	suite.NoError(err)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(collections, 2)
+	limit := int32(1)
+	offset := int32(1)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(collectionID, collections[0].Collection.ID)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(collection2, collections[0].Collection.ID)
+	offset = int32(2)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
+	suite.NoError(err)
+	suite.Nil(collections)
 
 	// clean up
 	err = CleanUpTestCollection(suite.db, collectionID)
@@ -95,7 +116,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion
 	collectionName := "test_collection_get_collections"
 	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	// verify default values
-	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "")
+	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(int64(0), collections[0].Collection.LogPosition)
@@ -105,7 +126,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion
 	version, err := suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(10), 0)
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
-	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "")
+	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.Len(collections, 1)
 	suite.Equal(int64(10), collections[0].Collection.LogPosition)
 	suite.Equal(int32(1), collections[0].Collection.Version)

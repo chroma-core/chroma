@@ -126,20 +126,7 @@ func (_m *IMetaDomain) TenantDb(ctx context.Context) dbmodel.ITenantDb {
 	return r0
 }
 
-func (_m *IMetaDomain) RecordLogDb(ctx context.Context) dbmodel.IRecordLogDb {
-	ret := _m.Called(ctx)
 
-	var r0 dbmodel.IRecordLogDb
-	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IRecordLogDb); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(dbmodel.IRecordLogDb)
-		}
-	}
-
-	return r0
-}
 
 // NewIMetaDomain creates a new instance of IMetaDomain. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.

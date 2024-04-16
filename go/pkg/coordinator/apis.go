@@ -18,7 +18,7 @@ type ICoordinator interface {
 	common.Component
 	ResetState(ctx context.Context) error
 	CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error)
-	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, dataName string) ([]*model.Collection, error)
+	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, dataName string, limit *int32, offset *int32) ([]*model.Collection, error)
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
 	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
 	CreateSegment(ctx context.Context, createSegment *model.CreateSegment) error
@@ -79,8 +79,8 @@ func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *mo
 	return collection, nil
 }
 
-func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) ([]*model.Collection, error) {
-	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName)
+func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
+	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
 
 func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {

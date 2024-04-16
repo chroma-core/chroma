@@ -16,3 +16,17 @@ clean:
 
 docker:
 	docker build -t chroma-coordinator:latest .
+
+### LOG SERVICE
+DATABABASE_LOG_DIR := database/log
+
+log_db_clean:
+	rm -rf $(DATABABASE_LOG_DIR)/db
+
+.PHONY: quota_db_generate
+log_db_generate: log_db_clean
+	sqlc generate -f $(DATABABASE_LOG_DIR)/sqlc.yaml
+
+log_db_migration:
+	 atlas migrate diff initial --to file://$(DATABABASE_LOG_DIR)/schema --dev-url "docker://postgres/15/dev"  --format '{{ sql . "  " }}' --dir file://$(DATABABASE_LOG_DIR)/migrations
+

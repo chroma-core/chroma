@@ -4,7 +4,6 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
 };
 use std::collections::HashMap;
-use std::vec::Vec;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -102,7 +101,6 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
     use crate::types::MetadataValue;

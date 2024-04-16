@@ -31,12 +31,6 @@ spec:
               {{ .Values.frontendService.consumerImpl }}
             - name: CHROMA_SEGMENT_MANAGER_IMPL
               {{ .Values.frontendService.segmentManagerImpl }}
-            - name: PULSAR_BROKER_URL
-              {{ .Values.frontendService.pulsarBrokerUrl }}
-            - name: PULSAR_BROKER_PORT
-              {{ .Values.frontendService.pulsarBrokerPort }}
-            - name: PULSAR_ADMIN_PORT
-              {{ .Values.frontendService.pulsarAdminPort }}
             - name: ALLOW_RESET
               {{ .Values.frontendService.allowReset }}
             - name: CHROMA_SYSDB_IMPL
