@@ -141,6 +141,8 @@ class ServerAuthenticationProvider(Component):
           return that database as its second return value. If the user has
           access to multiple tenants and/or databases, including "*", this
           function will return None for the corresponding value(s).
+        - If the user has access to multiple tenants and/or databases this
+          function will return None for the corresponding value(s).
         """
         if (not self.overwrite_singleton_tenant_database_access_from_auth or
                 not user):

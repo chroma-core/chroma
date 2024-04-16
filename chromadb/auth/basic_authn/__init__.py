@@ -1,4 +1,5 @@
 import base64
+import bcrypt
 import importlib
 import logging
 
@@ -40,7 +41,6 @@ class BasicAuthClientProvider(ClientAuthProvider):
 
     @override
     def authenticate(self) -> ClientAuthHeaders:
-        # We do this goofy encode-decode dance to make the type checker happy.
         encoded = base64.b64encode(
             f"{self._creds.get_secret_value()}".encode("utf-8")
         ).decode(
@@ -65,15 +65,6 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-
-        try:
-            # We need this to check passwords
-            self.bc = importlib.import_module("bcrypt")
-        except ImportError:
-            raise ValueError(
-                "The bcrypt python package is not installed. "
-                "Please install it with `pip install bcrypt`"
-            )
 
         self._creds: Dict[str, SecretStr] = {}
         creds = self.read_creds_or_creds_file()
@@ -115,7 +106,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 raise HTTPException(status_code=401, detail="Unauthorized")
 
             _usr_check = username in self._creds
-            _pwd_check = self.bc.checkpw(
+            _pwd_check = bcrypt.checkpw(
                 password.encode("utf-8"),
                 self._creds[username].get_secret_value().encode("utf-8"),
             )
@@ -127,4 +118,4 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 "BasicAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=403, detail="Forbidden")

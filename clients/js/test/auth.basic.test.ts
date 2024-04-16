@@ -16,7 +16,7 @@ test("it should get the heartbeat without auth needed", async () => {
 
 test("it should raise error when non authenticated", async () => {
   await expect(chromaNoAuth.listCollections()).rejects.toMatchObject({
-    status: 401,
+    status: 403,
   });
 });
 

@@ -188,4 +188,4 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                 "TokenAuthenticationServerProvider.authenticate "
                 f"failed: {repr(e)}"
             )
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=403, detail="Forbidden")

@@ -77,4 +77,4 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
             f"[{action}] [{resource}]"
         )
         if not policy_decision:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=403, detail="Forbidden")
