@@ -1,7 +1,9 @@
 import logging
 import string
+
 from enum import Enum
-from typing import List, Optional, TypedDict, cast, TypeVar
+from starlette.datastructures import Headers
+from typing import cast, Dict, List, Optional, TypedDict, TypeVar
 
 from fastapi import HTTPException
 from overrides import override
@@ -19,8 +21,6 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from starlette.datastructures import Headers
-from typing import Dict
 
 T = TypeVar("T")
 
