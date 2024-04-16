@@ -127,6 +127,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._id_to_seq_id,
             )
 
+    @trace_method("LocalHnswSegment.stop", OpenTelemetryGranularity.ALL)
+    @override
+    def stop(self) -> None:
+        super().stop()
+        self.close_persistent_index()
+
     @staticmethod
     @override
     def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:

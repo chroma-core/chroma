@@ -439,6 +439,11 @@ class BaseAPI(ABC):
         to submit_embeddings."""
         pass
 
+    @abstractmethod
+    def close(self) -> None:
+        """Close the client and release any resources."""
+        pass
+
 
 class ClientAPI(BaseAPI, ABC):
     tenant: str
@@ -471,6 +476,11 @@ class ClientAPI(BaseAPI, ABC):
     def clear_system_cache() -> None:
         """Clear the system cache so that new systems can be created for an existing path.
         This should only be used for testing purposes."""
+        pass
+
+    @abstractmethod
+    def close(self) -> None:
+        """Close the client and release any resources."""
         pass
 
 
