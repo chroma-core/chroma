@@ -117,7 +117,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
 
             num_records_read += logs.len();
             offset += batch_size as i64;
-            result.append(&mut logs);
+            result.extend_from_slice(&logs);
 
             // We used a a timestamp and we didn't get a full batch, so we have retrieved
             // the last batch of logs relevant to our query

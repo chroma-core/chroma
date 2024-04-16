@@ -21,6 +21,10 @@ query_service:
     storage:
         S3:
             bucket: "chroma-storage"
+    log_cache:
+        capacity: 100000
+        shard_num: 1
+        eviction: Lru
     log:
         Grpc:
             host: "logservice.chroma"

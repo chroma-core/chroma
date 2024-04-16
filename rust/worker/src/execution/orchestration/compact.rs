@@ -19,7 +19,6 @@ use crate::system::Handler;
 use crate::system::Receiver;
 use crate::system::System;
 use crate::types::SegmentFlushInfo;
-use arrow::compute::kernels::partition;
 use async_trait::async_trait;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
