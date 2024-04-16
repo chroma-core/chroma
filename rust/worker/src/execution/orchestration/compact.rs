@@ -179,7 +179,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task).await {
+        match self.dispatcher.send(task, None).await {
             Ok(_) => (),
             Err(e) => {
                 // TODO: log an error and reply to caller
