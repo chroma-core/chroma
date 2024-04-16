@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -27,6 +28,7 @@ type LogServerTestSuite struct {
 	logServer logservicepb.LogServiceServer
 	model     ModelState
 	t         *testing.T
+	lr        *repository.LogRepository
 }
 
 func (suite *LogServerTestSuite) SetupSuite() {
@@ -40,8 +42,8 @@ func (suite *LogServerTestSuite) SetupSuite() {
 	assert.NoError(suite.t, err, "Failed to create new pg connection")
 	err = libs2.RunMigration(ctx, connectionString)
 	assert.NoError(suite.t, err, "Failed to run migration")
-	lr := repository.NewLogRepository(conn)
-	suite.logServer = NewLogServer(lr)
+	suite.lr = repository.NewLogRepository(conn)
+	suite.logServer = NewLogServer(suite.lr)
 	suite.model = ModelState{
 		CollectionData:             map[types.UniqueID][]*coordinatorpb.OperationRecord{},
 		CollectionCompactionOffset: map[types.UniqueID]int64{},
@@ -117,7 +119,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 					CollectionId:    c.String(),
 					StartFromOffset: startOffset,
 					BatchSize:       batchSize,
-					EndTimestamp:    time.Now().Unix(),
+					EndTimestamp:    time.Now().UnixNano(),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -147,6 +149,20 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 					}
 					if firstRecord.LogOffset != startOffset {
 						t.Fatalf("expect first record %d, got %d", startOffset, firstRecord.LogOffset)
+					}
+				}
+			},
+			"purgeLogs": func(t *rapid.T) {
+				err := suite.lr.PurgeRecords(ctx)
+				suite.NoError(err)
+				for id, offset := range suite.model.CollectionCompactionOffset {
+					if offset != 0 {
+						var records []log.RecordLog
+						records, err = suite.lr.PullRecords(ctx, id.String(), 0, 1, time.Now().UnixNano())
+						suite.NoError(err)
+						if len(records) > 0 {
+							suite.Equal(offset, records[0].Offset)
+						}
 					}
 				}
 			},
