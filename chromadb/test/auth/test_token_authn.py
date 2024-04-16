@@ -82,4 +82,4 @@ def test_fastapi_server_token_authn_rejects_when_it_should_reject(
             with pytest.raises(Exception) as e:
                 api.list_collections()
 
-            assert "Unauthorized" in str(e)
+            assert "Forbidden" in str(e)
