@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbcore"
@@ -95,10 +96,12 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	limit := int32(1)
 	offset := int32(1)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
+	fmt.Println("collections", collections)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
+	fmt.Println("collections", collections)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collection2, collections[0].Collection.ID)
