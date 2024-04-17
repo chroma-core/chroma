@@ -1,5 +1,6 @@
 import gc
 import math
+from time import sleep
 
 import psutil
 
@@ -174,8 +175,17 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
     """
     current_process = psutil.Process()
     open_files = current_process.open_files()
-    if len([p.path for p in open_files if "sqlite3" in p.path]) - 1 <= threadpool_size:
+    max_retries = 5
+    retry_count = 0
+    # we probably don't need the below but we keep it to avoid flaky tests.
+    while (
+        len([p.path for p in open_files if "sqlite3" in p.path]) - 1 > threadpool_size
+        and retry_count < max_retries
+    ):
         gc.collect()  # GC to collect the orphaned TLS objects
+        open_files = current_process.open_files()
+        retry_count += 1
+        sleep(1)
     assert (
         len([p.path for p in open_files if "sqlite3" in p.path]) - 1 <= threadpool_size
     )
