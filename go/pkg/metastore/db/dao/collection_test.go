@@ -91,12 +91,19 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collection2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
 	suite.NoError(err)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	fmt.Println("PRINT COLLECTIONS 1")
+	for _, c := range collections {
+		fmt.Println("COLLECTIIONS NICO", c.Collection.ID, c.Collection.CreatedAt)
+	}
 	suite.NoError(err)
 	suite.Len(collections, 2)
 	limit := int32(1)
 	offset := int32(1)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
-	fmt.Println("collections", collections)
+	fmt.Println("PRINT COLLECTIONS 2")
+	for _, c := range collections {
+		fmt.Println("COLLECTIIONS NICO", c.Collection.ID, c.Collection.CreatedAt)
+	}
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
