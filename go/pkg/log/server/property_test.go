@@ -124,6 +124,18 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// Verify that the number of records returned is correct
+				if len(suite.model.CollectionData[c]) > int(startOffset) {
+					if len(suite.model.CollectionData[c])-int(startOffset) < int(batchSize) {
+						suite.Equal(len(response.Records), len(suite.model.CollectionData[c])-int(startOffset)+1)
+					} else {
+						suite.Equal(len(response.Records), int(batchSize))
+					}
+				}
+				// Verify that the first record offset is correct
+				if len(response.Records) > 0 {
+					suite.Equal(response.Records[0].LogOffset, startOffset)
+				}
 				// Verify that record returned is matching the expected record
 				for _, record := range response.Records {
 					expectedRecord := suite.model.CollectionData[c][record.LogOffset-1]
@@ -155,6 +167,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 			"purgeLogs": func(t *rapid.T) {
 				err := suite.lr.PurgeRecords(ctx)
 				suite.NoError(err)
+				// Verify that all record logs are purged
 				for id, offset := range suite.model.CollectionCompactionOffset {
 					if offset != 0 {
 						var records []log.RecordLog
