@@ -138,7 +138,7 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 			return "", err
 		}
 	}
-
+	time.Sleep(100 * time.Millisecond)
 	return collectionId, nil
 }
 
