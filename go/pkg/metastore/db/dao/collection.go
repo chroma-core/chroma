@@ -36,7 +36,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, collections.created_at, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Order("collections.id")
+		Order("collections.id asc")
 	if limit != nil {
 		query = query.Limit(int(*limit))
 		getCollectionInput.WriteString("limit: " + string(*limit) + ", ")
