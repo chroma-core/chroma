@@ -3,17 +3,16 @@ from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
-from chromadb.utils.messageid import bytes_to_int, int_to_bytes
 from chromadb.types import (
     Collection,
-    EmbeddingRecord,
+    LogRecord,
     Metadata,
     Operation,
     ScalarEncoding,
     Segment,
     SegmentScope,
     SeqId,
-    SubmitEmbeddingRecord,
+    OperationRecord,
     UpdateMetadata,
     Vector,
     VectorEmbeddingRecord,
@@ -42,7 +41,7 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
 
 def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
     encoding = vector.encoding
-    as_array: array.array[float] | array.array[int]
+    as_array: Union[array.array[float], array.array[int]]
     if encoding == proto.ScalarEncoding.FLOAT32:
         as_array = array.array("f")
         out_encoding = ScalarEncoding.FLOAT32
@@ -112,17 +111,18 @@ def to_proto_update_metadata(metadata: UpdateMetadata) -> proto.UpdateMetadata:
 
 
 def from_proto_submit(
-    submit_embedding_record: proto.SubmitEmbeddingRecord, seq_id: SeqId
-) -> EmbeddingRecord:
-    embedding, encoding = from_proto_vector(submit_embedding_record.vector)
-    record = EmbeddingRecord(
-        id=submit_embedding_record.id,
-        seq_id=seq_id,
-        embedding=embedding,
-        encoding=encoding,
-        metadata=from_proto_update_metadata(submit_embedding_record.metadata),
-        operation=from_proto_operation(submit_embedding_record.operation),
-        collection_id=UUID(hex=submit_embedding_record.collection_id),
+    operation_record: proto.OperationRecord, seq_id: SeqId
+) -> LogRecord:
+    embedding, encoding = from_proto_vector(operation_record.vector)
+    record = LogRecord(
+        log_offset=seq_id,
+        record=OperationRecord(
+            id=operation_record.id,
+            embedding=embedding,
+            encoding=encoding,
+            metadata=from_proto_update_metadata(operation_record.metadata),
+            operation=from_proto_operation(operation_record.operation),
+        ),
     )
     return record
 
@@ -132,7 +132,6 @@ def from_proto_segment(segment: proto.Segment) -> Segment:
         id=UUID(hex=segment.id),
         type=segment.type,
         scope=from_proto_segment_scope(segment.scope),
-        topic=segment.topic if segment.HasField("topic") else None,
         collection=None
         if not segment.HasField("collection")
         else UUID(hex=segment.collection),
@@ -147,7 +146,6 @@ def to_proto_segment(segment: Segment) -> proto.Segment:
         id=segment["id"].hex,
         type=segment["type"],
         scope=to_proto_segment_scope(segment["scope"]),
-        topic=segment["topic"],
         collection=None if segment["collection"] is None else segment["collection"].hex,
         metadata=None
         if segment["metadata"] is None
@@ -195,7 +193,6 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
-        topic=collection.topic,
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,
@@ -211,7 +208,6 @@ def to_proto_collection(collection: Collection) -> proto.Collection:
     return proto.Collection(
         id=collection["id"].hex,
         name=collection["name"],
-        topic=collection["topic"],
         metadata=None
         if collection["metadata"] is None
         else to_proto_update_metadata(collection["metadata"]),
@@ -238,8 +234,8 @@ def to_proto_operation(operation: Operation) -> proto.Operation:
 
 
 def to_proto_submit(
-    submit_record: SubmitEmbeddingRecord,
-) -> proto.SubmitEmbeddingRecord:
+    submit_record: OperationRecord,
+) -> proto.OperationRecord:
     vector = None
     if submit_record["embedding"] is not None and submit_record["encoding"] is not None:
         vector = to_proto_vector(submit_record["embedding"], submit_record["encoding"])
@@ -248,12 +244,11 @@ def to_proto_submit(
     if submit_record["metadata"] is not None:
         metadata = to_proto_update_metadata(submit_record["metadata"])
 
-    return proto.SubmitEmbeddingRecord(
+    return proto.OperationRecord(
         id=submit_record["id"],
         vector=vector,
         metadata=metadata,
         operation=to_proto_operation(submit_record["operation"]),
-        collection_id=submit_record["collection_id"].hex,
     )
 
 
@@ -262,7 +257,6 @@ def from_proto_vector_embedding_record(
 ) -> VectorEmbeddingRecord:
     return VectorEmbeddingRecord(
         id=embedding_record.id,
-        seq_id=from_proto_seq_id(embedding_record.seq_id),
         embedding=from_proto_vector(embedding_record.vector)[0],
     )
 
@@ -273,7 +267,6 @@ def to_proto_vector_embedding_record(
 ) -> proto.VectorEmbeddingRecord:
     return proto.VectorEmbeddingRecord(
         id=embedding_record["id"],
-        seq_id=to_proto_seq_id(embedding_record["seq_id"]),
         vector=to_proto_vector(embedding_record["embedding"], encoding),
     )
 
@@ -283,15 +276,6 @@ def from_proto_vector_query_result(
 ) -> VectorQueryResult:
     return VectorQueryResult(
         id=vector_query_result.id,
-        seq_id=from_proto_seq_id(vector_query_result.seq_id),
         distance=vector_query_result.distance,
         embedding=from_proto_vector(vector_query_result.vector)[0],
     )
-
-
-def to_proto_seq_id(seq_id: SeqId) -> bytes:
-    return int_to_bytes(seq_id)
-
-
-def from_proto_seq_id(seq_id: bytes) -> SeqId:
-    return bytes_to_int(seq_id)

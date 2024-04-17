@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-deployment
+  namespace: chroma
+spec:
+  selector:
+    matchLabels:
+      app: minio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      volumes:
+        - name: minio
+          emptyDir: {}
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args:
+            - server
+            - /storage
+          env:
+            - name: MINIO_ACCESS_KEY
+              value: "minio"
+            - name: MINIO_SECRET_KEY
+              value: "minio123"
+          ports:
+            - containerPort: 9000
+              hostPort: 9000
+              name: http
+          volumeMounts:
+            - name: minio
+              mountPath: /storage
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-lb
+  namespace: chroma
+spec:
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+  selector:
+    app: minio
+  type: LoadBalancer

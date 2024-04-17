@@ -24,7 +24,7 @@ const collection = await chroma.createCollection({ name: "test-from-js" });
 for (let i = 0; i < 20; i++) {
   await collection.add({
     ids: ["test-id-" + i.toString()],
-    embeddings, [1, 2, 3, 4, 5],
+    embeddings: [1, 2, 3, 4, 5],
     documents: ["test"],
   });
 }
@@ -41,4 +41,3 @@ const queryData = await collection.query({
 ## License
 
 Apache 2.0
-

@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -16,10 +16,11 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
+from tenacity import retry
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
-
+META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
@@ -145,18 +146,8 @@ Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
-class EmbeddingFunction(Protocol[D]):
-    def __call__(self, input: D) -> Embeddings:
-        ...
-
-
 Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
-
-
-class DataLoader(Protocol[L]):
-    def __call__(self, uris: Sequence[Optional[URI]]) -> L:
-        ...
 
 
 class GetResult(TypedDict):
@@ -189,13 +180,23 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-Embeddable = Union[Documents, Images]
-D = TypeVar("D", bound=Embeddable, contravariant=True)
-
-
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        # Raise an exception if __call__ is not defined since it is expected to be defined
+        call = getattr(cls, "__call__")
+
+        def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
+            result = call(self, input)
+            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+
+        setattr(cls, "__call__", __call__)
+
+    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
+        return retry(**retry_kwargs)(self.__call__)(input)
 
 
 def validate_embedding_function(
@@ -214,9 +215,6 @@ def validate_embedding_function(
         )
 
 
-L = TypeVar("L", covariant=True)
-
-
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
         ...
@@ -225,9 +223,9 @@ class DataLoader(Protocol[L]):
 def validate_ids(ids: IDs) -> IDs:
     """Validates ids to ensure it is a list of strings"""
     if not isinstance(ids, list):
-        raise ValueError(f"Expected IDs to be a list, got {ids}")
+        raise ValueError(f"Expected IDs to be a list, got {type(ids).__name__} as IDs")
     if len(ids) == 0:
-        raise ValueError(f"Expected IDs to be a non-empty list, got {ids}")
+        raise ValueError(f"Expected IDs to be a non-empty list, got {len(ids)} IDs")
     seen = set()
     dups = set()
     for id_ in ids:
@@ -261,20 +259,28 @@ def validate_ids(ids: IDs) -> IDs:
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
     if not isinstance(metadata, dict) and metadata is not None:
-        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a dict or None, got {type(metadata).__name__} as metadata"
+        )
     if metadata is None:
         return metadata
     if len(metadata) == 0:
-        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a non-empty dict, got {len(metadata)} metadata attributes"
+        )
     for key, value in metadata.items():
-        if not isinstance(key, str):
+        if key == META_KEY_CHROMA_DOCUMENT:
             raise ValueError(
-                f"Expected metadata key to be a str, got {key} which is a {type(key)}"
+                f"Expected metadata to not contain the reserved key {META_KEY_CHROMA_DOCUMENT}"
+            )
+        if not isinstance(key, str):
+            raise TypeError(
+                f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         if not isinstance(value, bool) and not isinstance(value, (str, int, float)):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float or bool, got {value} which is a {type(value)}"
+                f"Expected metadata value to be a str, int, float or bool, got {value} which is a {type(value).__name__}"
             )
     return metadata
 
@@ -282,7 +288,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
     if not isinstance(metadata, dict) and metadata is not None:
-        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a dict or None, got {type(metadata)}"
+        )
     if metadata is None:
         return metadata
     if len(metadata) == 0:
@@ -469,16 +477,23 @@ def validate_n_results(n_results: int) -> int:
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
-        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+        raise ValueError(
+            f"Expected embeddings to be a list, got {type(embeddings).__name__}"
+        )
     if len(embeddings) == 0:
         raise ValueError(
-            f"Expected embeddings to be a list with at least one item, got {embeddings}"
+            f"Expected embeddings to be a list with at least one item, got {len(embeddings)} embeddings"
         )
     if not all([isinstance(e, list) for e in embeddings]):
         raise ValueError(
-            f"Expected each embedding in the embeddings to be a list, got {embeddings}"
+            "Expected each embedding in the embeddings to be a list, got "
+            f"{list(set([type(e).__name__ for e in embeddings]))}"
         )
-    for embedding in embeddings:
+    for i, embedding in enumerate(embeddings):
+        if len(embedding) == 0:
+            raise ValueError(
+                f"Expected each embedding in the embeddings to be a non-empty list, got empty embedding at pos {i}"
+            )
         if not all(
             [
                 isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -486,7 +501,8 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             ]
         ):
             raise ValueError(
-                f"Expected each value in the embedding to be a int or float, got {embeddings}"
+                "Expected each value in the embedding to be a int or float, got an embedding with "
+                f"{list(set([type(value).__name__ for value in embedding]))} - {embedding}"
             )
     return embeddings
 

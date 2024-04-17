@@ -78,7 +78,7 @@ class DistributedSegmentManager(SegmentManager):
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     @override
-    def get_segment(self, collection_id: UUID, type: type[S]) -> S:
+    def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         if type == MetadataReader:
             scope = SegmentScope.METADATA
         elif type == VectorReader:
@@ -125,7 +125,7 @@ class DistributedSegmentManager(SegmentManager):
                     collection=collection_id, scope=SegmentScope.VECTOR
                 )
                 known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
-                segment = next(filter(lambda s: s["type"] in known_types, segments))
+                segment = next(filter(lambda s: s["type"] in known_types, segments))  # noqa
                 # grpc_url = self._segment_directory.get_segment_endpoint(segment)
 
                 # if grpc_url not in self._segment_server_stubs:
@@ -172,7 +172,6 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
         id=uuid4(),
         type=type.value,
         scope=scope,
-        topic=collection["topic"],
         collection=collection["id"],
         metadata=metadata,
     )

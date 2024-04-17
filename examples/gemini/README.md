@@ -10,7 +10,7 @@ The basic flow is as follows:
 0. The text documents in the `documents` folder are loaded line by line, then embedded and stored in a Chroma collection.
 
 1. When the user submits a question, it gets embedded using the same model as the documents, and the lines most relevant to the query are retrieved by Chroma.
-2. The user-submitted question is passed to Google Gemini's API, along with the extra context retrieved by Chroma. The Google Gemini API generates generates a response.
+2. The user-submitted question is passed to Google Gemini's API, along with the extra context retrieved by Chroma. The Google Gemini API generates a response.
 3. The response is displayed to the user, along with the lines used as extra context.
 
 ## Running the example

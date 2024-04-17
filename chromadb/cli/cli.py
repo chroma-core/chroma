@@ -1,4 +1,7 @@
+import logging
 from typing import Optional
+
+import yaml
 from typing_extensions import Annotated
 import typer
 import uvicorn
@@ -6,6 +9,7 @@ import os
 import webbrowser
 
 from chromadb.utils.client_utils import _upgrade_check
+from chromadb.cli.utils import set_log_file_path
 
 app = typer.Typer()
 
@@ -27,14 +31,17 @@ _logo = """
 
 @app.command()  # type: ignore
 def run(
-    path: str = typer.Option(
-        "./chroma_data", help="The path to the file or directory."
-    ),
-    host: Annotated[
-        Optional[str], typer.Option(help="The host to listen to. Default: localhost")
-    ] = "localhost",
-    port: int = typer.Option(8000, help="The port to run the server on."),
-    test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
+        path: str = typer.Option(
+            "./chroma_data", help="The path to the file or directory."
+        ),
+        host: Annotated[
+            Optional[str], typer.Option(help="The host to listen to. Default: localhost")
+        ] = "localhost",
+        log_path: Annotated[
+            Optional[str], typer.Option(help="The path to the log file.")
+        ] = "chroma.log",
+        port: int = typer.Option(8000, help="The port to run the server on."),
+        test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
 
@@ -67,13 +74,13 @@ def run(
 
     # this is the path of the CLI, we want to move up one directory
     chromadb_path = os.path.dirname(chromadb_path)
-
+    log_config = set_log_file_path(f"{chromadb_path}/log_config.yml", f"{log_path}")
     config = {
         "app": "chromadb.app:app",
         "host": host,
         "port": port,
         "workers": 1,
-        "log_config": f"{chromadb_path}/log_config.yml",
+        "log_config": log_config,  # Pass the modified log_config dictionary
         "timeout_keep_alive": 30,
     }
     if test:

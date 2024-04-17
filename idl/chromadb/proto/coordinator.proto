@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package chroma;
-option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 import "chromadb/proto/chroma.proto";
 import "google/protobuf/empty.proto";
@@ -10,6 +10,10 @@ message CreateDatabaseRequest {
   string id = 1;
   string name = 2;
   string tenant = 3;
+}
+
+message CreateDatabaseResponse {
+  Status status = 1;
 }
 
 message GetDatabaseRequest {
@@ -26,6 +30,10 @@ message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
 
+message CreateTenantResponse {
+  Status status = 1;
+}
+
 message GetTenantRequest {
   string name = 1;
 }
@@ -40,15 +48,22 @@ message CreateSegmentRequest {
   Segment segment = 1;
 }
 
+message CreateSegmentResponse {
+  Status status = 1;
+}
+
 message DeleteSegmentRequest {
   string id = 1;
+}
+
+message DeleteSegmentResponse {
+  Status status = 1;
 }
 
 message GetSegmentsRequest {
   optional string id = 1;
   optional string type = 2;
   optional SegmentScope scope = 3;
-  optional string topic = 4;
   optional string collection = 5; // Collection ID
 }
 
@@ -60,10 +75,6 @@ message GetSegmentsResponse {
 
 message UpdateSegmentRequest {
   string id = 1;
-  oneof topic_update {
-    string topic = 2;
-    bool reset_topic = 3;
-  }
   oneof collection_update {
     string collection = 4;
     bool reset_collection = 5;
@@ -72,6 +83,10 @@ message UpdateSegmentRequest {
     UpdateMetadata metadata = 6;
     bool reset_metadata = 7;
   }
+}
+
+message UpdateSegmentResponse {
+  Status status = 1;
 }
 
 message CreateCollectionRequest {
@@ -96,12 +111,17 @@ message DeleteCollectionRequest {
   string database = 3;
 }
 
+message DeleteCollectionResponse {
+  Status status = 1;
+}
+
 message GetCollectionsRequest {
   optional string id = 1;
   optional string name = 2;
-  optional string topic = 3;
   string tenant = 4;
   string database = 5;
+  optional int32 limit = 6;
+  optional int32 offset = 7;
 }
 
 message GetCollectionsResponse {
@@ -111,13 +131,16 @@ message GetCollectionsResponse {
 
 message UpdateCollectionRequest {
   string id = 1;
-  optional string topic = 2;
   optional string name = 3;
   optional int32 dimension = 4;
   oneof metadata_update {
     UpdateMetadata metadata = 5;
     bool reset_metadata = 6;
   }
+}
+
+message UpdateCollectionResponse {
+  Status status = 1;
 }
 
 message Notification {
@@ -127,18 +150,61 @@ message Notification {
   string status = 4;
 }
 
+message ResetStateResponse {
+  Status status = 1;
+}
+
+message GetLastCompactionTimeForTenantRequest {
+  repeated string tenant_id = 1;
+}
+
+message TenantLastCompactionTime {
+  string tenant_id = 1;
+  int64 last_compaction_time = 2;
+}
+
+message GetLastCompactionTimeForTenantResponse {
+  repeated TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
+message SetLastCompactionTimeForTenantRequest {
+  TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
+message FlushSegmentCompactionInfo {
+  string segment_id = 1;
+  map<string,FilePaths> file_paths = 2;
+}
+
+message FlushCollectionCompactionRequest {
+  string tenant_id = 1;
+  string collection_id = 2;
+  int64 log_position = 3;
+  int32 collection_version = 4;
+  repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
+}
+
+message FlushCollectionCompactionResponse {
+  string collection_id = 1;
+  int32 collection_version = 2;
+  int64 last_compaction_time = 3;
+}
+
 service SysDB {
-  rpc CreateDatabase(CreateDatabaseRequest) returns (ChromaResponse) {}
+  rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
-  rpc CreateTenant(CreateTenantRequest) returns (ChromaResponse) {}
+  rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
-  rpc CreateSegment(CreateSegmentRequest) returns (ChromaResponse) {}
-  rpc DeleteSegment(DeleteSegmentRequest) returns (ChromaResponse) {}
+  rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
+  rpc DeleteSegment(DeleteSegmentRequest) returns (DeleteSegmentResponse) {}
   rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}
-  rpc UpdateSegment(UpdateSegmentRequest) returns (ChromaResponse) {}
+  rpc UpdateSegment(UpdateSegmentRequest) returns (UpdateSegmentResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
-  rpc DeleteCollection(DeleteCollectionRequest) returns (ChromaResponse) {}
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
-  rpc UpdateCollection(UpdateCollectionRequest) returns (ChromaResponse) {}
-  rpc ResetState(google.protobuf.Empty) returns (ChromaResponse) {}
+  rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
+  rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
+  rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
+  rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
+  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
 }

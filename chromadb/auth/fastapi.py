@@ -1,4 +1,6 @@
-# FAST API code
+import asyncio
+
+import chromadb
 from contextvars import ContextVar
 from functools import wraps
 import logging
@@ -9,11 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from chromadb.server.fastapi.types import (
-    CreateDatabase,
-    CreateTenant,
-)
-
+import chromadb
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
@@ -33,6 +31,7 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import resolve_provider
 from chromadb.errors import AuthorizationError
+from chromadb.utils.fastapi import fastapi_json_response
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -148,7 +147,7 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
             FastAPIServerAuthenticationRequest(request)
         )
         if not response or not response.success():
-            return AuthorizationError("Unauthorized").fastapi_json_response()
+            return fastapi_json_response(AuthorizationError("Unauthorized"))
 
         request.state.user_identity = response.get_user_identity()
         return await call_next(request)
@@ -164,7 +163,9 @@ authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
 overwrite_singleton_tenant_database_access_from_auth: bool = False
 
 
-def set_overwrite_singleton_tenant_database_access_from_auth(overwrite: bool = False) -> None:
+def set_overwrite_singleton_tenant_database_access_from_auth(
+    overwrite: bool = False,
+) -> None:
     global overwrite_singleton_tenant_database_access_from_auth
     overwrite_singleton_tenant_database_access_from_auth = overwrite
 
@@ -175,7 +176,7 @@ def authz_context(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
-        def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+        async def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
             _dynamic_kwargs = {
                 "api": args[0]._api,
                 "function": f,
@@ -215,6 +216,7 @@ def authz_context(
                     )
 
                     if _provider:
+                        # TODO this will block the event loop if it takes too long - refactor for async
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
@@ -226,16 +228,23 @@ def authz_context(
                     if desired_tenant and "tenant" in kwargs:
                         if isinstance(kwargs["tenant"], str):
                             kwargs["tenant"] = desired_tenant
-                        elif isinstance(kwargs["tenant"], CreateTenant):
+                        elif isinstance(
+                            kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant
+                        ):
                             kwargs["tenant"].name = desired_tenant
                     databases = request.state.user_identity.get_user_databases()
                     if databases and len(databases) == 1 and "database" in kwargs:
                         desired_database = databases[0]
                         if isinstance(kwargs["database"], str):
                             kwargs["database"] = desired_database
-                        elif isinstance(kwargs["database"], CreateDatabase):
+                        elif isinstance(
+                            kwargs["database"],
+                            chromadb.server.fastapi.types.CreateDatabase,
+                        ):
                             kwargs["database"].name = desired_database
 
+            if asyncio.iscoroutinefunction(f):
+                return await f(*args, **kwargs)
             return f(*args, **kwargs)
 
         return wrapped
