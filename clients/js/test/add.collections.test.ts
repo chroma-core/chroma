@@ -3,11 +3,9 @@ import chroma from "./initClient";
 import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
 import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
-
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
 import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
-import { AmazonBedrockEmbeddingFunction } from "../src/embeddings/AmazonBedrockEmbeddingFunction";
 
 test("it should add single embeddings to a collection", async () => {
   await chroma.reset();
@@ -81,34 +79,6 @@ if (!process.env.COHERE_API_KEY) {
     var res = await collection.get({
       ids: IDS,
       include: [IncludeEnum.Embeddings],
-    });
-    expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
-  });
-}
-
-if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-  test.skip("it should add Amazon Bedrock embeddings", async () => {
-  });
-} else {
-  test("it should add Amazon Bedrock embeddings", async () => {
-    await chroma.reset();
-    const embedder = new AmazonBedrockEmbeddingFunction({ config: {
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        // sessionToken: process.env.AWS_SESSION_TOKEN,
-      },
-      region: "us-east-1",
-    }})
-    const collection = await chroma.createCollection({ name: "test", embeddingFunction: embedder });
-    const embeddings = await embedder.generate(DOCUMENTS);
-    await collection.add({ ids: IDS, embeddings: embeddings });
-    const count = await collection.count();
-    expect(count).toBe(3);
-    var res = await collection.get({
-      ids: IDS, include: [
-        IncludeEnum.Embeddings,
-      ]
     });
     expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
   });
