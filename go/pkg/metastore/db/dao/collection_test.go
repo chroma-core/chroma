@@ -97,11 +97,19 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
+	if collectionID < collection2 {
+		suite.Equal(collectionID, collections[0].Collection.ID)
+	} else {
+		suite.Equal(collection2, collections[0].Collection.ID)
+	}
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
 	suite.NoError(err)
 	suite.Len(collections, 1)
-	suite.Equal(collection2, collections[0].Collection.ID)
+	if collectionID < collection2 {
+		suite.Equal(collection2, collections[0].Collection.ID)
+	} else {
+		suite.Equal(collectionID, collections[0].Collection.ID)
+	}
 	offset = int32(2)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
 	suite.NoError(err)
