@@ -3,8 +3,8 @@ import { handleSuccess, validateTenantDatabase } from "./utils";
 import { ConfigOptions } from "./types";
 import {
   AuthOptions,
-  ClientAuthProtocolAdapter,
-  IsomorphicFetchClientAuthProtocolAdapter,
+  authOptionsToAuthProvider,
+  ClientAuthProvider,
 } from "./auth";
 
 const DEFAULT_TENANT = "default_tenant";
@@ -25,7 +25,7 @@ export class AdminClient {
    * @ignore
    */
   private api: DefaultApi & ConfigOptions;
-  private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
+  private authProvider: ClientAuthProvider | undefined;
   public tenant: string = DEFAULT_TENANT;
   public database: string = DEFAULT_DATABASE;
 
@@ -58,21 +58,26 @@ export class AdminClient {
     if (path === undefined) path = "http://localhost:8000";
     this.tenant = tenant;
     this.database = database;
+    this.authProvider = undefined;
 
     const apiConfig: Configuration = new Configuration({
       basePath: path,
     });
-    if (auth !== undefined) {
-      this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(
-        new DefaultApi(apiConfig),
-        auth,
-      );
-      this.api = this.apiAdapter.getApi();
-    } else {
-      this.api = new DefaultApi(apiConfig);
-    }
 
+    this.api = new DefaultApi(apiConfig);
     this.api.options = fetchOptions ?? {};
+
+    if (auth !== undefined) {
+      this.authProvider = authOptionsToAuthProvider(auth);
+      this.api.options.headers = {
+        ...this.api.options.headers,
+        ...this.authProvider.authenticate(),
+      };
+      this.api.options.headers = {
+        ...this.api.options.headers,
+        ...this.authProvider.authenticate(),
+      };
+    }
   }
 
   /**

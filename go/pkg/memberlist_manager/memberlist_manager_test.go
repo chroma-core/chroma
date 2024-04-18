@@ -132,7 +132,10 @@ func createFakePod(ip string, clientset kubernetes.Interface) {
 }
 
 func deleteFakePod(ip string, clientset kubernetes.Interface) {
-	clientset.CoreV1().Pods("chroma").Delete(context.TODO(), ip, metav1.DeleteOptions{})
+	gracefulPeriodSeconds := int64(0)
+	clientset.CoreV1().Pods("chroma").Delete(context.TODO(), ip, metav1.DeleteOptions{
+		GracePeriodSeconds: &gracefulPeriodSeconds,
+	})
 }
 
 func TestMemberlistManager(t *testing.T) {

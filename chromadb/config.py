@@ -1,7 +1,6 @@
 import importlib
 import inspect
 import logging
-import os
 from abc import ABC
 from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
@@ -62,20 +61,34 @@ _legacy_config_values = {
     "chromadb.api.local.LocalAPI",
 }
 
-# TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
+
+# Map specific abstract types to the setting which specifies which
+# concrete implementation to use.
+# Please keep these sorted. We're civilized people.
 _abstract_type_keys: Dict[str, str] = {
+    # TODO: Don't use concrete types here to avoid circular deps. Strings are
+    #       fine for right here!
     # NOTE: this is to support legacy api construction. Use ServerAPI instead
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
-    "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
-    "chromadb.ingest.Producer": "chroma_producer_impl",
-    "chromadb.ingest.Consumer": "chroma_consumer_impl",
-    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
+    "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
+    "chromadb.auth.ServerAuthenticationProvider":
+        "chroma_server_authn_provider",
+    "chromadb.auth.ServerAuthorizationProvider":
+        "chroma_server_authz_provider",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.ingest.Consumer": "chroma_consumer_impl",
+    "chromadb.ingest.Producer": "chroma_producer_impl",
+    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
+    "chromadb.rate_limiting.RateLimitingProvider":
+        "chroma_rate_limiting_provider_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
-    "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
-    "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
-    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
+    "chromadb.segment.distributed.SegmentDirectory":
+        "chroma_segment_directory_impl",
+    "chromadb.segment.distributed.MemberlistProvider":
+        "chroma_memberlist_provider_impl",
+    "chromadb.telemetry.product.ProductTelemetryClient":
+        "chroma_product_telemetry_impl",
 }
 
 DEFAULT_TENANT = "default_tenant"
@@ -83,60 +96,15 @@ DEFAULT_DATABASE = "default_database"
 
 
 class Settings(BaseSettings):  # type: ignore
+
+    # ==============
+    # Generic config
+    # ==============
+
     environment: str = ""
 
-    # Legacy config that has to be kept around because pydantic will error
-    # on nonexisting keys
-    chroma_db_impl: Optional[str] = None
-    chroma_collection_assignment_policy_impl: str = (
-        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
-    )
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
-    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
-    # Required for backwards compatibility
-    chroma_telemetry_impl: str = chroma_product_telemetry_impl
-
-    # New architecture components
-    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_segment_manager_impl: str = (
-        "chromadb.segment.impl.manager.local.LocalSegmentManager"
-    )
-
-    chroma_quota_provider_impl: Optional[str] = None
-    chroma_rate_limiting_provider_impl: Optional[str] = None
-
-    # Distributed architecture specific components
-    chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
-    chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
-    worker_memberlist_name: str = "query-service-memberlist"
-    chroma_coordinator_host = "localhost"
-
-    chroma_logservice_host = "localhost"
-    chroma_logservice_port = 50052
-
-    tenant_id: str = "default"
-    topic_namespace: str = "default"
-
-    is_persistent: bool = False
-    persist_directory: str = "./chroma"
-    background_ingest: bool = False
-
-    chroma_memory_limit_bytes: int = 0
-    chroma_segment_cache_policy: Optional[str] = None
-
-    chroma_server_host: Optional[str] = None
-    chroma_server_headers: Optional[Dict[str, str]] = None
-    chroma_server_http_port: Optional[int] = None
-    chroma_server_ssl_enabled: Optional[bool] = False
-    # the below config value is only applicable to Chroma HTTP clients
-    chroma_server_ssl_verify: Optional[Union[bool, str]] = None
-    chroma_server_api_default_path: Optional[str] = "/api/v1"
-    chroma_server_grpc_port: Optional[int] = None
-    # eg ["http://localhost:3000"]
-    chroma_server_cors_allow_origins: List[str] = []
 
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:
@@ -148,89 +116,92 @@ class Settings(BaseSettings):  # type: ignore
     # the number of maximum threads to handle synchronous tasks in the FastAPI server
     chroma_server_thread_pool_size: int = 40
 
-    chroma_server_auth_provider: Optional[str] = None
+    # ==================
+    # Client-mode config
+    # ==================
 
-    @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
-    def chroma_server_auth_provider_non_empty(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_auth_provider cannot be empty or just whitespace"
-            )
-        return v
+    tenant_id: str = "default"
+    topic_namespace: str = "default"
 
-    chroma_server_auth_configuration_provider: Optional[str] = None
-    chroma_server_auth_configuration_file: Optional[str] = None
-    chroma_server_auth_credentials_provider: Optional[str] = None
-    chroma_server_auth_credentials_file: Optional[str] = None
-    chroma_server_auth_credentials: Optional[str] = None
+    chroma_server_host: Optional[str] = None
+    chroma_server_headers: Optional[Dict[str, str]] = None
+    chroma_server_http_port: Optional[int] = None
+    chroma_server_ssl_enabled: Optional[bool] = False
 
-    @validator(
-        "chroma_server_auth_credentials_file", pre=True, always=True, allow_reuse=True
-    )
-    def chroma_server_auth_credentials_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_auth_credentials_file cannot be empty or just whitespace"
-            )
-        if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(
-                f"chroma_server_auth_credentials_file [{v}] does not exist"
-            )
-        return v
+    chroma_server_ssl_verify: Optional[Union[bool, str]] = None
+    chroma_server_api_default_path: Optional[str] = "/api/v1"
+    # eg ["http://localhost:3000"]
+    chroma_server_cors_allow_origins: List[str] = []
 
+    # ==================
+    # Server config
+    # ==================
+
+    is_persistent: bool = False
+    persist_directory: str = "./chroma"
+
+    chroma_memory_limit_bytes: int = 0
+    chroma_segment_cache_policy: Optional[str] = None
+
+    allow_reset: bool = False
+
+    # ===========================
+    # {Client, Server} auth{n, z}
+    # ===========================
+
+    # The header to use for the token. Defaults to "Authorization".
+    chroma_auth_token_transport_header: Optional[str] = None
+
+    # ================
+    # Client auth{n,z}
+    # ================
+
+    # The provider for client auth. See chromadb/auth/__init__.py
     chroma_client_auth_provider: Optional[str] = None
+    # If needed by the provider (e.g. BasicAuthClientProvider),
+    # the credentials to use.
+    chroma_client_auth_credentials: Optional[str] = None
+
+    # ================
+    # Server auth{n,z}
+    # ================
+
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
         "/api/v1": ["GET"],
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
     }
+    # Overwrite singleton tenant and database access from the auth provider
+    # if applicable. See chromadb/server/fastapi/__init__.py's
+    # authenticate_and_authorize_or_raise method.
+    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
-    chroma_client_auth_credentials_provider: Optional[
-        str
-    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
-    chroma_client_auth_protocol_adapter: Optional[
-        str
-    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
-    chroma_client_auth_credentials_file: Optional[str] = None
-    chroma_client_auth_credentials: Optional[str] = None
-    chroma_client_auth_token_transport_header: Optional[str] = None
-    chroma_server_auth_token_transport_header: Optional[str] = None
+    # ============
+    # Server authn
+    # ============
+
+    chroma_server_authn_provider: Optional[str] = None
+    # Only one of the below may be specified.
+    chroma_server_authn_credentials: Optional[str] = None
+    chroma_server_authn_credentials_file: Optional[str] = None
+
+    # ============
+    # Server authz
+    # ============
 
     chroma_server_authz_provider: Optional[str] = None
-
-    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
-    }
+    # Only one of the below may be specified.
+    chroma_server_authz_config: Optional[str] = None
     chroma_server_authz_config_file: Optional[str] = None
 
-    chroma_server_authz_config: Optional[Dict[str, Any]] = None
+    # =========
+    # Telemetry
+    # =========
 
-    @validator(
-        "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
-    )
-    def chroma_server_authz_config_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_authz_config_file cannot be empty or just whitespace"
-            )
-        if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
-        return v
-
-    chroma_server_authz_config_provider: Optional[
-        str
-    ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
-
-    # TODO comment
-    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
+    chroma_product_telemetry_impl: str = \
+        "chromadb.telemetry.product.posthog.Posthog"
+    # Required for backwards compatibility
+    chroma_telemetry_impl: str = chroma_product_telemetry_impl
 
     anonymized_telemetry: bool = True
 
@@ -239,12 +210,53 @@ class Settings(BaseSettings):  # type: ignore
     chroma_otel_collection_headers: Dict[str, str] = {}
     chroma_otel_granularity: Optional[str] = None
 
-    allow_reset: bool = False
+    # ==========
+    # Migrations
+    # ==========
 
     migrations: Literal["none", "validate", "apply"] = "apply"
-    # you cannot change the hash_algorithm after migrations have already been applied once
-    # this is intended to be a first-time setup configuration
+    # you cannot change the hash_algorithm after migrations have already
+    # been applied once this is intended to be a first-time setup configuration
     migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
+
+    # ==================
+    # Distributed Chroma
+    # ==================
+
+    chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
+    chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
+    worker_memberlist_name: str = "query-service-memberlist"
+
+    chroma_coordinator_host = "localhost"
+    # TODO this is the sysdb port. Should probably rename it.
+    chroma_server_grpc_port: Optional[int] = None
+    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+
+    chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+
+    chroma_segment_manager_impl: str = (
+        "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
+
+    chroma_logservice_host = "localhost"
+    chroma_logservice_port = 50052
+
+    chroma_quota_provider_impl: Optional[str] = None
+    chroma_rate_limiting_provider_impl: Optional[str] = None
+
+    # ======
+    # Legacy
+    # ======
+
+    chroma_db_impl: Optional[str] = None
+    chroma_collection_assignment_policy_impl: str = (
+        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
+    )
+
+    # =======
+    # Methods
+    # =======
 
     def require(self, key: str) -> Any:
         """Return the value of a required config key, or raise an exception if it is not

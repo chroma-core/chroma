@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence, Optional, cast
+from typing import Any, Callable, cast, Dict, List, Sequence, Optional, Tuple
 import fastapi
 import orjson
 
@@ -16,25 +16,13 @@ from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
-    AuthzDynamicParams,
-    AuthzResourceActions,
-    AuthzResourceTypes,
-    DynamicAuthzResource,
-)
-from chromadb.auth.fastapi import (
-    FastAPIChromaAuthMiddleware,
-    FastAPIChromaAuthMiddlewareWrapper,
-    FastAPIChromaAuthzMiddleware,
-    FastAPIChromaAuthzMiddlewareWrapper,
-    authz_context,
-    set_overwrite_singleton_tenant_database_access_from_auth,
-)
-from chromadb.auth.fastapi_utils import (
-    attr_from_collection_lookup,
-    attr_from_resource_object,
+    AuthzAction,
+    AuthzResource,
+    ServerAuthenticationProvider,
+    ServerAuthorizationProvider,
+    UserIdentity,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-import chromadb.api
 from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
@@ -43,6 +31,7 @@ from chromadb.errors import (
 )
 from chromadb.quota import QuotaError
 from chromadb.rate_limiting import RateLimitError
+from chromadb.server import Server
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CreateDatabase,
@@ -54,6 +43,7 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
+from starlette.datastructures import Headers
 
 import logging
 
@@ -102,13 +92,14 @@ async def check_http_version_middleware(
     return await call_next(request)
 
 
-class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
-    # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
-    # same as URLs without. Docs will only contain URLs without trailing "/"s.
+class ChromaAPIRouter(fastapi.APIRouter):
+    # A simple subclass of fastapi's APIRouter which treats URLs with a
+    # trailing "/" the same as URLs without. Docs will only contain URLs
+    # without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
-        # If kwargs["include_in_schema"] isn't passed OR is True, we should only
-        # include the non-"/" path. If kwargs["include_in_schema"] is False, include
-        # neither.
+        # If kwargs["include_in_schema"] isn't passed OR is True, we should
+        # only include the non-"/" path. If kwargs["include_in_schema"] is
+        # False, include neither.
         exclude_from_schema = (
             "include_in_schema" in kwargs and not kwargs["include_in_schema"]
         )
@@ -129,12 +120,15 @@ class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
         super().add_api_route(path, *args, **kwargs)
 
 
-class FastAPI(chromadb.server.Server):
+class FastAPI(Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         # https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
-        self._app = fastapi.FastAPI(debug=True, default_response_class=ORJSONResponse)
+        self._app = fastapi.FastAPI(
+            debug=True,
+            default_response_class=ORJSONResponse
+        )
         self._system = System(settings)
         self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
@@ -151,36 +145,48 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
-        self._app.add_exception_handler(QuotaError, self.quota_exception_handler)
-        self._app.add_exception_handler(
-            RateLimitError, self.rate_limit_exception_handler
-        )
+        self._app.add_exception_handler(QuotaError,
+                                        self.quota_exception_handler)
+        self._app.add_exception_handler(RateLimitError,
+                                        self.rate_limit_exception_handler)
 
         self._app.on_event("shutdown")(self.shutdown)
 
-        if settings.chroma_server_authz_provider:
-            self._app.add_middleware(
-                FastAPIChromaAuthzMiddlewareWrapper,
-                authz_middleware=self._api.require(FastAPIChromaAuthzMiddleware),
+        self.authn_provider = None
+        if settings.chroma_server_authn_provider:
+            self.authn_provider = self._system.require(
+                ServerAuthenticationProvider
             )
 
-        if settings.chroma_server_auth_provider:
-            self._app.add_middleware(
-                FastAPIChromaAuthMiddlewareWrapper,
-                auth_middleware=self._api.require(FastAPIChromaAuthMiddleware),
+        self.authz_provider = None
+        if settings.chroma_server_authz_provider:
+            self.authz_provider = self._system.require(
+                ServerAuthorizationProvider
             )
-        set_overwrite_singleton_tenant_database_access_from_auth(
-            settings.chroma_overwrite_singleton_tenant_database_access_from_auth
-        )
 
         self.router = ChromaAPIRouter()
 
-        self.router.add_api_route("/api/v1", self.root, methods=["GET"])
-        self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
-        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
-            "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
+            "/api/v1",
+            self.root, methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/reset",
+            self.reset, methods=["POST"]
+        )
+        self.router.add_api_route(
+            "/api/v1/version",
+            self.version, methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/heartbeat",
+            self.heartbeat,
+            methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/pre-flight-checks",
+            self.pre_flight_checks,
+            methods=["GET"]
         )
 
         self.router.add_api_route(
@@ -303,23 +309,30 @@ class FastAPI(chromadb.server.Server):
     def app(self) -> fastapi.FastAPI:
         return self._app
 
-    async def rate_limit_exception_handler(self, request: Request, exc: RateLimitError):
+    async def rate_limit_exception_handler(
+            self, request: Request,
+            exc: RateLimitError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
             content={
-                "message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"
+                "message":
+                f"rate limit. resource: {exc.resource} quota: {exc.quota}"
             },
         )
 
     def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
 
-    async def quota_exception_handler(self, request: Request, exc: QuotaError):
+    async def quota_exception_handler(
+            self,
+            request: Request,
+            exc: QuotaError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
-            content={
-                "message": f"quota error. resource: {exc.resource} quota: {exc.quota} actual: {exc.actual}"
-            },
+            content={"message": f"quota error. resource: {exc.resource} "
+                     f"quota: {exc.quota} actual: {exc.actual}"},
         )
 
     async def heartbeat(self) -> Dict[str, int]:
@@ -327,44 +340,127 @@ class FastAPI(chromadb.server.Server):
 
     async def version(self) -> str:
         return self._api.get_version()
+    def auth_and_get_tenant_and_database_for_request(
+        self,
+        headers: Headers,
+        action: AuthzAction,
+        tenant: Optional[str],
+        database: Optional[str],
+        collection: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Authenticates and authorizes the request based on the given headers
+        and other parameters. If the request cannot be authenticated or cannot
+        be authorized (with the configured providers), raises an HTTP 401.
 
-    @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.CREATE_DATABASE,
-        resource=DynamicAuthzResource(
-            type=AuthzResourceTypes.DB,
-            attributes=attr_from_resource_object(
-                type=AuthzResourceTypes.DB, additional_attrs=["tenant"]
-            ),
-        ),
-    )
+        If the request is authenticated and authorized, returns the tenant and
+        database to be used for the request. These will differ from the passed
+        tenant and database if and only if:
+        - The request is authenticated
+        - chroma_overwrite_singleton_tenant_database_access_from_auth = True
+        - The passed tenant or database are None or default_{tenant, database}
+            (can be overwritten separately)
+        - The user has access to a single tenant and/or single database.
+        """
+        if not self.authn_provider:
+            return (tenant, database)
+
+        user_identity = self.authn_provider.authenticate_or_raise(headers)
+
+        (new_tenant, new_database) = self.authn_provider.\
+            singleton_tenant_database_if_applicable(
+            user_identity
+        )
+        if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:
+            tenant = new_tenant
+        if (not database or database == DEFAULT_DATABASE) and new_database:
+            database = new_database
+
+        if (self._system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth
+                and collection is not None):
+            collec = self._api.get_collection(
+                id=_uuid(collection),
+                name=collection
+            )
+            if not collec:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"collection {collection} not found",
+                )
+            if not tenant:
+                tenant = collec.tenant
+            if not database:
+                database = collec.database
+
+        if not self.authz_provider:
+            return (tenant, database)
+
+        authz_resource = AuthzResource(
+            tenant=tenant,
+            database=database,
+            collection=collection,
+        )
+
+        self.authz_provider.authorize_or_raise(
+            user_identity,
+            action,
+            authz_resource
+        )
+        return (tenant, database)
+
+    @trace_method("FastAPI.create_database",
+                  OpenTelemetryGranularity.OPERATION)
     async def create_database(
         self, request: Request, tenant: str = DEFAULT_TENANT
     ) -> None:
-        def process_create_database(raw_body: bytes) -> None:
-            create = CreateDatabase.model_validate(orjson.loads(raw_body))
-            return self._api.create_database(create.name, tenant)
+        def process_create_database(
+                tenant: str,
+                headers: Headers,
+                raw_body: bytes
+        ) -> None:
+            db = CreateDatabase.model_validate(orjson.loads(raw_body))
+
+            maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+                headers,
+                AuthzAction.CREATE_DATABASE,
+                tenant,
+                db.name,
+                None,
+            )
+            if maybe_tenant:
+                tenant = maybe_tenant
+            if maybe_database:
+                db.name = maybe_database
+
+            return self._api.create_database(db.name, tenant)
 
         await to_thread.run_sync(
             process_create_database,
+            tenant,
+            request.headers,
             await request.body(),
             limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET_DATABASE,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
     async def get_database(
-        self, database: str, tenant: str = DEFAULT_TENANT
+        self,
+        request: Request,
+        database: str,
+        tenant: str = DEFAULT_TENANT,
     ) -> Database:
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.GET_DATABASE,
+            tenant,
+            database,
+            None,
+        )
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
+
         return cast(
             Database,
             await to_thread.run_sync(
@@ -376,32 +472,45 @@ class FastAPI(chromadb.server.Server):
         )
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.CREATE_TENANT,
-        resource=DynamicAuthzResource(
-            type=AuthzResourceTypes.TENANT,
-        ),
-    )
     async def create_tenant(self, request: Request) -> None:
-        def process_create_tenant(raw_body: bytes) -> None:
-            create = CreateTenant.model_validate(orjson.loads(raw_body))
-            return self._api.create_tenant(create.name)
+        def process_create_tenant(request: Request, raw_body: bytes) -> None:
+            tenant = CreateTenant.model_validate(orjson.loads(raw_body))
+
+            maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.CREATE_TENANT,
+                tenant.name,
+                None,
+                None,
+            )
+            if maybe_tenant:
+                tenant.name = maybe_tenant
+
+            return self._api.create_tenant(tenant.name)
 
         await to_thread.run_sync(
             process_create_tenant,
+            request,
             await request.body(),
             limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET_TENANT,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.TENANT,
-        ),
-    )
-    async def get_tenant(self, tenant: str) -> Tenant:
+    async def get_tenant(
+        self,
+        request: Request,
+        tenant: str,
+    ) -> Tenant:
+        maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.GET_TENANT,
+            tenant,
+            None,
+            None,
+        )
+        if maybe_tenant:
+            tenant = maybe_tenant
+
         return cast(
             Tenant,
             await to_thread.run_sync(
@@ -411,24 +520,28 @@ class FastAPI(chromadb.server.Server):
             ),
         )
 
-    @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.LIST_COLLECTIONS,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.list_collections",
+                  OpenTelemetryGranularity.OPERATION)
     async def list_collections(
         self,
+        request: Request,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.LIST_COLLECTIONS,
+            tenant,
+            database,
+            None,
+        )
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
+
         return cast(
             Sequence[Collection],
             await to_thread.run_sync(
@@ -441,22 +554,26 @@ class FastAPI(chromadb.server.Server):
             ),
         )
 
-    @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.COUNT_COLLECTIONS,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.count_collections",
+                  OpenTelemetryGranularity.OPERATION)
     async def count_collections(
         self,
+        request: Request,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.COUNT_COLLECTIONS,
+            tenant,
+            database,
+            None,
+        )
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
+
         return cast(
             int,
             await to_thread.run_sync(
@@ -467,25 +584,34 @@ class FastAPI(chromadb.server.Server):
             ),
         )
 
-    @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.CREATE_COLLECTION,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.create_collection",
+                  OpenTelemetryGranularity.OPERATION)
     async def create_collection(
         self,
         request: Request,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        def process_create_collection(raw_body: bytes) -> Collection:
+        def process_create_collection(
+                request: Request,
+                tenant: str,
+                database: str,
+                raw_body: bytes
+        ) -> Collection:
             create = CreateCollection.model_validate(orjson.loads(raw_body))
+
+            maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.CREATE_COLLECTION,
+                tenant,
+                database,
+                create.name,
+            )
+            if maybe_tenant:
+                tenant = maybe_tenant
+            if maybe_database:
+                database = maybe_database
+
             return self._api.create_collection(
                 name=create.name,
                 metadata=create.metadata,
@@ -498,28 +624,34 @@ class FastAPI(chromadb.server.Server):
             Collection,
             await to_thread.run_sync(
                 process_create_collection,
+                request,
+                tenant,
+                database,
                 await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET_COLLECTION,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
     async def get_collection(
         self,
+        request: Request,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.GET_COLLECTION,
+            tenant,
+            database,
+            collection_name,
+        )
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
+
         return cast(
             Collection,
             await to_thread.run_sync(
@@ -534,18 +666,26 @@ class FastAPI(chromadb.server.Server):
             ),
         )
 
-    @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.UPDATE_COLLECTION,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    async def update_collection(self, collection_id: str, request: Request) -> None:
-        def process_update_collection(raw_body: bytes) -> None:
+    @trace_method("FastAPI.update_collection",
+                  OpenTelemetryGranularity.OPERATION)
+    async def update_collection(
+        self,
+        collection_id: str,
+        request: Request,
+    ) -> None:
+        def process_update_collection(
+                request: Request,
+                collection_id: str,
+                raw_body: bytes
+        ) -> None:
             update = UpdateCollection.model_validate(orjson.loads(raw_body))
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.UPDATE_COLLECTION,
+                None,
+                None,
+                collection_id,
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
@@ -554,27 +694,33 @@ class FastAPI(chromadb.server.Server):
 
         await to_thread.run_sync(
             process_update_collection,
+            request,
+            collection_id,
             await request.body(),
             limiter=self._capacity_limiter,
         )
 
-    @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.DELETE_COLLECTION,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=AuthzDynamicParams.dict_from_function_kwargs(
-                arg_names=["tenant", "database"]
-            ),
-        ),
-    )
+    @trace_method("FastAPI.delete_collection",
+                  OpenTelemetryGranularity.OPERATION)
     async def delete_collection(
         self,
+        request: Request,
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        maybe_tenant, maybe_database = self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.DELETE_COLLECTION,
+            tenant,
+            database,
+            collection_name,
+        )
+        if maybe_tenant:
+            tenant = maybe_tenant
+        if maybe_database:
+            database = maybe_database
+
         await to_thread.run_sync(
             self._api.delete_collection,
             collection_name,
@@ -584,19 +730,17 @@ class FastAPI(chromadb.server.Server):
         )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.ADD,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
     async def add(self, request: Request, collection_id: str) -> bool:
         try:
-
-            def process_add(raw_body: bytes) -> bool:
+            def process_add(request: Request, raw_body: bytes) -> bool:
                 add = AddEmbedding.model_validate(orjson.loads(raw_body))
+                self.auth_and_get_tenant_and_database_for_request(
+                    request.headers,
+                    AuthzAction.ADD,
+                    None,
+                    None,
+                    collection_id,
+                )
                 return self._api._add(
                     collection_id=_uuid(collection_id),
                     ids=add.ids,
@@ -610,6 +754,7 @@ class FastAPI(chromadb.server.Server):
                 bool,
                 await to_thread.run_sync(
                     process_add,
+                    request,
                     await request.body(),
                     limiter=self._capacity_limiter,
                 ),
@@ -618,17 +763,18 @@ class FastAPI(chromadb.server.Server):
             raise HTTPException(status_code=500, detail=str(e))
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.UPDATE,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
     async def update(self, request: Request, collection_id: str) -> None:
-        def process_update(raw_body: bytes) -> bool:
+        def process_update(request: Request, raw_body: bytes) -> bool:
             update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
+
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.UPDATE,
+                None,
+                None,
+                collection_id,
+            )
+
             return self._api._update(
                 collection_id=_uuid(collection_id),
                 ids=update.ids,
@@ -640,22 +786,24 @@ class FastAPI(chromadb.server.Server):
 
         await to_thread.run_sync(
             process_update,
+            request,
             await request.body(),
             limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.UPSERT,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
     async def upsert(self, request: Request, collection_id: str) -> None:
-        def process_upsert(raw_body: bytes) -> bool:
+        def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
+
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.UPSERT,
+                None,
+                None,
+                collection_id,
+            )
+
             return self._api._upsert(
                 collection_id=_uuid(collection_id),
                 ids=upsert.ids,
@@ -667,22 +815,22 @@ class FastAPI(chromadb.server.Server):
 
         await to_thread.run_sync(
             process_upsert,
+            request,
             await request.body(),
             limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.GET,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
     async def get(self, collection_id: str, request: Request) -> GetResult:
-        def process_get(raw_body: bytes) -> GetResult:
+        def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = GetEmbedding.model_validate(orjson.loads(raw_body))
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.GET,
+                None,
+                None,
+                collection_id,
+            )
             return self._api._get(
                 collection_id=_uuid(collection_id),
                 ids=get.ids,
@@ -698,23 +846,23 @@ class FastAPI(chromadb.server.Server):
             GetResult,
             await to_thread.run_sync(
                 process_get,
+                request,
                 await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
 
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.DELETE,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
     async def delete(self, collection_id: str, request: Request) -> List[UUID]:
-        def process_delete(raw_body: bytes) -> List[str]:
+        def process_delete(request: Request, raw_body: bytes) -> List[str]:
             delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.DELETE,
+                None,
+                None,
+                collection_id,
+            )
             return self._api._delete(
                 collection_id=_uuid(collection_id),
                 ids=delete.ids,
@@ -726,21 +874,26 @@ class FastAPI(chromadb.server.Server):
             List[UUID],
             await to_thread.run_sync(
                 process_delete,
+                request,
                 await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
 
     @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.COUNT,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
-    async def count(self, collection_id: str) -> int:
+    async def count(
+        self,
+        request: Request,
+        collection_id: str,
+    ) -> int:
+        self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.COUNT,
+            None,
+            None,
+            collection_id,
+        )
+
         return cast(
             int,
             await to_thread.run_sync(
@@ -751,14 +904,18 @@ class FastAPI(chromadb.server.Server):
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.RESET,
-        resource=DynamicAuthzResource(
-            id="*",
-            type=AuthzResourceTypes.DB,
-        ),
-    )
-    async def reset(self) -> bool:
+    async def reset(
+        self,
+        request: Request,
+    ) -> bool:
+        self.auth_and_get_tenant_and_database_for_request(
+            request.headers,
+            AuthzAction.RESET,
+            None,
+            None,
+            None,
+        )
+
         return cast(
             bool,
             await to_thread.run_sync(
@@ -767,20 +924,24 @@ class FastAPI(chromadb.server.Server):
             ),
         )
 
-    @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
-    @authz_context(
-        action=AuthzResourceActions.QUERY,
-        resource=DynamicAuthzResource(
-            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
-            type=AuthzResourceTypes.COLLECTION,
-            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
-        ),
-    )
+    @trace_method("FastAPI.get_nearest_neighbors",
+                  OpenTelemetryGranularity.OPERATION)
     async def get_nearest_neighbors(
-        self, collection_id: str, request: Request
+        self,
+        collection_id: str,
+        request: Request,
     ) -> QueryResult:
-        def process_query(raw_body: bytes) -> QueryResult:
+        def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = QueryEmbedding.model_validate(orjson.loads(raw_body))
+
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.QUERY,
+                None,
+                None,
+                collection_id,
+            )
+
             return self._api._query(
                 collection_id=_uuid(collection_id),
                 query_embeddings=query.query_embeddings,
@@ -794,6 +955,7 @@ class FastAPI(chromadb.server.Server):
             QueryResult,
             await to_thread.run_sync(
                 process_query,
+                request,
                 await request.body(),
                 limiter=self._capacity_limiter,
             ),

@@ -71,7 +71,7 @@ We suggest the following abstractions:
 
 > Note: All abstractions are defined under `chromadb.auth` package
 
-- `ServerAuthProvider` - this is the base server auth provider abstraction that allows any server implementation of
+- `ServerAuthenticationProvider` - this is the base server auth provider abstraction that allows any server implementation of
   Chroma to support variety of auth providers. The main responsibility of the auth provider is to orchestrate the auth
   flow by gluing together the auth configuration and credentials providers.
 - `ChromaAuthMiddleware` - The auth middleware is effectively an adapter responsible for providing server specific

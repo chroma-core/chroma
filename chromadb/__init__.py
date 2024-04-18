@@ -2,7 +2,7 @@ from typing import Dict, Optional
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
-from chromadb.auth.token import TokenTransportHeader
+from chromadb.auth.token_authn import TokenTransportHeader
 import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
 from chromadb.api import AdminAPI, ClientAPI
@@ -246,9 +246,9 @@ def CloudClient(
     # Always use SSL for cloud
     settings.chroma_server_ssl_enabled = enable_ssl
 
-    settings.chroma_client_auth_provider = "chromadb.auth.token.TokenAuthClientProvider"
+    settings.chroma_client_auth_provider = "chromadb.auth.token_authn.TokenAuthClientProvider"
     settings.chroma_client_auth_credentials = api_key
-    settings.chroma_client_auth_token_transport_header = (
+    settings.chroma_auth_token_transport_header = (
         TokenTransportHeader.X_CHROMA_TOKEN.name
     )
 

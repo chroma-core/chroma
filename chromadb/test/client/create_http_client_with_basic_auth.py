@@ -13,7 +13,7 @@ def main() -> None:
             host='localhost',
             port=8000,
             settings=Settings(
-                chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+                chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
                 chroma_client_auth_credentials="admin:testDb@home2"
             )
         )
