@@ -4,7 +4,6 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
 };
 use std::collections::HashMap;
-use std::vec::Vec;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -85,7 +84,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
         let mut file_paths = HashMap::new();
         let drain = proto_segment.file_paths.drain();
-        for (key, mut value) in drain {
+        for (key, value) in drain {
             file_paths.insert(key, value.paths);
         }
 

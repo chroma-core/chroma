@@ -12,7 +12,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import (
-    EmbeddingRecord,
+    LogRecord,
     VectorEmbeddingRecord,
     VectorQuery,
     VectorQueryResult,
@@ -49,6 +49,9 @@ class LocalHnswSegment(VectorReader):
 
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, str]
+    # Note: As of the time of writing, this mapping is no longer needed.
+    # We merely keep it around for easy compatibility with the old code and
+    # debugging purposes.
     _id_to_seq_id: Dict[str, SeqId]
 
     _opentelemtry_client: OpenTelemetryClient
@@ -116,10 +119,7 @@ class LocalHnswSegment(VectorReader):
 
             for label, vector in zip(labels, vectors):
                 id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
-                results.append(
-                    VectorEmbeddingRecord(id=id, seq_id=seq_id, embedding=vector)
-                )
+                results.append(VectorEmbeddingRecord(id=id, embedding=vector))
 
         return results
 
@@ -168,7 +168,6 @@ class LocalHnswSegment(VectorReader):
                     result_labels[result_i], distances[result_i]
                 ):
                     id = self._label_to_id[label]
-                    seq_id = self._id_to_seq_id[id]
                     if query["include_embeddings"]:
                         embedding = self._index.get_items([label])[0]
                     else:
@@ -176,7 +175,6 @@ class LocalHnswSegment(VectorReader):
                     results.append(
                         VectorQueryResult(
                             id=id,
-                            seq_id=seq_id,
                             distance=distance.item(),
                             embedding=embedding,
                         )
@@ -272,7 +270,7 @@ class LocalHnswSegment(VectorReader):
 
             # If that succeeds, update the mappings
             for i, id in enumerate(written_ids):
-                self._id_to_seq_id[id] = batch.get_record(id)["seq_id"]
+                self._id_to_seq_id[id] = batch.get_record(id)["log_offset"]
                 self._id_to_label[id] = labels_to_write[i]
                 self._label_to_id[labels_to_write[i]] = id
 
@@ -283,7 +281,7 @@ class LocalHnswSegment(VectorReader):
             self._max_seq_id = batch.max_seq_id
 
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
-    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_records(self, records: Sequence[LogRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
@@ -293,9 +291,9 @@ class LocalHnswSegment(VectorReader):
             batch = Batch()
 
             for record in records:
-                self._max_seq_id = max(self._max_seq_id, record["seq_id"])
-                id = record["id"]
-                op = record["operation"]
+                self._max_seq_id = max(self._max_seq_id, record["log_offset"])
+                id = record["operation_record"]["id"]
+                op = record["operation_record"]["operation"]
                 label = self._id_to_label.get(id, None)
 
                 if op == Operation.DELETE:
@@ -305,12 +303,12 @@ class LocalHnswSegment(VectorReader):
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
-                    if record["embedding"] is not None:
+                    if record["operation_record"]["embedding"] is not None:
                         if label is not None:
                             batch.apply(record)
                         else:
                             logger.warning(
-                                f"Update of nonexisting embedding ID: {record['id']}"
+                                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
                             )
                 elif op == Operation.ADD:
                     if not label:

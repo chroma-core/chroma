@@ -15,7 +15,7 @@ import {
 } from "./types";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import { ApiApi as DefaultApi } from "./generated";
-import { handleError, handleSuccess } from "./utils";
+import { handleSuccess } from "./utils";
 import { toArray, toArrayOfArrays } from "./utils";
 
 export class Collection {
@@ -187,8 +187,7 @@ export class Collection {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     return response;
   }
@@ -235,8 +234,7 @@ export class Collection {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     return response;
   }
@@ -283,8 +281,7 @@ export class Collection {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     this.setName(name || this.name);
     this.setMetadata(metadata || this.metadata);
@@ -323,7 +320,7 @@ export class Collection {
     include,
     whereDocument,
   }: GetParams = {}): Promise<GetResponse> {
-    let idsArray = undefined;
+    let idsArray: string[] | undefined;
     if (ids !== undefined) idsArray = toArray(ids);
 
     return await this.api
@@ -340,8 +337,7 @@ export class Collection {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
   }
 
   /**
@@ -403,8 +399,7 @@ export class Collection {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     return resp;
   }
@@ -484,8 +479,7 @@ export class Collection {
         },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
   }
 
   /**
@@ -545,7 +539,6 @@ export class Collection {
         { ids: idsArray, where: where, where_document: whereDocument },
         this.api.options,
       )
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
   }
 }

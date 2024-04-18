@@ -9,7 +9,7 @@ from chromadb.ingest import (
 )
 from chromadb.types import (
     OperationRecord,
-    EmbeddingRecord,
+    LogRecord,
     ScalarEncoding,
     SeqId,
     Operation,
@@ -188,14 +188,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 submit_embedding_record = embeddings[id_to_idx[id]]
                 # We allow notifying consumers out of order relative to one call to
                 # submit_embeddings so we do not reorder the records before submitting them
-                embedding_record = EmbeddingRecord(
-                    id=id,
-                    seq_id=seq_id,
-                    embedding=submit_embedding_record["embedding"],
-                    encoding=submit_embedding_record["encoding"],
-                    metadata=submit_embedding_record["metadata"],
-                    operation=submit_embedding_record["operation"],
-                    collection_id=collection_id,
+                embedding_record = LogRecord(
+                    log_offset=seq_id,
+                    operation_record=OperationRecord(
+                        id=id,
+                        embedding=submit_embedding_record["embedding"],
+                        encoding=submit_embedding_record["encoding"],
+                        metadata=submit_embedding_record["metadata"],
+                        operation=submit_embedding_record["operation"],
+                    ),
                 )
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
@@ -318,13 +319,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 self._notify_one(
                     subscription,
                     [
-                        EmbeddingRecord(
-                            seq_id=row[0],
-                            operation=_operation_codes_inv[row[1]],
-                            id=row[2],
-                            embedding=vector,
-                            encoding=encoding,
-                            metadata=json.loads(row[5]) if row[5] else None,
+                        LogRecord(
+                            log_offset=row[0],
+                            operation_record=OperationRecord(
+                                operation=_operation_codes_inv[row[1]],
+                                id=row[2],
+                                embedding=vector,
+                                encoding=encoding,
+                                metadata=json.loads(row[5]) if row[5] else None,
+                            ),
                         )
                     ],
                 )
@@ -353,24 +356,22 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             return int(cur.fetchone()[0]) + 1
 
     @trace_method("SqlEmbeddingsQueue._notify_all", OpenTelemetryGranularity.ALL)
-    def _notify_all(self, topic: str, embeddings: Sequence[EmbeddingRecord]) -> None:
+    def _notify_all(self, topic: str, embeddings: Sequence[LogRecord]) -> None:
         """Send a notification to each subscriber of the given topic."""
         if self._running:
             for sub in self._subscriptions[topic]:
                 self._notify_one(sub, embeddings)
 
     @trace_method("SqlEmbeddingsQueue._notify_one", OpenTelemetryGranularity.ALL)
-    def _notify_one(
-        self, sub: Subscription, embeddings: Sequence[EmbeddingRecord]
-    ) -> None:
+    def _notify_one(self, sub: Subscription, embeddings: Sequence[LogRecord]) -> None:
         """Send a notification to a single subscriber."""
         # Filter out any embeddings that are not in the subscription range
         should_unsubscribe = False
         filtered_embeddings = []
         for embedding in embeddings:
-            if embedding["seq_id"] <= sub.start:
+            if embedding["log_offset"] <= sub.start:
                 continue
-            if embedding["seq_id"] > sub.end:
+            if embedding["log_offset"] > sub.end:
                 should_unsubscribe = True
                 break
             filtered_embeddings.append(embedding)

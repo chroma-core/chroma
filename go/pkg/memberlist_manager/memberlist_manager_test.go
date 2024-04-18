@@ -47,11 +47,12 @@ func TestNodeWatcher(t *testing.T) {
 
 	// Get the status of the node
 	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.1")
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == Ready
+
+		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
 
 	// Add a not ready pod
@@ -75,13 +76,12 @@ func TestNodeWatcher(t *testing.T) {
 	}, metav1.CreateOptions{})
 
 	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.2")
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == NotReady
+		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
-
 }
 
 func TestMemberlistStore(t *testing.T) {

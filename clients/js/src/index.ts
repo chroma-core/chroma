@@ -15,6 +15,7 @@ export {
   VoyageAIEmbeddingFunction,
   InputType,
 } from "./embeddings/VoyageAIEmbeddingFunction";
+export { OllamaEmbeddingFunction } from "./embeddings/OllamaEmbeddingFunction";
 
 export {
   IncludeEnum,

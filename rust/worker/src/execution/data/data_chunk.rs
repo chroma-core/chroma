@@ -1,15 +1,14 @@
+use crate::types::LogRecord;
 use std::sync::Arc;
-
-use crate::types::EmbeddingRecord;
 
 #[derive(Clone, Debug)]
 pub(crate) struct DataChunk {
-    data: Arc<[EmbeddingRecord]>,
+    data: Arc<[LogRecord]>,
     visibility: Arc<[bool]>,
 }
 
 impl DataChunk {
-    pub fn new(data: Arc<[EmbeddingRecord]>) -> Self {
+    pub fn new(data: Arc<[LogRecord]>) -> Self {
         let len = data.len();
         DataChunk {
             data,
@@ -31,7 +30,7 @@ impl DataChunk {
     /// if the index is out of bounds, it returns None
     /// # Arguments
     /// * `index` - The index of the element
-    pub fn get(&self, index: usize) -> Option<&EmbeddingRecord> {
+    pub fn get(&self, index: usize) -> Option<&LogRecord> {
         if index < self.data.len() {
             Some(&self.data[index])
         } else {
@@ -84,7 +83,7 @@ pub(crate) struct DataChunkIteraror<'a> {
 }
 
 impl<'a> Iterator for DataChunkIteraror<'a> {
-    type Item = (&'a EmbeddingRecord, usize);
+    type Item = (&'a LogRecord, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.index < self.chunk.total_len() {
@@ -109,33 +108,32 @@ impl<'a> Iterator for DataChunkIteraror<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::EmbeddingRecord;
+    use crate::types::LogRecord;
     use crate::types::Operation;
-    use num_bigint::BigInt;
-    use std::str::FromStr;
-    use uuid::Uuid;
+    use crate::types::OperationRecord;
 
     #[test]
     fn test_data_chunk() {
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let data = vec![
-            EmbeddingRecord {
-                id: "embedding_id_1".to_string(),
-                seq_id: BigInt::from(1),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: collection_uuid_1,
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
-            EmbeddingRecord {
-                id: "embedding_id_2".to_string(),
-                seq_id: BigInt::from(2),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                operation: Operation::Add,
-                collection_id: collection_uuid_1,
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    operation: Operation::Add,
+                },
             },
         ];
         let data = data.into();
@@ -145,12 +143,12 @@ mod tests {
         let elem = iter.next();
         assert_eq!(elem.is_some(), true);
         let (record, index) = elem.unwrap();
-        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.record.id, "embedding_id_1");
         assert_eq!(index, 0);
         let elem = iter.next();
         assert_eq!(elem.is_some(), true);
         let (record, index) = elem.unwrap();
-        assert_eq!(record.id, "embedding_id_2");
+        assert_eq!(record.record.id, "embedding_id_2");
         assert_eq!(index, 1);
         let elem = iter.next();
         assert_eq!(elem.is_none(), true);
@@ -162,7 +160,7 @@ mod tests {
         let elem = iter.next();
         assert_eq!(elem.is_some(), true);
         let (record, index) = elem.unwrap();
-        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.record.id, "embedding_id_1");
         assert_eq!(index, 0);
         let elem = iter.next();
         assert_eq!(elem.is_none(), true);

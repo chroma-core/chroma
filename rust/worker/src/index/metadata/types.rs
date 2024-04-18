@@ -1,13 +1,9 @@
 use crate::blockstore::provider::BlockfileProvider;
-use crate::blockstore::{Blockfile, BlockfileKey, HashMapBlockfile, Key, Value};
+use crate::blockstore::{Blockfile, BlockfileKey, Key, Value};
 use crate::errors::{ChromaError, ErrorCodes};
-use async_trait::async_trait;
+
 use roaring::RoaringBitmap;
-use std::{
-    collections::HashMap,
-    marker::PhantomData,
-    ops::{BitOrAssign, SubAssign}
-};
+use std::{collections::HashMap, marker::PhantomData};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -133,7 +129,7 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
         }
         let blockfilekey = BlockfileKey::new(key.to_string(), value.to_blockfile_key());
         self.look_up_key_and_populate_uncommitted_rbms(&blockfilekey)?;
-        let mut rbm = self.uncommitted_rbms.get_mut(&blockfilekey).unwrap();
+        let rbm = self.uncommitted_rbms.get_mut(&blockfilekey).unwrap();
         rbm.insert(offset_id);
         Ok(())
     }
@@ -144,9 +140,9 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
         }
         let blockfilekey = BlockfileKey::new(key.to_string(), value.to_blockfile_key());
         self.look_up_key_and_populate_uncommitted_rbms(&blockfilekey)?;
-        let mut rbm = self.uncommitted_rbms.get_mut(&blockfilekey).unwrap();
+        let rbm = self.uncommitted_rbms.get_mut(&blockfilekey).unwrap();
         rbm.remove(offset_id);
-        Ok(()) 
+        Ok(())
     }
 
     fn get(&self, key: &str, value: T) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
@@ -174,9 +170,9 @@ mod test {
             .create("test", KeyType::String, ValueType::RoaringBitmap)
             .unwrap();
         let mut index = BlockfileMetadataIndex::new(blockfile);
-        let result = index.set("key", ("value".to_string()), 1);
+        let result = index.set("key", "value".to_string(), 1);
         assert_eq!(result.is_err(), true);
-        let result = index.delete("key", ("value".to_string()), 1);
+        let result = index.delete("key", "value".to_string(), 1);
         assert_eq!(result.is_err(), true);
         let result = index.commit_transaction();
         assert_eq!(result.is_err(), true);
@@ -201,14 +197,10 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index
-            .set("key", ("value".to_string()), 1)
-            .unwrap();
+        index.set("key", "value".to_string(), 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index
-            .get("key", ("value".to_string()))
-            .unwrap();
+        let bitmap = index.get("key", "value".to_string()).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
@@ -221,10 +213,10 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<f32>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", (1.0), 1).unwrap();
+        index.set("key", 1.0, 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", (1.0)).unwrap();
+        let bitmap = index.get("key", 1.0).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
@@ -237,10 +229,10 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<bool>::new(blockfile);
         index.begin_transaction().unwrap();
-        index.set("key", (true), 1).unwrap();
+        index.set("key", true, 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index.get("key", (true)).unwrap();
+        let bitmap = index.get("key", true).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
@@ -253,17 +245,11 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index
-            .set("key", ("value".to_string()), 1)
-            .unwrap();
-        index
-            .delete("key", ("value".to_string()), 1)
-            .unwrap();
+        index.set("key", "value".to_string(), 1).unwrap();
+        index.delete("key", "value".to_string(), 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index
-            .get("key", ("value".to_string()))
-            .unwrap();
+        let bitmap = index.get("key", "value".to_string()).unwrap();
         assert_eq!(bitmap.len(), 0);
     }
 
@@ -275,20 +261,12 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index
-            .set("key", ("value".to_string()), 1)
-            .unwrap();
-        index
-            .delete("key", ("value".to_string()), 1)
-            .unwrap();
-        index
-            .set("key", ("value".to_string()), 1)
-            .unwrap();
+        index.set("key", "value".to_string(), 1).unwrap();
+        index.delete("key", "value".to_string(), 1).unwrap();
+        index.set("key", "value".to_string(), 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index
-            .get("key", ("value".to_string()))
-            .unwrap();
+        let bitmap = index.get("key", "value".to_string()).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
     }
@@ -301,23 +279,15 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index
-            .set("key1", ("value".to_string()), 1)
-            .unwrap();
-        index
-            .set("key2", ("value".to_string()), 2)
-            .unwrap();
+        index.set("key1", "value".to_string(), 1).unwrap();
+        index.set("key2", "value".to_string(), 2).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index
-            .get("key1", ("value".to_string()))
-            .unwrap();
+        let bitmap = index.get("key1", "value".to_string()).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
 
-        let bitmap = index
-            .get("key2", ("value".to_string()))
-            .unwrap();
+        let bitmap = index.get("key2", "value".to_string()).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(2), true);
     }
@@ -330,23 +300,15 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index
-            .set("key", ("value1".to_string()), 1)
-            .unwrap();
-        index
-            .set("key", ("value2".to_string()), 2)
-            .unwrap();
+        index.set("key", "value1".to_string(), 1).unwrap();
+        index.set("key", "value2".to_string(), 2).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index
-            .get("key", ("value1".to_string()))
-            .unwrap();
+        let bitmap = index.get("key", "value1".to_string()).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(1), true);
 
-        let bitmap = index
-            .get("key", ("value2".to_string()))
-            .unwrap();
+        let bitmap = index.get("key", "value2".to_string()).unwrap();
         assert_eq!(bitmap.len(), 1);
         assert_eq!(bitmap.contains(2), true);
     }
@@ -359,27 +321,20 @@ mod test {
             .unwrap();
         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
         index.begin_transaction().unwrap();
-        index
-            .set("key", ("value".to_string()), 1)
-            .unwrap();
+        index.set("key", "value".to_string(), 1).unwrap();
         index.commit_transaction().unwrap();
 
         index.begin_transaction().unwrap();
-        index
-            .delete("key", ("value".to_string()), 1)
-            .unwrap();
+        index.delete("key", "value".to_string(), 1).unwrap();
         index.commit_transaction().unwrap();
 
-        let bitmap = index
-            .get("key", ("value".to_string()))
-            .unwrap();
+        let bitmap = index.get("key", "value".to_string()).unwrap();
         assert_eq!(bitmap.len(), 0);
     }
 
     use proptest::prelude::*;
-    use proptest_state_machine::{prop_state_machine, ReferenceStateMachine, StateMachineTest};
     use proptest::test_runner::Config;
-    use rand::prelude::{IteratorRandom, SliceRandom};
+    use proptest_state_machine::{prop_state_machine, ReferenceStateMachine, StateMachineTest};
     use std::rc::Rc;
 
     // Utility function to check if a Vec<u32> and RoaringBitmap contain equivalent
@@ -401,12 +356,9 @@ mod test {
         return true;
     }
 
-    pub(crate) trait PropTestValue: MetadataIndexValue +
-                                    PartialEq +
-                                    Eq +
-                                    Clone +
-                                    std::hash::Hash +
-                                    std::fmt::Debug {
+    pub(crate) trait PropTestValue:
+        MetadataIndexValue + PartialEq + Eq + Clone + std::hash::Hash + std::fmt::Debug
+    {
         fn strategy() -> BoxedStrategy<Self>;
     }
 
@@ -481,7 +433,11 @@ mod test {
             Some(keys[r1 % keys.len()].clone())
         }
 
-        fn key_and_value_from_random_numbers(self: &Self, r1: usize, r2: usize) -> Option<(String, T)> {
+        fn key_and_value_from_random_numbers(
+            self: &Self,
+            r1: usize,
+            r2: usize,
+        ) -> Option<(String, T)> {
             let k = self.key_from_random_number(r1)?;
 
             let values = self.data.get(&k)?.keys().collect::<Vec<&T>>();
@@ -492,7 +448,12 @@ mod test {
             Some((k.clone(), v.clone()))
         }
 
-        fn key_and_value_and_entry_from_random_numbers(self: &Self, r1: usize, r2: usize, r3: usize) -> Option<(String, T, u32)> {
+        fn key_and_value_and_entry_from_random_numbers(
+            self: &Self,
+            r1: usize,
+            r2: usize,
+            r3: usize,
+        ) -> Option<(String, T, u32)> {
             let (k, v) = self.key_and_value_from_random_numbers(r1, r2)?;
 
             let offsets = self.data.get(&k)?.get(&v)?;
@@ -503,12 +464,7 @@ mod test {
             Some((k.clone(), v.clone(), oid))
         }
 
-        fn kv_rbm_eq(
-            self: &Self,
-            rbm: &RoaringBitmap,
-            k: &str,
-            v: &T,
-        ) -> bool {
+        fn kv_rbm_eq(self: &Self, rbm: &RoaringBitmap, k: &str, v: &T) -> bool {
             match self.data.get(k) {
                 Some(vv) => match vv.get(v) {
                     Some(rbm2) => vec_rbm_eq(rbm2, rbm),
@@ -545,10 +501,10 @@ mod test {
                     (".{0,10}", T::strategy(), 1..1000).prop_map(move |(k, v, oid)| {
                         Transition::Delete(k.to_string(), v, oid as u32)
                     }),
-                    (".{0,10}", T::strategy()).prop_map(move |(k, v)| {
-                        Transition::Get(k.to_string(), v)
-                    }),
-                ].boxed();
+                    (".{0,10}", T::strategy())
+                        .prop_map(move |(k, v)| { Transition::Get(k.to_string(), v) }),
+                ]
+                .boxed();
             }
 
             let state = Rc::new(state.clone());
@@ -650,10 +606,10 @@ mod test {
             match transition {
                 Transition::BeginTransaction => {
                     state.in_transaction = true;
-                },
+                }
                 Transition::CommitTransaction => {
                     state.in_transaction = false;
-                },
+                }
                 Transition::Set(k, v, oid) => {
                     if !state.in_transaction {
                         return state;
@@ -663,7 +619,7 @@ mod test {
                     if !entry.contains(oid) {
                         entry.push(*oid);
                     }
-                },
+                }
                 Transition::Delete(k, v, oid) => {
                     if !state.in_transaction {
                         return state;
@@ -686,10 +642,10 @@ mod test {
                     if entry.is_empty() {
                         state.data.remove(k);
                     }
-                },
+                }
                 Transition::Get(_, _) => {
                     // No-op
-                },
+                }
             }
             state
         }
@@ -724,7 +680,7 @@ mod test {
                     } else {
                         assert!(res.is_ok());
                     }
-                },
+                }
                 Transition::CommitTransaction => {
                     let in_transaction = state.in_transaction();
                     let res = state.commit_transaction();
@@ -734,7 +690,7 @@ mod test {
                     } else {
                         assert!(res.is_ok());
                     }
-                },
+                }
                 Transition::Set(k, v, oid) => {
                     let in_transaction = state.in_transaction();
                     let res = state.set(&k, v.clone(), oid);
@@ -743,7 +699,7 @@ mod test {
                     } else {
                         assert!(res.is_ok());
                     }
-                },
+                }
                 Transition::Delete(k, v, oid) => {
                     let in_transaction = state.in_transaction();
                     let res = state.delete(&k, v, oid);
@@ -752,7 +708,7 @@ mod test {
                     } else {
                         assert!(res.is_ok());
                     }
-                },
+                }
                 Transition::Get(k, v) => {
                     let in_transaction = state.in_transaction();
                     let res = state.get(&k, v.clone());
@@ -761,10 +717,8 @@ mod test {
                         return state;
                     }
                     let rbm = res.unwrap();
-                    assert!(
-                        ref_state.kv_rbm_eq(&rbm, &k, &v)
-                    );
-                },
+                    assert!(ref_state.kv_rbm_eq(&rbm, &k, &v));
+                }
             }
             state
         }

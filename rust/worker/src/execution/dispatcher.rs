@@ -1,6 +1,7 @@
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
+use crate::execution::config::DispatcherConfig;
 use crate::{
-    config::{Configurable, WorkerConfig},
+    config::Configurable,
     errors::ChromaError,
     system::{Component, ComponentContext, Handler, Receiver, System},
 };
@@ -129,12 +130,12 @@ impl Dispatcher {
 }
 
 #[async_trait]
-impl Configurable for Dispatcher {
-    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+impl Configurable<DispatcherConfig> for Dispatcher {
+    async fn try_from_config(config: &DispatcherConfig) -> Result<Self, Box<dyn ChromaError>> {
         Ok(Dispatcher::new(
-            worker_config.dispatcher.num_worker_threads,
-            worker_config.dispatcher.dispatcher_queue_size,
-            worker_config.dispatcher.worker_queue_size,
+            config.num_worker_threads,
+            config.dispatcher_queue_size,
+            config.worker_queue_size,
         ))
     }
 }
@@ -248,7 +249,7 @@ mod tests {
     impl Handler<Result<String, ()>> for MockDispatchUser {
         async fn handle(
             &mut self,
-            message: Result<String, ()>,
+            _message: Result<String, ()>,
             ctx: &ComponentContext<MockDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
@@ -262,7 +263,7 @@ mod tests {
 
     #[async_trait]
     impl Handler<()> for MockDispatchUser {
-        async fn handle(&mut self, message: (), ctx: &ComponentContext<MockDispatchUser>) {
+        async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
             let res = self.dispatcher.send(task).await;
         }
@@ -270,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dispatcher() {
-        let mut system = System::new();
+        let system = System::new();
         let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));

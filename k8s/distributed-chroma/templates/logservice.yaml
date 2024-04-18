@@ -15,12 +15,7 @@ spec:
     spec:
       serviceAccountName: logservice-serviceaccount
       containers:
-        - command:
-            - "/bin/sh"
-            - "-c"
-            # This has to be one line to be passed into the `exec` env correctly. I truly could not tell you why.
-            - logservice logservice {{ range $k, $v := .Values.logService.flags }} --{{ $k }}={{ $v }} {{ end }}
-          env:
+        - env:
             {{ range .Values.logService.env }}
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
