@@ -7,7 +7,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
-use tracing::{debug_span, instrument, Instrument, Span};
+use tracing::Span;
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.

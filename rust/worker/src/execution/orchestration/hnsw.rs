@@ -16,7 +16,7 @@ use crate::{
 use async_trait::async_trait;
 use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, debug_span, instrument, span, Instrument, Span};
+use tracing::{trace, trace_span, Instrument, Span};
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -99,7 +99,7 @@ impl HnswQueryOrchestrator {
         match segments {
             Ok(segments) => match segments.get(0) {
                 Some(segment) => {
-                    debug!("Collection Id {:?}", segment.collection);
+                    trace!("Collection Id {:?}", segment.collection);
                     segment.collection
                 }
                 None => None,
@@ -115,7 +115,7 @@ impl HnswQueryOrchestrator {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
         let child_span: tracing::Span =
-            debug_span!(parent: Span::current(), "get collection id for segment id");
+            trace_span!(parent: Span::current(), "get collection id for segment id");
         let get_collection_id_future = self.get_collection_id_for_segment_id(self.segment_id);
         let collection_id = match get_collection_id_future
             .instrument(child_span.clone())
@@ -198,7 +198,6 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
                 };
                 let operator = Box::new(BruteForceKnnOperator {});
                 let task = wrap(operator, bf_input, ctx.sender.as_receiver());
-                println!("Current span {:?}", Span::current());
                 match self
                     .dispatcher
                     .send(task, Some(Span::current().clone()))
@@ -247,7 +246,7 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
                     query_results.push(query_result);
                 }
                 result.push(query_results);
-                debug!("Merged results: {:?}", result);
+                trace!("Merged results: {:?}", result);
 
                 match result_channel.send(Ok(result)) {
                     Ok(_) => (),

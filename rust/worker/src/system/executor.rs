@@ -7,7 +7,7 @@ use super::{
 use crate::system::ComponentContext;
 use std::sync::Arc;
 use tokio::select;
-use tracing::{debug_span, instrument, span, Id, Instrument, Span};
+use tracing::{trace_span, Instrument, Span};
 
 struct Inner<C>
 where
@@ -79,7 +79,7 @@ where
                                     parent_span = Span::current().clone();
                                 }
                             }
-                            let child_span = debug_span!(parent: parent_span, "task handler");
+                            let child_span = trace_span!(parent: parent_span, "task handler");
                             let component_context = ComponentContext {
                                     system: self.inner.system.clone(),
                                     sender: self.inner.sender.clone(),

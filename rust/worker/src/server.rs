@@ -12,7 +12,7 @@ use crate::system::{Receiver, System};
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{debug, debug_span, instrument};
+use tracing::{debug, trace, trace_span};
 use uuid::Uuid;
 
 pub struct WorkerServer {
@@ -110,7 +110,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
-        debug_span!("Input vectors parsing").in_scope(|| {
+        trace_span!("Input vectors parsing").in_scope(|| {
             for proto_query_vector in request.vectors {
                 let (query_vector, _encoding) = match proto_query_vector.try_into() {
                     Ok((vector, encoding)) => (vector, encoding),
@@ -120,7 +120,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
                 };
                 query_vectors.push(query_vector);
             }
-            debug!("Parsed vectors {:?}", query_vectors);
+            trace!("Parsed vectors {:?}", query_vectors);
             Ok(())
         });
 

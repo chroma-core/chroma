@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::{pin, select};
-use tracing::{debug_span, instrument, Instrument, Span};
+use tracing::{trace_span, Instrument, Span};
 
 #[derive(Clone, Debug)]
 pub(crate) struct System {
@@ -47,7 +47,7 @@ impl System {
 
         match C::runtime() {
             ComponentRuntime::Inherit => {
-                let child_span = debug_span!(parent: Span::current(), "component spawn");
+                let child_span = trace_span!(parent: Span::current(), "component spawn");
                 let task_future = async move { executor.run(rx).await };
                 let join_handle = tokio::spawn(task_future.instrument(child_span));
                 return ComponentHandle::new(cancel_token, Some(join_handle), sender);
