@@ -750,7 +750,8 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         )
         
         self._model_details = self._bedrock_client.get_foundation_model(modelIdentifier=self._model_name)['modelDetails']
-        assert "EMBEDDING" in self._model_details['outputModalities'], f"{self._model_name} doesn't have embedding modality output!"
+        if "EMBEDDING" not in self._model_details['outputModalities']:
+            raise ValueError(f"{self._model_name} doesn't have embedding modality output!")
 
         self._bedrock_runtime_client = session.client(
             service_name="bedrock-runtime",
@@ -780,8 +781,10 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         elif self._model_provider == "cohere":
             # See Amazon Bedrock User Guide > Cohere Embed models for more information
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed.html
-            assert len(input) <= 128, f"Input texts exceeds max size (Got: {len(input)}, Expected: <=128)"
-            assert all(len(text) <= 2048 for text in input), f"Input contains texts exceeding max length (2048)"
+            if len(input) > 128:
+                raise ValueError(f"Input texts exceeds max size (Got: {len(input)}, Expected: <=128)")
+            if not all(len(text) <= 2048 for text in input):
+                raise ValueError(f"Input contains texts exceeding max length (2048)")
             input_body = {
                 "texts": input,
                 "input_type": "search_document"
