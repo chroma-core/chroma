@@ -62,7 +62,7 @@ for auth_type in basic token xtoken; do
   setup_auth "$auth_type"
   cd clients/js
   docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
-  yarn test:run-auth-"$auth_type"
+  npm run test:run-auth-"$auth_type"
   cd ../..
   docker compose down
 done
