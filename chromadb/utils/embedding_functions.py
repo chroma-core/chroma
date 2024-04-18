@@ -214,7 +214,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
-    def __init__(self, api_key: str, model_name: str = "large"):
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "large",
+        input_type: str = "search_document"):
         try:
             import cohere
         except ImportError:
@@ -224,13 +228,14 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._client = cohere.Client(api_key)
         self._model_name = model_name
+        self._input_type = input_type
 
     def __call__(self, input: Documents) -> Embeddings:
         # Call Cohere Embedding API for each document.
         return [
             embeddings
             for embeddings in self._client.embed(
-                texts=input, model=self._model_name, input_type="search_document"
+                texts=input, model=self._model_name, input_type=self._input_type
             )
         ]
 
@@ -724,6 +729,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         session: "boto3.Session",  # noqa: F821 # Quote for forward reference
         model_name: str = "amazon.titan-embed-text-v1",
+        model_params: dict = {},
         **kwargs: Any,
     ):
         """Initialize AmazonBedrockEmbeddingFunction.
@@ -743,6 +749,10 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._model_name = model_name
         self._model_provider = self._model_name.split('.')[0]
+        
+        if self._model_provider == "cohere":
+            self._input_type = model_params.get('input_type', "search_document")
+            self._truncate = model_params.get('truncate', "NONE")
         
         self._bedrock_client = session.client(
             service_name="bedrock",
@@ -787,7 +797,8 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 raise ValueError(f"Input contains texts exceeding max length (2048)")
             input_body = {
                 "texts": input,
-                "input_type": "search_document"
+                "input_type": self._input_type,
+                "truncate": self._truncate
             }
             response = self.call_model(input_body)
             embeddings = json.load(response.get("body")).get("embeddings")
