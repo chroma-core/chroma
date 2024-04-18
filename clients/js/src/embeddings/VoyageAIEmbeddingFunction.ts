@@ -2,7 +2,7 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 export enum InputType {
   DOCUMENT = "document",
-  QUERY = "query"
+  QUERY = "query",
 }
 
 export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
@@ -48,12 +48,14 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
 
   public async generate(texts: string[]) {
     try {
-      if(texts.length > this.batchSize) {
-        throw new Error(`The number of texts to embed exceeds the maximum batch size of ${this.batchSize}`);
+      if (texts.length > this.batchSize) {
+        throw new Error(
+          `The number of texts to embed exceeds the maximum batch size of ${this.batchSize}`
+        );
       }
 
       const response = await fetch(this.apiUrl, {
-        method: 'POST',
+        method: "POST",
         headers: this.headers,
         body: JSON.stringify({
           input: texts,
@@ -71,7 +73,9 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
       const embeddings: any[] = data.data;
       const sortedEmbeddings = embeddings.sort((a, b) => a.index - b.index);
 
-      const embeddingsChunks = sortedEmbeddings.map((result) => result.embedding);
+      const embeddingsChunks = sortedEmbeddings.map(
+        (result) => result.embedding
+      );
 
       return embeddingsChunks;
     } catch (error) {
