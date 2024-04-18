@@ -2,6 +2,9 @@ import queue
 import threading
 import time
 import json
+
+from typing_extensions import Annotated
+
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
 from chromadb.ingest import (
     Producer,
@@ -47,7 +50,7 @@ _operation_codes_inv = {v: k for k, v in _operation_codes.items()}
 # https://doc.pytest.org/en/latest/example/simple.html#detect-if-running-from-within-a-pytest-run
 _called_from_test = False
 
-batch_queue: queue.Queue[Any] = queue.Queue()
+batch_queue: Annotated[Any, queue.Queue] = queue.Queue()
 
 
 class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
