@@ -24,6 +24,29 @@ META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
+
+class Omitted:
+    """Represents a returned property that was omitted from the response. It raises a ValueError when any property is accessed."""
+
+    def __init__(self, message: str):
+        self.message = message
+
+    def __getattr__(self, _):
+        raise ValueError(self.message)
+
+    def __getitem__(self, _):
+        raise ValueError(self.message)
+
+    def __str__(self):
+        return self.message
+
+    def __repr__(self):
+        return f'Omitted("{self.message}")'
+
+
+E = TypeVar("E")
+Omittable = Union[E, Omitted]
+
 # URIs
 URI = str
 URIs = List[URI]
@@ -152,21 +175,21 @@ L = TypeVar("L", covariant=True, bound=Loadable)
 
 class GetResult(TypedDict):
     ids: List[ID]
-    embeddings: Optional[List[Embedding]]
-    documents: Optional[List[Document]]
-    uris: Optional[URIs]
-    data: Optional[Loadable]
-    metadatas: Optional[List[Metadata]]
+    embeddings: Omittable[List[Embedding]]
+    documents: Omittable[List[Document]]
+    uris: Omittable[URIs]
+    data: Omittable[Loadable]
+    metadatas: Omittable[List[Metadata]]
 
 
 class QueryResult(TypedDict):
     ids: List[IDs]
-    embeddings: Optional[List[List[Embedding]]]
-    documents: Optional[List[List[Document]]]
-    uris: Optional[List[List[URI]]]
-    data: Optional[List[Loadable]]
-    metadatas: Optional[List[List[Metadata]]]
-    distances: Optional[List[List[float]]]
+    embeddings: Omittable[List[List[Embedding]]]
+    documents: Omittable[List[List[Document]]]
+    uris: Omittable[List[List[URI]]]
+    data: Omittable[List[Loadable]]
+    metadatas: Omittable[List[List[Metadata]]]
+    distances: Omittable[List[List[float]]]
 
 
 class IndexMetadata(TypedDict):
@@ -441,6 +464,15 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     return where_document
 
 
+def valid_include_keys(allow_distances: bool) -> Include:
+    """Returns a list of available keys for the include parameter."""
+    allowed_values: Include = ["embeddings", "documents", "metadatas", "uris", "data"]
+    if allow_distances:
+        allowed_values.append("distances")
+
+    return allowed_values
+
+
 def validate_include(include: Include, allow_distances: bool) -> Include:
     """Validates include to ensure it is a list of strings. Since get does not allow distances, allow_distances is used
     to control if distances is allowed"""
@@ -450,9 +482,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
-        allowed_values = ["embeddings", "documents", "metadatas", "uris", "data"]
-        if allow_distances:
-            allowed_values.append("distances")
+        allowed_values = valid_include_keys(allow_distances=allow_distances)
         if item not in allowed_values:
             raise ValueError(
                 f"Expected include item to be one of {', '.join(allowed_values)}, got {item}"

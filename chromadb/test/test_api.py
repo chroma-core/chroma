@@ -1499,3 +1499,28 @@ def test_ssl_self_signed_with_verify_false(client_ssl):
         client.heartbeat()
     client_ssl.clear_system_cache()
     assert "Unverified HTTPS request" in str(record[0].message)
+
+
+def test_omitted_field_messages(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+
+    # Test .get()
+    document = collection.get(ids="id1")
+
+    assert "Add 'embeddings' to `include` to return this field" in str(document)
+
+    assert "Add 'embeddings' to `include` to return this field" in str(
+        document["embeddings"]
+    )
+
+    with pytest.raises(ValueError) as exc:
+        document["embeddings"][0]
+    assert "Add 'embeddings' to `include` to return this field" in str(exc.value)
+    assert exc.type == ValueError
+
+    # Test .query()
+    documents = collection.query(query_embeddings=[0, 0, 0], n_results=1)
+
+    assert "Add 'embeddings' to `include` to return this field" in str(documents)

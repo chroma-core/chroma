@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
 
 import numpy as np
 from pydantic import BaseModel, PrivateAttr
@@ -8,6 +8,7 @@ import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     URI,
+    Omitted,
     CollectionMetadata,
     DataLoader,
     Embedding,
@@ -37,6 +38,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many_image,
     maybe_cast_one_to_many_uri,
     validate_ids,
+    valid_include_keys,
     validate_include,
     validate_metadata,
     validate_metadatas,
@@ -226,9 +228,12 @@ class Collection(BaseModel):
         ):
             get_results["data"] = self._data_loader(get_results["uris"])
 
-        # Remove URIs from the result if they weren't requested
-        if "uris" not in include:
-            get_results["uris"] = None
+        for key in valid_include_keys(allow_distances=False):
+            if key not in include:
+                # Casting to Any because key is of type Include, but GetResult does not have a distances key
+                get_results[cast(Any, key)] = Omitted(
+                    f"Add '{key}' to `include` to return this field."
+                )
 
         return get_results
 
@@ -360,9 +365,11 @@ class Collection(BaseModel):
                 self._data_loader(uris) for uris in query_results["uris"]
             ]
 
-        # Remove URIs from the result if they weren't requested
-        if "uris" not in include:
-            query_results["uris"] = None
+        for key in valid_include_keys(allow_distances=True):
+            if key not in include:
+                query_results[key] = Omitted(
+                    f"Add '{key}' to `include` to return this field."
+                )
 
         return query_results
 
@@ -382,7 +389,8 @@ class Collection(BaseModel):
             validate_metadata(metadata)
             if "hnsw:space" in metadata:
                 raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently.")
+                    "Changing the distance function of a collection once it is created is not supported currently."
+                )
 
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
