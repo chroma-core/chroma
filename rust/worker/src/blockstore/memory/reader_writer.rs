@@ -23,17 +23,13 @@ impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> MemoryBlockfileWriter<K, V
         }
     }
 
-    pub(crate) fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        Ok(())
-    }
-
-    pub(crate) fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(&self) -> Result<(), Box<dyn ChromaError>> {
         self.storage_manager.commit(self.builder.id);
         Ok(())
     }
 
-    pub(crate) fn set(&self, prefix: &str, key: K, value: &V) -> Result<(), Box<dyn ChromaError>> {
-        let key = key.into();
+    pub(crate) fn set(&self, prefix: &str, key: K, value: V) -> Result<(), Box<dyn ChromaError>> {
+        let key = key.clone().into();
         V::write_to_storage(prefix, key, value, &self.builder);
         Ok(())
     }
@@ -126,12 +122,12 @@ mod tests {
     fn test_blockfile_string() {
         let storage_manager = StorageManager::new();
         let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", "key1".to_string(), &"value1".to_string());
-        let _ = writer.commit_transaction();
+        let _ = writer.set("prefix", "key1", "value1");
+        let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<String, &String> =
+        let reader: HashMapBlockfileReader<&str, &str> =
             HashMapBlockfileReader::open(writer.id, storage_manager);
-        let value = reader.get("prefix", "key1".to_string()).unwrap();
+        let value = reader.get("prefix", "key1").unwrap();
         assert_eq!(value, "value1");
     }
 
@@ -144,9 +140,8 @@ mod tests {
         let record = DataRecord {
             id: &id,
             embedding: &embedding,
-            metadata: &None,
-            document: &None,
-            serialized_metadata: None,
+            metadata: None,
+            document: None,
         };
 
         let data = vec![
@@ -187,22 +182,21 @@ mod tests {
             .map(|record| DataRecord {
                 id: &record.0.record.id,
                 embedding: record.0.record.embedding.as_ref().unwrap(),
-                document: &None,
-                metadata: &None,
-                serialized_metadata: None,
+                document: None,
+                metadata: None,
             })
             .collect::<Vec<_>>();
         let id = writer.id();
-        let _ = writer.set("prefix", "key1".to_string(), &record);
+        let _ = writer.set("prefix", "key1", &record);
         for record in data_records {
-            let _ = writer.set("prefix", record.id.to_owned(), &record);
+            let _ = writer.set("prefix", record.id, &record);
         }
 
-        writer.commit_transaction().unwrap();
+        writer.commit().unwrap();
 
-        let reader: HashMapBlockfileReader<String, DataRecord> =
+        let reader: HashMapBlockfileReader<&str, DataRecord> =
             HashMapBlockfileReader::open(id, storage_manager);
-        let record = reader.get("prefix", "embedding_id_1".to_string()).unwrap();
+        let record = reader.get("prefix", "embedding_id_1").unwrap();
         assert_eq!(record.id, "embedding_id_1");
         assert_eq!(record.embedding, vec![1.0, 2.0, 3.0]);
     }

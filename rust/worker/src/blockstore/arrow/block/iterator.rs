@@ -1,5 +1,8 @@
 // use super::types::Block;
-// use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
+// use crate::blockstore::{
+//     key::CompositeKey,
+//     types::{Key, Value},
+// };
 // use arrow::array::{Array, BooleanArray, Int32Array, ListArray, StringArray, UInt32Array};
 
 // /// An iterator over the contents of a block.
@@ -8,25 +11,21 @@
 // pub(super) struct BlockIterator<'a> {
 //     block: Block,
 //     index: usize,
-//     key_type: KeyType,
-//     value_type: ValueType,
 //     phantom: std::marker::PhantomData<&'a ()>,
 // }
 
 // impl BlockIterator<'_> {
-//     pub fn new(block: Block, key_type: KeyType, value_type: ValueType) -> Self {
+//     pub fn new(block: Block) -> Self {
 //         Self {
 //             block,
 //             index: 0,
-//             key_type,
-//             value_type,
 //             phantom: std::marker::PhantomData,
 //         }
 //     }
 // }
 
-// impl<'a> Iterator for BlockIterator<'a> {
-//     type Item = (BlockfileKey, Value<'a>);
+// impl<'a> Iterator for BlockIterator {
+//     type Item = (&str, Value);
 
 //     fn next(&mut self) -> Option<Self::Item> {
 //         let data = &self.block.inner.read().data;

@@ -1,20 +1,32 @@
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{LogRecord, Metadata};
 
-pub(super) struct MaterializedLogRecord<'a> {
-    segment_offset_id: u32,
-    log_record: &'a LogRecord,
-    materialized_record: DataRecord<'a>,
+pub(crate) struct MaterializedLogRecord<'a> {
+    pub(super) segment_offset_id: u32,
+    pub(super) log_record: &'a LogRecord,
+    pub(super) materialized_record: DataRecord<'a>,
+}
+
+impl<'a> MaterializedLogRecord<'a> {
+    pub(crate) fn new(
+        segment_offset_id: u32,
+        log_record: &'a LogRecord,
+        materialized_record: DataRecord<'a>,
+    ) -> Self {
+        Self {
+            segment_offset_id,
+            log_record,
+            materialized_record,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct DataRecord<'a> {
     pub(crate) id: &'a str,
     pub(crate) embedding: &'a [f32],
-    pub(crate) metadata: &'a Option<Metadata>,
-    pub(crate) document: &'a Option<String>,
-    // Optional staged serialized version of the metadata
-    pub(crate) serialized_metadata: Option<Vec<u8>>,
+    pub(crate) metadata: Option<Metadata>,
+    pub(crate) document: Option<&'a str>,
 }
 
 impl DataRecord<'_> {
@@ -32,15 +44,16 @@ impl DataRecord<'_> {
 }
 
 pub(super) trait SegmentWriter {
-    fn begin_transaction(&self);
     fn apply_materialized_log_chunk(&self, records: Chunk<MaterializedLogRecord>);
     fn apply_log_chunk(&self, records: Chunk<LogRecord>);
-    fn commit_transaction(&self);
-    fn rollback_transaction(&self);
+    fn commit(&self);
 }
 
 pub(crate) trait LogMaterializer: SegmentWriter {
-    fn materialize(&self, records: Chunk<LogRecord>) -> Chunk<MaterializedLogRecord>;
+    fn materialize<'chunk>(
+        &self,
+        records: &'chunk Chunk<LogRecord>,
+    ) -> Chunk<MaterializedLogRecord<'chunk>>;
 }
 
 #[cfg(test)]
@@ -99,9 +112,8 @@ mod tests {
                 materialized_record: DataRecord {
                     id: &record.0.record.id,
                     embedding: &[],
-                    metadata: &metadata_1,
-                    document: &None,
-                    serialized_metadata: None,
+                    metadata: metadata_1.clone(),
+                    document: None,
                 },
             })
             .collect::<Vec<_>>();

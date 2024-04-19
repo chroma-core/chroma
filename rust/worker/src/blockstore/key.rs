@@ -1,6 +1,8 @@
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, PartialEq, PartialOrd)]
+use super::Key;
+
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub(crate) enum KeyWrapper {
     String(String),
     Float32(f32),
@@ -20,9 +22,9 @@ impl KeyWrapper {
     }
 }
 
-impl Into<KeyWrapper> for String {
+impl Into<KeyWrapper> for &str {
     fn into(self) -> KeyWrapper {
-        KeyWrapper::String(self)
+        KeyWrapper::String(self.to_string())
     }
 }
 
@@ -44,10 +46,19 @@ impl Into<KeyWrapper> for u32 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct CompositeKey {
     pub(super) prefix: String,
     pub(super) key: KeyWrapper,
+}
+
+impl CompositeKey {
+    pub(super) fn new<K: Key>(prefix: String, key: K) -> Self {
+        Self {
+            prefix,
+            key: key.into(),
+        }
+    }
 }
 
 impl Hash for CompositeKey {

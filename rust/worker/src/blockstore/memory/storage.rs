@@ -2,11 +2,13 @@ use crate::{
     blockstore::key::{CompositeKey, KeyWrapper},
     segment::DataRecord,
 };
+use arrow::array::Int32Array;
 use parking_lot::RwLock;
-use std::{collections::HashMap, sync::Arc};
+use roaring::RoaringBitmap;
+use std::{collections::HashMap, fmt::Write, sync::Arc};
 
 pub(crate) trait Writeable {
-    fn write_to_storage(prefix: &str, key: KeyWrapper, value: &Self, storage: &StorageBuilder);
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder);
 }
 
 pub(crate) trait Readable<'referred_data>: Sized {
@@ -17,8 +19,8 @@ pub(crate) trait Readable<'referred_data>: Sized {
     ) -> Option<Self>;
 }
 
-impl Writeable for String {
-    fn write_to_storage(prefix: &str, key: KeyWrapper, value: &Self, storage: &StorageBuilder) {
+impl Writeable for &str {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
             .string_value_storage
             .write()
@@ -29,26 +31,66 @@ impl Writeable for String {
                     prefix: prefix.to_string(),
                     key,
                 },
-                value.clone(),
+                value.to_string(),
             );
     }
 }
 
-impl<'referred_data> Readable<'referred_data> for &'referred_data String {
+impl<'referred_data> Readable<'referred_data> for &'referred_data str {
     fn read_from_storage(
         prefix: &str,
         key: KeyWrapper,
         storage: &'referred_data Storage,
     ) -> Option<Self> {
-        storage.string_value_storage.get(&CompositeKey {
-            prefix: prefix.to_string(),
-            key,
-        })
+        storage
+            .string_value_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .map(|s| s.as_str())
     }
 }
 
-impl Writeable for DataRecord<'_> {
-    fn write_to_storage(prefix: &str, key: KeyWrapper, value: &Self, storage: &StorageBuilder) {
+// TODO: remove this and make this all use a unified storage so we don't have two impls
+impl Writeable for &Int32Array {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+        todo!()
+    }
+}
+
+impl Readable<'_> for Int32Array {
+    fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
+        todo!()
+    }
+}
+
+impl Writeable for &RoaringBitmap {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+        todo!()
+    }
+}
+
+impl Writeable for u32 {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+        todo!()
+    }
+}
+
+impl Readable<'_> for u32 {
+    fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
+        todo!()
+    }
+}
+
+impl Readable<'_> for RoaringBitmap {
+    fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
+        todo!()
+    }
+}
+
+impl Writeable for &DataRecord<'_> {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
             .data_record_id_storage
             .write()
@@ -94,9 +136,8 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
         Some(DataRecord {
             id: &id.unwrap(),
             embedding: &embedding.unwrap(),
-            metadata: &None,
-            document: &None,
-            serialized_metadata: None,
+            metadata: None,
+            document: None,
         })
     }
 }

@@ -1,16 +1,19 @@
 // use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
-use super::delta::{BlockDeltaKey, BlockDeltaValue};
+use super::delta::BlockDelta;
+use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
 use crate::blockstore::key::{CompositeKey, KeyWrapper};
+use crate::blockstore::Key;
 use crate::errors::{ChromaError, ErrorCodes};
 use arrow::array::{
     ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
-    Float32Builder, UInt32Array, UInt32Builder,
+    Float32Builder, StructArray, UInt32Array, UInt32Builder,
 };
 use arrow::{
     array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
+// use proptest::bits::usize;
 use uuid::Uuid;
 // use parking_lot::RwLock;
 use std::io::Error;
@@ -21,23 +24,6 @@ use thiserror::Error;
 
 // use super::delta::BlockDelta;
 // use super::iterator::BlockIterator;
-
-// /// BlockState represents the state of a block in the blockstore. Conceptually, a block is immutable once the broarder system
-// /// has been made aware of its existence. New blocks may exist locally but are not considered part of the blockstore until they
-// /// are registered.
-// /// ## State transitions
-// /// The state of a block is as follows:
-// /// - Uninitialized: The block has been created but no data has been added
-// /// - Initialized: Data has been added to the block but it has not been committed
-// /// - Commited: The block has been committed and is ready to be registered. At this point the block is immutable
-// /// - Registered: The block has been registered and is now part of the blockstore
-// #[derive(Clone, Copy)]
-// pub enum BlockState {
-//     Uninitialized,
-//     Initialized,
-//     Commited,
-//     Registered,
-// }
 
 /// A block in a blockfile. A block is a sorted collection of data that is immutable once it has been committed.
 /// Blocks are the fundamental unit of storage in the blockstore and are used to store data in the form of (key, value) pairs.
@@ -54,7 +40,7 @@ use thiserror::Error;
 pub struct Block {
     // The data is stored in an Arrow record batch with the column schema (prefix, key, value).
     // These are stored in sorted order by prefix and key for efficient lookups.
-    pub(super) data: RecordBatch,
+    pub data: RecordBatch,
     pub id: Uuid,
 }
 
@@ -63,121 +49,151 @@ impl Block {
         Self { id, data }
     }
 
-    // pub fn get(&self, query_key: &BlockfileKey) -> Option<Value> {
-    //     match &self.inner.read().data {
-    //         Some(data) => {
-    //             let prefix = data.data.column(0);
-    //             let key = data.data.column(1);
-    //             let value = data.data.column(2);
-    //             // TODO: This should be binary search
-    //             for i in 0..prefix.len() {
-    //                 if prefix
-    //                     .as_any()
-    //                     .downcast_ref::<StringArray>()
-    //                     .unwrap()
-    //                     .value(i)
-    //                     == query_key.prefix
-    //                 {
-    //                     let key_matches = match &query_key.key {
-    //                         Key::String(inner_key) => {
-    //                             inner_key
-    //                                 == key.as_any().downcast_ref::<StringArray>().unwrap().value(i)
-    //                         }
-    //                         Key::Float(inner_key) => {
-    //                             *inner_key
-    //                                 == key
-    //                                     .as_any()
-    //                                     .downcast_ref::<Float32Array>()
-    //                                     .unwrap()
-    //                                     .value(i)
-    //                         }
-    //                         Key::Bool(inner_key) => {
-    //                             *inner_key
-    //                                 == key
-    //                                     .as_any()
-    //                                     .downcast_ref::<BooleanArray>()
-    //                                     .unwrap()
-    //                                     .value(i)
-    //                         }
-    //                         Key::Uint(inner_key) => {
-    //                             *inner_key
-    //                                 == key.as_any().downcast_ref::<UInt32Array>().unwrap().value(i)
-    //                                     as u32
-    //                         }
-    //                     };
-    //                     if key_matches {
-    //                         match self.get_value_type() {
-    //                             ValueType::Int32Array => {
-    //                                 return Some(Value::Int32ArrayValue(
-    //                                     value
-    //                                         .as_any()
-    //                                         .downcast_ref::<ListArray>()
-    //                                         .unwrap()
-    //                                         .value(i)
-    //                                         .as_any()
-    //                                         .downcast_ref::<Int32Array>()
-    //                                         .unwrap()
-    //                                         .clone(),
-    //                                 ))
-    //                             }
-    //                             ValueType::String => {
-    //                                 return Some(Value::StringValue(
-    //                                     value
-    //                                         .as_any()
-    //                                         .downcast_ref::<StringArray>()
-    //                                         .unwrap()
-    //                                         .value(i)
-    //                                         .to_string(),
-    //                                 ))
-    //                             }
-    //                             ValueType::RoaringBitmap => {
-    //                                 let bytes = value
-    //                                     .as_any()
-    //                                     .downcast_ref::<BinaryArray>()
-    //                                     .unwrap()
-    //                                     .value(i);
-    //                                 let bitmap = roaring::RoaringBitmap::deserialize_from(bytes);
-    //                                 match bitmap {
-    //                                     Ok(bitmap) => {
-    //                                         return Some(Value::RoaringBitmapValue(bitmap))
-    //                                     }
-    //                                     // TODO: log error
-    //                                     Err(_) => return None,
-    //                                 }
-    //                             }
-    //                             ValueType::Uint => {
-    //                                 return Some(Value::UintValue(
-    //                                     value
-    //                                         .as_any()
-    //                                         .downcast_ref::<UInt32Array>()
-    //                                         .unwrap()
-    //                                         .value(i),
-    //                                 ))
-    //                             }
-    //                             // TODO: Add support for other types
-    //                             _ => unimplemented!(),
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             None
-    //         }
-    //         None => None,
-    //     }
-    // }
+    pub fn to_block_delta<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        mut delta: BlockDelta,
+    ) -> BlockDelta {
+        let prefix_arr = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..self.data.num_rows() {
+            let prefix = prefix_arr.value(i);
+            let key = K::get(self.data.column(1), i);
+            let value = V::get(self.data.column(2), i);
+
+            K::add_to_delta(prefix, key, value, &mut delta);
+        }
+        delta
+    }
+
+    pub fn get<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<V> {
+        let prefix_arr = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_arr.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            if curr_prefix == prefix && curr_key == key {
+                return Some(V::get(self.data.column(2), i));
+            }
+        }
+        None
+    }
 
     /// Returns the size of the block in bytes
     pub(crate) fn get_size(&self) -> usize {
         let mut total_size = 0;
+        let mut i = 0;
         for column in self.data.columns() {
             total_size += column.get_buffer_memory_size();
+            i += 1;
         }
+
+        // debug
+        let value = self
+            .data
+            .column(2)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        i = 0;
+        for column in value.columns() {
+            println!(
+                "Struct Column {}, size: {:?}",
+                i,
+                column.get_buffer_memory_size()
+            );
+            column.nulls().map_or((), |nulls| {
+                println!("Nulls size: {:?}", nulls.buffer().capacity());
+            });
+            let mut j = 0;
+            for buffer in column.to_data().buffers() {
+                println!(
+                    "Struct Column {}, buffer {}, size: {:?}",
+                    i,
+                    j,
+                    buffer.capacity(),
+                );
+                j += 1;
+            }
+            i += 1;
+        }
+
         total_size
     }
 
     /// Returns the number of items in the block
     pub fn len(&self) -> usize {
         self.data.num_rows()
+    }
+
+    pub fn save(&self, path: &str) -> Result<(), Box<dyn ChromaError>> {
+        let file = std::fs::File::create(path);
+        let mut file = match file {
+            Ok(file) => file,
+            Err(e) => {
+                // TODO: Return a proper error
+                panic!("Error creating file: {:?}", e)
+            }
+        };
+        let mut writer = std::io::BufWriter::new(file);
+        let writer = arrow::ipc::writer::FileWriter::try_new(&mut writer, &self.data.schema());
+        let mut writer = match writer {
+            Ok(writer) => writer,
+            Err(e) => {
+                // TODO: Return a proper error
+                panic!("Error creating writer: {:?}", e)
+            }
+        };
+        match writer.write(&self.data) {
+            Ok(_) => match writer.finish() {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    panic!("Error finishing writer: {:?}", e);
+                }
+            },
+            Err(e) => {
+                panic!("Error writing data: {:?}", e);
+            }
+        }
+    }
+
+    pub fn load(path: &str) -> Result<Self, Box<dyn ChromaError>> {
+        let file = std::fs::File::open(path);
+        let file = match file {
+            Ok(file) => file,
+            Err(e) => {
+                // TODO: Return a proper error
+                panic!("Error opening file: {:?}", e)
+            }
+        };
+        let mut reader = std::io::BufReader::new(file);
+        let reader = arrow::ipc::reader::FileReader::try_new(&mut reader, None);
+        let mut reader = match reader {
+            Ok(reader) => reader,
+            Err(e) => {
+                // TODO: Return a proper error
+                panic!("Error creating reader: {:?}", e)
+            }
+        };
+        let batch = reader.next().unwrap();
+        // TODO: how to store / hydrate id?
+        match batch {
+            Ok(batch) => Ok(Self::from_record_batch(Uuid::new_v4(), batch)),
+            Err(e) => {
+                panic!("Error reading batch: {:?}", e);
+            }
+        }
     }
 }
 

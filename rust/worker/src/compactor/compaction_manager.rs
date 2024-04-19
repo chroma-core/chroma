@@ -1,6 +1,7 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use crate::assignment::assignment_policy::AssignmentPolicy;
+use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
 use crate::config::CompactionServiceConfig;
@@ -12,6 +13,7 @@ use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
+use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::ComponentContext;
@@ -34,6 +36,7 @@ pub(crate) struct CompactionManager {
     // Dependencies
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
+    blockfile_provider: BlockfileProvider,
     // Dispatcher
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Config
@@ -60,6 +63,7 @@ impl CompactionManager {
         scheduler: Scheduler,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
+        blockfile_provider: BlockfileProvider,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
     ) -> Self {
@@ -68,6 +72,7 @@ impl CompactionManager {
             scheduler,
             log,
             sysdb,
+            blockfile_provider,
             dispatcher: None,
             compaction_manager_queue_size,
             compaction_interval,
@@ -101,6 +106,7 @@ impl CompactionManager {
                     collection_uuid.unwrap(),
                     self.log.clone(),
                     self.sysdb.clone(),
+                    self.blockfile_provider.clone(),
                     dispatcher.clone(),
                     None,
                 );
@@ -175,6 +181,13 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
                 return Err(err);
             }
         };
+        let sysdb_config = &config.sysdb;
+        let sysdb = match sysdb::from_config(sysdb_config).await {
+            Ok(sysdb) => sysdb,
+            Err(err) => {
+                return Err(err);
+            }
+        };
 
         let my_ip = config.my_ip.clone();
         let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
@@ -198,10 +211,13 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             max_concurrent_jobs,
             assignment_policy,
         );
+
+        // TODO: blockfile proivder should be injected somehow
         Ok(CompactionManager::new(
             scheduler,
             log,
             sysdb,
+            BlockfileProvider::new_arrow(),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
         ))
@@ -367,6 +383,7 @@ mod tests {
             scheduler,
             log,
             sysdb,
+            BlockfileProvider::new_arrow(),
             compaction_manager_queue_size,
             compaction_interval,
         );

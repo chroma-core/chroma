@@ -20,7 +20,6 @@ trait WriteableValue {
 }
 
 // =====  Value Implementations  =====
-
 impl<'referred_data> ReadableValue<'referred_data> for NestedReferences<'referred_data> {
     fn read_from_block(block: &'referred_data Block) -> Self {
         let id = block.id_storage.get("key").unwrap();

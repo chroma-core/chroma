@@ -1,9 +1,14 @@
+use super::arrow::blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter};
+use super::arrow::types::{
+    ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
+};
 use super::key::KeyWrapper;
 use super::memory::reader_writer::{HashMapBlockfileReader, MemoryBlockfileWriter};
 use super::memory::storage::{Readable, Writeable};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
+use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
@@ -36,24 +41,21 @@ impl ChromaError for BlockfileError {
 }
 
 // ===== Key Types =====
-pub(crate) trait Key: PartialEq + Eq + Debug + Display + Into<KeyWrapper> + Clone {
+pub(crate) trait Key: PartialEq + Debug + Display + Into<KeyWrapper> + Clone {
     fn get_size(&self) -> usize;
 }
 
-impl Key for String {
+impl Key for &str {
     fn get_size(&self) -> usize {
         self.len()
     }
 }
 
-// impl Key for f32 {
-//     fn get_size(&self) -> usize {
-//         4
-//     }
-//     fn get_type(&self) -> KeyType {
-//         KeyType::Float32
-//     }
-// }
+impl Key for f32 {
+    fn get_size(&self) -> usize {
+        4
+    }
+}
 
 impl Key for bool {
     fn get_size(&self) -> usize {
@@ -120,66 +122,100 @@ pub(crate) trait Value: Clone {
     fn get_size(&self) -> usize;
 }
 
+// TODO: Maybe make writeable and readable traits'
+// TODO: we don't need this get size
 impl Value for Int32Array {
     fn get_size(&self) -> usize {
         self.get_buffer_memory_size()
     }
 }
 
-impl Value for String {
+impl Value for &Int32Array {
+    fn get_size(&self) -> usize {
+        self.get_buffer_memory_size()
+    }
+}
+
+impl Value for &str {
     fn get_size(&self) -> usize {
         self.len()
     }
 }
 
-impl Value for &String {
+impl Value for u32 {
     fn get_size(&self) -> usize {
-        self.len()
+        4
+    }
+}
+
+impl Value for RoaringBitmap {
+    fn get_size(&self) -> usize {
+        self.serialized_size()
+    }
+}
+
+impl Value for &RoaringBitmap {
+    fn get_size(&self) -> usize {
+        self.serialized_size()
     }
 }
 
 impl<'a> Value for DataRecord<'a> {
     fn get_size(&self) -> usize {
-        self.get_size()
+        DataRecord::get_size(self)
     }
 }
 
-pub(crate) enum BlockfileWriter<K: Key, V: Value> {
-    HashMapBlockfileWriter(MemoryBlockfileWriter<K, V>),
+impl<'a> Value for &DataRecord<'a> {
+    fn get_size(&self) -> usize {
+        DataRecord::get_size(self)
+    }
 }
 
-impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> BlockfileWriter<K, V> {
-    pub(crate) fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+pub(crate) enum BlockfileWriter<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> {
+    MemoryBlockfileWriter(MemoryBlockfileWriter<K, V>),
+    ArrowBlockfileWriter(ArrowBlockfileWriter<K, V>),
+}
+
+impl<K: Key + Into<KeyWrapper> + ArrowWriteableKey, V: Value + Writeable + ArrowWriteableValue>
+    BlockfileWriter<K, V>
+{
+    pub(crate) fn commit(self) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            BlockfileWriter::HashMapBlockfileWriter(writer) => writer.begin_transaction(),
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.commit(),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.commit(),
         }
     }
 
-    pub(crate) fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn set(&self, prefix: &str, key: K, value: V) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            BlockfileWriter::HashMapBlockfileWriter(writer) => writer.commit_transaction(),
-        }
-    }
-
-    pub(crate) fn set(&self, prefix: &str, key: K, value: &V) -> Result<(), Box<dyn ChromaError>> {
-        match self {
-            BlockfileWriter::HashMapBlockfileWriter(writer) => writer.set(prefix, key, value),
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.set(prefix, key, value),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.set(prefix, key, value),
         }
     }
 
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
-            BlockfileWriter::HashMapBlockfileWriter(writer) => writer.id(),
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.id(),
         }
     }
 }
 
-pub(crate) enum BlockfileReader<K: Key, V: Value> {
-    HashMapBlockfileReader(HashMapBlockfileReader<K, V>),
+pub(crate) enum BlockfileReader<
+    'me,
+    K: Key + ArrowReadableKey<'me>,
+    V: Value + ArrowReadableValue<'me>,
+> {
+    MemoryBlockfileReader(HashMapBlockfileReader<K, V>),
+    ArrowBlockfileReader(ArrowBlockfileReader<'me, K, V>),
 }
 
-impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_data>>
-    BlockfileReader<K, V>
+impl<
+        'referred_data,
+        K: Key + Into<KeyWrapper> + ArrowReadableKey<'referred_data>,
+        V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
+    > BlockfileReader<'referred_data, K, V>
 {
     pub(crate) fn get(
         &'referred_data self,
@@ -187,16 +223,19 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         key: K,
     ) -> Result<V, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.get(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key),
         }
     }
 
+    // TODO: make prefix &str
     pub(crate) fn get_by_prefix(
         &self,
         prefix: String,
     ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.get_by_prefix(prefix),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
+            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
         }
     }
 
@@ -206,7 +245,8 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         key: K,
     ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.get_gt(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
         }
     }
 
@@ -216,7 +256,8 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         key: K,
     ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.get_lt(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
         }
     }
 
@@ -226,7 +267,8 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         key: K,
     ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.get_gte(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
         }
     }
 
@@ -236,13 +278,15 @@ impl<'referred_data, K: Key + Into<KeyWrapper>, V: Value + Readable<'referred_da
         key: K,
     ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.get_lte(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
         }
     }
 
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
-            BlockfileReader::HashMapBlockfileReader(reader) => reader.id(),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
         }
     }
 }

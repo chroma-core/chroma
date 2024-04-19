@@ -1,4 +1,5 @@
 use super::super::operator::{wrap, TaskMessage};
+use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::CompactionJob;
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
@@ -14,6 +15,8 @@ use crate::execution::operators::pull_log::PullLogsOperator;
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::execution::operators::write_segments::WriteSegmentsResult;
 use crate::log::log::Log;
+use crate::segment::record_segment::RecordSegmentWriter;
+use crate::segment::LogMaterializer;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::Handler;
@@ -21,6 +24,7 @@ use crate::system::Receiver;
 use crate::system::System;
 use crate::types::LogRecord;
 use crate::types::SegmentFlushInfo;
+use crate::types::SegmentType;
 use async_trait::async_trait;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -63,6 +67,7 @@ pub struct CompactOrchestrator {
     // Dependencies
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
+    blockfile_provider: BlockfileProvider,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // number of write segments tasks
@@ -87,6 +92,7 @@ impl CompactOrchestrator {
         collection_id: Uuid,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
+        blockfile_provider: BlockfileProvider,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         result_channel: Option<
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
@@ -100,6 +106,7 @@ impl CompactOrchestrator {
             collection_id,
             log,
             sysdb,
+            blockfile_provider,
             dispatcher,
             num_write_tasks: 0,
             result_channel,
@@ -151,9 +158,53 @@ impl CompactOrchestrator {
     async fn write(&mut self, partitions: Vec<Chunk<LogRecord>>) {
         self.state = ExecutionState::Write;
 
-        self.num_write_tasks = partitions.len() as i32;
+        let segments = self
+            .sysdb
+            .get_segments(None, None, None, Some(self.collection_id))
+            .await;
+
+        let segments = match segments {
+            Ok(segments) => {
+                if segments.is_empty() {
+                    // Log an error and return
+                    return;
+                }
+                segments
+            }
+            Err(e) => {
+                // Log an error and return
+                return;
+            }
+        };
+
+        let record_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::Record);
+
+        if record_segment.is_none() {
+            // Log an error and return
+            return;
+        }
+        let record_segment = record_segment.unwrap();
+        let record_segment_writer =
+            match RecordSegmentWriter::from_segment(record_segment, &self.blockfile_provider) {
+                Ok(writer) => writer,
+                Err(e) => {
+                    // Log an error and return
+                    return;
+                }
+            };
+
         for partition in partitions {
-            // TODO: implement write
+            let res = record_segment_writer.materialize(&partition);
+        }
+
+        let hnsw_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::HnswDistributed);
+        if hnsw_segment.is_none() {
+            // Log an error and return
+            return;
         }
     }
 
