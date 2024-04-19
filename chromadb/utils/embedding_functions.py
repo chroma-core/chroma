@@ -21,7 +21,7 @@ from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Union, cast
 import numpy as np
 import numpy.typing as npt
 import importlib
@@ -676,9 +676,16 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 self._api_url, json={"instances": [{"content": text}]}
             ).json()
 
-            if "predictions" in response:
-                for prediction in response["predictions"]:
+            predictions = response.get('predictions')
+            if predictions:
+                for prediction in predictions:
                     embeddings.append(prediction["embeddings"]["values"])
+            elif predictions is None:
+                    raise KeyError('Key `predictions` of the response from Vertex Embedding API is not existed!! Please confirm the response.')
+            elif not isinstance(predictions, Iterable):
+                raise TypeError('The response from Vertex Embedding API is not iterable!! Please confirm the response.')
+            elif not len(predictions):
+                raise IndexError('The response from Vertex Embedding API is empty!! Please confirm the retrieved result.')
 
         return embeddings
 
