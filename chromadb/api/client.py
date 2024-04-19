@@ -5,6 +5,7 @@ import uuid
 from overrides import override
 import requests
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.types import (
     CollectionMetadata,
     DataLoader,
@@ -194,6 +195,7 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
     ) -> Collection:
         return self._server.create_collection(
             name=name,
@@ -203,6 +205,7 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
+            configuration=configuration,
         )
 
     @override
@@ -233,6 +236,7 @@ class Client(SharedSystemClient, ClientAPI):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
     ) -> Collection:
         return self._server.get_or_create_collection(
             name=name,
@@ -241,6 +245,7 @@ class Client(SharedSystemClient, ClientAPI):
             data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+            configuration=configuration,
         )
 
     @override

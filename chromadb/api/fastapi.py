@@ -7,6 +7,7 @@ from uuid import UUID
 import requests
 from overrides import override
 
+from chromadb.api.configuration import CollectionConfiguration
 import chromadb.errors as errors
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
@@ -30,6 +31,7 @@ from chromadb.api.types import (
     CollectionMetadata,
     validate_batch,
 )
+import chromadb.types as t
 from chromadb.auth import (
     ClientAuthProvider,
 )
@@ -237,6 +239,7 @@ class FastAPI(ServerAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -248,19 +251,19 @@ class FastAPI(ServerAPI):
                     "name": name,
                     "metadata": metadata,
                     "get_or_create": get_or_create,
+                    "configuration": configuration.to_json() if configuration else None,
                 }
             ),
             params={"tenant": tenant, "database": database},
         )
         raise_chroma_error(resp)
         resp_json = json.loads(resp.text)
+        model = t.Collection.from_json(resp_json)
         return Collection(
             client=self,
-            id=resp_json["id"],
-            name=resp_json["name"],
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -309,6 +312,7 @@ class FastAPI(ServerAPI):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -322,6 +326,7 @@ class FastAPI(ServerAPI):
                 get_or_create=True,
                 tenant=tenant,
                 database=database,
+                configuration=configuration,
             ),
         )
 

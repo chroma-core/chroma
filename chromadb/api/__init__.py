@@ -3,6 +3,7 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -90,6 +91,7 @@ class BaseAPI(ABC):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
         Args:
@@ -159,6 +161,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -550,6 +553,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -580,6 +584,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

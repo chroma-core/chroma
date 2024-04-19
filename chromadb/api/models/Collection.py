@@ -6,6 +6,9 @@ from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
 
+from chromadb.types import Collection as CollectionModel
+from chromadb.api.configuration import CollectionConfiguration
+
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -54,33 +57,30 @@ if TYPE_CHECKING:
     from chromadb.api import ServerAPI
 
 
-class Collection(BaseModel):
-    name: str
-    id: UUID
-    metadata: Optional[CollectionMetadata] = None
-    tenant: Optional[str] = None
-    database: Optional[str] = None
-    _client: "ServerAPI" = PrivateAttr()
+class Collection:
+    """
+    A collection object used for interacting with the Chromadb API.
+    It presents an interface for adding, getting, and querying embeddings.
+    """
+
+    # _client: "ServerAPI" = PrivateAttr()
+    _model: CollectionModel  # The model this collection API is wrapping
+    _client: "ServerAPI"
     _embedding_function: Optional[EmbeddingFunction[Embeddable]] = PrivateAttr()
     _data_loader: Optional[DataLoader[Loadable]] = PrivateAttr()
 
     def __init__(
         self,
         client: "ServerAPI",
-        name: str,
-        id: UUID,
+        model: CollectionModel,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-        tenant: Optional[str] = None,
-        database: Optional[str] = None,
-        metadata: Optional[CollectionMetadata] = None,
     ):
-        super().__init__(
-            name=name, metadata=metadata, id=id, tenant=tenant, database=database
-        )
+        """Initializes a new instance of the Collection class."""
         self._client = client
+        self._model = model
 
         # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
         if embedding_function is not None:
@@ -100,6 +100,33 @@ class Collection(BaseModel):
 
         """
         return self._client._count(collection_id=self.id)
+
+    @property
+    def id(self) -> UUID:
+        return self._model.id
+
+    @property
+    def name(self) -> str:
+        return self._model.name
+
+    @property
+    def metadata(self) -> Optional[CollectionMetadata]:
+        return self._model.sanitized_metadata
+
+    @property
+    def configuration(self) -> Optional[CollectionConfiguration]:
+        return self._model.get_configuration()
+
+    @property
+    def tenant(self) -> str:
+        return self._model.tenant
+
+    @property
+    def database(self) -> str:
+        return self._model.database
+
+    def get_model(self) -> CollectionModel:
+        return self._model
 
     def add(
         self,
@@ -380,15 +407,23 @@ class Collection(BaseModel):
         """
         if metadata is not None:
             validate_metadata(metadata)
+            # todo: remove?
             if "hnsw:space" in metadata:
                 raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently.")
+                    "Changing the distance function of a collection once it is created is not supported currently."
+                )
 
-        self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
-        if name:
-            self.name = name
-        if metadata:
-            self.metadata = metadata
+        prev_name = self.name
+        prev_metadata = self.metadata
+        self._model.modify(name=name, metadata=metadata)
+        try:
+            self._client._modify(
+                id=self.id, new_name=self.name, new_metadata=self.metadata
+            )
+        except Exception as e:
+            # Rollback client view
+            self._model.modify(name=prev_name, metadata=prev_metadata)
+            raise e
 
     def update(
         self,

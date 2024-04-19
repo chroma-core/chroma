@@ -1,6 +1,7 @@
 from functools import cached_property
 
 from chromadb.api import ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer, Resource
@@ -159,6 +160,7 @@ class SegmentAPI(ServerAPI):
         ] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -170,11 +172,22 @@ class SegmentAPI(ServerAPI):
 
         id = uuid4()
 
-        coll, created = self._sysdb.create_collection(
+        model = t.Collection.with_configuration(
             id=id,
             name=name,
             metadata=metadata,
-            dimension=None,
+            tenant=tenant,
+            database=database,
+            configuration=configuration if configuration else CollectionConfiguration(),
+            topic=None,  # populated by the SysDB service
+            dimension=None,  # lazily populated upon the first add
+        )
+
+        coll, created = self._sysdb.create_collection(
+            id=model.id,
+            name=model.name,
+            metadata=model.metadata,
+            dimension=model.dimension,
             get_or_create=get_or_create,
             tenant=tenant,
             database=database,
@@ -197,16 +210,7 @@ class SegmentAPI(ServerAPI):
         )
         add_attributes_to_current_span({"collection_uuid": str(id)})
 
-        return Collection(
-            client=self,
-            id=coll["id"],
-            name=name,
-            metadata=coll["metadata"],  # type: ignore
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-            tenant=tenant,
-            database=database,
-        )
+        return Collection(client=self, model=coll)
 
     @trace_method(
         "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
@@ -220,6 +224,7 @@ class SegmentAPI(ServerAPI):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -231,6 +236,7 @@ class SegmentAPI(ServerAPI):
             get_or_create=True,
             tenant=tenant,
             database=database,
+            configuration=configuration,
         )
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is

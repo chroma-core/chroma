@@ -252,7 +252,7 @@ class LocalSegmentManager(SegmentManager):
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
     cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
-    collection_metadata = collection.get("metadata", None)
+    collection_metadata = collection.metadata if collection.metadata else None
     metadata: Optional[Metadata] = None
     if collection_metadata:
         metadata = cls.propagate_collection_metadata(collection_metadata)
