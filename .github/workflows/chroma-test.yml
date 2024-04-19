@@ -18,14 +18,6 @@ jobs:
       matrix:
         python: ['3.8', '3.9', '3.10', '3.11', '3.12']
         platform: [ubuntu-latest, windows-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -40,14 +32,21 @@ jobs:
       run: python bin/windows_upgrade_sqlite.py
       if: runner.os == 'Windows'
     - name: Test
-      run: python -m pytest ${{ matrix.testfile }}
+      run: |
+        python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'
+        python -m pytest chromadb/test/auth/test_simple_rbac_authz.py
+        python -m pytest chromadb/test/property/test_add.py
+        python -m pytest chromadb/test/property/test_collections.py
+        python -m pytest chromadb/test/property/test_cross_version_persist.py
+        python -m pytest chromadb/test/property/test_embeddings.py
+        python -m pytest chromadb/test/property/test_filtering.py
+        python -m pytest chromadb/test/property/test_persist.py
   stress-test:
     timeout-minutes: 90
     strategy:
       matrix:
         python: ['3.8']
         platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
-        testfile: ["'chromadb/test/stress/'"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -62,4 +61,4 @@ jobs:
       run: python bin/windows_upgrade_sqlite.py
       if: runner.os == 'Windows'
     - name: Test
-      run: python -m pytest ${{ matrix.testfile }}
+      run: python -m pytest 'chromadb/test/stress/'
