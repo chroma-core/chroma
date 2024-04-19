@@ -13,6 +13,7 @@ from chromadb.api.types import (
     Metadatas,
     Where,
     WhereDocument,
+    Omitted,
 )
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
@@ -345,7 +346,7 @@ def test_empty_filter(api: ServerAPI) -> None:
         n_results=3,
     )
     assert res["ids"] == [[], []]
-    assert res["embeddings"] is None
+    assert isinstance(res["embeddings"], Omitted)
     assert res["distances"] == [[], []]
     assert res["metadatas"] == [[], []]
 
