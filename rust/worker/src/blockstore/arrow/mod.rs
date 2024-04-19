@@ -1,4 +1,5 @@
 mod block;
-mod blockfile;
-mod provider;
+pub(crate) mod blockfile;
+pub(crate) mod provider;
 mod sparse_index;
+pub(crate) mod types;

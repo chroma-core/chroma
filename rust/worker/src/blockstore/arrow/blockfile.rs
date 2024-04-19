@@ -1,613 +1,475 @@
+use crate::{blockstore::key::CompositeKey, errors::ChromaError};
 // use super::super::types::{Blockfile, BlockfileKey, Key, Value};
 // use super::block::{BlockError, BlockState};
 // use super::provider::ArrowBlockProvider;
-// use super::sparse_index::SparseIndex;
+use super::{
+    block::Block,
+    provider::SparseIndexManager,
+    sparse_index::SparseIndex,
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
+};
+use std::mem::transmute;
 // use crate::blockstore::arrow::block::delta::BlockDelta;
 // use crate::blockstore::BlockfileError;
-// use crate::errors::ChromaError;
-// use parking_lot::Mutex;
-// use std::sync::Arc;
+use parking_lot::Mutex;
+use std::{collections::HashMap, sync::Arc};
 // use thiserror::Error;
-// use uuid::Uuid;
+use super::{block::delta::BlockDelta, provider::BlockManager};
+use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
-// // RESUME POINT: make this use the reader/writer pattern
+pub(crate) struct ArrowBlockfileWriter<K: ArrowWriteableKey, V: ArrowWriteableValue> {
+    block_manager: BlockManager,
+    sparse_index_manager: SparseIndexManager,
+    block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
+    sparse_index: SparseIndex,
+    marker: std::marker::PhantomData<(K, V)>,
+    id: Uuid,
+}
+// TODO: method visibility should not be pub(crate)
 
-// /// ArrowBlockfile is a blockfile implementation that uses Apache Arrow for storage.
-// /// It stores a sparse index over a set of blocks sorted by key.
-// /// It uses a block provider to create new blocks and to retrieve existing blocks.
-// #[derive(Clone)]
-// pub(crate) struct ArrowBlockfile<'a> {
-//     block_provider: ArrowBlockProvider,
-//     sparse_index: Arc<Mutex<SparseIndex>>,
-//     transaction_state: Option<Arc<TransactionState<'a>>>,
-// }
+impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
+    /// Create a new blockfile and writer for it
+    pub(super) fn new(
+        id: Uuid,
+        block_manager: BlockManager,
+        sparse_index_manager: SparseIndexManager,
+    ) -> Self {
+        let initial_block = block_manager.create::<K, V>();
+        // TODO: we can update the constructor to take the initial block instead of having a seperate method
+        let sparse_index = SparseIndex::new(id);
+        sparse_index.add_initial_block(initial_block.id);
+        let block_deltas = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut block_deltas_map = block_deltas.lock();
+            block_deltas_map.insert(initial_block.id, initial_block);
+        }
+        Self {
+            block_manager,
+            sparse_index_manager,
+            marker: std::marker::PhantomData,
+            block_deltas: block_deltas,
+            sparse_index: sparse_index,
+            id,
+        }
+    }
 
-// /// TransactionState is a helper struct to keep track of the state of a transaction.
-// /// It keeps a list of block deltas that are applied during the transaction and the new
-// /// sparse index that is created during the transaction. The sparse index is immutable
-// /// so we can replace the sparse index of the blockfile with the new sparse index after
-// /// the transaction is committed.
-// struct TransactionState<'a> {
-//     block_delta: Mutex<Vec<BlockDelta<'a>>>,
-//     sparse_index: Mutex<Option<Arc<Mutex<SparseIndex>>>>,
-// }
+    pub(super) fn from_sparse_index(
+        id: Uuid,
+        block_manager: BlockManager,
+        sparse_index_manager: SparseIndexManager,
+        new_sparse_index: SparseIndex,
+    ) -> Self {
+        let block_deltas = Arc::new(Mutex::new(HashMap::new()));
+        Self {
+            block_manager,
+            sparse_index_manager,
+            marker: std::marker::PhantomData,
+            block_deltas: block_deltas,
+            sparse_index: new_sparse_index,
+            id,
+        }
+    }
 
-// impl TransactionState<'_> {
-//     fn new() -> Self {
-//         Self {
-//             block_delta: Mutex::new(Vec::new()),
-//             sparse_index: Mutex::new(None),
-//         }
-//     }
+    pub(crate) fn commit(self) -> Result<(), Box<dyn ChromaError>> {
+        for delta in self.block_deltas.lock().values() {
+            // TODO: might these error?
+            self.block_manager.commit::<K, V>(delta);
+        }
+        self.sparse_index_manager.commit(self.sparse_index.clone());
 
-//     /// Add a new block delta to the transaction state
-//     fn add_delta(&self, delta: BlockDelta) {
-//         let mut block_delta = self.block_delta.lock();
-//         block_delta.push(delta);
-//     }
+        // TODO: we need to update the sparse index with the new min keys?
+        Ok(())
+    }
 
-//     /// Get the block delta for a specific block id
-//     fn get_delta_for_block(&self, search_id: &Uuid) -> Option<BlockDelta> {
-//         let block_delta = self.block_delta.lock();
-//         for delta in &*block_delta {
-//             if delta.source_block.get_id() == *search_id {
-//                 return Some(delta.clone());
-//             }
-//         }
-//         None
-//     }
-// }
+    pub(crate) fn set(&self, prefix: &str, key: K, value: V) -> Result<(), Box<dyn ChromaError>> {
+        // TODO: value must be smaller than the block size except for position lists, which are a special case
+        //         // where we split the value across multiple blocks
+        //         if !self.in_transaction() {
+        //             return Err(Box::new(BlockfileError::TransactionNotInProgress));
+        //         }
 
-// #[derive(Error, Debug)]
-// pub(crate) enum ArrowBlockfileError {
-//     #[error("Block not found")]
-//     BlockNotFoundError,
-//     #[error("Block Error")]
-//     BlockError(#[from] BlockError),
-//     #[error("No split key found")]
-//     NoSplitKeyFound,
-// }
+        // Get the target block id for the key
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.sparse_index.get_target_block_id(&search_key);
 
-// impl ChromaError for ArrowBlockfileError {
-//     fn code(&self) -> crate::errors::ErrorCodes {
-//         match self {
-//             ArrowBlockfileError::BlockNotFoundError => crate::errors::ErrorCodes::NotFound,
-//             ArrowBlockfileError::BlockError(err) => err.code(),
-//             ArrowBlockfileError::NoSplitKeyFound => crate::errors::ErrorCodes::Internal,
-//         }
-//     }
-// }
+        // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
+        // Creating a delta loads the block entirely into memory
 
-// impl<'a> Blockfile<'a> for ArrowBlockfile<'a> {
-//     fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
-//         let target_block_id = self.sparse_index.lock().get_target_block_id(&key);
-//         let target_block = match self.block_provider.get_block(&target_block_id) {
-//             None => return Err(Box::new(ArrowBlockfileError::BlockNotFoundError)),
-//             Some(block) => block,
-//         };
-//         let value = target_block.get(&key);
-//         match value {
-//             None => return Err(Box::new(BlockfileError::NotFoundError)),
-//             Some(value) => Ok(value),
-//         }
-//     }
+        // TODO: replace with R/W lock
+        let mut deltas = self.block_deltas.lock();
+        let delta = match deltas.get(&target_block_id) {
+            None => match self.block_manager.get(&target_block_id) {
+                None => {
+                    // this should never happen
+                    unreachable!("Block not found")
+                }
+                Some(block) => {
+                    let new_delta = self.block_manager.fork::<K, V>(&block.id);
+                    let new_id = new_delta.id;
+                    self.sparse_index.replace_block(
+                        target_block_id,
+                        new_delta.id,
+                        new_delta
+                            .get_min_key()
+                            .expect("Block should never be empty when forked"),
+                    );
+                    deltas.insert(new_id, new_delta);
+                    deltas.get(&new_id).unwrap()
+                }
+            },
+            Some(delta) => delta,
+        };
 
-//     fn get_by_prefix(
-//         &self,
-//         prefix: String,
-//     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
-//         unimplemented!();
-//     }
+        // Check if we can add to the the delta without pushing the block over the max size.
+        // If we can't, we need to split the block and create a new delta
+        if delta.can_add(prefix, &key, &value) {
+            delta.add(prefix, key, value);
+        } else {
+            let (split_key, new_delta) = delta.split::<K, V>();
+            self.sparse_index.add_block(split_key, new_delta.id);
+            new_delta.add(prefix, key, value);
+            deltas.insert(new_delta.id, new_delta);
+        }
+        Ok(())
+    }
 
-//     fn get_gt(
-//         &self,
-//         prefix: String,
-//         key: Key,
-//     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
-//         unimplemented!();
-//     }
+    pub(crate) fn id(&self) -> Uuid {
+        self.id
+    }
+}
 
-//     fn get_gte(
-//         &self,
-//         prefix: String,
-//         key: Key,
-//     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
-//         unimplemented!();
-//     }
+pub(crate) struct ArrowBlockfileReader<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> {
+    block_manager: BlockManager,
+    sparse_index: SparseIndex,
+    loaded_blocks: Mutex<HashMap<Uuid, Box<Block>>>,
+    marker: std::marker::PhantomData<(K, V, &'me ())>,
+    id: Uuid,
+}
 
-//     fn get_lt(
-//         &self,
-//         prefix: String,
-//         key: Key,
-//     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
-//         unimplemented!();
-//     }
+impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileReader<'me, K, V> {
+    pub(super) fn new(id: Uuid, block_manager: BlockManager, sparse_index: SparseIndex) -> Self {
+        Self {
+            block_manager,
+            sparse_index,
+            loaded_blocks: Mutex::new(HashMap::new()),
+            marker: std::marker::PhantomData,
+            id,
+        }
+    }
 
-//     fn get_lte(
-//         &self,
-//         prefix: String,
-//         key: Key,
-//     ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn crate::errors::ChromaError>> {
-//         unimplemented!();
-//     }
+    fn get_block(&self, block_id: Uuid) -> Option<&Block> {
+        if !self.loaded_blocks.lock().contains_key(&block_id) {
+            let block = self.block_manager.get(&block_id)?;
+            self.loaded_blocks.lock().insert(block_id, Box::new(block));
+        }
 
-//     fn set(
-//         &mut self,
-//         key: BlockfileKey,
-//         value: Value,
-//     ) -> Result<(), Box<dyn crate::errors::ChromaError>> {
-//         // TODO: value must be smaller than the block size except for position lists, which are a special case
-//         // where we split the value across multiple blocks
-//         if !self.in_transaction() {
-//             return Err(Box::new(BlockfileError::TransactionNotInProgress));
-//         }
+        if let Some(block) = self.loaded_blocks.lock().get(&block_id) {
+            // https://github.com/mitsuhiko/memo-map/blob/a5db43853b2561145d7778dc2a5bd4b861fbfd75/src/lib.rs#L163
+            // This is safe because we only ever insert Box<Block> into the HashMap
+            // We never remove the Box<Block> from the HashMap, so the reference is always valid
+            // We never mutate the Box<Block> after inserting it into the HashMap
+            // We never share the Box<Block> with other threads - readers are single-threaded
+            // We never drop the Box<Block> while the HashMap is still alive
+            // We never drop the Box<Block> while the reference is still alive
+            // We never drop the HashMap while the reference is still alive
+            // We never drop the HashMap while the Box<Block> is still alive
+            return Some(unsafe { transmute(&**block) });
+        }
 
-//         // Validate key type
-//         match key.key {
-//             Key::String(_) => {
-//                 if self.key_type != KeyType::String {
-//                     return Err(Box::new(BlockfileError::InvalidKeyType));
-//                 }
-//             }
-//             Key::Float(_) => {
-//                 if self.key_type != KeyType::Float {
-//                     return Err(Box::new(BlockfileError::InvalidKeyType));
-//                 }
-//             }
-//             Key::Bool(_) => {
-//                 if self.key_type != KeyType::Bool {
-//                     return Err(Box::new(BlockfileError::InvalidKeyType));
-//                 }
-//             }
-//             Key::Uint(_) => {
-//                 if self.key_type != KeyType::Uint {
-//                     return Err(Box::new(BlockfileError::InvalidKeyType));
-//                 }
-//             }
-//         }
+        None
+    }
 
-//         // Validate value type
-//         match value {
-//             Value::Int32ArrayValue(_) => {
-//                 if self.value_type != ValueType::Int32Array {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//             Value::StringValue(_) => {
-//                 if self.value_type != ValueType::String {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//             Value::IntValue(_) => {
-//                 if self.value_type != ValueType::Int {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//             Value::UintValue(_) => {
-//                 if self.value_type != ValueType::Uint {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//             Value::PositionalPostingListValue(_) => {
-//                 if self.value_type != ValueType::PositionalPostingList {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//             Value::RoaringBitmapValue(_) => {
-//                 if self.value_type != ValueType::RoaringBitmap {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//             Value::DataRecordValue(_) => {
-//                 if self.value_type != ValueType::DataRecord {
-//                     return Err(Box::new(BlockfileError::InvalidValueType));
-//                 }
-//             }
-//         }
+    pub(crate) fn get(&'me self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.sparse_index.get_target_block_id(&search_key);
+        let block = self.get_block(target_block_id);
+        let res = match block {
+            Some(block) => block.get(prefix, key),
+            None => {
+                // TODO: return a proper error
+                panic!("Block not found");
+            }
+        };
+        match res {
+            Some(value) => Ok(value),
+            None => {
+                // TODO: return a proper error
+                panic!("Key not found");
+            }
+        }
+    }
 
-//         let transaction_state = match &self.transaction_state {
-//             None => return Err(Box::new(BlockfileError::TransactionNotInProgress)),
-//             Some(transaction_state) => transaction_state,
-//         };
+    pub(crate) fn id(&self) -> Uuid {
+        self.id
+    }
+}
 
-//         // Get the target block id for the key
-//         let mut transaction_sparse_index = transaction_state.sparse_index.lock();
-//         let target_block_id = match *transaction_sparse_index {
-//             None => self.sparse_index.lock().get_target_block_id(&key),
-//             Some(ref index) => index.lock().get_target_block_id(&key),
-//         };
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
 
-//         // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
-//         // Creating a delta loads the block entirely into memory
-//         let delta = match transaction_state.get_delta_for_block(&target_block_id) {
-//             None => {
-//                 let target_block = match self.block_provider.get_block(&target_block_id) {
-//                     None => return Err(Box::new(ArrowBlockfileError::BlockNotFoundError)),
-//                     Some(block) => block,
-//                 };
-//                 let delta = BlockDelta::from(target_block);
-//                 transaction_state.add_delta(delta.clone());
-//                 delta
-//             }
-//             Some(delta) => delta,
-//         };
+    use crate::{
+        blockstore::{
+            arrow::{block, provider::ArrowBlockfileProvider},
+            provider::BlockfileProvider,
+        },
+        segment::DataRecord,
+        types::MetadataValue,
+    };
+    use arrow::array::Int32Array;
 
-//         // Check if we can add to the the delta without pushing the block over the max size.
-//         // If we can't, we need to split the block and create a new delta
-//         if delta.can_add(&key, &value) {
-//             delta.add(key, value);
-//         } else {
-//             let (split_key, new_delta) = delta.split(&self.block_provider);
-//             match *transaction_sparse_index {
-//                 None => {
-//                     let new_sparse_index =
-//                         Arc::new(Mutex::new(SparseIndex::from(&self.sparse_index.lock())));
-//                     new_sparse_index
-//                         .lock()
-//                         .add_block(split_key, new_delta.source_block.get_id());
-//                     *transaction_sparse_index = Some(new_sparse_index);
-//                 }
-//                 Some(ref index) => {
-//                     index
-//                         .lock()
-//                         .add_block(split_key, new_delta.source_block.get_id());
-//                 }
-//             }
-//             transaction_state.add_delta(new_delta);
-//             drop(transaction_sparse_index);
-//             // Recursive call to add to the new appropriate delta
-//             self.set(key, value)?
-//         }
-//         Ok(())
-//     }
+    #[test]
+    fn test_blockfile() {
+        let blockfile_provider = ArrowBlockfileProvider::new();
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id = writer.id();
 
-//     fn begin_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
-//         if self.in_transaction() {
-//             return Err(Box::new(BlockfileError::TransactionInProgress));
-//         }
-//         self.transaction_state = Some(Arc::new(TransactionState::new()));
-//         Ok(())
-//     }
+        let prefix_1 = "key";
+        let key1 = "zzzz";
+        let value1 = Int32Array::from(vec![1, 2, 3]);
+        writer.set(prefix_1, key1, &value1).unwrap();
 
-//     fn commit_transaction(&mut self) -> Result<(), Box<dyn crate::errors::ChromaError>> {
-//         if !self.in_transaction() {
-//             return Err(Box::new(BlockfileError::TransactionNotInProgress));
-//         }
+        let prefix_2 = "key";
+        let key2 = "aaaa";
+        let value2 = Int32Array::from(vec![4, 5, 6]);
+        writer.set(prefix_2, key2, &value2).unwrap();
 
-//         let transaction_state = match self.transaction_state {
-//             None => return Err(Box::new(BlockfileError::TransactionNotInProgress)),
-//             Some(ref transaction_state) => transaction_state,
-//         };
+        writer.commit().unwrap();
 
-//         for delta in &*transaction_state.block_delta.lock() {
-//             // Blocks are WORM, so if the block is uninitialized or initialized we can update it directly, if its registered, meaning the broader system is aware of it,
-//             // we need to create a new block and update the sparse index to point to the new block
+        let reader = blockfile_provider.open::<&str, Int32Array>(&id).unwrap();
 
-//             match delta.source_block.get_state() {
-//                 BlockState::Uninitialized => {
-//                     match delta.source_block.apply_delta(&delta) {
-//                         Ok(_) => {}
-//                         Err(err) => {
-//                             return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
-//                         }
-//                     }
-//                     match delta.source_block.commit() {
-//                         Ok(_) => {}
-//                         Err(err) => {
-//                             return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
-//                         }
-//                     }
-//                 }
-//                 BlockState::Initialized => {
-//                     match delta.source_block.apply_delta(&delta) {
-//                         Ok(_) => {}
-//                         Err(err) => {
-//                             return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
-//                         }
-//                     }
-//                     match delta.source_block.commit() {
-//                         Ok(_) => {}
-//                         Err(err) => {
-//                             return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
-//                         }
-//                     }
-//                 }
-//                 BlockState::Commited | BlockState::Registered => {
-//                     // If the block is commited or registered, we need to create a new block and update the sparse index
-//                     let new_block = self
-//                         .block_provider
-//                         .create_block(self.key_type, self.value_type);
-//                     match new_block.apply_delta(&delta) {
-//                         Ok(_) => {}
-//                         Err(err) => {
-//                             return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
-//                         }
-//                     }
-//                     let new_min_key = match delta.get_min_key() {
-//                         // This should never happen. We don't panic here because we want to return a proper error
-//                         None => return Err(Box::new(ArrowBlockfileError::NoSplitKeyFound)),
-//                         Some(key) => key,
-//                     };
-//                     let mut transaction_sparse_index = transaction_state.sparse_index.lock();
-//                     match *transaction_sparse_index {
-//                         None => {
-//                             let new_sparse_index =
-//                                 Arc::new(Mutex::new(SparseIndex::from(&self.sparse_index.lock())));
-//                             new_sparse_index.lock().replace_block(
-//                                 delta.source_block.get_id(),
-//                                 new_block.get_id(),
-//                                 new_min_key,
-//                             );
-//                             *transaction_sparse_index = Some(new_sparse_index);
-//                         }
-//                         Some(ref index) => {
-//                             index.lock().replace_block(
-//                                 delta.source_block.get_id(),
-//                                 new_block.get_id(),
-//                                 new_min_key,
-//                             );
-//                         }
-//                     }
-//                     match new_block.commit() {
-//                         Ok(_) => {}
-//                         Err(err) => {
-//                             return Err(Box::new(ArrowBlockfileError::BlockError(*err)));
-//                         }
-//                     }
-//                 }
-//             }
-//         }
+        let value = reader.get(prefix_1, key1).unwrap();
+        assert_eq!(value.values(), &[1, 2, 3]);
 
-//         // update the sparse index
-//         let mut transaction_state_sparse_index = transaction_state.sparse_index.lock();
-//         if transaction_state_sparse_index.is_some() {
-//             self.sparse_index = transaction_state_sparse_index.take().unwrap();
-//             // unwrap is safe because we just checked it
-//         }
+        let value = reader.get(prefix_2, key2).unwrap();
+        assert_eq!(value.values(), &[4, 5, 6]);
+    }
 
-//         // Reset the transaction state
-//         drop(transaction_state_sparse_index);
-//         self.transaction_state = None;
-//         Ok(())
-//     }
-// }
+    #[test]
+    fn test_splitting() {
+        let blockfile_provider = ArrowBlockfileProvider::new();
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id_1 = writer.id();
 
-// impl ArrowBlockfile<'_> {
-//     pub(super) fn new(
-//         key_type: KeyType,
-//         value_type: ValueType,
-//         block_provider: ArrowBlockProvider,
-//     ) -> Self {
-//         let initial_block = block_provider.create_block(key_type.clone(), value_type.clone());
-//         Self {
-//             sparse_index: Arc::new(Mutex::new(SparseIndex::new(initial_block.get_id()))),
-//             transaction_state: None,
-//             block_provider,
-//             key_type,
-//             value_type,
-//         }
-//     }
+        let n = 1200;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", &key, &value).unwrap();
+        }
+        writer.commit().unwrap();
 
-//     fn in_transaction(&self) -> bool {
-//         self.transaction_state.is_some()
-//     }
-// }
+        let reader = blockfile_provider.open::<&str, Int32Array>(&id_1).unwrap();
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use arrow::array::Int32Array;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).unwrap();
+            assert_eq!(value.values(), &[i]);
+        }
 
-//     #[test]
-//     fn test_blockfile() {
-//         let block_provider = ArrowBlockProvider::new();
-//         let mut blockfile =
-//             ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
+        // Sparse index should have 3 blocks
+        match &reader {
+            crate::blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert_eq!(reader.sparse_index.len(), 3);
+                assert!(reader.sparse_index.is_valid());
+            }
+            _ => panic!("Unexpected reader type"),
+        }
 
-//         blockfile.begin_transaction().unwrap();
-//         let key1 = BlockfileKey::new("key".to_string(), Key::String("zzzz".to_string()));
-//         blockfile
-//             .set(
-//                 key1.clone(),
-//                 Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
-//             )
-//             .unwrap();
-//         let key2 = BlockfileKey::new("key".to_string(), Key::String("aaaa".to_string()));
-//         blockfile
-//             .set(
-//                 key2,
-//                 Value::Int32ArrayValue(Int32Array::from(vec![4, 5, 6])),
-//             )
-//             .unwrap();
-//         blockfile.commit_transaction().unwrap();
+        // Add 5 new entries to the first block
+        let writer = blockfile_provider.fork::<&str, &Int32Array>(&id_1).unwrap();
+        let id_2 = writer.id();
+        for i in 0..5 {
+            let key = format!("{:05}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", &key, &value).unwrap();
+        }
+        writer.commit().unwrap();
 
-//         let value = blockfile.get(key1).unwrap();
-//         match value {
-//             Value::Int32ArrayValue(array) => {
-//                 assert_eq!(array.values(), &[1, 2, 3]);
-//             }
-//             _ => panic!("Unexpected value type"),
-//         }
-//     }
+        let reader = blockfile_provider.open::<&str, Int32Array>(&id_2).unwrap();
+        for i in 0..5 {
+            let key = format!("{:05}", i);
+            println!("Getting key: {}", key);
+            let value = reader.get("key", &key).unwrap();
+            assert_eq!(value.values(), &[i]);
+        }
 
-//     #[test]
-//     fn test_splitting() {
-//         let block_provider = ArrowBlockProvider::new();
-//         let mut blockfile =
-//             ArrowBlockfile::new(KeyType::String, ValueType::Int32Array, block_provider);
+        // Sparse index should still have 3 blocks
+        match &reader {
+            crate::blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert_eq!(reader.sparse_index.len(), 3);
+                assert!(reader.sparse_index.is_valid());
+            }
+            _ => panic!("Unexpected reader type"),
+        }
 
-//         blockfile.begin_transaction().unwrap();
-//         let n = 1200;
-//         for i in 0..n {
-//             let string_key = format!("{:04}", i);
-//             let key = BlockfileKey::new("key".to_string(), Key::String(string_key));
-//             blockfile
-//                 .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
-//                 .unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
+        // Add 1200 more entries, causing splits
+        let writer = blockfile_provider.fork::<&str, &Int32Array>(&id_2).unwrap();
+        let id_3 = writer.id();
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", &key, &value).unwrap();
+        }
+        writer.commit().unwrap();
 
-//         for i in 0..n {
-//             let string_key = format!("{:04}", i);
-//             let key = BlockfileKey::new("key".to_string(), Key::String(string_key));
-//             let res = blockfile.get(key).unwrap();
-//             match res {
-//                 Value::Int32ArrayValue(array) => {
-//                     assert_eq!(array.values(), &[i]);
-//                 }
-//                 _ => panic!("Unexpected value type"),
-//             }
-//         }
+        let reader = blockfile_provider.open::<&str, Int32Array>(&id_3).unwrap();
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).unwrap();
+            assert_eq!(value.values(), &[i]);
+        }
 
-//         // Sparse index should have 3 blocks
-//         assert_eq!(blockfile.sparse_index.lock().len(), 3);
-//         assert!(blockfile.sparse_index.lock().is_valid());
+        // Sparse index should have 6 blocks
+        match &reader {
+            crate::blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert_eq!(reader.sparse_index.len(), 6);
+                assert!(reader.sparse_index.is_valid());
+            }
+            _ => panic!("Unexpected reader type"),
+        }
+    }
 
-//         // Add 5 new entries to the first block
-//         blockfile.begin_transaction().unwrap();
-//         for i in 0..5 {
-//             let new_key = format! {"{:05}", i};
-//             let key = BlockfileKey::new("key".to_string(), Key::String(new_key));
-//             blockfile
-//                 .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
-//                 .unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
+    #[test]
+    fn test_string_value() {
+        let blockfile_provider = ArrowBlockfileProvider::new();
 
-//         // Sparse index should still have 3 blocks
-//         assert_eq!(blockfile.sparse_index.lock().len(), 3);
-//         assert!(blockfile.sparse_index.lock().is_valid());
+        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let id = writer.id();
 
-//         // Add 1200 more entries, causing splits
-//         blockfile.begin_transaction().unwrap();
-//         for i in n..n * 2 {
-//             let new_key = format! {"{:04}", i};
-//             let key = BlockfileKey::new("key".to_string(), Key::String(new_key));
-//             blockfile
-//                 .set(key, Value::Int32ArrayValue(Int32Array::from(vec![i])))
-//                 .unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
-//     }
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = format!("{:04}", i);
+            writer.set("key", &key, &value).unwrap();
+        }
 
-//     #[test]
-//     fn test_string_value() {
-//         let block_provider = ArrowBlockProvider::new();
-//         let mut blockfile = ArrowBlockfile::new(KeyType::String, ValueType::String, block_provider);
+        writer.commit().unwrap();
 
-//         blockfile.begin_transaction().unwrap();
-//         let n = 2000;
+        let reader = blockfile_provider.open::<&str, &str>(&id).unwrap();
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).unwrap();
+            assert_eq!(value, format!("{:04}", i));
+        }
+    }
 
-//         for i in 0..n {
-//             let string_key = format!("{:04}", i);
-//             let key = BlockfileKey::new("key".to_string(), Key::String(string_key.clone()));
-//             blockfile
-//                 .set(key, Value::StringValue(string_key.clone()))
-//                 .unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
+    #[test]
+    fn test_float_key() {
+        let provider = ArrowBlockfileProvider::new();
 
-//         for i in 0..n {
-//             let string_key = format!("{:04}", i);
-//             let key = BlockfileKey::new("key".to_string(), Key::String(string_key.clone()));
-//             let res = blockfile.get(key).unwrap();
-//             match res {
-//                 Value::StringValue(string) => {
-//                     assert_eq!(string, string_key);
-//                 }
-//                 _ => panic!("Unexpected value type"),
-//             }
-//         }
-//     }
+        let writer = provider.create::<f32, &str>().unwrap();
+        let id = writer.id();
 
-//     #[test]
-//     fn test_int_key() {
-//         let block_provider = ArrowBlockProvider::new();
-//         let mut blockfile = ArrowBlockfile::new(KeyType::Float, ValueType::String, block_provider);
+        let n = 2000;
+        for i in 0..n {
+            let key = i as f32;
+            let value = format!("{:04}", i);
+            writer.set("key", key, &value).unwrap();
+        }
 
-//         blockfile.begin_transaction().unwrap();
-//         let n = 2000;
-//         for i in 0..n {
-//             let key = BlockfileKey::new("key".to_string(), Key::Float(i as f32));
-//             blockfile
-//                 .set(key, Value::StringValue(format!("{:04}", i)))
-//                 .unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
+        writer.commit().unwrap();
 
-//         for i in 0..n {
-//             let key = BlockfileKey::new("key".to_string(), Key::Float(i as f32));
-//             let res = blockfile.get(key).unwrap();
-//             match res {
-//                 Value::StringValue(string) => {
-//                     assert_eq!(string, format!("{:04}", i));
-//                 }
-//                 _ => panic!("Unexpected value type"),
-//             }
-//         }
-//     }
+        let reader = provider.open::<f32, &str>(&id).unwrap();
+        for i in 0..n {
+            let key = i as f32;
+            let value = reader.get("key", key).unwrap();
+            assert_eq!(value, format!("{:04}", i));
+        }
+    }
 
-//     #[test]
-//     fn test_roaring_bitmap_value() {
-//         let block_provider = ArrowBlockProvider::new();
-//         let mut blockfile =
-//             ArrowBlockfile::new(KeyType::String, ValueType::RoaringBitmap, block_provider);
+    #[test]
+    fn test_roaring_bitmap_value() {
+        let blockfile_provider = ArrowBlockfileProvider::new();
 
-//         blockfile.begin_transaction().unwrap();
-//         let n = 2000;
-//         for i in 0..n {
-//             let key = BlockfileKey::new("key".to_string(), Key::String(format!("{:04}", i)));
-//             blockfile
-//                 .set(
-//                     key,
-//                     Value::RoaringBitmapValue(roaring::RoaringBitmap::from_iter(
-//                         (0..i).map(|x| x as u32),
-//                     )),
-//                 )
-//                 .unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
+        let writer = blockfile_provider
+            .create::<&str, &roaring::RoaringBitmap>()
+            .unwrap();
+        let id = writer.id();
 
-//         for i in 0..n {
-//             let key = BlockfileKey::new("key".to_string(), Key::String(format!("{:04}", i)));
-//             let res = blockfile.get(key).unwrap();
-//             match res {
-//                 Value::RoaringBitmapValue(bitmap) => {
-//                     assert_eq!(bitmap.len(), i as u64);
-//                     assert_eq!(
-//                         bitmap.iter().collect::<Vec<u32>>(),
-//                         (0..i).collect::<Vec<u32>>()
-//                     );
-//                 }
-//                 _ => panic!("Unexpected value type"),
-//             }
-//         }
-//     }
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
+            writer.set("key", &key, &value).unwrap();
+        }
+        writer.commit().unwrap();
 
-//     #[test]
-//     fn test_uint_key_val() {
-//         let block_provider = ArrowBlockProvider::new();
-//         let mut blockfile = ArrowBlockfile::new(KeyType::Uint, ValueType::Uint, block_provider);
+        let reader = blockfile_provider
+            .open::<&str, roaring::RoaringBitmap>(&id)
+            .unwrap();
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).unwrap();
+            assert_eq!(value.len(), i as u64);
+            assert_eq!(
+                value.iter().collect::<Vec<u32>>(),
+                (0..i).collect::<Vec<u32>>()
+            );
+        }
+    }
 
-//         blockfile.begin_transaction().unwrap();
-//         let n = 2000;
-//         for i in 0..n {
-//             let key = BlockfileKey::new("key".to_string(), Key::Uint(i as u32));
-//             blockfile.set(key, Value::UintValue(i as u32)).unwrap();
-//         }
-//         blockfile.commit_transaction().unwrap();
+    #[test]
+    fn test_uint_key_val() {
+        let blockfile_provider = ArrowBlockfileProvider::new();
 
-//         for i in 0..n {
-//             let key = BlockfileKey::new("key".to_string(), Key::Uint(i as u32));
-//             let res = blockfile.get(key).unwrap();
-//             match res {
-//                 Value::UintValue(val) => {
-//                     assert_eq!(val, i as u32);
-//                 }
-//                 _ => panic!("Unexpected value type"),
-//             }
-//         }
-//     }
-// }
+        let writer = blockfile_provider.create::<u32, u32>().unwrap();
+        let id = writer.id();
+
+        let n = 2000;
+        for i in 0..n {
+            let key = i as u32;
+            let value = i as u32;
+            writer.set("key", key, value).unwrap();
+        }
+
+        writer.commit().unwrap();
+
+        let reader = blockfile_provider.open::<u32, u32>(&id).unwrap();
+        for i in 0..n {
+            let key = i as u32;
+            let value = reader.get("key", key).unwrap();
+            assert_eq!(value, i as u32);
+        }
+    }
+
+    #[test]
+    fn test_data_record_val() {
+        let blockfile_provider = ArrowBlockfileProvider::new();
+
+        let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
+        let id = writer.id();
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let mut metdata = HashMap::new();
+            metdata.insert("key".to_string(), MetadataValue::Str("value".to_string()));
+            let value = DataRecord {
+                id: &key,
+                embedding: &[i as f32],
+                document: None,
+                metadata: Some(metdata),
+            };
+            writer.set("key", &key, &value).unwrap();
+        }
+
+        writer.commit().unwrap();
+
+        let reader = blockfile_provider.open::<&str, DataRecord>(&id).unwrap();
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).unwrap();
+            assert_eq!(value.id, key);
+            assert_eq!(value.embedding, &[i as f32]);
+            let metadata = value.metadata.unwrap();
+            assert_eq!(metadata.len(), 1);
+            assert_eq!(
+                metadata.get("key").unwrap(),
+                &MetadataValue::Str("value".to_string())
+            );
+        }
+    }
+}
