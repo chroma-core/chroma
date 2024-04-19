@@ -39,6 +39,8 @@ EOF
 
 trap cleanup EXIT
 
+docker compose -f docker-compose.test.yml up --build -d
+
 export CHROMA_INTEGRATION_TEST_ONLY=1
 export CHROMA_API_IMPL=chromadb.api.fastapi.FastAPI
 export CHROMA_SERVER_HOST=localhost
@@ -49,6 +51,10 @@ export CHROMA_SERVER_NOFILE=65535
 cd clients/js
 # moved off of yarn to npm to fix issues with jackspeak/cliui/string-width versions #1314
 npm install
+
+npm run test:run
+docker compose down
+
 cd ../..
 
 for auth_type in basic token xtoken; do
@@ -56,7 +62,7 @@ for auth_type in basic token xtoken; do
   setup_auth "$auth_type"
   cd clients/js
   docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
-  yarn test:run-auth-"$auth_type"
+  npm run test:run-auth-"$auth_type"
   cd ../..
   docker compose down
 done

@@ -62,7 +62,7 @@ export class ChromaClient {
       basePath: path,
     });
 
-    this.api = new DefaultApi(apiConfig);
+    this.api = new DefaultApi(apiConfig, undefined, chromaFetch);
     this.api.options = fetchOptions ?? {};
 
     if (auth !== undefined) {
