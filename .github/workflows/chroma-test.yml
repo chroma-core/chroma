@@ -34,8 +34,7 @@ jobs:
     - name: Test
       run: |
         set -e
-        python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'
-        python -m pytest chromadb/test/auth/test_simple_rbac_authz.py
+        python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*'
         python -m pytest chromadb/test/property/test_add.py
         python -m pytest chromadb/test/property/test_collections.py
         python -m pytest chromadb/test/property/test_cross_version_persist.py
