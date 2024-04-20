@@ -1,19 +1,18 @@
+import importlib
 import logging
+from typing import Optional, Union, cast
 
 from chromadb.api.types import (
     Document,
     Documents,
     Embedding,
-    Image,
-    Images,
     EmbeddingFunction,
     Embeddings,
-    is_image,
+    Image,
+    Images,
     is_document,
+    is_image,
 )
-
-from typing import Optional, Union, cast
-import importlib
 
 logger = logging.getLogger(__name__)
 

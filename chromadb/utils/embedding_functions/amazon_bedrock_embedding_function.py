@@ -1,29 +1,24 @@
-import logging
-
-from chromadb.api.types import (
-    Documents,
-    EmbeddingFunction,
-    Embeddings,
-)
-
-from typing import Any
 import json
+import logging
+from typing import Any
+
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
-
 
 
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        session: "boto3.Session",  # noqa: F821 # Quote for forward reference
+        session: Any,
         model_name: str = "amazon.titan-embed-text-v1",
         **kwargs: Any,
     ):
         """Initialize AmazonBedrockEmbeddingFunction.
 
         Args:
-            session (boto3.Session): The boto3 session to use.
+            session (boto3.Session): The boto3 session to use. You need to have boto3
+            installed, `pip install boto3`.
             model_name (str, optional): Identifier of the model, defaults to "amazon.titan-embed-text-v1"
             **kwargs: Additional arguments to pass to the boto3 client.
 

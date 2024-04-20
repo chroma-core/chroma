@@ -1,16 +1,11 @@
 import logging
-
-from chromadb.api.types import (
-    Documents,
-    EmbeddingFunction,
-    Embeddings,
-)
-
 from typing import cast
+
 import requests
 
-logger = logging.getLogger(__name__)
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
+logger = logging.getLogger(__name__)
 
 
 class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -56,7 +51,6 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 json={"inputs": input, "options": {"wait_for_model": True}},
             ).json(),
         )
-
 
 
 class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):

@@ -1,6 +1,7 @@
-from typing import cast
-from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import logging
+from typing import cast
+
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
 

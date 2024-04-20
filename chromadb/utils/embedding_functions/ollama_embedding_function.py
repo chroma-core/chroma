@@ -1,12 +1,7 @@
 import logging
+from typing import Union, cast
 
-from chromadb.api.types import (
-    Documents,
-    EmbeddingFunction,
-    Embeddings,
-)
-
-from typing import cast
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +29,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
         self._session = requests.Session()
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Union[Documents, str]) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 

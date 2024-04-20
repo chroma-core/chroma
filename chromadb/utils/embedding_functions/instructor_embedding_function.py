@@ -1,15 +1,9 @@
 import logging
-
-from chromadb.api.types import (
-    Documents,
-    EmbeddingFunction,
-    Embeddings,
-)
-
 from typing import Optional, cast
 
-logger = logging.getLogger(__name__)
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
+logger = logging.getLogger(__name__)
 
 
 class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):

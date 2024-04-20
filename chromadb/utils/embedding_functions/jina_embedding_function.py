@@ -1,14 +1,9 @@
 import logging
-
-from chromadb.api.types import (
-    Documents,
-    EmbeddingFunction,
-    Embeddings,
-)
+from typing import List, cast, Union
 
 import requests
-from typing import cast
 
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +51,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         if "data" not in resp:
             raise RuntimeError(resp["detail"])
 
-        embeddings = resp["data"]
+        embeddings: List[dict[str, Union[str, List[float]]]] = resp["data"]
 
         # Sort resulting embeddings by index
         sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])

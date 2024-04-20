@@ -1,13 +1,7 @@
-
 import logging
-from chromadb.api.types import (
-    Documents,
-    EmbeddingFunction,
-    Embeddings,
-)
-
 from typing import Mapping, Optional, cast
 
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +86,21 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self._deployment_id = deployment_id
 
     def __call__(self, input: Documents) -> Embeddings:
+        """
+        Generate the embeddings for the given `input`.
+
+        # About ignoring types
+        We are not enforcing the openai library, therefore, `mypy` has hard times trying
+        to figure out what the types are for `self._client.create()` which throws an
+        error when trying to sort the list. If, eventually we include the `openai` lib
+        we can remove the type ignore tag.
+
+        Args:
+            input (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the given input sorted by index
+        """
         # replace newlines, which can negatively affect performance.
         input = [t.replace("\n", " ") for t in input]
 
@@ -102,7 +111,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             ).data
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)
+            sorted_embeddings = sorted(
+                embeddings, key=lambda e: e.index  # type: ignore
+            )
 
             # Return just the embeddings
             return cast(Embeddings, [result.embedding for result in sorted_embeddings])
@@ -117,7 +128,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 ]
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
+            sorted_embeddings = sorted(
+                embeddings, key=lambda e: e["index"]  # type: ignore
+            )
 
             # Return just the embeddings
             return cast(
