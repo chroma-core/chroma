@@ -22,7 +22,7 @@ spec:
           ports:
             - containerPort: 50051
           env:
-            - name: CHROMA_compaction-service__MY_IP
+            - name: CHROMA_COMPACTION_SERVICE__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP

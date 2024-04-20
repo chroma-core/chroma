@@ -136,6 +136,7 @@ impl CompactionManager {
         for job in self.scheduler.get_jobs() {
             jobs.push(self.compact(job));
         }
+        println!("Compacting {} jobs", jobs.len());
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
         while let Some(job) = jobs.next().await {
@@ -232,6 +233,7 @@ impl Component for CompactionManager {
     }
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
+        println!("Starting CompactionManager");
         ctx.scheduler.schedule_interval(
             ctx.sender.clone(),
             ScheduleMessage {},
@@ -256,6 +258,7 @@ impl Handler<ScheduleMessage> for CompactionManager {
         _message: ScheduleMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
+        println!("CompactionManager: Performing compaction");
         self.compact_batch().await;
     }
 }

@@ -145,6 +145,7 @@ impl CompactOrchestrator {
         // TODO: make this configurable
         let max_partition_size = 100;
         let operator = PartitionOperator::new();
+        println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, max_partition_size);
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, None).await {
@@ -158,10 +159,13 @@ impl CompactOrchestrator {
     async fn write(&mut self, partitions: Vec<Chunk<LogRecord>>) {
         self.state = ExecutionState::Write;
 
+        // TODO: move this into an operator
         let segments = self
             .sysdb
             .get_segments(None, None, None, Some(self.collection_id))
             .await;
+
+        println!("Writing to Segments: {:?}", segments);
 
         let segments = match segments {
             Ok(segments) => {
@@ -181,6 +185,8 @@ impl CompactOrchestrator {
             .iter()
             .find(|segment| segment.r#type == SegmentType::Record);
 
+        println!("RS Record Segment: {:?}", record_segment);
+
         if record_segment.is_none() {
             // Log an error and return
             return;
@@ -190,14 +196,22 @@ impl CompactOrchestrator {
             match RecordSegmentWriter::from_segment(record_segment, &self.blockfile_provider) {
                 Ok(writer) => writer,
                 Err(e) => {
+                    println!("Error creating Record Segment Writer: {:?}", e);
                     // Log an error and return
                     return;
                 }
             };
 
+        println!("Record Segment Writer created");
+
+        println!("Partitions: {:?}", partitions.len());
         for partition in partitions {
+            println!("Materializing N Records: {:?}", partition.len());
             let res = record_segment_writer.materialize(&partition);
+            println!("Materialized Records: {:?}", res);
         }
+
+        // RESUME POINT: MAKE THE RECORD SEGMENT FLUSH BLOCKS TO S3
 
         let hnsw_segment = segments
             .iter()
@@ -311,7 +325,9 @@ impl Handler<PartitionResult> for CompactOrchestrator {
                 return;
             }
         };
-        // TODO: implement write records
+        // TODO: implement write records as operator and handle in WriteSegmentsResult
+        self.write(records).await;
+
         // For now, we will return to execution state to the compaction manager
         let result_channel = match self.result_channel.take() {
             Some(tx) => tx,

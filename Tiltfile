@@ -79,6 +79,7 @@ k8s_yaml([
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
   'k8s/test/sysdb-service.yaml',
+  'k8s/test/postgres-service.yaml',
   'k8s/test/jaeger-service.yaml',
   'k8s/test/jaeger.yaml',
   'k8s/test/logservice-service.yaml',
