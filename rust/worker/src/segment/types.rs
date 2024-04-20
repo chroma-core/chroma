@@ -1,6 +1,7 @@
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{LogRecord, Metadata};
 
+#[derive(Debug)]
 pub(crate) struct MaterializedLogRecord<'a> {
     pub(super) segment_offset_id: u32,
     pub(super) log_record: &'a LogRecord,

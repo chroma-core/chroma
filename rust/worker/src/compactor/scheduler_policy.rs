@@ -34,6 +34,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         collections: Vec<CollectionRecord>,
         number_jobs: i32,
     ) -> Vec<CompactionJob> {
+        println!("POLICY SEES N COLLECTIONS: {:?}", collections.len());
         let mut collections = collections;
         collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
         let number_tasks = if number_jobs > collections.len() as i32 {
@@ -41,6 +42,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         } else {
             number_jobs
         };
+        println!("POLICY CREATING N TASKS: {:?}", number_tasks);
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
             tasks.push(CompactionJob {

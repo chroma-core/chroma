@@ -64,10 +64,11 @@ class DistributedSegmentManager(SegmentManager):
         vector_segment = _segment(
             SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
         )
-        metadata_segment = _segment(
-            SegmentType.SQLITE, SegmentScope.METADATA, collection
-        )
-        return [vector_segment, metadata_segment]
+        # metadata_segment = _segment(
+        #     SegmentType.SQLITE, SegmentScope.METADATA, collection
+        # )
+        record_segment = _segment(SegmentType.RECORD, SegmentScope.RECORD, collection)
+        return [vector_segment, record_segment]
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
@@ -89,6 +90,7 @@ class DistributedSegmentManager(SegmentManager):
 
         if scope not in self._segment_cache[collection_id]:
             segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
+            print("Segments: ", segments)
             known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
             # Get the first segment of a known type
             segment = next(filter(lambda s: s["type"] in known_types, segments))
@@ -163,11 +165,14 @@ class DistributedSegmentManager(SegmentManager):
 # TODO: rethink duplication from local segment manager
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
-    cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
-    collection_metadata = collection.get("metadata", None)
+
     metadata: Optional[Metadata] = None
-    if collection_metadata:
-        metadata = cls.propagate_collection_metadata(collection_metadata)
+    # For the segment types with python implementations, we can propagate metadata
+    if type in SEGMENT_TYPE_IMPLS:
+        cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
+        collection_metadata = collection.get("metadata", None)
+        if collection_metadata:
+            metadata = cls.propagate_collection_metadata(collection_metadata)
 
     return Segment(
         id=uuid4(),

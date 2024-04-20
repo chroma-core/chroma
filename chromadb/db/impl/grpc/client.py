@@ -153,7 +153,10 @@ class GrpcSysDB(SysDB):
             collection=collection.hex if collection else None,
         )
         response = self._sys_db_stub.GetSegments(request)
+        print("GRPC RESPONSE: ", response)
+        print("SEGMENTS LENGTH: ", len(response.segments))
         results: List[Segment] = []
+        print("GRPC SEGMENTS: ", response.segments)
         for proto_segment in response.segments:
             segment = from_proto_segment(proto_segment)
             results.append(segment)
