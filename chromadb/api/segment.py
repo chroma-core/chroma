@@ -264,13 +264,9 @@ class SegmentAPI(ServerAPI):
         if existing:
             return Collection(
                 client=self,
-                id=existing[0]["id"],
-                name=existing[0]["name"],
-                metadata=existing[0]["metadata"],  # type: ignore
+                model=existing[0],
                 embedding_function=embedding_function,
                 data_loader=data_loader,
-                tenant=existing[0]["tenant"],
-                database=existing[0]["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")

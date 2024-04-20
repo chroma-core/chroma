@@ -636,10 +636,13 @@ class FastAPI(Server):
         if maybe_database:
             database = maybe_database
 
+        def get_collection_model(*args, **kwargs):
+            return self._api.get_collection(*args, **kwargs).get_model()
+
         return cast(
             Collection,
             await to_thread.run_sync(
-                self._api.get_collection,
+                get_collection_model,
                 collection_name,
                 None,
                 None,

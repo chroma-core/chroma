@@ -291,13 +291,12 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = json.loads(resp.text)
+        model = t.Collection.from_json(resp_json)
         return Collection(
             client=self,
-            name=resp_json["name"],
-            id=resp_json["id"],
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method(

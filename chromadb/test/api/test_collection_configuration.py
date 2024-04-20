@@ -19,13 +19,14 @@ def test_default_collection_configuration(client: ClientAPI):
 #     collection = client.create_collection("test", configuration=configuration)
 #     assert collection.configuration == configuration
 
-# def test_create_get_collection_configuration(client: ClientAPI):
-#     """Test the creation and retrieval of a collection configuration."""
-#     client.reset()
-#     configuration = CollectionConfiguration()
 
-#     collection = client.create_collection("test", configuration=configuration)
-#     assert collection.configuration == configuration
+def test_create_get_collection_configuration(client: ClientAPI):
+    """Test the creation and retrieval of a collection configuration."""
+    client.reset()
+    configuration = CollectionConfiguration()
 
-#     retrieved_collection = client.get_collection("test")
-#     assert retrieved_collection.configuration == configuration
+    collection = client.create_collection("test", configuration=configuration)
+    assert collection.configuration == configuration
+
+    retrieved_collection = client.get_collection("test")
+    assert retrieved_collection.configuration == configuration

@@ -430,6 +430,8 @@ class SqlSysDB(SqlDB, SysDB):
                         dimension=dimension,
                         tenant=str(rows[0][4]),
                         database=str(rows[0][3]),
+                        # todo: where does this come from?
+                        topic=None,
                     )
                 )
 
