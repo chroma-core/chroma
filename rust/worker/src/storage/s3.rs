@@ -16,11 +16,14 @@ use aws_sdk_s3;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_smithy_types::byte_stream::ByteStream;
+use bytes::Bytes;
 use std::clone::Clone;
 use std::io::Write;
+use thiserror::Error;
+use tokio::io::AsyncBufRead;
 
 #[derive(Clone)]
-struct S3Storage {
+pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
 }
@@ -70,6 +73,80 @@ impl S3Storage {
             },
         }
     }
+
+    pub(crate) async fn get(
+        &self,
+        key: &str,
+    ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, String> {
+        let res = self
+            .client
+            .get_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        match res {
+            Ok(res) => {
+                return Ok(Box::new(res.body.into_async_read()));
+            }
+            Err(e) => {
+                println!("error: {}", e);
+                return Err::<_, String>(e.to_string());
+            }
+        }
+    }
+
+    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), String> {
+        let bytestream = ByteStream::from(bytes);
+        self.put_bytestream(key, bytestream).await
+    }
+
+    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
+        let bytestream = ByteStream::from_path(path).await;
+        match bytestream {
+            Ok(bytestream) => {
+                return self.put_bytestream(key, bytestream).await;
+            }
+            Err(e) => {
+                return Err::<(), String>(e.to_string());
+            }
+        }
+    }
+
+    async fn put_bytestream(&self, key: &str, bytestream: ByteStream) -> Result<(), String> {
+        let res = self
+            .client
+            .put_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .body(bytestream)
+            .send()
+            .await;
+        match res {
+            Ok(_) => {
+                println!("put object {} to bucket {}", key, self.bucket);
+                return Ok(());
+            }
+            Err(e) => {
+                println!("error: {}", e);
+                return Err::<(), String>(e.to_string());
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum StorageConfigError {
+    #[error("Invalid storage config")]
+    InvalidStorageConfig,
+}
+
+impl ChromaError for StorageConfigError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        match self {
+            StorageConfigError::InvalidStorageConfig => crate::errors::ErrorCodes::InvalidArgument,
+        }
+    }
 }
 
 #[async_trait]
@@ -83,84 +160,8 @@ impl Configurable<StorageConfig> for S3Storage {
                 let storage = S3Storage::new(&s3_config.bucket, client);
                 return Ok(storage);
             }
-        }
-    }
-}
-
-#[async_trait]
-impl Storage for S3Storage {
-    async fn get(&self, key: &str, path: &str) -> Result<(), String> {
-        let file = std::fs::File::create(path);
-        let res = self
-            .client
-            .get_object()
-            .bucket(self.bucket.clone())
-            .key(key)
-            .send()
-            .await;
-        match res {
-            Ok(mut res) => {
-                match file {
-                    Ok(mut file) => {
-                        while let bytes = res.body.next().await {
-                            match bytes {
-                                Some(bytes) => match bytes {
-                                    Ok(bytes) => {
-                                        file.write_all(&bytes).unwrap();
-                                    }
-                                    Err(e) => {
-                                        println!("error: {}", e);
-                                        return Err::<(), String>(e.to_string());
-                                    }
-                                },
-                                None => {
-                                    // Stream is done
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("error: {}", e);
-                        return Err::<(), String>(e.to_string());
-                    }
-                }
-                return Ok(());
-            }
-            Err(e) => {
-                println!("error: {}", e);
-                return Err::<(), String>(e.to_string());
-            }
-        }
-    }
-
-    async fn put(&self, key: &str, path: &str) -> Result<(), String> {
-        // Puts from a file on disk to s3.
-        let bytestream = ByteStream::from_path(path).await;
-        match bytestream {
-            Ok(bytestream) => {
-                let res = self
-                    .client
-                    .put_object()
-                    .bucket(self.bucket.clone())
-                    .key(key)
-                    .body(bytestream)
-                    .send()
-                    .await;
-                match res {
-                    Ok(_) => {
-                        println!("put object {} to bucket {}", key, self.bucket);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        println!("error: {}", e);
-                        return Err::<(), String>(e.to_string());
-                    }
-                }
-            }
-            Err(e) => {
-                println!("error: {}", e);
-                return Err::<(), String>(e.to_string());
+            _ => {
+                return Err(Box::new(StorageConfigError::InvalidStorageConfig));
             }
         }
     }
@@ -170,6 +171,7 @@ impl Storage for S3Storage {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use tokio::io::AsyncReadExt;
 
     #[tokio::test]
     #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
@@ -195,7 +197,7 @@ mod tests {
 
         let storage = S3Storage {
             bucket: "test".to_string(),
-            client: client,
+            client,
         };
         storage.create_bucket().await.unwrap();
 
@@ -205,12 +207,12 @@ mod tests {
 
         let test_data = "test data";
         let test_file_in = format!("{}/test_file_in", persist_path);
-        let test_file_out = format!("{}/test_file_out", persist_path);
         std::fs::write(&test_file_in, test_data).unwrap();
-        storage.put("test", &test_file_in).await.unwrap();
-        storage.get("test", &test_file_out).await.unwrap();
+        storage.put_file("test", &test_file_in).await.unwrap();
+        let mut bytes = storage.get("test").await.unwrap();
 
-        let contents = std::fs::read_to_string(test_file_out).unwrap();
-        assert_eq!(contents, test_data);
+        let mut buf = String::new();
+        bytes.read_to_string(&mut buf).await.unwrap();
+        assert_eq!(buf, test_data);
     }
 }

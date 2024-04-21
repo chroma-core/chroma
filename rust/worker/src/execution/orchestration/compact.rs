@@ -120,7 +120,7 @@ impl CompactOrchestrator {
         let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
         let end_timestamp = match end_timestamp {
             // TODO: change protobuf definition to use u64 instead of i64
-            Ok(end_timestamp) => end_timestamp.as_secs() as i64,
+            Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
                 // Log an error and reply + return
                 return;
@@ -207,7 +207,7 @@ impl CompactOrchestrator {
         println!("Partitions: {:?}", partitions.len());
         for partition in partitions {
             println!("Materializing N Records: {:?}", partition.len());
-            let res = record_segment_writer.materialize(&partition);
+            let res = record_segment_writer.materialize(&partition).await;
             println!("Materialized Records: {:?}", res);
         }
 

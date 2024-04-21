@@ -6,6 +6,7 @@ use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
     update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
 };
+use async_trait::async_trait;
 use std::sync::atomic::AtomicU32;
 use thiserror::Error;
 
@@ -80,8 +81,9 @@ impl SegmentWriter for RecordSegmentWriter<'_> {
     }
 }
 
+#[async_trait]
 impl LogMaterializer for RecordSegmentWriter<'_> {
-    fn materialize<'chunk>(
+    async fn materialize<'chunk>(
         &self,
         log_records: &'chunk Chunk<LogRecord>,
     ) -> Chunk<MaterializedLogRecord<'chunk>> {
@@ -103,9 +105,10 @@ impl LogMaterializer for RecordSegmentWriter<'_> {
                     };
                     let materialized =
                         MaterializedLogRecord::new(next_offset_id, log_entry, data_record);
-                    let res =
-                        self.id_to_data
-                            .set("", index as u32, &materialized.materialized_record);
+                    let res = self
+                        .id_to_data
+                        .set("", index as u32, &materialized.materialized_record)
+                        .await;
                     // TODO: use res
                     // RESUME POINT: ADD REVERSE MAPPING, THEN IMPLEMENT DOWNSTREAM SEGMENTS (HNSW, METADATA) AND FLUSHING
                     materialized_records.push(materialized);
@@ -116,6 +119,7 @@ impl LogMaterializer for RecordSegmentWriter<'_> {
             }
         }
 
-        Chunk::new(materialized_records.into())
+        // Chunk::new(materialized_records.into())
+        todo!()
     }
 }

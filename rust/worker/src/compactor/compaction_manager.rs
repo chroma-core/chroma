@@ -13,6 +13,7 @@ use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
+use crate::storage::Storage;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
@@ -36,6 +37,7 @@ pub(crate) struct CompactionManager {
     // Dependencies
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
+    storage: Box<Storage>,
     blockfile_provider: BlockfileProvider,
     // Dispatcher
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
@@ -63,6 +65,7 @@ impl CompactionManager {
         scheduler: Scheduler,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
+        storage: Box<Storage>,
         blockfile_provider: BlockfileProvider,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
@@ -72,6 +75,7 @@ impl CompactionManager {
             scheduler,
             log,
             sysdb,
+            storage,
             blockfile_provider,
             dispatcher: None,
             compaction_manager_queue_size,
@@ -190,6 +194,13 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             }
         };
 
+        let storage = match crate::storage::from_config(&config.storage).await {
+            Ok(storage) => storage,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
         let my_ip = config.my_ip.clone();
         let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
@@ -218,7 +229,8 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             scheduler,
             log,
             sysdb,
-            BlockfileProvider::new_arrow(),
+            storage.clone(),
+            BlockfileProvider::new_arrow(storage.clone()),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
         ))
@@ -277,6 +289,7 @@ mod tests {
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
+    use crate::storage::local::LocalStorage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::types::Collection;
     use crate::types::LogRecord;
@@ -286,6 +299,10 @@ mod tests {
     #[tokio::test]
     async fn test_compaction_manager() {
         let mut log = Box::new(InMemoryLog::new());
+        let tmpdir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmpdir.path().to_str().unwrap(),
+        )));
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let collection_id_1 = collection_uuid_1.to_string();
@@ -386,7 +403,8 @@ mod tests {
             scheduler,
             log,
             sysdb,
-            BlockfileProvider::new_arrow(),
+            storage.clone(),
+            BlockfileProvider::new_arrow(storage),
             compaction_manager_queue_size,
             compaction_interval,
         );

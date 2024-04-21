@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -9,6 +11,7 @@ use serde::Deserialize;
 /// config files to configure the worker.
 pub(crate) enum StorageConfig {
     S3(S3StorageConfig),
+    Local(LocalStorageConfig),
 }
 
 #[derive(Deserialize)]
@@ -17,4 +20,15 @@ pub(crate) enum StorageConfig {
 /// - bucket: The name of the bucket to use.
 pub(crate) struct S3StorageConfig {
     pub(crate) bucket: String,
+}
+
+#[derive(Deserialize)]
+/// The configuration for the local storage type
+/// # Fields
+/// - root: The root directory to use for storage.
+/// # Notes
+/// The root directory is the directory where files will be stored.
+/// This is not intended to be used in production.
+pub(crate) struct LocalStorageConfig {
+    pub(crate) root: String,
 }

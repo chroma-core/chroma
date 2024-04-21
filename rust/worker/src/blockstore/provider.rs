@@ -8,6 +8,7 @@ use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
 use crate::errors::ChromaError;
+use crate::storage::Storage;
 use core::fmt::{self, Debug};
 use std::fmt::Formatter;
 use thiserror::Error;
@@ -36,8 +37,8 @@ impl BlockfileProvider {
         BlockfileProvider::HashMapBlockfileProvider(HashMapBlockfileProvider::new())
     }
 
-    pub(crate) fn new_arrow() -> Self {
-        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new())
+    pub(crate) fn new_arrow(storage: Box<Storage>) -> Self {
+        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(storage))
     }
 
     pub(crate) fn open<

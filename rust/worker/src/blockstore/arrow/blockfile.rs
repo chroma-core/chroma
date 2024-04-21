@@ -83,7 +83,12 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
         Ok(())
     }
 
-    pub(crate) fn set(&self, prefix: &str, key: K, value: V) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) async fn set(
+        &self,
+        prefix: &str,
+        key: K,
+        value: V,
+    ) -> Result<(), Box<dyn ChromaError>> {
         // TODO: value must be smaller than the block size except for position lists, which are a special case
         //         // where we split the value across multiple blocks
         //         if !self.in_transaction() {
@@ -98,29 +103,58 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
         // Creating a delta loads the block entirely into memory
 
         // TODO: replace with R/W lock
-        let mut deltas = self.block_deltas.lock();
-        let delta = match deltas.get(&target_block_id) {
-            None => match self.block_manager.get(&target_block_id) {
-                None => {
-                    // this should never happen
-                    unreachable!("Block not found")
+        let delta = {
+            let deltas = self.block_deltas.lock();
+            let delta = match deltas.get(&target_block_id) {
+                None => None,
+                Some(delta) => Some(delta.clone()),
+            };
+            delta
+        };
+
+        let delta = match delta {
+            None => {
+                let block = self.block_manager.get(&target_block_id).await.unwrap();
+                let new_delta = self.block_manager.fork::<K, V>(&block.id);
+                let new_id = new_delta.id;
+                self.sparse_index.replace_block(
+                    target_block_id,
+                    new_delta.id,
+                    new_delta
+                        .get_min_key()
+                        .expect("Block should never be empty when forked"),
+                );
+                {
+                    let mut deltas = self.block_deltas.lock();
+                    deltas.insert(new_id, new_delta.clone());
                 }
-                Some(block) => {
-                    let new_delta = self.block_manager.fork::<K, V>(&block.id);
-                    let new_id = new_delta.id;
-                    self.sparse_index.replace_block(
-                        target_block_id,
-                        new_delta.id,
-                        new_delta
-                            .get_min_key()
-                            .expect("Block should never be empty when forked"),
-                    );
-                    deltas.insert(new_id, new_delta);
-                    deltas.get(&new_id).unwrap()
-                }
-            },
+                new_delta
+            }
             Some(delta) => delta,
         };
+
+        // let delta = match deltas.get(&target_block_id) {
+        //     None => match self.block_manager.get(&target_block_id).await {
+        //         None => {
+        //             // this should never happen
+        //             unreachable!("Block not found")
+        //         }
+        //         Some(block) => {
+        //             let new_delta = self.block_manager.fork::<K, V>(&block.id);
+        //             let new_id = new_delta.id;
+        //             self.sparse_index.replace_block(
+        //                 target_block_id,
+        //                 new_delta.id,
+        //                 new_delta
+        //                     .get_min_key()
+        //                     .expect("Block should never be empty when forked"),
+        //             );
+        //             deltas.insert(new_id, new_delta);
+        //             deltas.get(&new_id).unwrap()
+        //         }
+        //     },
+        //     Some(delta) => delta,
+        // };
 
         // Check if we can add to the the delta without pushing the block over the max size.
         // If we can't, we need to split the block and create a new delta
@@ -130,6 +164,8 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
             let (split_key, new_delta) = delta.split::<K, V>();
             self.sparse_index.add_block(split_key, new_delta.id);
             new_delta.add(prefix, key, value);
+            // deltas.insert(new_delta.id, new_delta);
+            let mut deltas = self.block_deltas.lock();
             deltas.insert(new_delta.id, new_delta);
         }
         Ok(())
@@ -159,9 +195,9 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
-    fn get_block(&self, block_id: Uuid) -> Option<&Block> {
+    async fn get_block(&self, block_id: Uuid) -> Option<&Block> {
         if !self.loaded_blocks.lock().contains_key(&block_id) {
-            let block = self.block_manager.get(&block_id)?;
+            let block = self.block_manager.get(&block_id).await?;
             self.loaded_blocks.lock().insert(block_id, Box::new(block));
         }
 
@@ -181,10 +217,10 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         None
     }
 
-    pub(crate) fn get(&'me self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
+    pub(crate) async fn get(&'me self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
-        let block = self.get_block(target_block_id);
+        let block = self.get_block(target_block_id).await;
         let res = match block {
             Some(block) => block.get(prefix, key),
             None => {
@@ -208,48 +244,56 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::{
         blockstore::{
             arrow::{block, provider::ArrowBlockfileProvider},
             provider::BlockfileProvider,
         },
         segment::DataRecord,
+        storage::{local::LocalStorage, Storage},
         types::MetadataValue,
     };
     use arrow::array::Int32Array;
+    use std::collections::HashMap;
 
-    #[test]
-    fn test_blockfile() {
-        let blockfile_provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_blockfile() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
         let key1 = "zzzz";
         let value1 = Int32Array::from(vec![1, 2, 3]);
-        writer.set(prefix_1, key1, &value1).unwrap();
+        writer.set(prefix_1, key1, &value1).await.unwrap();
 
         let prefix_2 = "key";
         let key2 = "aaaa";
         let value2 = Int32Array::from(vec![4, 5, 6]);
-        writer.set(prefix_2, key2, &value2).unwrap();
+        writer.set(prefix_2, key2, &value2).await.unwrap();
 
         writer.commit().unwrap();
 
         let reader = blockfile_provider.open::<&str, Int32Array>(&id).unwrap();
 
-        let value = reader.get(prefix_1, key1).unwrap();
+        let value = reader.get(prefix_1, key1).await.unwrap();
         assert_eq!(value.values(), &[1, 2, 3]);
 
-        let value = reader.get(prefix_2, key2).unwrap();
+        let value = reader.get(prefix_2, key2).await.unwrap();
         assert_eq!(value.values(), &[4, 5, 6]);
     }
 
-    #[test]
-    fn test_splitting() {
-        let blockfile_provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_splitting() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
@@ -257,7 +301,7 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", &key, &value).unwrap();
+            writer.set("key", &key, &value).await.unwrap();
         }
         writer.commit().unwrap();
 
@@ -265,7 +309,7 @@ mod tests {
 
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).unwrap();
+            let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value.values(), &[i]);
         }
 
@@ -284,7 +328,7 @@ mod tests {
         for i in 0..5 {
             let key = format!("{:05}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", &key, &value).unwrap();
+            writer.set("key", &key, &value).await.unwrap();
         }
         writer.commit().unwrap();
 
@@ -292,7 +336,7 @@ mod tests {
         for i in 0..5 {
             let key = format!("{:05}", i);
             println!("Getting key: {}", key);
-            let value = reader.get("key", &key).unwrap();
+            let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value.values(), &[i]);
         }
 
@@ -311,14 +355,14 @@ mod tests {
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", &key, &value).unwrap();
+            writer.set("key", &key, &value).await.unwrap();
         }
         writer.commit().unwrap();
 
         let reader = blockfile_provider.open::<&str, Int32Array>(&id_3).unwrap();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).unwrap();
+            let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value.values(), &[i]);
         }
 
@@ -332,9 +376,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_string_value() {
-        let blockfile_provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_string_value() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
@@ -343,7 +391,7 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = format!("{:04}", i);
-            writer.set("key", &key, &value).unwrap();
+            writer.set("key", &key, &value).await.unwrap();
         }
 
         writer.commit().unwrap();
@@ -351,14 +399,18 @@ mod tests {
         let reader = blockfile_provider.open::<&str, &str>(&id).unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).unwrap();
+            let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value, format!("{:04}", i));
         }
     }
 
-    #[test]
-    fn test_float_key() {
-        let provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_float_key() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let provider = ArrowBlockfileProvider::new(storage);
 
         let writer = provider.create::<f32, &str>().unwrap();
         let id = writer.id();
@@ -367,7 +419,7 @@ mod tests {
         for i in 0..n {
             let key = i as f32;
             let value = format!("{:04}", i);
-            writer.set("key", key, &value).unwrap();
+            writer.set("key", key, &value).await.unwrap();
         }
 
         writer.commit().unwrap();
@@ -375,14 +427,18 @@ mod tests {
         let reader = provider.open::<f32, &str>(&id).unwrap();
         for i in 0..n {
             let key = i as f32;
-            let value = reader.get("key", key).unwrap();
+            let value = reader.get("key", key).await.unwrap();
             assert_eq!(value, format!("{:04}", i));
         }
     }
 
-    #[test]
-    fn test_roaring_bitmap_value() {
-        let blockfile_provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_roaring_bitmap_value() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider
             .create::<&str, &roaring::RoaringBitmap>()
@@ -393,7 +449,7 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
-            writer.set("key", &key, &value).unwrap();
+            writer.set("key", &key, &value).await.unwrap();
         }
         writer.commit().unwrap();
 
@@ -402,7 +458,7 @@ mod tests {
             .unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).unwrap();
+            let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value.len(), i as u64);
             assert_eq!(
                 value.iter().collect::<Vec<u32>>(),
@@ -411,9 +467,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_uint_key_val() {
-        let blockfile_provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_uint_key_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<u32, u32>().unwrap();
         let id = writer.id();
@@ -422,7 +482,7 @@ mod tests {
         for i in 0..n {
             let key = i as u32;
             let value = i as u32;
-            writer.set("key", key, value).unwrap();
+            writer.set("key", key, value).await.unwrap();
         }
 
         writer.commit().unwrap();
@@ -430,14 +490,18 @@ mod tests {
         let reader = blockfile_provider.open::<u32, u32>(&id).unwrap();
         for i in 0..n {
             let key = i as u32;
-            let value = reader.get("key", key).unwrap();
+            let value = reader.get("key", key).await.unwrap();
             assert_eq!(value, i as u32);
         }
     }
 
-    #[test]
-    fn test_data_record_val() {
-        let blockfile_provider = ArrowBlockfileProvider::new();
+    #[tokio::test]
+    async fn test_data_record_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
         let id = writer.id();
@@ -453,7 +517,7 @@ mod tests {
                 document: None,
                 metadata: Some(metdata),
             };
-            writer.set("key", &key, &value).unwrap();
+            writer.set("key", &key, &value).await.unwrap();
         }
 
         writer.commit().unwrap();
@@ -461,7 +525,7 @@ mod tests {
         let reader = blockfile_provider.open::<&str, DataRecord>(&id).unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).unwrap();
+            let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value.id, key);
             assert_eq!(value.embedding, &[i as f32]);
             let metadata = value.metadata.unwrap();
