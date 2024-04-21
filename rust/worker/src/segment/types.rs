@@ -1,5 +1,6 @@
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{LogRecord, Metadata};
+use async_trait::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct MaterializedLogRecord<'a> {
@@ -50,8 +51,9 @@ pub(super) trait SegmentWriter {
     fn commit(&self);
 }
 
+#[async_trait]
 pub(crate) trait LogMaterializer: SegmentWriter {
-    fn materialize<'chunk>(
+    async fn materialize<'chunk>(
         &self,
         records: &'chunk Chunk<LogRecord>,
     ) -> Chunk<MaterializedLogRecord<'chunk>>;

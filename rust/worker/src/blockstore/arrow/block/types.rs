@@ -13,6 +13,8 @@ use arrow::{
     datatypes::{DataType, Field},
     record_batch::RecordBatch,
 };
+use bytes::Bytes;
+use tokio::io::AsyncBufRead;
 // use proptest::bits::usize;
 use uuid::Uuid;
 // use parking_lot::RwLock;
@@ -93,42 +95,9 @@ impl Block {
     /// Returns the size of the block in bytes
     pub(crate) fn get_size(&self) -> usize {
         let mut total_size = 0;
-        let mut i = 0;
         for column in self.data.columns() {
             total_size += column.get_buffer_memory_size();
-            i += 1;
         }
-
-        // debug
-        let value = self
-            .data
-            .column(2)
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .unwrap();
-        i = 0;
-        for column in value.columns() {
-            println!(
-                "Struct Column {}, size: {:?}",
-                i,
-                column.get_buffer_memory_size()
-            );
-            column.nulls().map_or((), |nulls| {
-                println!("Nulls size: {:?}", nulls.buffer().capacity());
-            });
-            let mut j = 0;
-            for buffer in column.to_data().buffers() {
-                println!(
-                    "Struct Column {}, buffer {}, size: {:?}",
-                    i,
-                    j,
-                    buffer.capacity(),
-                );
-                j += 1;
-            }
-            i += 1;
-        }
-
         total_size
     }
 
@@ -168,6 +137,26 @@ impl Block {
         }
     }
 
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        // Scope the writer so that it is dropped before we return the bytes
+        {
+            let mut writer =
+                arrow::ipc::writer::FileWriter::try_new(&mut bytes, &self.data.schema())
+                    .expect("Error creating writer");
+            writer.write(&self.data).expect("Error writing data");
+            writer.finish().expect("Error finishing writer");
+        }
+        bytes
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn ChromaError>> {
+        let cursor = std::io::Cursor::new(bytes);
+        let mut reader =
+            arrow::ipc::reader::FileReader::try_new(cursor, None).expect("Error creating reader");
+        return Self::load_with_reader(reader);
+    }
+
     pub fn load(path: &str) -> Result<Self, Box<dyn ChromaError>> {
         let file = std::fs::File::open(path);
         let file = match file {
@@ -186,6 +175,15 @@ impl Block {
                 panic!("Error creating reader: {:?}", e)
             }
         };
+        return Self::load_with_reader(reader);
+    }
+
+    fn load_with_reader<R>(
+        mut reader: arrow::ipc::reader::FileReader<R>,
+    ) -> Result<Self, Box<dyn ChromaError>>
+    where
+        R: std::io::Read + std::io::Seek,
+    {
         let batch = reader.next().unwrap();
         // TODO: how to store / hydrate id?
         match batch {

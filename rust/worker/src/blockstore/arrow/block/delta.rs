@@ -223,8 +223,6 @@ impl BlockDelta {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, hash::Hash};
-
     use super::*;
     use crate::{
         blockstore::{
@@ -232,16 +230,21 @@ mod test {
             types::Key,
         },
         segment::DataRecord,
+        storage::{local::LocalStorage, Storage},
         types::MetadataValue,
     };
     use arrow::array::Int32Array;
-    use aws_config::meta;
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
+    use std::{collections::HashMap, hash::Hash};
 
-    #[test]
-    fn test_sizing_int_arr_val() {
-        let block_manager = BlockManager::new();
+    #[tokio::test]
+    async fn test_sizing_int_arr_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &Int32Array>();
 
         let n = 2000;
@@ -260,13 +263,17 @@ mod test {
         // TODO: should commit take ownership of delta?
         // Semantically, that makes sense, since a delta is unsuable after commit
         block_manager.commit::<&str, &Int32Array>(&delta);
-        let block = block_manager.get(&delta.id).unwrap();
+        let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
     }
 
-    #[test]
-    fn test_sizing_string_val() {
-        let block_manager = BlockManager::new();
+    #[tokio::test]
+    async fn test_sizing_string_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &str>();
         let delta_id = delta.id.clone();
 
@@ -279,7 +286,7 @@ mod test {
         }
         let size = delta.get_size::<&str, &str>();
         block_manager.commit::<&str, &str>(&delta);
-        let block = block_manager.get(&delta_id).unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap();
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
@@ -302,7 +309,7 @@ mod test {
         let forked_block = block_manager.fork::<&str, &str>(&delta_id);
         let new_id = forked_block.id.clone();
         block_manager.commit::<&str, &str>(&forked_block);
-        let forked_block = block_manager.get(&new_id).unwrap();
+        let forked_block = block_manager.get(&new_id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
             let read = forked_block.get::<&str, &str>("prefix", &key);
@@ -310,9 +317,13 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_sizing_float_key() {
-        let block_manager = BlockManager::new();
+    #[tokio::test]
+    async fn test_sizing_float_key() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<f32, &str>();
 
         let n = 2000;
@@ -325,13 +336,17 @@ mod test {
 
         let size = delta.get_size::<f32, &str>();
         block_manager.commit::<f32, &str>(&delta);
-        let block = block_manager.get(&delta.id).unwrap();
+        let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
     }
 
-    #[test]
-    fn test_sizing_roaring_bitmap_val() {
-        let block_manager = BlockManager::new();
+    #[tokio::test]
+    async fn test_sizing_roaring_bitmap_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &RoaringBitmap>();
 
         let n = 2000;
@@ -344,7 +359,7 @@ mod test {
 
         let size = delta.get_size::<&str, &RoaringBitmap>();
         block_manager.commit::<&str, &RoaringBitmap>(&delta);
-        let block = block_manager.get(&delta.id).unwrap();
+        let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
 
         for i in 0..n {
@@ -355,9 +370,13 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_data_record() {
-        let block_manager = BlockManager::new();
+    #[tokio::test]
+    async fn test_data_record() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let block_manager = BlockManager::new(storage);
         let ids = vec!["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = vec![
             vec![1.0, 2.0, 3.0],
@@ -399,7 +418,7 @@ mod test {
 
         let size = delta.get_size::<&str, &DataRecord>();
         block_manager.commit::<&str, &DataRecord>(&delta);
-        let block = block_manager.get(&delta.id).unwrap();
+        let block = block_manager.get(&delta.id).await.unwrap();
         for i in 0..3 {
             let read = block.get::<&str, DataRecord>("", ids[i]).unwrap();
             assert_eq!(read.id, ids[i]);

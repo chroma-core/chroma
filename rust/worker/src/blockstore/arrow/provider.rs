@@ -4,14 +4,18 @@ use super::{
     sparse_index::{self, SparseIndex},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
-use crate::blockstore::{
-    key::KeyWrapper,
-    memory::storage::Readable,
-    provider::{BlockfileProvider, CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, Key, Value,
+use crate::{
+    blockstore::{
+        key::KeyWrapper,
+        memory::storage::Readable,
+        provider::{BlockfileProvider, CreateError, OpenError},
+        BlockfileReader, BlockfileWriter, Key, Value,
+    },
+    storage::Storage,
 };
 use parking_lot::{Mutex, RwLock};
 use std::{collections::HashMap, sync::Arc};
+use tokio::{io::AsyncReadExt, pin};
 use uuid::Uuid;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
@@ -23,9 +27,9 @@ pub(crate) struct ArrowBlockfileProvider {
 }
 
 impl ArrowBlockfileProvider {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(storage: Box<Storage>) -> Self {
         Self {
-            block_manager: BlockManager::new(),
+            block_manager: BlockManager::new(storage),
             sparse_index_manager: SparseIndexManager::new(),
         }
     }
@@ -82,59 +86,6 @@ impl ArrowBlockfileProvider {
     }
 }
 
-// impl BlockfileProvider for ArrowBlockfileProvider {
-//     fn open<
-//         'new,
-//         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
-//         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
-//     >(
-//         &self,
-//         id: &uuid::Uuid,
-//     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
-//         let sparse_index = self.sparse_index_manager.get(id);
-//         match sparse_index {
-//             Some(sparse_index) => Ok(BlockfileReader::ArrowBlockfileReader(
-//                 ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
-//             )),
-//             None => {
-//                 return Err(Box::new(OpenError::NotFound));
-//             }
-//         }
-//     }
-
-//     fn create<
-//         'new,
-//         K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
-//         V: Value + crate::blockstore::memory::storage::Writeable + ArrowWriteableValue + 'new,
-//     >(
-//         &self,
-//     ) -> Result<crate::blockstore::BlockfileWriter<K, V>, Box<CreateError>> {
-//         // Create a new blockfile and return a writer
-//         let new_id = Uuid::new_v4();
-//         let file = ArrowBlockfileWriter::new(
-//             new_id,
-//             self.block_manager.clone(),
-//             self.sparse_index_manager.clone(),
-//         );
-//         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
-//     }
-
-//     fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-//         &self,
-//         id: &uuid::Uuid,
-//     ) -> Result<crate::blockstore::BlockfileWriter<K, V>, Box<CreateError>> {
-//         let new_id = Uuid::new_v4();
-//         let new_sparse_index = self.sparse_index_manager.fork(id, new_id);
-//         let file = ArrowBlockfileWriter::from_sparse_index(
-//             new_id,
-//             self.block_manager.clone(),
-//             self.sparse_index_manager.clone(),
-//             new_sparse_index,
-//         );
-//         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
-//     }
-// }
-
 /// A simple local cache of Arrow-backed blocks, the blockfile provider passes this
 /// to the ArrowBlockfile when it creates a new blockfile. So that the blockfile can manage and access blocks
 /// # Note
@@ -144,12 +95,14 @@ impl ArrowBlockfileProvider {
 #[derive(Clone)]
 pub(super) struct BlockManager {
     read_cache: Arc<RwLock<HashMap<Uuid, Block>>>,
+    storage: Box<Storage>,
 }
 
 impl BlockManager {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(storage: Box<Storage>) -> Self {
         Self {
             read_cache: Arc::new(RwLock::new(HashMap::new())),
+            storage,
         }
     }
 
@@ -196,8 +149,86 @@ impl BlockManager {
         self.read_cache.write().insert(block.id, block);
     }
 
-    pub(super) fn get(&self, id: &Uuid) -> Option<Block> {
-        self.read_cache.read().get(id).cloned()
+    pub(super) async fn get(&self, id: &Uuid) -> Option<Block> {
+        let block = {
+            let cache = self.read_cache.read();
+            cache.get(id).cloned()
+        };
+        match block {
+            Some(block) => Some(block),
+            None => {
+                let key = format!("block/{}", id);
+                let bytes = self.storage.get(&key).await;
+                let mut buf: Vec<u8> = Vec::new();
+                match bytes {
+                    Ok(mut bytes) => {
+                        let res = bytes.read_to_end(&mut buf).await;
+                        match res {
+                            Ok(_) => {}
+                            Err(_) => {
+                                // TODO: log error
+                                return None;
+                            }
+                        }
+                        let block = Block::from_bytes(&buf);
+                        match block {
+                            Ok(block) => {
+                                self.read_cache.write().insert(*id, block.clone());
+                                Some(block)
+                            }
+                            Err(_) => {
+                                // TODO: log error
+                                None
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // TODO: log error
+                        None
+                    }
+                }
+            }
+        }
+
+        // match cache.get(id) {
+        //     Some(block) => Some(block.clone()),
+        //     None => {
+        //         let key = format!("block/{}", id);
+        //         let bytes = self.storage.get(&key).await;
+        //         match bytes {
+        //             Ok(mut bytes) => {
+        //                 let mut buf: Vec<u8> = Vec::new();
+        //                 bytes.read_to_end(&mut buf);
+        //                 let block = Block::from_bytes(&buf);
+        //                 match block {
+        //                     Ok(block) => {
+        //                         self.read_cache.write().insert(*id, block.clone());
+        //                         Some(block)
+        //                     }
+        //                     Err(_) => {
+        //                         // TODO: log error
+        //                         None
+        //                     }
+        //                 }
+        //             }
+        //             Err(_) => None,
+        //         }
+        //     }
+        // }
+    }
+
+    pub(super) async fn flush(&self, id: &Uuid) {
+        let block = self.get(id).await;
+
+        match block {
+            Some(block) => {
+                let bytes = block.to_bytes();
+                let key = format!("block/{}", id);
+                let res = self.storage.put_bytes(&key, bytes).await;
+                // TODO: error handling
+            }
+            None => {}
+        }
     }
 }
 

@@ -187,10 +187,15 @@ impl<K: Key + Into<KeyWrapper> + ArrowWriteableKey, V: Value + Writeable + Arrow
         }
     }
 
-    pub(crate) fn set(&self, prefix: &str, key: K, value: V) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) async fn set(
+        &self,
+        prefix: &str,
+        key: K,
+        value: V,
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.set(prefix, key, value),
-            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.set(prefix, key, value),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.set(prefix, key, value).await,
         }
     }
 
@@ -217,14 +222,14 @@ impl<
         V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
     > BlockfileReader<'referred_data, K, V>
 {
-    pub(crate) fn get(
+    pub(crate) async fn get(
         &'referred_data self,
         prefix: &str,
         key: K,
     ) -> Result<V, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
         }
     }
 

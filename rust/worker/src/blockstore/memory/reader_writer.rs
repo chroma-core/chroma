@@ -133,6 +133,7 @@ mod tests {
 
     #[test]
     fn test_data_record() {
+        // TODO: cleanup this test
         let storage_manager = StorageManager::new();
         let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let id = uuid::Uuid::new_v4().to_string();
@@ -168,7 +169,7 @@ mod tests {
             LogRecord {
                 log_offset: 3,
                 record: OperationRecord {
-                    id: "embedding_id_1".to_string(),
+                    id: "embedding_id_3".to_string(),
                     embedding: Some(vec![7.0, 8.0, 9.0]),
                     encoding: None,
                     metadata: None,
