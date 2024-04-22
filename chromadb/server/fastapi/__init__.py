@@ -379,7 +379,6 @@ class FastAPI(Server):
         if (self._system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth
                 and collection is not None):
             collec = self._api.get_collection(
-                id=_uuid(collection),
                 name=collection
             )
             if not collec:
