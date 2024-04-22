@@ -87,19 +87,59 @@ message OperationRecord {
     Operation operation = 4;
 }
 
-message VectorEmbeddingRecord {
-    string id = 1;
-    Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
+/* Metadata Reader Interface */
+
+service MetadataReader {
+    rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse) {}
 }
 
-message VectorQueryResult {
-    string id = 1;
-    float distance = 3;
-    optional Vector vector = 4;
+message GetMetadataRequest {
+    Where where = 1;
+    WhereDocument where_document = 2;
+    repeated string ids = 3;
+    optional int32 limit = 4;
+    optional int32 offset = 5;
 }
 
-message VectorQueryResults {
-    repeated VectorQueryResult results = 1;
+enum WhereListType {
+    IN = 0;
+    NIN = 1;
+}
+
+enum WhereChildrenType {
+    AND = 0;
+    OR = 1;
+}
+
+// A `Where` clause for filtering metadata. A `Where` clause is a tree of
+// `Where` clauses, where each node is exactly one of:
+// - A leaf node with a key, a list of values, and a list type (IN or NIN)
+// - An branch node with a list of children and a children type (AND or OR)
+message Where {
+    // Metadata key
+    string key = 1;
+    // Allowed or disallowed metadata values
+    repeated string values = 2;
+    // Whether we're filtering IN or NIN `values`
+    WhereListType list_type = 3;
+    // Children of this `Where` clause
+    repeated Where children = 4;
+    // Whether children should be ANDed or ORed
+    WhereChildrenType children_type = 5;
+}
+
+message WhereDocument {
+    repeated string contains = 1;
+    repeated string not_contains = 2;
+}
+
+message GetMetadataResponse {
+    repeated MetadataEmbeddingRecord records = 1;
+}
+
+message MetadataEmbeddingRecord {
+    string id = 1;
+    UpdateMetadata metadata = 2;
 }
 
 /* Vector Reader Interface */
@@ -118,6 +158,11 @@ message GetVectorsResponse {
     repeated VectorEmbeddingRecord records = 1;
 }
 
+message VectorEmbeddingRecord {
+    string id = 1;
+    Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
+}
+
 message QueryVectorsRequest {
     repeated Vector vectors = 1;
     int32 k = 2;
@@ -129,4 +174,14 @@ message QueryVectorsRequest {
 
 message QueryVectorsResponse {
     repeated VectorQueryResults results = 1;
+}
+
+message VectorQueryResults {
+    repeated VectorQueryResult results = 1;
+}
+
+message VectorQueryResult {
+    string id = 1;
+    float distance = 3;
+    optional Vector vector = 4;
 }
