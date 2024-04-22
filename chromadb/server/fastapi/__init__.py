@@ -27,7 +27,7 @@ from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
     InvalidDimensionException,
-    InvalidHTTPVersion,
+    InvalidHTTPVersion, InvalidUUIDError,
 )
 from chromadb.quota import QuotaError
 from chromadb.rate_limiting import RateLimitError
@@ -377,11 +377,16 @@ class FastAPI(Server):
             database = new_database
 
         if (self._system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth
-                and collection is not None):
-            collec = self._api.get_collection(
-                id=_uuid(collection),
-                name=collection
-            )
+                and collection is not None and action != AuthzAction.CREATE_COLLECTION and action != AuthzAction.GET_OR_CREATE_COLLECTION):
+            try:
+                uuid = _uuid(collection)
+                collec = self._api.get_collection(
+                    id=uuid,
+                )
+            except InvalidUUIDError:
+                collec = self._api.get_collection(
+                    name=collection,
+                )
             if not collec:
                 raise HTTPException(
                     status_code=404,
