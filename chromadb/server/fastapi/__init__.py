@@ -377,7 +377,7 @@ class FastAPI(Server):
             database = new_database
 
         if (self._system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth
-                and collection is not None):
+                and collection is not None and action != AuthzAction.CREATE_COLLECTION and action != AuthzAction.GET_OR_CREATE_COLLECTION):
             collec = self._api.get_collection(
                 name=collection
             )
