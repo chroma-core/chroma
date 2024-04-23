@@ -162,8 +162,8 @@ message DirectComparison {
         StringListComparison string_list_operand = 3;
         SingleIntComparison single_int_operand = 4;
         IntListComparison int_list_operand = 5;
-        SingleDoubleComparison single_float_operand = 6;
-        DoubleListComparison float_list_operand = 7;
+        SingleDoubleComparison single_double_operand = 6;
+        DoubleListComparison double_list_operand = 7;
     }
 }
 

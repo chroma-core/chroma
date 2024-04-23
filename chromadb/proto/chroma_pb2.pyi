@@ -251,22 +251,22 @@ class Where(_message.Message):
     def __init__(self, direct_comparison: _Optional[_Union[DirectComparison, _Mapping]] = ..., children: _Optional[_Union[WhereChildren, _Mapping]] = ...) -> None: ...
 
 class DirectComparison(_message.Message):
-    __slots__ = ("key", "single_string_operand", "string_list_operand", "single_int_operand", "int_list_operand", "single_float_operand", "float_list_operand")
+    __slots__ = ("key", "single_string_operand", "string_list_operand", "single_int_operand", "int_list_operand", "single_double_operand", "double_list_operand")
     KEY_FIELD_NUMBER: _ClassVar[int]
     SINGLE_STRING_OPERAND_FIELD_NUMBER: _ClassVar[int]
     STRING_LIST_OPERAND_FIELD_NUMBER: _ClassVar[int]
     SINGLE_INT_OPERAND_FIELD_NUMBER: _ClassVar[int]
     INT_LIST_OPERAND_FIELD_NUMBER: _ClassVar[int]
-    SINGLE_FLOAT_OPERAND_FIELD_NUMBER: _ClassVar[int]
-    FLOAT_LIST_OPERAND_FIELD_NUMBER: _ClassVar[int]
+    SINGLE_DOUBLE_OPERAND_FIELD_NUMBER: _ClassVar[int]
+    DOUBLE_LIST_OPERAND_FIELD_NUMBER: _ClassVar[int]
     key: str
     single_string_operand: SingleStringComparison
     string_list_operand: StringListComparison
     single_int_operand: SingleIntComparison
     int_list_operand: IntListComparison
-    single_float_operand: SingleDoubleComparison
-    float_list_operand: DoubleListComparison
-    def __init__(self, key: _Optional[str] = ..., single_string_operand: _Optional[_Union[SingleStringComparison, _Mapping]] = ..., string_list_operand: _Optional[_Union[StringListComparison, _Mapping]] = ..., single_int_operand: _Optional[_Union[SingleIntComparison, _Mapping]] = ..., int_list_operand: _Optional[_Union[IntListComparison, _Mapping]] = ..., single_float_operand: _Optional[_Union[SingleDoubleComparison, _Mapping]] = ..., float_list_operand: _Optional[_Union[DoubleListComparison, _Mapping]] = ...) -> None: ...
+    single_double_operand: SingleDoubleComparison
+    double_list_operand: DoubleListComparison
+    def __init__(self, key: _Optional[str] = ..., single_string_operand: _Optional[_Union[SingleStringComparison, _Mapping]] = ..., string_list_operand: _Optional[_Union[StringListComparison, _Mapping]] = ..., single_int_operand: _Optional[_Union[SingleIntComparison, _Mapping]] = ..., int_list_operand: _Optional[_Union[IntListComparison, _Mapping]] = ..., single_double_operand: _Optional[_Union[SingleDoubleComparison, _Mapping]] = ..., double_list_operand: _Optional[_Union[DoubleListComparison, _Mapping]] = ...) -> None: ...
 
 class WhereChildren(_message.Message):
     __slots__ = ("children", "operator")

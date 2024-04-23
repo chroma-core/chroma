@@ -113,122 +113,157 @@ class GrpcMetadataSegment(MetadataReader):
                 else:
                     children.operator = pb.BooleanOperator.OR
 
-                response.children = children
+                response.children.CopyFrom(children)
                 return response
 
-            # At this point we know we're at a leaf node and the key is
-            # a field name.
-            if not isinstance(value, dict):
-                raise ValueError(
-                    f"Expected where value to be a dict, got {value}"
-                )
+            # At this point we know we're at a direct comparison. It can either
+            # be of the form {"key": "value"} or {"key": {"$operator": "value"}}.
+
             dc = pb.DirectComparison()
             dc.key = key
-            for operator, operand in value.items():
-                if operator in ["$in", "$nin"]:
-                    if not isinstance(operand, list):
-                        raise ValueError(
-                            f"Expected where value for $in or $nin to be a list of values, got {value}"
-                        )
-                    if (len(operand) == 0
-                        or not all(
-                            isinstance(x, type(operand[0]))
-                            for x in operand
-                    )):
-                        raise ValueError(
-                            f"Expected where operand value to be a non-empty list, and all values to be of the same type "
-                            f"got {operand}"
-                        )
-                    list_operator = None
-                    if operator == "$in":
-                        list_operator = pb.ListOperator.IN
-                    else:
-                        list_operator = pb.ListOperator.NIN
-                    if type(operand[0]) is str:
-                        slo = pb.StringListComparison()
-                        for x in operand:
-                            slo.values.extend([x])  # type: ignore
-                        slo.list_operator = list_operator
-                        dc.string_list_operand = slo
-                    elif type(operand[0]) is int:
-                        ilo = pb.IntListComparison()
-                        for x in operand:
-                            ilo.values.extend([x])  # type: ignore
-                        ilo.list_operator = list_operator
-                        dc.int_list_operand = ilo
-                    elif type(operand[0]) is float:
-                        dlo = pb.DoubleListComparison()
-                        for x in operand:
-                            dlo.values.extend([x])  # type: ignore
-                        dlo.list_operator = list_operator
-                        dc.float_list_operand = dlo
-                    else:
-                        raise ValueError(
-                            f"Expected where operand value to be a list of strings, ints, or floats, got {operand}"
-                        )
-                else:
-                    # Direct comparison to a single value.
-                    if operator not in ["$eq", "$ne", "$gt", "$lt", "$gte", "$lte"]:
-                        raise ValueError(
-                            f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
-                        )
-                    if type(operand) is str:
-                        ssc = pb.SingleStringComparison()
-                        ssc.value = operand
-                        if operator == "$eq":
-                            ssc.comparator = pb.GenericComparator.EQ
-                        elif operator == "$ne":
-                            ssc.comparator = pb.GenericComparator.NE
-                        else:
-                            raise ValueError(
-                                f"Expected where operator to be $eq or $ne, got {operator}"
-                            )
-                        dc.single_string_operand = ssc
-                    elif type(operand) is int:
-                        sic = pb.SingleIntComparison()
-                        sic.value = operand
-                        if operator == "$eq":
-                            sic.generic_comparator = pb.GenericComparator.EQ
-                        elif operator == "$ne":
-                            sic.generic_comparator = pb.GenericComparator.NE
-                        elif operator == "$gt":
-                            sic.number_comparator = pb.NumberComparator.GT
-                        elif operator == "$lt":
-                            sic.number_comparator = pb.NumberComparator.LT
-                        elif operator == "$gte":
-                            sic.number_comparator = pb.NumberComparator.GTE
-                        elif operator == "$lte":
-                            sic.number_comparator = pb.NumberComparator.LTE
-                        else:
-                            raise ValueError(
-                                f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
-                            )
-                        dc.single_int_operand = sic
-                    elif type(operand) is float:
-                        sfc = pb.SingleDoubleComparison()
-                        sfc.value = operand
-                        if operator == "$eq":
-                            sfc.generic_comparator = pb.GenericComparator.EQ
-                        elif operator == "$ne":
-                            sfc.generic_comparator = pb.GenericComparator.NE
-                        elif operator == "$gt":
-                            sfc.number_comparator = pb.NumberComparator.GT
-                        elif operator == "$lt":
-                            sfc.number_comparator = pb.NumberComparator.LT
-                        elif operator == "$gte":
-                            sfc.number_comparator = pb.NumberComparator.GTE
-                        elif operator == "$lte":
-                            sfc.number_comparator = pb.NumberComparator.LTE
-                        else:
-                            raise ValueError(
-                                f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
-                            )
-                        dc.single_float_operand = sfc
-                    else:
-                        raise ValueError(
-                            f"Expected where operand value to be a string, int, or float, got {operand}"
-                        )
 
+            if not isinstance(value, dict):
+                # {'key': 'value'} case
+                if type(value) is str:
+                    ssc = pb.SingleStringComparison()
+                    ssc.value = value
+                    ssc.comparator = pb.GenericComparator.EQ
+                    dc.single_string_operand.CopyFrom(ssc)
+                elif type(value) is int:
+                    sic = pb.SingleIntComparison()
+                    sic.value = value
+                    sic.generic_comparator = pb.GenericComparator.EQ
+                    dc.single_int_operand.CopyFrom(sic)
+                elif type(value) is float:
+                    sdc = pb.SingleDoubleComparison()
+                    sdc.value = value
+                    sdc.generic_comparator = pb.GenericComparator.EQ
+                    dc.single_double_operand.CopyFrom(sdc)
+                else:
+                    raise ValueError(
+                        f"Expected where value to be a string, int, or float, got {value}"
+                    )
+            else:
+                for operator, operand in value.items():
+                    if operator in ["$in", "$nin"]:
+                        if not isinstance(operand, list):
+                            raise ValueError(
+                                f"Expected where value for $in or $nin to be a list of values, got {value}"
+                            )
+                        if (len(operand) == 0
+                            or not all(
+                                isinstance(x, type(operand[0]))
+                                for x in operand
+                        )):
+                            raise ValueError(
+                                f"Expected where operand value to be a non-empty list, and all values to be of the same type "
+                                f"got {operand}"
+                            )
+                        list_operator = None
+                        if operator == "$in":
+                            list_operator = pb.ListOperator.IN
+                        else:
+                            list_operator = pb.ListOperator.NIN
+                        if type(operand[0]) is str:
+                            slo = pb.StringListComparison()
+                            for x in operand:
+                                slo.values.extend([x])  # type: ignore
+                            slo.list_operator = list_operator
+                            dc.string_list_operand.CopyFrom(slo)
+                        elif type(operand[0]) is int:
+                            ilo = pb.IntListComparison()
+                            for x in operand:
+                                ilo.values.extend([x])  # type: ignore
+                            ilo.list_operator = list_operator
+                            dc.int_list_operand.CopyFrom(ilo)
+                        elif type(operand[0]) is float:
+                            dlo = pb.DoubleListComparison()
+                            for x in operand:
+                                dlo.values.extend([x])  # type: ignore
+                            dlo.list_operator = list_operator
+                            dc.double_list_operand.CopyFrom(dlo)
+                        else:
+                            raise ValueError(
+                                f"Expected where operand value to be a list of strings, ints, or floats, got {operand}"
+                            )
+                    elif operator in ["$eq", "$ne", "$gt", "$lt", "$gte", "$lte"]:
+                        # Direct comparison to a single value.
+                        if type(operand) is str:
+                            ssc = pb.SingleStringComparison()
+                            ssc.value = operand
+                            if operator == "$eq":
+                                ssc.comparator = pb.GenericComparator.EQ
+                            elif operator == "$ne":
+                                ssc.comparator = pb.GenericComparator.NE
+                            else:
+                                raise ValueError(
+                                    f"Expected where operator to be $eq or $ne, got {operator}"
+                                )
+                            dc.single_string_operand.CopyFrom(ssc)
+                        elif type(operand) is int:
+                            sic = pb.SingleIntComparison()
+                            sic.value = operand
+                            if operator == "$eq":
+                                sic.generic_comparator = pb.GenericComparator.EQ
+                            elif operator == "$ne":
+                                sic.generic_comparator = pb.GenericComparator.NE
+                            elif operator == "$gt":
+                                sic.number_comparator = pb.NumberComparator.GT
+                            elif operator == "$lt":
+                                sic.number_comparator = pb.NumberComparator.LT
+                            elif operator == "$gte":
+                                sic.number_comparator = pb.NumberComparator.GTE
+                            elif operator == "$lte":
+                                sic.number_comparator = pb.NumberComparator.LTE
+                            else:
+                                raise ValueError(
+                                    f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
+                                )
+                            dc.single_int_operand.CopyFrom(sic)
+                        elif type(operand) is float:
+                            sfc = pb.SingleDoubleComparison()
+                            sfc.value = operand
+                            if operator == "$eq":
+                                sfc.generic_comparator = pb.GenericComparator.EQ
+                            elif operator == "$ne":
+                                sfc.generic_comparator = pb.GenericComparator.NE
+                            elif operator == "$gt":
+                                sfc.number_comparator = pb.NumberComparator.GT
+                            elif operator == "$lt":
+                                sfc.number_comparator = pb.NumberComparator.LT
+                            elif operator == "$gte":
+                                sfc.number_comparator = pb.NumberComparator.GTE
+                            elif operator == "$lte":
+                                sfc.number_comparator = pb.NumberComparator.LTE
+                            else:
+                                raise ValueError(
+                                    f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
+                                )
+                            dc.single_double_operand.CopyFrom(sfc)
+                        else:
+                            raise ValueError(
+                                f"Expected where operand value to be a string, int, or float, got {operand}"
+                            )
+                    else:
+                        # Our key is a metadata field name and the value is meant
+                        # to be compared for strict equality.
+                        if type(operand) is str:
+                            ssc = pb.SingleStringComparison()
+                            ssc.value = operand
+                            ssc.comparator = pb.GenericComparator.EQ
+                            dc.single_string_operand.CopyFrom(ssc)
+                        elif type(operand) is int:
+                            sic = pb.SingleIntComparison()
+                            sic.value = operand
+                            sic.generic_comparator = pb.GenericComparator.EQ
+                            dc.single_int_operand.CopyFrom(sic)
+                        elif type(operand) is float:
+                            sfc = pb.SingleDoubleComparison()
+                            sfc.value = operand
+                            sfc.generic_comparator = pb.GenericComparator.EQ
+                            dc.double_list_operand.CopyFrom(sfc)
+
+            response.direct_comparison.CopyFrom(dc)
         return response
 
     def _where_document_to_proto(
