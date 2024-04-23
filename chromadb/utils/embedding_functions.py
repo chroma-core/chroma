@@ -15,6 +15,7 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
+from chromadb.errors import error_types
 
 from io import BytesIO
 from pathlib import Path
@@ -680,12 +681,17 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             if predictions:
                 for prediction in predictions:
                     embeddings.append(prediction["embeddings"]["values"])
-            elif predictions is None:
-                    raise KeyError('Key `predictions` of the response from Vertex Embedding API is not existed!! Please confirm the response.')
-            elif not isinstance(predictions, Iterable):
-                raise TypeError('The response from Vertex Embedding API is not iterable!! Please confirm the response.')
-            elif not len(predictions):
-                raise IndexError('The response from Vertex Embedding API is empty!! Please confirm the retrieved result.')
+            else:
+                if predictions is None:
+                    error_info = response.get('error')
+                    if error_info:
+                        raise error_types.get('AuthorizationError')(dumps(response))
+
+                    raise KeyError(f'Key `predictions` of the response from Vertex Embedding API is not existed!! Please confirm the response. \n{response}')
+                elif not isinstance(predictions, Iterable):
+                    raise TypeError(f'The response from Vertex Embedding API is not iterable!! Please confirm the response. \n{response}')
+                elif not len(predictions):
+                    raise IndexError(f'The response from Vertex Embedding API is empty!! Please confirm the retrieved result. \n{response}')
 
         return embeddings
 
