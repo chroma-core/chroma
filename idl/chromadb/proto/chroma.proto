@@ -111,10 +111,35 @@ message MetadataEmbeddingRecord {
     UpdateMetadata metadata = 2;
 }
 
-// A `WhereDocument` clause for filtering embeddings based on their associated documents.
+// A `WhereDocument` clause for filtering metadata. A `WhereDocument` clause is a tree of
+// `WhereDocument` clauses, where each node is exactly one of:
+// - A leaf node representing a `$contains` or `$not_contains` query directly.
+// - An branch node with a list of children and a way to combine them (AND or OR).
 message WhereDocument {
-    repeated string contains = 1;
-    repeated string not_contains = 2;
+    oneof where_document {
+        DirectWhereDocument direct = 1;
+        WhereDocumentChildren children = 2;
+    }
+}
+
+// A leaf-node `WhereDocument` clause may compare a document to a single value.
+message DirectWhereDocument {
+    string document = 1;
+    WhereDocumentOperator operator = 2;
+}
+
+// Types of operators for `WhereDocument` clauses. A `WhereDocument` clause can
+// either require that a document contains a value or that it does not contain
+// a value.
+enum WhereDocumentOperator {
+    CONTAINS = 0;
+    NOT_CONTAINS = 1;
+}
+
+// A branch-node `WhereDocument` node has a list of children.
+message WhereDocumentChildren {
+    repeated WhereDocument children = 1;
+    WhereChildrenOperator operator = 2;
 }
 
 // A `Where` clause for filtering metadata. A `Where` clause is a tree of
@@ -129,6 +154,7 @@ message Where {
     }
 }
 
+// A leaf-node `Where` clause.
 message DirectComparison {
     string key = 1;
     oneof comparison {
@@ -141,6 +167,8 @@ message DirectComparison {
     }
 }
 
+// A branch-node `Where` clause has a list of children and a specification
+// for how to combine them.
 message WhereChildren {
     repeated Where children = 1;
     WhereChildrenOperator operator = 2;

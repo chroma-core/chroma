@@ -1,4 +1,4 @@
-from typing import Any, cast, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 from chromadb.segment import MetadataReader
 from chromadb.config import System
 from chromadb.types import Segment
@@ -219,8 +219,74 @@ class GrpcMetadataSegment(MetadataReader):
 
         return response
 
-    def _where_document_to_proto(self, where_document: Optional[WhereDocument]) -> pb.WhereDocument:
-        pass
+    def _where_document_to_proto(
+            self,
+            where_document: Optional[WhereDocument]
+    ) -> pb.WhereDocument:
+        response = pb.WhereDocument()
+        if where_document is None:
+            return response
+        if len(where_document) != 1:
+            raise ValueError(f"Expected where_document to have exactly one operator, got {where_document}")
 
-    def _from_proto(self, record: pb.MetadataEmbeddingRecord) -> MetadataEmbeddingRecord:
-        pass
+        for operator, operand in where_document.items():
+            if operator == "$and" or operator == "$or":
+                # Nested "$and" or "$or" expression.
+                if not isinstance(operand, list):
+                    raise ValueError(
+                        f"Expected where_document value for $and or $or to be a list of where_document expressions, got {operand}"
+                    )
+                children: pb.WhereDocumentChildren = pb.WhereDocumentChildren(
+                    children=[
+                        self._where_document_to_proto(w) for w in operand
+                    ]
+                )
+                if operator == "$and":
+                    children.operator = pb.WhereChildrenOperator.AND
+                else:
+                    children.operator = pb.WhereChildrenOperator.OR
+
+                response.children = children
+            else:
+                # Direct "$contains" or "$not_contains" comparison to a single
+                # value.
+                if not isinstance(operand, str):
+                    raise ValueError(
+                        f"Expected where_document operand to be a string, got {operand}"
+                    )
+                dwd = pb.DirectWhereDocument()
+                dwd.document = operand
+                if operator == "$contains":
+                    dwd.operator = pb.WhereDocumentOperator.CONTAINS
+                elif operator == "$not_contains":
+                    dwd.operator = pb.WhereDocumentOperator.NOT_CONTAINS
+                else:
+                    raise ValueError(
+                        f"Expected where_document operator to be one of $contains, $not_contains, got {operator}"
+                    )
+                response.direct = dwd
+
+        return response
+
+    def _from_proto(
+            self,
+            record: pb.MetadataEmbeddingRecord
+    ) -> MetadataEmbeddingRecord:
+        translated_metadata: Dict[str, str | int | float] = {}
+        record_metadata_map = record.metadata.metadata
+        for key, value in record_metadata_map.items():
+            if value.HasField("string_value"):
+                translated_metadata[key] = value.string_value
+            elif value.HasField("int_value"):
+                translated_metadata[key] = value.int_value
+            elif value.HasField("float_value"):
+                translated_metadata[key] = value.float_value
+            else:
+                raise ValueError(f"Unknown metadata value type: {value}")
+
+        mer = MetadataEmbeddingRecord(
+            id=record.id,
+            metadata=translated_metadata
+        )
+
+        return mer

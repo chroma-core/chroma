@@ -23,6 +23,11 @@ class SegmentScope(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     VECTOR: _ClassVar[SegmentScope]
     METADATA: _ClassVar[SegmentScope]
 
+class WhereDocumentOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    CONTAINS: _ClassVar[WhereDocumentOperator]
+    NOT_CONTAINS: _ClassVar[WhereDocumentOperator]
+
 class WhereChildrenOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     AND: _ClassVar[WhereChildrenOperator]
@@ -52,6 +57,8 @@ FLOAT32: ScalarEncoding
 INT32: ScalarEncoding
 VECTOR: SegmentScope
 METADATA: SegmentScope
+CONTAINS: WhereDocumentOperator
+NOT_CONTAINS: WhereDocumentOperator
 AND: WhereChildrenOperator
 OR: WhereChildrenOperator
 IN: ListOperator
@@ -212,12 +219,28 @@ class MetadataEmbeddingRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ...) -> None: ...
 
 class WhereDocument(_message.Message):
-    __slots__ = ("contains", "not_contains")
-    CONTAINS_FIELD_NUMBER: _ClassVar[int]
-    NOT_CONTAINS_FIELD_NUMBER: _ClassVar[int]
-    contains: _containers.RepeatedScalarFieldContainer[str]
-    not_contains: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, contains: _Optional[_Iterable[str]] = ..., not_contains: _Optional[_Iterable[str]] = ...) -> None: ...
+    __slots__ = ("direct", "children")
+    DIRECT_FIELD_NUMBER: _ClassVar[int]
+    CHILDREN_FIELD_NUMBER: _ClassVar[int]
+    direct: DirectWhereDocument
+    children: WhereDocumentChildren
+    def __init__(self, direct: _Optional[_Union[DirectWhereDocument, _Mapping]] = ..., children: _Optional[_Union[WhereDocumentChildren, _Mapping]] = ...) -> None: ...
+
+class DirectWhereDocument(_message.Message):
+    __slots__ = ("document", "operator")
+    DOCUMENT_FIELD_NUMBER: _ClassVar[int]
+    OPERATOR_FIELD_NUMBER: _ClassVar[int]
+    document: str
+    operator: WhereDocumentOperator
+    def __init__(self, document: _Optional[str] = ..., operator: _Optional[_Union[WhereDocumentOperator, str]] = ...) -> None: ...
+
+class WhereDocumentChildren(_message.Message):
+    __slots__ = ("children", "operator")
+    CHILDREN_FIELD_NUMBER: _ClassVar[int]
+    OPERATOR_FIELD_NUMBER: _ClassVar[int]
+    children: _containers.RepeatedCompositeFieldContainer[WhereDocument]
+    operator: WhereChildrenOperator
+    def __init__(self, children: _Optional[_Iterable[_Union[WhereDocument, _Mapping]]] = ..., operator: _Optional[_Union[WhereChildrenOperator, str]] = ...) -> None: ...
 
 class Where(_message.Message):
     __slots__ = ("direct_comparison", "children")
