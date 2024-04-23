@@ -6,6 +6,7 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
       - id: end-of-file-fixer
+        exclude: "go/migrations"
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
