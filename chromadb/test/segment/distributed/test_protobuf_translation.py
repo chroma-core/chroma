@@ -6,6 +6,7 @@ from chromadb.segment.impl.metadata.grpc_segment import GrpcMetadataSegment
 from chromadb.types import (
     Segment,
     SegmentScope,
+    UpdateMetadata,
     Where,
     WhereDocument,
     MetadataEmbeddingRecord,
@@ -258,3 +259,91 @@ def test_where_to_proto_nested_boolean_operators() -> None:
         assert nested_children[0].direct_comparison.single_int_operand.value == 1
         assert nested_children[1].direct_comparison.HasField("single_string_operand")
         assert nested_children[1].direct_comparison.single_string_operand.value == "value"
+
+
+def test_metadata_embedding_record_string_from_proto() -> None:
+    md_segment = unstarted_grpc_metadata_segment()
+    val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        string_value="test_value",
+    )
+    update: pb.UpdateMetadata = pb.UpdateMetadata(
+        metadata={"test_key": val},
+    )
+    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
+        id="test_id",
+        metadata=update,
+    )
+
+    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
+    assert mdr["id"] == "test_id"
+    assert mdr["metadata"]
+    assert mdr["metadata"]["test_key"] == "test_value"
+
+
+def test_metadata_embedding_record_int_from_proto() -> None:
+    md_segment = unstarted_grpc_metadata_segment()
+    val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        int_value=1,
+    )
+    update: pb.UpdateMetadata = pb.UpdateMetadata(
+        metadata={"test_key": val},
+    )
+    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
+        id="test_id",
+        metadata=update,
+    )
+
+    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
+    assert mdr["id"] == "test_id"
+    assert mdr["metadata"]
+    assert mdr["metadata"]["test_key"] == 1
+
+
+def test_metadata_embedding_record_double_from_proto() -> None:
+    md_segment = unstarted_grpc_metadata_segment()
+    val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        float_value=1.0,
+    )
+    update: pb.UpdateMetadata = pb.UpdateMetadata(
+        metadata={"test_key": val},
+    )
+    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
+        id="test_id",
+        metadata=update,
+    )
+
+    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
+    assert mdr["id"] == "test_id"
+    assert mdr["metadata"]
+    assert mdr["metadata"]["test_key"] == 1.0
+
+
+def test_metadata_embedding_record_heterogeneous_from_proto() -> None:
+    md_segment = unstarted_grpc_metadata_segment()
+    val1: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        string_value="test_value",
+    )
+    val2: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        int_value=1,
+    )
+    val3: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        float_value=1.0,
+    )
+    update: pb.UpdateMetadata = pb.UpdateMetadata(
+        metadata={
+            "test_key1": val1,
+            "test_key2": val2,
+            "test_key3": val3,
+        },
+    )
+    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
+        id="test_id",
+        metadata=update,
+    )
+
+    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
+    assert mdr["id"] == "test_id"
+    assert mdr["metadata"]
+    assert mdr["metadata"]["test_key1"] == "test_value"
+    assert mdr["metadata"]["test_key2"] == 1
+    assert mdr["metadata"]["test_key3"] == 1.0
