@@ -372,6 +372,25 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 
+class TensorFlowHubEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(self, model_name: str = "base"):
+        try:
+            import tensorflow_hub as tf_hub
+            import tensorflow as tf
+            import tensorflow_text as tf_text
+        except ImportError:
+            raise ValueError(
+                "The tensorflow-hub, tensorflow and tensorflow-text python package is not installed. Please install it with 'pip install tensorflow-hub tensorflow-text tensorflow'"
+            )
+
+        self._hub_url = "https://www.kaggle.com/models/google/gtr/TensorFlow2/gtr-{}/1".format(model_name)
+
+    
+    def __call__(self, input: Documents) -> Embeddings:
+        
+        encoder = tf_hub.KerasLayer(self._hub_url)
+        return encoder(tf.constant(input))
+
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
 # implements the same functionality as "all-MiniLM-L6-v2" from sentence-transformers.
