@@ -435,7 +435,7 @@ class SqlSysDB(SqlDB, SysDB):
             if limit is not None:
                 if offset is None:
                     offset = 0
-                collections = collections[offset: offset + limit]
+                collections = collections[offset : offset + limit]
             else:
                 collections = collections[offset:]
 

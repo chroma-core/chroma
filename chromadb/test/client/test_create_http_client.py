@@ -11,5 +11,5 @@ def test_main() -> None:
     #
     # See https://github.com/chroma-core/chroma/issues/1554
 
-    res = subprocess.run(['python', '-m', TEST_MODULE])
+    res = subprocess.run(["python", "-m", TEST_MODULE])
     assert res.returncode == 0

@@ -191,7 +191,7 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[str],
-        Optional[bool]
+        Optional[bool],
     ] = (
         port,
         False,
@@ -296,7 +296,9 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
     os.remove(server_auth_file)
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> Generator[System, None, None]:
+def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
+    Generator[System, None, None]
+):
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -338,7 +340,8 @@ def fastapi_server_basic_authn_rbac_authz() -> Generator[System, None, None]:
     with open(server_authn_file, "w") as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
     with open(server_authz_file, "w") as f:
-        f.write("""
+        f.write(
+            """
 roles_mapping:
   admin:
     actions:
@@ -367,7 +370,7 @@ users:
   - id: admin
     role: admin
 """
-                )
+        )
     for item in _fastapi_fixture(
         is_persistent=False,
         chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
@@ -382,14 +385,13 @@ users:
     os.remove(server_authz_file)
 
 
-def fastapi_fixture_admin_and_singleton_tenant_db_user() -> Generator[
-    System, None, None
-]:
-    server_authn_file = os.path.abspath(
-        os.path.join(".", "server.authn")
-    )
+def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
+    Generator[System, None, None]
+):
+    server_authn_file = os.path.abspath(os.path.join(".", "server.authn"))
     with open(server_authn_file, "w") as f:
-        f.write("""
+        f.write(
+            """
 users:
   - id: admin
     tokens:
@@ -401,14 +403,12 @@ users:
     tokens:
       - singleton-token
 """
-                )
+        )
     for item in _fastapi_fixture(
         is_persistent=False,
         chroma_overwrite_singleton_tenant_database_access_from_auth=True,
-
         chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
         chroma_client_auth_credentials="admin-token",
-
         chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
         chroma_server_authn_credentials_file=server_authn_file,
     ):
@@ -484,12 +484,16 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
-def system_fixtures_authn_rbac_authz() -> List[Callable[[], Generator[System, None, None]]]:
+def system_fixtures_authn_rbac_authz() -> (
+    List[Callable[[], Generator[System, None, None]]]
+):
     fixtures = [fastapi_server_basic_authn_rbac_authz]
     return fixtures
 
 
-def system_fixtures_root_and_singleton_tenant_db_user() -> List[Callable[[], Generator[System, None, None]]]:
+def system_fixtures_root_and_singleton_tenant_db_user() -> (
+    List[Callable[[], Generator[System, None, None]]]
+):
     fixtures = [fastapi_fixture_admin_and_singleton_tenant_db_user]
     return fixtures
 
