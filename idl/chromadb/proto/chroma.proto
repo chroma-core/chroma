@@ -90,18 +90,19 @@ message OperationRecord {
 /* Metadata Reader Interface */
 
 service MetadataReader {
-    rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse) {}
+    rpc QueryMetadata(QueryMetadataRequest) returns (QueryMetadataResponse) {}
 }
 
-message GetMetadataRequest {
-    Where where = 1;
-    WhereDocument where_document = 2;
-    repeated string ids = 3;
-    optional int32 limit = 4;
-    optional int32 offset = 5;
+message QueryMetadataRequest {
+    string segment_id = 1;
+    Where where = 2;
+    WhereDocument where_document = 3;
+    repeated string ids = 4;
+    optional int32 limit = 5;
+    optional int32 offset = 6;
 }
 
-message GetMetadataResponse {
+message QueryMetadataResponse {
     repeated MetadataEmbeddingRecord records = 1;
 }
 
@@ -129,24 +130,25 @@ message Where {
 }
 
 message DirectComparison {
+    string key = 1;
     oneof comparison {
-        SingleStringComparison single_string_operand = 1;
-        StringListComparison string_list_operand = 2;
-        SingleIntComparison single_int_operand = 3;
-        IntListComparison int_list_operand = 4;
-        SingleFloatComparison single_float_operand = 5;
-        FloatListComparison float_list_operand = 6;
+        SingleStringComparison single_string_operand = 2;
+        StringListComparison string_list_operand = 3;
+        SingleIntComparison single_int_operand = 4;
+        IntListComparison int_list_operand = 5;
+        SingleFloatComparison single_float_operand = 6;
+        FloatListComparison float_list_operand = 7;
     }
 }
 
 message WhereChildren {
     repeated Where children = 1;
-    WhereChildrenType children_type = 2;
+    WhereChildrenOperator operator = 2;
 }
 
 // A `Where` clause may have a list of children. This enum specifies how the
 // children should be combined.
-enum WhereChildrenType {
+enum WhereChildrenOperator {
     AND = 0;
     OR = 1;
 }
@@ -177,50 +179,44 @@ enum NumberComparator {
 // Used when a leaf-node `Where` clause compares a string to a list of strings.
 // `WhereListType` specifies whether values in the list are allowed or disallowed.
 message StringListComparison {
-    string key = 1;
-    repeated string values = 2;
-    WhereListType list_type = 3;
+    repeated string values = 1;
+    WhereListType list_type = 2;
 }
 
 // Used when a leaf-node `Where` clause compares a string to a single string.
 message SingleStringComparison {
-    string key = 1;
-    string value = 2;
-    GenericComparator comparator = 3;
+    string value = 1;
+    GenericComparator comparator = 2;
 }
 
 // Used when a leaf-node `Where` clause compares an int to a list of ints.
 // `WhereListType` specifies whether values in the list are allowed or disallowed.
 message IntListComparison {
-    int64 key = 1;
-    repeated int64 values = 2;
-    WhereListType list_type = 3;
+    repeated int64 values = 1;
+    WhereListType list_type = 2;
 }
 
 // Used when a leaf-node `Where` clause compares an int to a single int.
 message SingleIntComparison {
-    int64 key = 1;
-    int64 value = 2;
+    int64 value = 1;
     oneof comparator {
-        GenericComparator generic_comparator = 3;
-        NumberComparator number_comparator = 4;
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
     }
 }
 
 // Used when a leaf-node `Where` clause compares a float to a list of floats.
 // `WhereListType` specifies whether values in the list are allowed or disallowed.
 message FloatListComparison {
-    double key = 1;
-    repeated double values = 2;
-    WhereListType list_type = 3;
+    repeated double values = 1;
+    WhereListType list_type = 2;
 }
 
 message SingleFloatComparison {
-    double key = 1;
-    double value = 2;
+    double value = 1;
     oneof comparator {
-        GenericComparator generic_comparator = 3;
-        NumberComparator number_comparator = 4;
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
     }
 }
 
