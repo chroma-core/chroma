@@ -5,13 +5,21 @@ use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
 use crate::types::{LogRecord, Operation, Segment};
 use async_trait::async_trait;
 use parking_lot::RwLock;
+use std::fmt::Debug;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
     hnsw_index_provider: HnswIndexProvider,
     id: Uuid,
+}
+
+impl Debug for DistributedHNSWSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DistributedHNSWSegment")
+    }
 }
 
 impl DistributedHNSWSegment {
@@ -29,11 +37,11 @@ impl DistributedHNSWSegment {
 
     pub(crate) fn from_segment(
         segment: &Segment,
-        persist_path: &std::path::Path,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegment>, Box<dyn ChromaError>> {
         let index_config = IndexConfig::from_segment(&segment, dimensionality as i32)?;
+        let persist_path = &hnsw_index_provider.temporary_storage_path;
         let hnsw_config = HnswIndexConfig::from_segment(segment, persist_path)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index

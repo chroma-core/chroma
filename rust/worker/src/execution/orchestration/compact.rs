@@ -12,6 +12,8 @@ use crate::execution::operators::partition::PartitionResult;
 use crate::execution::operators::pull_log::PullLogsInput;
 use crate::execution::operators::pull_log::PullLogsOperator;
 use crate::execution::operators::pull_log::PullLogsResult;
+use crate::execution::operators::write_segments::WriteSegmentsInput;
+use crate::execution::operators::write_segments::WriteSegmentsOperator;
 use crate::execution::operators::write_segments::WriteSegmentsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
@@ -20,6 +22,8 @@ use crate::segment::record_segment::RecordSegmentWriter;
 use crate::segment::LogMaterializer;
 use crate::segment::SegmentFlusher;
 use crate::segment::SegmentWriter;
+use crate::sysdb::sysdb::GetCollectionsError;
+use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::Handler;
@@ -31,6 +35,7 @@ use crate::types::SegmentType;
 use async_trait::async_trait;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
+use thiserror::Error;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -40,11 +45,11 @@ expect to encounter for a given query plan. This is a bit more rigid, but it's a
 understand. We can always add more abstraction later if we need it.
 ```plaintext
 
-                               ┌───► Write─────-------┐
-                               │                      │
-  Pending ─► PullLogs ─► Group │                      ├─► Flush ─► Finished
-                               │                      │
-                               └───► Write ───────────┘
+                                   ┌───► Write─────-------┐
+                                   │                      │
+  Pending ─► PullLogs ─► Partition │                      ├─► Flush ─► Finished
+                                   │                      │
+                                   └───► Write ───────────┘
 
 ```
 */
@@ -79,6 +84,32 @@ pub struct CompactOrchestrator {
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
+}
+
+#[derive(Error, Debug)]
+enum GetSegmentWritersError {
+    #[error("No segments found for collection")]
+    NoSegmentsFound,
+    #[error("SysDB GetSegments Error")]
+    SysDbGetSegmentsError(#[from] GetSegmentsError),
+    #[error("Error creating Record Segment Writer")]
+    RecordSegmentWriterError,
+    #[error("Error creating HNSW Segment Writer")]
+    HnswSegmentWriterError,
+    #[error("No record segment found for collection")]
+    NoRecordSegmentFound,
+    #[error("Collection not found")]
+    CollectionNotFound,
+    #[error("Error getting collection")]
+    GetCollectionError(#[from] GetCollectionsError),
+    #[error("No hnsw segment found for collection")]
+    NoHnswSegmentFound,
+}
+
+impl ChromaError for GetSegmentWritersError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        crate::errors::ErrorCodes::Internal
+    }
 }
 
 // TODO: we need to improve this response
@@ -162,152 +193,79 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn write(&mut self, partitions: Vec<Chunk<LogRecord>>) {
+    async fn write(
+        &mut self,
+        partitions: Vec<Chunk<LogRecord>>,
+        self_address: Box<dyn Receiver<WriteSegmentsResult>>,
+    ) {
         self.state = ExecutionState::Write;
 
-        // TODO: move this into an operator
-        let segments = self
-            .sysdb
-            .get_segments(None, None, None, Some(self.collection_id))
-            .await;
-
-        println!("Writing to Segments: {:?}", segments);
-
-        let segments = match segments {
-            Ok(segments) => {
-                if segments.is_empty() {
-                    // Log an error and return
-                    return;
-                }
-                segments
-            }
+        let writer_res = self.get_segment_writers().await;
+        let (record_segment_writer, hnsw_segment_writer) = match writer_res {
+            Ok(writers) => writers,
             Err(e) => {
                 // Log an error and return
                 return;
             }
         };
 
-        let record_segment = segments
-            .iter()
-            .find(|segment| segment.r#type == SegmentType::Record);
-
-        println!("RS Record Segment: {:?}", record_segment);
-
-        if record_segment.is_none() {
-            // Log an error and return
-            return;
-        }
-        // Create a record segment writer
-        let record_segment = record_segment.unwrap();
-        let record_segment_writer =
-            match RecordSegmentWriter::from_segment(record_segment, &self.blockfile_provider) {
-                Ok(writer) => writer,
-                Err(e) => {
-                    println!("Error creating Record Segment Writer: {:?}", e);
-                    // Log an error and return
-                    return;
-                }
-            };
-
-        println!("Record Segment Writer created");
-
-        // Create a hnsw segment writer
-        // TODO: do this elsewhere
-        let collection_res = self
-            .sysdb
-            .get_collections(Some(self.collection_id), None, None, None)
-            .await;
-
-        let collection_res = match collection_res {
-            Ok(collections) => {
-                if collections.is_empty() {
-                    // Log an error and return
-                    return;
-                }
-                collections
-            }
-            Err(e) => {
-                // Log an error and return
-                return;
-            }
-        };
-        let collection = &collection_res[0];
-
-        let hnsw_segment = segments
-            .iter()
-            .find(|segment| segment.r#type == SegmentType::HnswDistributed);
-        if hnsw_segment.is_none() {
-            // Log an error and return
-            return;
-        }
-        let hnsw_segment = hnsw_segment.unwrap();
-        let dimension = collection
-            .dimension
-            .expect("Dimension is required in the compactor");
-
-        // TODO: real path
-        let path = "/tmp/hnsw_segment";
-        let as_path = std::path::Path::new(path);
-        let hnsw_segment_writer = match DistributedHNSWSegment::from_segment(
-            hnsw_segment,
-            as_path,
-            dimension as usize,
-            self.hnsw_index_provider.clone(),
-        ) {
-            Ok(writer) => writer,
-            Err(e) => {
-                // Log an error and return
-                return;
-            }
-        };
-
-        println!("Partitions: {:?}", partitions.len());
-        for partition in partitions {
-            println!("Materializing N Records: {:?}", partition.len());
-            let res = record_segment_writer.materialize(&partition).await;
-            println!("Materialized Records: {:?}", res);
-            hnsw_segment_writer.apply_materialized_log_chunk(res);
+        // self.num_write_tasks = partitions.len() as i32;
+        for parition in partitions.iter() {
+            let operator = WriteSegmentsOperator::new();
+            let input = WriteSegmentsInput::new(
+                record_segment_writer.clone(),
+                hnsw_segment_writer.clone(),
+                parition.clone(),
+            );
+            // !!!PROBLEM: THE SYSTEM REQURES MESSAGES AND RECEIVERS TO HAVE 'STATIC LIFETIME, BUT THE INPUT IS NOT STATIC FUCK!
+            // let task = wrap(operator, input, self_address.clone());
+            // match self.dispatcher.send(task).await {
+            //     Ok(_) => (),
+            //     Err(e) => {
+            //         // Log an error and reply to caller
+            //     }
+            // }
         }
 
-        let record_segment_flusher = record_segment_writer.commit();
-        match record_segment_flusher {
-            Ok(flusher) => {
-                let res = flusher.flush().await;
-                match res {
-                    Ok(_) => {
-                        println!("Record Segment Flushed")
-                    }
-                    Err(e) => {
-                        println!("Error Flushing Record Segment: {:?}", e)
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Error Commiting Record Segment: {:?}", e)
-            }
-        }
+        // let record_segment_flusher = record_segment_writer.commit();
+        // match record_segment_flusher {
+        //     Ok(flusher) => {
+        //         let res = flusher.flush().await;
+        //         match res {
+        //             Ok(_) => {
+        //                 println!("Record Segment Flushed")
+        //             }
+        //             Err(e) => {
+        //                 println!("Error Flushing Record Segment: {:?}", e)
+        //             }
+        //         }
+        //     }
+        //     Err(e) => {
+        //         println!("Error Commiting Record Segment: {:?}", e)
+        //     }
+        // }
 
-        let hnsw_segment_flusher = hnsw_segment_writer.commit();
-        match hnsw_segment_flusher {
-            Ok(flusher) => {
-                let res = flusher.flush().await;
-                match res {
-                    Ok(_) => {
-                        println!("HNSW Segment Flushed")
-                    }
-                    Err(e) => {
-                        println!("Error Flushing HNSW Segment: {:?}", e)
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Error Commiting HNSW Segment: {:?}", e)
-            }
-        }
-        println!("HNSW FLUSHED");
+        // let hnsw_segment_flusher = hnsw_segment_writer.commit();
+        // match hnsw_segment_flusher {
+        //     Ok(flusher) => {
+        //         let res = flusher.flush().await;
+        //         match res {
+        //             Ok(_) => {
+        //                 println!("HNSW Segment Flushed")
+        //             }
+        //             Err(e) => {
+        //                 println!("Error Flushing HNSW Segment: {:?}", e)
+        //             }
+        //         }
+        //     }
+        //     Err(e) => {
+        //         println!("Error Commiting HNSW Segment: {:?}", e)
+        //     }
+        // }
+        // println!("HNSW FLUSHED");
     }
 
-    async fn flush_s3(&mut self, self_address: Box<dyn Receiver<WriteSegmentsResult>>) {
+    async fn flush_s3(&mut self) {
         self.state = ExecutionState::Flush;
         // TODO: implement flush to s3
     }
@@ -336,6 +294,96 @@ impl CompactOrchestrator {
                 // TODO: log an error and reply to caller
             }
         }
+    }
+
+    async fn get_segment_writers(
+        &mut self,
+    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegment>), Box<dyn ChromaError>> {
+        let segments = self
+            .sysdb
+            .get_segments(None, None, None, Some(self.collection_id))
+            .await;
+
+        println!("Retrived segments: {:?}", segments);
+
+        let segments = match segments {
+            Ok(segments) => {
+                if segments.is_empty() {
+                    // Log an error and return
+                    return Err(Box::new(GetSegmentWritersError::NoSegmentsFound));
+                }
+                segments
+            }
+            Err(e) => {
+                return Err(Box::new(GetSegmentWritersError::SysDbGetSegmentsError(e)));
+            }
+        };
+
+        let record_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::Record);
+
+        println!("Found Record Segment: {:?}", record_segment);
+
+        if record_segment.is_none() {
+            return Err(Box::new(GetSegmentWritersError::NoRecordSegmentFound));
+        }
+        // Create a record segment writer
+        let record_segment = record_segment.unwrap();
+        let record_segment_writer =
+            match RecordSegmentWriter::from_segment(record_segment, &self.blockfile_provider) {
+                Ok(writer) => writer,
+                Err(e) => {
+                    println!("Error creating Record Segment Writer: {:?}", e);
+                    return Err(Box::new(GetSegmentWritersError::RecordSegmentWriterError));
+                }
+            };
+
+        println!("Record Segment Writer created");
+
+        // Create a hnsw segment writer
+        let collection_res = self
+            .sysdb
+            .get_collections(Some(self.collection_id), None, None, None)
+            .await;
+
+        let collection_res = match collection_res {
+            Ok(collections) => {
+                if collections.is_empty() {
+                    return Err(Box::new(GetSegmentWritersError::CollectionNotFound));
+                }
+                collections
+            }
+            Err(e) => {
+                return Err(Box::new(GetSegmentWritersError::GetCollectionError(e)));
+            }
+        };
+        let collection = &collection_res[0];
+
+        let hnsw_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::HnswDistributed);
+        if hnsw_segment.is_none() {
+            return Err(Box::new(GetSegmentWritersError::NoHnswSegmentFound));
+        }
+        let hnsw_segment = hnsw_segment.unwrap();
+        let dimension = collection
+            .dimension
+            .expect("Dimension is required in the compactor");
+
+        let hnsw_segment_writer = match DistributedHNSWSegment::from_segment(
+            hnsw_segment,
+            dimension as usize,
+            self.hnsw_index_provider.clone(),
+        ) {
+            Ok(writer) => writer,
+            Err(e) => {
+                println!("Error creating HNSW Segment Writer: {:?}", e);
+                return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
+            }
+        };
+
+        Ok((record_segment_writer, hnsw_segment_writer))
     }
 
     pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {
@@ -410,23 +458,7 @@ impl Handler<PartitionResult> for CompactOrchestrator {
                 return;
             }
         };
-        // TODO: implement write records as operator and handle in WriteSegmentsResult
-        self.write(records).await;
-
-        // For now, we will return to execution state to the compaction manager
-        let result_channel = match self.result_channel.take() {
-            Some(tx) => tx,
-            None => {
-                // Log an error
-                return;
-            }
-        };
-        let response = CompactionResponse {
-            id: self.id,
-            compaction_job: self.compaction_job.clone(),
-            message: "Compaction Complete".to_string(),
-        };
-        let _ = result_channel.send(Ok(response));
+        self.write(records, _ctx.sender.as_receiver()).await;
     }
 }
 
@@ -447,7 +479,22 @@ impl Handler<WriteSegmentsResult> for CompactOrchestrator {
             }
         }
         if self.num_write_tasks == 0 {
-            self.flush_s3(_ctx.sender.as_receiver()).await;
+            self.flush_s3().await;
         }
+
+        // For now, we will return to execution state to the compaction manager
+        // let result_channel = match self.result_channel.take() {
+        //     Some(tx) => tx,
+        //     None => {
+        //         // Log an error
+        //         return;
+        //     }
+        // };
+        // let response = CompactionResponse {
+        //     id: self.id,
+        //     compaction_job: self.compaction_job.clone(),
+        //     message: "Compaction Complete".to_string(),
+        // };
+        // let _ = result_channel.send(Ok(response));
     }
 }
