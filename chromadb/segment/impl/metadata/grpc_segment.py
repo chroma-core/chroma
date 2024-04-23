@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Sequence
 from chromadb.segment import MetadataReader
 from chromadb.config import System
-from chromadb.types import Segment
+from chromadb.types import Segment, SeqId
 from overrides import override
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -37,6 +37,18 @@ class GrpcMetadataSegment(MetadataReader):
 
         channel = grpc.insecure_channel(self._segment["metadata"]["grpc_url"])
         self._metadata_reader_stub = MetadataReaderStub(channel)  # type: ignore
+
+    @override
+    def count(self) -> int:
+        raise NotImplementedError()
+
+    @override
+    def delete(self, where: Optional[Where] = None) -> None:
+        raise NotImplementedError()
+
+    @override
+    def max_seqid(self) -> int:
+        raise NotImplementedError()
 
     @override
     @trace_method(
