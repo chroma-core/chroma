@@ -13,6 +13,7 @@ use crate::{
     },
     storage::Storage,
 };
+use core::panic;
 use parking_lot::{Mutex, RwLock};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{io::AsyncReadExt, pin};
@@ -29,8 +30,8 @@ pub(crate) struct ArrowBlockfileProvider {
 impl ArrowBlockfileProvider {
     pub(crate) fn new(storage: Box<Storage>) -> Self {
         Self {
-            block_manager: BlockManager::new(storage),
-            sparse_index_manager: SparseIndexManager::new(),
+            block_manager: BlockManager::new(storage.clone()),
+            sparse_index_manager: SparseIndexManager::new(storage),
         }
     }
 
@@ -225,6 +226,14 @@ impl BlockManager {
                 let bytes = block.to_bytes();
                 let key = format!("block/{}", id);
                 let res = self.storage.put_bytes(&key, bytes).await;
+                match res {
+                    Ok(_) => {
+                        println!("Block written to storage")
+                    }
+                    Err(_) => {
+                        println!("Error writing block to storage");
+                    }
+                }
                 // TODO: error handling
             }
             None => {}
@@ -235,12 +244,14 @@ impl BlockManager {
 #[derive(Clone)]
 pub(super) struct SparseIndexManager {
     cache: Arc<RwLock<HashMap<Uuid, SparseIndex>>>,
+    storage: Box<Storage>,
 }
 
 impl SparseIndexManager {
-    pub fn new() -> Self {
+    pub fn new(storage: Box<Storage>) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
+            storage,
         }
     }
 
@@ -255,6 +266,38 @@ impl SparseIndexManager {
 
     pub fn commit(&self, index: SparseIndex) {
         self.cache.write().insert(index.id, index);
+    }
+
+    pub async fn flush<K: ArrowWriteableKey>(&self, id: &Uuid) {
+        let index = self.get(id);
+        match index {
+            Some(index) => {
+                let as_block = index.to_block::<K>();
+                match as_block {
+                    Ok(block) => {
+                        let bytes = block.to_bytes();
+                        let key = format!("sparse_index/{}", id);
+                        let res = self.storage.put_bytes(&key, bytes).await;
+                        match res {
+                            Ok(_) => {
+                                println!("Sparse index written to storage")
+                            }
+                            Err(_) => {
+                                println!("Error writing sparse index to storage");
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // TODO: error
+                        panic!("Failed to convert sparse index to block");
+                    }
+                }
+            }
+            None => {
+                // TODO: error
+                panic!("Tried to flush a sparse index that doesn't exist");
+            }
+        }
     }
 
     pub fn fork(&self, old_id: &Uuid, new_id: Uuid) -> SparseIndex {

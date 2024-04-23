@@ -1,124 +1,50 @@
-// use super::types::Block;
-// use crate::blockstore::{
-//     key::CompositeKey,
-//     types::{Key, Value},
-// };
-// use arrow::array::{Array, BooleanArray, Int32Array, ListArray, StringArray, UInt32Array};
+use super::types::Block;
+use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue};
+use arrow::array::{Array, StringArray};
 
-// /// An iterator over the contents of a block.
-// /// This is a simple wrapper around the Arrow array data that is stored in the block.
-// /// For now, it clones the data in the Block, since it is only used to populate BlockDeltas.
-// pub(super) struct BlockIterator<'a> {
-//     block: Block,
-//     index: usize,
-//     phantom: std::marker::PhantomData<&'a ()>,
-// }
+/// An iterator over the contents of a block.
+/// This is a simple wrapper around the Arrow array data that is stored in the block.
+/// For now, it clones the data in the Block, since it is only used to populate BlockDeltas.
+pub struct BlockIterator<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>> {
+    block: &'a Block,
+    index: usize,
+    phantom: std::marker::PhantomData<&'a (K, V)>,
+}
 
-// impl BlockIterator<'_> {
-//     pub fn new(block: Block) -> Self {
-//         Self {
-//             block,
-//             index: 0,
-//             phantom: std::marker::PhantomData,
-//         }
-//     }
-// }
+impl<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>> BlockIterator<'a, K, V> {
+    pub fn new(block: &'a Block) -> Self {
+        Self {
+            block,
+            index: 0,
+            phantom: std::marker::PhantomData,
+        }
+    }
+}
 
-// impl<'a> Iterator for BlockIterator {
-//     type Item = (&str, Value);
+impl<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>> Iterator for BlockIterator<'a, K, V> {
+    type Item = (&'a str, K, V);
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         let data = &self.block.inner.read().data;
-//         if data.is_none() {
-//             return None;
-//         }
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.block.len() {
+            return None;
+        }
 
-//         // Arrow requires us to downcast the array to the specific type we want to work with.
-//         // This is a bit awkward, but it's the way Arrow works to allow for dynamic typing.
-//         // We match and return None if the downcast fails, since we can't continue without the correct type.
-//         // In practice, this should never happen, since we control the types of the data we store in the block and
-//         // maintain the invariant that the data is always of the correct type.
+        let prefix_arr = self
+            .block
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let key_arr = self.block.data.column(1);
+        let value_arr = self.block.data.column(2);
 
-//         let prefix = match data
-//             .as_ref()
-//             .unwrap()
-//             .data
-//             .column(0)
-//             .as_any()
-//             .downcast_ref::<StringArray>()
-//         {
-//             Some(prefix) => prefix.value(self.index).to_owned(),
-//             None => return None,
-//         };
+        let prefix = prefix_arr.value(self.index);
+        let key = K::get(key_arr, self.index);
+        let value = V::get(value_arr, self.index);
 
-//         let key = match data.as_ref() {
-//             Some(data) => data.data.column(1),
-//             None => return None,
-//         };
+        self.index += 1;
 
-//         let value = match data.as_ref() {
-//             Some(data) => data.data.column(2),
-//             None => return None,
-//         };
-
-//         if self.index >= prefix.len() {
-//             return None;
-//         }
-
-//         let key = match self.key_type {
-//             KeyType::String => match key.as_any().downcast_ref::<StringArray>() {
-//                 Some(key) => Key::String(key.value(self.index).to_string()),
-//                 None => return None,
-//             },
-//             KeyType::Float => match key.as_any().downcast_ref::<Int32Array>() {
-//                 Some(key) => Key::Float(key.value(self.index) as f32),
-//                 None => return None,
-//             },
-//             KeyType::Bool => match key.as_any().downcast_ref::<BooleanArray>() {
-//                 Some(key) => Key::Bool(key.value(self.index)),
-//                 None => return None,
-//             },
-//             KeyType::Uint => match key.as_any().downcast_ref::<UInt32Array>() {
-//                 Some(key) => Key::Uint(key.value(self.index) as u32),
-//                 None => return None,
-//             },
-//         };
-
-//         let value = match self.value_type {
-//             ValueType::Int32Array => match value.as_any().downcast_ref::<ListArray>() {
-//                 Some(value) => {
-//                     let value = match value
-//                         .value(self.index)
-//                         .as_any()
-//                         .downcast_ref::<Int32Array>()
-//                     {
-//                         Some(value) => {
-//                             // An arrow array, if nested in a larger structure, when cloned may clone the entire larger buffer.
-//                             // This leads to a memory overhead and also breaks our sizing assumptions. In order to work around this,
-//                             // we have to manuallly create a new array and copy the data over rather than relying on clone.
-
-//                             // Note that we use a vector here to avoid the overhead of the builder. The from() method for primitive
-//                             // types uses unsafe code to wrap the vecs underlying buffer in an arrow array.
-
-//                             // There are more performant ways to do this, but this is the most straightforward.
-
-//                             let mut new_vec = Vec::with_capacity(value.len());
-//                             for i in 0..value.len() {
-//                                 new_vec.push(value.value(i));
-//                             }
-//                             let value = Int32Array::from(new_vec);
-//                             Value::Int32ArrayValue(value)
-//                         }
-//                         None => return None,
-//                     };
-//                     value
-//                 }
-//                 None => return None,
-//             },
-//             // TODO: Implement the rest of the value types
-//             _ => unimplemented!(),
-//         };
-//         self.index += 1;
-//         Some((BlockfileKey::new(prefix, key), value))
-//     }
-// }
+        Some((prefix, key, value))
+    }
+}

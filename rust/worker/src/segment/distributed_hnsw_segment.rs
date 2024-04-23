@@ -1,37 +1,29 @@
+use super::{SegmentFlusher, SegmentWriter};
 use crate::errors::ChromaError;
+use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
-use crate::types::{LogRecord, Operation, Segment, VectorEmbeddingRecord};
+use crate::types::{LogRecord, Operation, Segment};
+use async_trait::async_trait;
 use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-
-use super::SegmentWriter;
+use uuid::Uuid;
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
-    index_config: IndexConfig,
-    hnsw_config: HnswIndexConfig,
+    hnsw_index_provider: HnswIndexProvider,
+    id: Uuid,
 }
 
 impl DistributedHNSWSegment {
     pub(crate) fn new(
-        index_config: IndexConfig,
-        hnsw_config: HnswIndexConfig,
+        index: Arc<RwLock<HnswIndex>>,
+        hnsw_index_provider: HnswIndexProvider,
+        id: Uuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let hnsw_index = HnswIndex::init(&index_config, Some(&hnsw_config));
-        let hnsw_index = match hnsw_index {
-            Ok(index) => index,
-            Err(e) => {
-                // TODO: log + handle an error that we failed to init the index
-                return Err(e);
-            }
-        };
-        let index = Arc::new(RwLock::new(hnsw_index));
         return Ok(DistributedHNSWSegment {
-            index: index,
-            index_config: index_config,
-            hnsw_config,
+            index,
+            hnsw_index_provider,
+            id,
         });
     }
 
@@ -39,13 +31,25 @@ impl DistributedHNSWSegment {
         segment: &Segment,
         persist_path: &std::path::Path,
         dimensionality: usize,
+        hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegment>, Box<dyn ChromaError>> {
         let index_config = IndexConfig::from_segment(&segment, dimensionality as i32)?;
         let hnsw_config = HnswIndexConfig::from_segment(segment, persist_path)?;
-        Ok(Box::new(DistributedHNSWSegment::new(
-            index_config,
-            hnsw_config,
-        )?))
+
+        // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
+        // ideally, an explicit state would be better. When we implement distributed HNSW segments,
+        // we can introduce a state in the segment metadata for this
+        if segment.file_path.len() > 0 {
+            // Load the index from the files
+            unimplemented!();
+        } else {
+            let index = hnsw_index_provider.create(segment, dimensionality as i32)?;
+            Ok(Box::new(DistributedHNSWSegment::new(
+                index,
+                hnsw_index_provider,
+                segment.id,
+            )?))
+        }
     }
 
     // pub(crate) fn get_records(&self, ids: Vec<String>) -> Vec<Box<VectorEmbeddingRecord>> {
@@ -116,7 +120,20 @@ impl SegmentWriter for DistributedHNSWSegment {
         todo!()
     }
 
-    fn commit(&self) {
-        todo!()
+    fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+        let hnsw_index_id = self.index.read().id;
+        let res = self.hnsw_index_provider.commit(&hnsw_index_id);
+        match res {
+            Ok(_) => Ok(self),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[async_trait]
+impl SegmentFlusher for DistributedHNSWSegment {
+    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+        let hnsw_index_id = self.index.read().id;
+        self.hnsw_index_provider.flush(&hnsw_index_id).await
     }
 }

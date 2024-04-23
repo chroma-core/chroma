@@ -1,7 +1,8 @@
 use super::types::{LogMaterializer, MaterializedLogRecord, SegmentWriter};
-use super::DataRecord;
+use super::{DataRecord, SegmentFlusher};
 use crate::blockstore::provider::{BlockfileProvider, CreateError};
-use crate::blockstore::{BlockfileReader, BlockfileWriter};
+use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
     update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
@@ -15,9 +16,11 @@ const OFFSET_ID_TO_USER_ID: &str = "offset_id_to_user_id";
 const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
 
 pub(crate) struct RecordSegmentWriter<'a> {
-    user_id_to_id: BlockfileWriter<&'a str, u32>,
-    id_to_user_id: BlockfileWriter<u32, &'a str>,
-    id_to_data: BlockfileWriter<u32, &'a DataRecord<'a>>,
+    // These are Option<> so that we can take() them when we commit
+    user_id_to_id: Option<BlockfileWriter<&'a str, u32>>,
+    id_to_user_id: Option<BlockfileWriter<u32, &'a str>>,
+    id_to_data: Option<BlockfileWriter<u32, &'a DataRecord<'a>>>,
+    // TODO: store current max offset id in the metadata of the id_to_data blockfile
     curr_max_offset_id: AtomicU32,
     // If there is an old version of the data, we need to keep it around to be able to
     // materialize the log records
@@ -59,9 +62,9 @@ impl<'a> RecordSegmentWriter<'a> {
         };
 
         Ok(RecordSegmentWriter {
-            user_id_to_id,
-            id_to_user_id,
-            id_to_data,
+            user_id_to_id: Some(user_id_to_id),
+            id_to_user_id: Some(id_to_user_id),
+            id_to_data: Some(id_to_data),
             curr_max_offset_id: AtomicU32::new(0),
         })
     }
@@ -76,11 +79,84 @@ impl SegmentWriter for RecordSegmentWriter<'_> {
         todo!()
     }
 
-    fn commit(&self) {
-        todo!()
+    fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+        // Commit all the blockfiles
+        let flusher_user_id_to_id = self.user_id_to_id.take().unwrap().commit();
+        let flusher_id_to_user_id = self.id_to_user_id.take().unwrap().commit();
+        let flusher_id_to_data = self.id_to_data.take().unwrap().commit();
+
+        let flusher_user_id_to_id = match flusher_user_id_to_id {
+            Ok(f) => f,
+            Err(e) => {
+                // TOOD: log and return error
+                return Err(e);
+            }
+        };
+
+        let flusher_id_to_user_id = match flusher_id_to_user_id {
+            Ok(f) => f,
+            Err(e) => {
+                // TOOD: log and return error
+                return Err(e);
+            }
+        };
+
+        let flusher_id_to_data = match flusher_id_to_data {
+            Ok(f) => f,
+            Err(e) => {
+                // TOOD: log and return error
+                return Err(e);
+            }
+        };
+
+        // Return a flusher that can be used to flush the blockfiles
+        Ok(RecordSegmentFlusher {
+            user_id_to_id_flusher: flusher_user_id_to_id,
+            id_to_user_id_flusher: flusher_id_to_user_id,
+            id_to_data_flusher: flusher_id_to_data,
+        })
     }
 }
 
+pub(crate) struct RecordSegmentFlusher<'a> {
+    user_id_to_id_flusher: BlockfileFlusher<&'a str, u32>,
+    id_to_user_id_flusher: BlockfileFlusher<u32, &'a str>,
+    id_to_data_flusher: BlockfileFlusher<u32, &'a DataRecord<'a>>,
+}
+
+#[async_trait]
+impl SegmentFlusher for RecordSegmentFlusher<'_> {
+    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+        let res_user_id_to_id = self.user_id_to_id_flusher.flush().await;
+        let res_id_to_user_id = self.id_to_user_id_flusher.flush().await;
+        let res_id_to_data = self.id_to_data_flusher.flush().await;
+
+        match res_user_id_to_id {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        match res_id_to_user_id {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        match res_id_to_data {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// TODO: remove log materializer, its needless abstraction and complexity
 #[async_trait]
 impl LogMaterializer for RecordSegmentWriter<'_> {
     async fn materialize<'chunk>(
@@ -107,6 +183,8 @@ impl LogMaterializer for RecordSegmentWriter<'_> {
                         MaterializedLogRecord::new(next_offset_id, log_entry, data_record);
                     let res = self
                         .id_to_data
+                        .as_ref()
+                        .unwrap()
                         .set("", index as u32, &materialized.materialized_record)
                         .await;
                     // TODO: use res
@@ -119,7 +197,6 @@ impl LogMaterializer for RecordSegmentWriter<'_> {
             }
         }
 
-        // Chunk::new(materialized_records.into())
-        todo!()
+        Chunk::new(materialized_records.into())
     }
 }

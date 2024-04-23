@@ -6,7 +6,6 @@ use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operators::flush_sysdb::FlushSysDbInput;
 use crate::execution::operators::flush_sysdb::FlushSysDbOperator;
 use crate::execution::operators::flush_sysdb::FlushSysDbResult;
-use crate::execution::operators::partition;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionResult;
@@ -14,9 +13,13 @@ use crate::execution::operators::pull_log::PullLogsInput;
 use crate::execution::operators::pull_log::PullLogsOperator;
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::execution::operators::write_segments::WriteSegmentsResult;
+use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
+use crate::segment::distributed_hnsw_segment::DistributedHNSWSegment;
 use crate::segment::record_segment::RecordSegmentWriter;
 use crate::segment::LogMaterializer;
+use crate::segment::SegmentFlusher;
+use crate::segment::SegmentWriter;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::Handler;
@@ -68,6 +71,7 @@ pub struct CompactOrchestrator {
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     blockfile_provider: BlockfileProvider,
+    hnsw_index_provider: HnswIndexProvider,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // number of write segments tasks
@@ -93,6 +97,7 @@ impl CompactOrchestrator {
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         blockfile_provider: BlockfileProvider,
+        hnsw_index_provider: HnswIndexProvider,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         result_channel: Option<
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
@@ -107,6 +112,7 @@ impl CompactOrchestrator {
             log,
             sysdb,
             blockfile_provider,
+            hnsw_index_provider,
             dispatcher,
             num_write_tasks: 0,
             result_channel,
@@ -191,6 +197,7 @@ impl CompactOrchestrator {
             // Log an error and return
             return;
         }
+        // Create a record segment writer
         let record_segment = record_segment.unwrap();
         let record_segment_writer =
             match RecordSegmentWriter::from_segment(record_segment, &self.blockfile_provider) {
@@ -204,14 +211,27 @@ impl CompactOrchestrator {
 
         println!("Record Segment Writer created");
 
-        println!("Partitions: {:?}", partitions.len());
-        for partition in partitions {
-            println!("Materializing N Records: {:?}", partition.len());
-            let res = record_segment_writer.materialize(&partition).await;
-            println!("Materialized Records: {:?}", res);
-        }
+        // Create a hnsw segment writer
+        // TODO: do this elsewhere
+        let collection_res = self
+            .sysdb
+            .get_collections(Some(self.collection_id), None, None, None)
+            .await;
 
-        // RESUME POINT: MAKE THE RECORD SEGMENT FLUSH BLOCKS TO S3
+        let collection_res = match collection_res {
+            Ok(collections) => {
+                if collections.is_empty() {
+                    // Log an error and return
+                    return;
+                }
+                collections
+            }
+            Err(e) => {
+                // Log an error and return
+                return;
+            }
+        };
+        let collection = &collection_res[0];
 
         let hnsw_segment = segments
             .iter()
@@ -220,6 +240,71 @@ impl CompactOrchestrator {
             // Log an error and return
             return;
         }
+        let hnsw_segment = hnsw_segment.unwrap();
+        let dimension = collection
+            .dimension
+            .expect("Dimension is required in the compactor");
+
+        // TODO: real path
+        let path = "/tmp/hnsw_segment";
+        let as_path = std::path::Path::new(path);
+        let hnsw_segment_writer = match DistributedHNSWSegment::from_segment(
+            hnsw_segment,
+            as_path,
+            dimension as usize,
+            self.hnsw_index_provider.clone(),
+        ) {
+            Ok(writer) => writer,
+            Err(e) => {
+                // Log an error and return
+                return;
+            }
+        };
+
+        println!("Partitions: {:?}", partitions.len());
+        for partition in partitions {
+            println!("Materializing N Records: {:?}", partition.len());
+            let res = record_segment_writer.materialize(&partition).await;
+            println!("Materialized Records: {:?}", res);
+            hnsw_segment_writer.apply_materialized_log_chunk(res);
+        }
+
+        let record_segment_flusher = record_segment_writer.commit();
+        match record_segment_flusher {
+            Ok(flusher) => {
+                let res = flusher.flush().await;
+                match res {
+                    Ok(_) => {
+                        println!("Record Segment Flushed")
+                    }
+                    Err(e) => {
+                        println!("Error Flushing Record Segment: {:?}", e)
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Error Commiting Record Segment: {:?}", e)
+            }
+        }
+
+        let hnsw_segment_flusher = hnsw_segment_writer.commit();
+        match hnsw_segment_flusher {
+            Ok(flusher) => {
+                let res = flusher.flush().await;
+                match res {
+                    Ok(_) => {
+                        println!("HNSW Segment Flushed")
+                    }
+                    Err(e) => {
+                        println!("Error Flushing HNSW Segment: {:?}", e)
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Error Commiting HNSW Segment: {:?}", e)
+            }
+        }
+        println!("HNSW FLUSHED");
     }
 
     async fn flush_s3(&mut self, self_address: Box<dyn Receiver<WriteSegmentsResult>>) {

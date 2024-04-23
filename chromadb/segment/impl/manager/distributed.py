@@ -90,7 +90,6 @@ class DistributedSegmentManager(SegmentManager):
 
         if scope not in self._segment_cache[collection_id]:
             segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
-            print("Segments: ", segments)
             known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
             # Get the first segment of a known type
             segment = next(filter(lambda s: s["type"] in known_types, segments))
@@ -115,37 +114,7 @@ class DistributedSegmentManager(SegmentManager):
     )
     @override
     def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
-        # TODO: this should call load/release on the target node, node should be stored in metadata
-        # for now this is fine, but cache invalidation is a problem btwn sysdb and segment manager
-        types = [MetadataReader, VectorReader]
-        for type in types:
-            self.get_segment(
-                collection_id, type
-            )  # TODO: this is a hack that mirrors local segment manager to force load the relevant instances
-            if type == VectorReader:
-                # Load the remote segment
-                segments = self._sysdb.get_segments(
-                    collection=collection_id, scope=SegmentScope.VECTOR
-                )
-                known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
-                next(filter(lambda s: s["type"] in known_types, segments))  # noqa
-                # grpc_url = self._segment_directory.get_segment_endpoint(segment)
-
-                # if grpc_url not in self._segment_server_stubs:
-                #     channel = grpc.insecure_channel(grpc_url)
-                # self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
-
-                # TODO: this load is not necessary
-                # self._segment_server_stubs[grpc_url].LoadSegment(
-                #     to_proto_segment(segment)
-                # )
-                # if grpc_url not in self._segment_server_stubs:
-                #     channel = grpc.insecure_channel(grpc_url)
-                #     self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
-
-                # self._segment_server_stubs[grpc_url].LoadSegment(
-                #     to_proto_segment(segment)
-                # )
+        pass
 
     # TODO: rethink duplication from local segment manager
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:

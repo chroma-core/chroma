@@ -45,8 +45,24 @@ metadata:
 spec:
   ports:
     - name: http
-      port: 9000
+    # Put the lb on a different port so we can run minio locally since the port is already in use
+      port: 9001
       targetPort: 9000
   selector:
     app: minio
   type: LoadBalancer
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: chroma
+spec:
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+  selector:
+    app: minio
+  type: ClusterIP

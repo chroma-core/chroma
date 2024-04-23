@@ -3,6 +3,7 @@ pub(in crate::blockstore::arrow) mod delta;
 pub(in crate::blockstore::arrow) mod delta_storage;
 mod f32_key;
 mod int32array_value;
+pub(in crate::blockstore::arrow) mod iterator;
 mod roaring_bitmap_value;
 mod str_key;
 mod str_value;

@@ -62,12 +62,12 @@ impl S3Storage {
                         return Ok(());
                     }
                     e => {
-                        println!("error: {}", e.to_string());
+                        println!("Error creating bucket: {}", e.to_string());
                         return Err::<(), String>(e.to_string());
                     }
                 },
                 _ => {
-                    println!("error: {}", e);
+                    println!("Error creating bucket: {}", e);
                     return Err::<(), String>(e.to_string());
                 }
             },
@@ -128,7 +128,7 @@ impl S3Storage {
                 return Ok(());
             }
             Err(e) => {
-                println!("error: {}", e);
+                println!("s3 error: {}", e);
                 return Err::<(), String>(e.to_string());
             }
         }
@@ -139,12 +139,15 @@ impl S3Storage {
 pub enum StorageConfigError {
     #[error("Invalid storage config")]
     InvalidStorageConfig,
+    #[error("Failed to create bucket: {0}")]
+    FailedToCreateBucket(String),
 }
 
 impl ChromaError for StorageConfigError {
     fn code(&self) -> crate::errors::ErrorCodes {
         match self {
             StorageConfigError::InvalidStorageConfig => crate::errors::ErrorCodes::InvalidArgument,
+            StorageConfigError::FailedToCreateBucket(_) => crate::errors::ErrorCodes::Internal,
         }
     }
 }
@@ -154,10 +157,47 @@ impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::S3(s3_config) => {
-                let config = aws_config::load_from_env().await;
-                let client = aws_sdk_s3::Client::new(&config);
+                let client = match &s3_config.credentials {
+                    super::config::S3CredentialsConfig::Minio => {
+                        // Set up credentials assuming minio is running locally
+                        let cred = aws_sdk_s3::config::Credentials::new(
+                            "minio",
+                            "minio123",
+                            None,
+                            None,
+                            "loaded-from-env",
+                        );
 
+                        // Set up s3 client
+                        let config = aws_sdk_s3::config::Builder::new()
+                            .endpoint_url("http://minio.chroma:9000".to_string())
+                            .credentials_provider(cred)
+                            .behavior_version_latest()
+                            .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                            .force_path_style(true)
+                            .build();
+                        aws_sdk_s3::Client::from_conf(config)
+                    }
+                    super::config::S3CredentialsConfig::AWS => {
+                        let config = aws_config::load_from_env().await;
+                        aws_sdk_s3::Client::new(&config)
+                    }
+                };
                 let storage = S3Storage::new(&s3_config.bucket, client);
+                // for minio we create the bucket since it is only used for testing
+                match &s3_config.credentials {
+                    super::config::S3CredentialsConfig::Minio => {
+                        let res = storage.create_bucket().await;
+                        match res {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(Box::new(StorageConfigError::FailedToCreateBucket(e)));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
                 return Ok(storage);
             }
             _ => {

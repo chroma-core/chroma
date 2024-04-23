@@ -1,4 +1,5 @@
 use super::arrow::blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter};
+use super::arrow::flusher::ArrowBlockfileFlusher;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
@@ -180,10 +181,16 @@ pub(crate) enum BlockfileWriter<K: Key + ArrowWriteableKey, V: Value + ArrowWrit
 impl<K: Key + Into<KeyWrapper> + ArrowWriteableKey, V: Value + Writeable + ArrowWriteableValue>
     BlockfileWriter<K, V>
 {
-    pub(crate) fn commit(self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(self) -> Result<BlockfileFlusher<K, V>, Box<dyn ChromaError>> {
         match self {
-            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.commit(),
-            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.commit(),
+            BlockfileWriter::MemoryBlockfileWriter(writer) => match writer.commit() {
+                Ok(_) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(())),
+                Err(e) => Err(e),
+            },
+            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit() {
+                Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
+                Err(e) => Err(e),
+            },
         }
     }
 
@@ -203,6 +210,20 @@ impl<K: Key + Into<KeyWrapper> + ArrowWriteableKey, V: Value + Writeable + Arrow
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
             BlockfileWriter::ArrowBlockfileWriter(writer) => writer.id(),
+        }
+    }
+}
+
+pub(crate) enum BlockfileFlusher<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> {
+    MemoryBlockfileFlusher(()),
+    ArrowBlockfileFlusher(ArrowBlockfileFlusher<K, V>),
+}
+
+impl<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> BlockfileFlusher<K, V> {
+    pub(crate) async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => Ok(()),
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.flush().await,
         }
     }
 }
