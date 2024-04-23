@@ -136,8 +136,8 @@ message DirectComparison {
         StringListComparison string_list_operand = 3;
         SingleIntComparison single_int_operand = 4;
         IntListComparison int_list_operand = 5;
-        SingleFloatComparison single_float_operand = 6;
-        FloatListComparison float_list_operand = 7;
+        SingleDoubleComparison single_float_operand = 6;
+        DoubleListComparison float_list_operand = 7;
     }
 }
 
@@ -155,7 +155,7 @@ enum WhereChildrenOperator {
 
 // A `Where` clause may have a list of allowed or disallowed values. This enum
 // specifies which type of list it is.
-enum WhereListType {
+enum ListOperator {
     IN = 0;
     NIN = 1;
 }
@@ -177,10 +177,10 @@ enum NumberComparator {
 }
 
 // Used when a leaf-node `Where` clause compares a string to a list of strings.
-// `WhereListType` specifies whether values in the list are allowed or disallowed.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
 message StringListComparison {
     repeated string values = 1;
-    WhereListType list_type = 2;
+    ListOperator list_operator = 2;
 }
 
 // Used when a leaf-node `Where` clause compares a string to a single string.
@@ -190,10 +190,10 @@ message SingleStringComparison {
 }
 
 // Used when a leaf-node `Where` clause compares an int to a list of ints.
-// `WhereListType` specifies whether values in the list are allowed or disallowed.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
 message IntListComparison {
     repeated int64 values = 1;
-    WhereListType list_type = 2;
+    ListOperator list_operator = 2;
 }
 
 // Used when a leaf-node `Where` clause compares an int to a single int.
@@ -206,13 +206,13 @@ message SingleIntComparison {
 }
 
 // Used when a leaf-node `Where` clause compares a float to a list of floats.
-// `WhereListType` specifies whether values in the list are allowed or disallowed.
-message FloatListComparison {
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message DoubleListComparison {
     repeated double values = 1;
-    WhereListType list_type = 2;
+    ListOperator list_operator = 2;
 }
 
-message SingleFloatComparison {
+message SingleDoubleComparison {
     double value = 1;
     oneof comparator {
         GenericComparator generic_comparator = 2;
