@@ -139,7 +139,7 @@ enum WhereDocumentOperator {
 // A branch-node `WhereDocument` node has a list of children.
 message WhereDocumentChildren {
     repeated WhereDocument children = 1;
-    WhereChildrenOperator operator = 2;
+    BooleanOperator operator = 2;
 }
 
 // A `Where` clause for filtering metadata. A `Where` clause is a tree of
@@ -171,12 +171,12 @@ message DirectComparison {
 // for how to combine them.
 message WhereChildren {
     repeated Where children = 1;
-    WhereChildrenOperator operator = 2;
+    BooleanOperator operator = 2;
 }
 
 // A `Where` clause may have a list of children. This enum specifies how the
 // children should be combined.
-enum WhereChildrenOperator {
+enum BooleanOperator {
     AND = 0;
     OR = 1;
 }

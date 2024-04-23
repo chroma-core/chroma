@@ -97,9 +97,9 @@ class GrpcMetadataSegment(MetadataReader):
                     children=[self._where_to_proto(w) for w in value]
                 )
                 if key == "$and":
-                    children.operator = pb.WhereChildrenOperator.AND
+                    children.operator = pb.BooleanOperator.AND
                 else:
-                    children.operator = pb.WhereChildrenOperator.OR
+                    children.operator = pb.BooleanOperator.OR
 
                 response.children = children
                 return response
@@ -242,9 +242,9 @@ class GrpcMetadataSegment(MetadataReader):
                     ]
                 )
                 if operator == "$and":
-                    children.operator = pb.WhereChildrenOperator.AND
+                    children.operator = pb.BooleanOperator.AND
                 else:
-                    children.operator = pb.WhereChildrenOperator.OR
+                    children.operator = pb.BooleanOperator.OR
 
                 response.children = children
             else:

@@ -28,10 +28,10 @@ class WhereDocumentOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     CONTAINS: _ClassVar[WhereDocumentOperator]
     NOT_CONTAINS: _ClassVar[WhereDocumentOperator]
 
-class WhereChildrenOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+class BooleanOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
-    AND: _ClassVar[WhereChildrenOperator]
-    OR: _ClassVar[WhereChildrenOperator]
+    AND: _ClassVar[BooleanOperator]
+    OR: _ClassVar[BooleanOperator]
 
 class ListOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -59,8 +59,8 @@ VECTOR: SegmentScope
 METADATA: SegmentScope
 CONTAINS: WhereDocumentOperator
 NOT_CONTAINS: WhereDocumentOperator
-AND: WhereChildrenOperator
-OR: WhereChildrenOperator
+AND: BooleanOperator
+OR: BooleanOperator
 IN: ListOperator
 NIN: ListOperator
 EQ: GenericComparator
@@ -239,8 +239,8 @@ class WhereDocumentChildren(_message.Message):
     CHILDREN_FIELD_NUMBER: _ClassVar[int]
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
     children: _containers.RepeatedCompositeFieldContainer[WhereDocument]
-    operator: WhereChildrenOperator
-    def __init__(self, children: _Optional[_Iterable[_Union[WhereDocument, _Mapping]]] = ..., operator: _Optional[_Union[WhereChildrenOperator, str]] = ...) -> None: ...
+    operator: BooleanOperator
+    def __init__(self, children: _Optional[_Iterable[_Union[WhereDocument, _Mapping]]] = ..., operator: _Optional[_Union[BooleanOperator, str]] = ...) -> None: ...
 
 class Where(_message.Message):
     __slots__ = ("direct_comparison", "children")
@@ -273,8 +273,8 @@ class WhereChildren(_message.Message):
     CHILDREN_FIELD_NUMBER: _ClassVar[int]
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
     children: _containers.RepeatedCompositeFieldContainer[Where]
-    operator: WhereChildrenOperator
-    def __init__(self, children: _Optional[_Iterable[_Union[Where, _Mapping]]] = ..., operator: _Optional[_Union[WhereChildrenOperator, str]] = ...) -> None: ...
+    operator: BooleanOperator
+    def __init__(self, children: _Optional[_Iterable[_Union[Where, _Mapping]]] = ..., operator: _Optional[_Union[BooleanOperator, str]] = ...) -> None: ...
 
 class StringListComparison(_message.Message):
     __slots__ = ("values", "list_operator")
