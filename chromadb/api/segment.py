@@ -531,6 +531,7 @@ class SegmentAPI(ServerAPI):
                 documents=[] if "documents" in include else None,
                 uris=[] if "uris" in include else None,
                 data=[] if "data" in include else None,
+                included=include,
             )
 
         vectors: Sequence[t.VectorEmbeddingRecord] = []
@@ -574,6 +575,7 @@ class SegmentAPI(ServerAPI):
             documents=documents if "documents" in include else None,  # type: ignore
             uris=uris if "uris" in include else None,  # type: ignore
             data=None,
+            included=include,
         )
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -766,6 +768,7 @@ class SegmentAPI(ServerAPI):
             documents=documents if documents else None,
             uris=uris if uris else None,
             data=None,
+            included=include,
         )
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)

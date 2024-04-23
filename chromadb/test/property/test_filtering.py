@@ -338,6 +338,7 @@ def test_empty_filter(api: ServerAPI) -> None:
     assert res["embeddings"] == [[]]
     assert res["distances"] == [[]]
     assert res["metadatas"] == [[]]
+    assert res["included"] == ["embeddings", "distances", "metadatas"]
 
     res = coll.query(
         query_embeddings=test_query_embeddings,
@@ -348,6 +349,7 @@ def test_empty_filter(api: ServerAPI) -> None:
     assert res["embeddings"] is None
     assert res["distances"] == [[], []]
     assert res["metadatas"] == [[], []]
+    assert res["included"] == ["metadatas", "documents", "distances"]
 
 
 def test_boolean_metadata(api: ServerAPI) -> None:

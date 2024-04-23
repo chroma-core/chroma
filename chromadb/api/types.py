@@ -157,6 +157,7 @@ class GetResult(TypedDict):
     uris: Optional[URIs]
     data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
+    included: Include
 
 
 class QueryResult(TypedDict):
@@ -167,6 +168,7 @@ class QueryResult(TypedDict):
     data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
+    included: Include
 
 
 class IndexMetadata(TypedDict):

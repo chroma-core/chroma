@@ -994,22 +994,26 @@ def test_query_include(api):
     collection = api.create_collection("test_query_include")
     collection.add(**records)
 
+    include = ["metadatas", "documents", "distances"]
     items = collection.query(
         query_embeddings=[0, 0, 0],
-        include=["metadatas", "documents", "distances"],
+        include=include,
         n_results=1,
     )
     assert items["embeddings"] is None
     assert items["ids"][0][0] == "id1"
     assert items["metadatas"][0][0]["int_value"] == 1
+    assert items["included"] == include
 
+    include = ["embeddings", "documents", "distances"]
     items = collection.query(
         query_embeddings=[0, 0, 0],
-        include=["embeddings", "documents", "distances"],
+        include=include,
         n_results=1,
     )
     assert items["metadatas"] is None
     assert items["ids"][0][0] == "id1"
+    assert items["included"] == include
 
     items = collection.query(
         query_embeddings=[[0, 0, 0], [1, 2, 1.2]],
@@ -1029,22 +1033,27 @@ def test_get_include(api):
     collection = api.create_collection("test_get_include")
     collection.add(**records)
 
-    items = collection.get(include=["metadatas", "documents"], where={"int_value": 1})
+    include = ["metadatas", "documents"]
+    items = collection.get(include=include, where={"int_value": 1})
     assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
     assert items["metadatas"][0]["int_value"] == 1
     assert items["documents"][0] == "this document is first"
+    assert items["included"] == include
 
-    items = collection.get(include=["embeddings", "documents"])
+    include = ["embeddings", "documents"]
+    items = collection.get(include=include)
     assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
     assert approx_equal(items["embeddings"][1][0], 1.2)
+    assert items["included"] == include
 
     items = collection.get(include=[])
     assert items["documents"] is None
     assert items["metadatas"] is None
     assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
+    assert items["included"] == []
 
     with pytest.raises(ValueError, match="include"):
         items = collection.get(include=["metadatas", "undefined"])
