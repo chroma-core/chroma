@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
+#[derive(Clone)]
 pub(crate) struct ArrowBlockfileWriter<K: ArrowWriteableKey, V: ArrowWriteableValue> {
     block_manager: BlockManager,
     sparse_index_manager: SparseIndexManager,

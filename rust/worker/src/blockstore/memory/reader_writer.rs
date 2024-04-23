@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{blockstore::key::KeyWrapper, errors::ChromaError};
 
+#[derive(Clone)]
 pub(crate) struct MemoryBlockfileWriter<K: Key, V: Value> {
     builder: StorageBuilder,
     storage_manager: StorageManager,

@@ -173,6 +173,7 @@ impl<'a> Value for &DataRecord<'a> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum BlockfileWriter<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> {
     MemoryBlockfileWriter(MemoryBlockfileWriter<K, V>),
     ArrowBlockfileWriter(ArrowBlockfileWriter<K, V>),

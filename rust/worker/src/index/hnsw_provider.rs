@@ -19,7 +19,7 @@ const FILES: [&'static str; 4] = [
 #[derive(Clone)]
 pub(crate) struct HnswIndexProvider {
     cache: Arc<RwLock<HashMap<Uuid, Arc<RwLock<HnswIndex>>>>>,
-    temporary_storage_path: PathBuf,
+    pub(crate) temporary_storage_path: PathBuf,
     storage: Box<Storage>,
 }
 

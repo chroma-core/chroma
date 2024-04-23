@@ -8,23 +8,32 @@ use crate::types::{
     update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
 };
 use async_trait::async_trait;
+use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 use thiserror::Error;
 
 const USER_ID_TO_OFFSET_ID: &str = "user_id_to_offset_id";
 const OFFSET_ID_TO_USER_ID: &str = "offset_id_to_user_id";
 const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
 
+#[derive(Clone)]
 pub(crate) struct RecordSegmentWriter<'a> {
     // These are Option<> so that we can take() them when we commit
     user_id_to_id: Option<BlockfileWriter<&'a str, u32>>,
     id_to_user_id: Option<BlockfileWriter<u32, &'a str>>,
     id_to_data: Option<BlockfileWriter<u32, &'a DataRecord<'a>>>,
     // TODO: store current max offset id in the metadata of the id_to_data blockfile
-    curr_max_offset_id: AtomicU32,
+    curr_max_offset_id: Arc<AtomicU32>,
     // If there is an old version of the data, we need to keep it around to be able to
     // materialize the log records
     // old_id_to_data: Option<BlockfileReader<'a, u32, DataRecord<'a>>>,
+}
+
+impl Debug for RecordSegmentWriter<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "RecordSegmentWriter")
+    }
 }
 
 #[derive(Error, Debug)]
@@ -65,7 +74,7 @@ impl<'a> RecordSegmentWriter<'a> {
             user_id_to_id: Some(user_id_to_id),
             id_to_user_id: Some(id_to_user_id),
             id_to_data: Some(id_to_data),
-            curr_max_offset_id: AtomicU32::new(0),
+            curr_max_offset_id: Arc::new(AtomicU32::new(0)),
         })
     }
 }
@@ -122,6 +131,12 @@ pub(crate) struct RecordSegmentFlusher<'a> {
     user_id_to_id_flusher: BlockfileFlusher<&'a str, u32>,
     id_to_user_id_flusher: BlockfileFlusher<u32, &'a str>,
     id_to_data_flusher: BlockfileFlusher<u32, &'a DataRecord<'a>>,
+}
+
+impl Debug for RecordSegmentFlusher<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "RecordSegmentFlusher")
+    }
 }
 
 #[async_trait]
