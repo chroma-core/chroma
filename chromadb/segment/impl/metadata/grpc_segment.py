@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Sequence
 from chromadb.segment import MetadataReader
 from chromadb.config import System
-from chromadb.types import Segment, SeqId
+from chromadb.types import Segment
 from overrides import override
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -50,11 +50,11 @@ class GrpcMetadataSegment(MetadataReader):
     def max_seqid(self) -> int:
         raise NotImplementedError()
 
-    @override
     @trace_method(
         "GrpcMetadataSegment.get_metadata",
         OpenTelemetryGranularity.ALL,
     )
+    @override
     def get_metadata(
         self,
         where: Optional[Where] = None,
@@ -258,7 +258,7 @@ class GrpcMetadataSegment(MetadataReader):
                 else:
                     children.operator = pb.BooleanOperator.OR
 
-                response.children = children
+                response.children.CopyFrom(children)
             else:
                 # Direct "$contains" or "$not_contains" comparison to a single
                 # value.
@@ -276,7 +276,7 @@ class GrpcMetadataSegment(MetadataReader):
                     raise ValueError(
                         f"Expected where_document operator to be one of $contains, $not_contains, got {operator}"
                     )
-                response.direct = dwd
+                response.direct.CopyFrom(dwd)
 
         return response
 
