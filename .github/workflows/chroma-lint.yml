@@ -1,0 +1,13 @@
+name: Lint
+on: push
+
+jobs:
+  lint:
+    name: Lint with pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Run pre-commit
+        # todo: remove || true once lint issues are resolved
+        run: pre-commit run --all-files || true
