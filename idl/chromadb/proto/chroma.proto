@@ -101,38 +101,6 @@ message GetMetadataRequest {
     optional int32 offset = 5;
 }
 
-enum WhereListType {
-    IN = 0;
-    NIN = 1;
-}
-
-enum WhereChildrenType {
-    AND = 0;
-    OR = 1;
-}
-
-// A `Where` clause for filtering metadata. A `Where` clause is a tree of
-// `Where` clauses, where each node is exactly one of:
-// - A leaf node with a key, a list of values, and a list type (IN or NIN)
-// - An branch node with a list of children and a children type (AND or OR)
-message Where {
-    // Metadata key
-    string key = 1;
-    // Allowed or disallowed metadata values
-    repeated string values = 2;
-    // Whether we're filtering IN or NIN `values`
-    WhereListType list_type = 3;
-    // Children of this `Where` clause
-    repeated Where children = 4;
-    // Whether children should be ANDed or ORed
-    WhereChildrenType children_type = 5;
-}
-
-message WhereDocument {
-    repeated string contains = 1;
-    repeated string not_contains = 2;
-}
-
 message GetMetadataResponse {
     repeated MetadataEmbeddingRecord records = 1;
 }
@@ -140,6 +108,120 @@ message GetMetadataResponse {
 message MetadataEmbeddingRecord {
     string id = 1;
     UpdateMetadata metadata = 2;
+}
+
+// A `WhereDocument` clause for filtering embeddings based on their associated documents.
+message WhereDocument {
+    repeated string contains = 1;
+    repeated string not_contains = 2;
+}
+
+// A `Where` clause for filtering metadata. A `Where` clause is a tree of
+// `Where` clauses, where each node is exactly one of:
+// - A leaf node representing a direct comparison between a metadata key and a
+//   value or list of values.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+message Where {
+    oneof where {
+        DirectComparison direct_comparison = 1;
+        WhereChildren children = 2;
+    }
+}
+
+message DirectComparison {
+    oneof comparison {
+        SingleStringComparison single_string_operand = 1;
+        StringListComparison string_list_operand = 2;
+        SingleIntComparison single_int_operand = 3;
+        IntListComparison int_list_operand = 4;
+        SingleFloatComparison single_float_operand = 5;
+        FloatListComparison float_list_operand = 6;
+    }
+}
+
+message WhereChildren {
+    repeated Where children = 1;
+    WhereChildrenType children_type = 2;
+}
+
+// A `Where` clause may have a list of children. This enum specifies how the
+// children should be combined.
+enum WhereChildrenType {
+    AND = 0;
+    OR = 1;
+}
+
+// A `Where` clause may have a list of allowed or disallowed values. This enum
+// specifies which type of list it is.
+enum WhereListType {
+    IN = 0;
+    NIN = 1;
+}
+
+// A leaf-node `Where` clause may compare a string, int, or float to a single
+// value of the same type. These comparators apply to all three of those types.
+enum GenericComparator {
+    EQ = 0;
+    NE = 1;
+}
+
+// Used when a leaf-node `Where` clause compares an int or float to a single
+// value of the same type.
+enum NumberComparator {
+    GT = 0;
+    GTE = 1;
+    LT = 2;
+    LTE = 3;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a list of strings.
+// `WhereListType` specifies whether values in the list are allowed or disallowed.
+message StringListComparison {
+    string key = 1;
+    repeated string values = 2;
+    WhereListType list_type = 3;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a single string.
+message SingleStringComparison {
+    string key = 1;
+    string value = 2;
+    GenericComparator comparator = 3;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a list of ints.
+// `WhereListType` specifies whether values in the list are allowed or disallowed.
+message IntListComparison {
+    int64 key = 1;
+    repeated int64 values = 2;
+    WhereListType list_type = 3;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a single int.
+message SingleIntComparison {
+    int64 key = 1;
+    int64 value = 2;
+    oneof comparator {
+        GenericComparator generic_comparator = 3;
+        NumberComparator number_comparator = 4;
+    }
+}
+
+// Used when a leaf-node `Where` clause compares a float to a list of floats.
+// `WhereListType` specifies whether values in the list are allowed or disallowed.
+message FloatListComparison {
+    double key = 1;
+    repeated double values = 2;
+    WhereListType list_type = 3;
+}
+
+message SingleFloatComparison {
+    double key = 1;
+    double value = 2;
+    oneof comparator {
+        GenericComparator generic_comparator = 3;
+        NumberComparator number_comparator = 4;
+    }
 }
 
 /* Vector Reader Interface */
