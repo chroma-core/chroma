@@ -383,9 +383,8 @@ class TensorFlowHubEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The tensorflow-hub, tensorflow and tensorflow-text python package is not installed. Please install it with 'pip install tensorflow-hub tensorflow-text tensorflow'"
             )
 
-        self._hub_url = "https://www.kaggle.com/models/google/gtr/TensorFlow2/gtr-{}/1".format(model_name)
+        self._encoder = tf_hub.KerasLayer("https://www.kaggle.com/models/google/gtr/TensorFlow2/gtr-{}/1".format(model_name))
 
-    
     def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
@@ -402,9 +401,7 @@ class TensorFlowHubEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = tfhub_ai_fn(input)
         """
 
-        
-        encoder = tf_hub.KerasLayer(self._hub_url)
-        return encoder(tf.constant(input))
+        return self._encoder(tf.constant(input))
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
