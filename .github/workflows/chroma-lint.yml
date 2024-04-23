@@ -1,0 +1,17 @@
+name: Lint
+on: push
+
+jobs:
+  lint:
+    name: Lint with pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+      - name: Install pre-commit
+        run: python -m pip install -r requirements_dev.txt
+      - name: Run pre-commit
+        # todo: remove || true once lint issues are resolved
+        run: pre-commit run --all-files || true
