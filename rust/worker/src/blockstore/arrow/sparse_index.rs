@@ -1,9 +1,17 @@
-use crate::blockstore::key::CompositeKey;
+use crate::blockstore::arrow::block::iterator::BlockIterator;
+use crate::blockstore::key::{CompositeKey, KeyWrapper};
+use crate::errors::ChromaError;
+use core::panic;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use super::block::delta::BlockDelta;
+use super::block::{self, Block};
+use super::provider::BlockManager;
+use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range
 /// # Note
@@ -177,6 +185,80 @@ impl SparseIndex {
             }
         }
         true
+    }
+
+    pub(super) fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
+        let forward = self.forward.lock();
+        if forward.is_empty() {
+            // TODO: error here
+            panic!("No blocks in the sparse index");
+        }
+
+        // TODO: we could save the uuid not as a string to be more space efficient
+        // but given the scale is relatively small, this is fine for now
+        let delta = BlockDelta::new::<K, &str>(self.id);
+        for (key, block_id) in forward.iter() {
+            match key {
+                SparseIndexDelimiter::Start => {
+                    delta.add("START", K::default(), block_id.to_string().as_str());
+                }
+                SparseIndexDelimiter::Key(k) => match &k.key {
+                    KeyWrapper::String(s) => {
+                        delta.add("KEY", s.as_str(), block_id.to_string().as_str());
+                    }
+                    KeyWrapper::Float32(f) => {
+                        delta.add("KEY", *f, block_id.to_string().as_str());
+                    }
+                    KeyWrapper::Bool(b) => {
+                        unimplemented!();
+                        // delta.add("KEY", b, block_id.to_string().as_str());
+                    }
+                    KeyWrapper::Uint32(u) => {
+                        delta.add("KEY", *u, block_id.to_string().as_str());
+                    }
+                },
+            }
+        }
+
+        let record_batch = delta.finish::<K, &str>();
+        Ok(Block::from_record_batch(delta.id, record_batch))
+    }
+
+    fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
+        block: &'block Block,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let mut forward = BTreeMap::new();
+        let mut reverse = HashMap::new();
+        let iterator: BlockIterator<'block, K, &str> = BlockIterator::new(&block);
+        for (prefix, key, value) in iterator {
+            let (delimiter, block_id) = match prefix {
+                "START" => {
+                    let block_id = Uuid::parse_str(value);
+                    match block_id {
+                        Ok(block_id) => (SparseIndexDelimiter::Start, block_id),
+                        Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
+                    }
+                }
+                "KEY" => {
+                    let block_id = Uuid::parse_str(value);
+                    match block_id {
+                        Ok(block_id) => (
+                            SparseIndexDelimiter::Key(CompositeKey::new(prefix.to_string(), key)),
+                            block_id,
+                        ),
+                        Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
+                    }
+                }
+                _ => panic!("Invalid key"), // TODO: error here
+            };
+            forward.insert(delimiter.clone(), block_id);
+            reverse.insert(block_id, delimiter);
+        }
+        Ok(Self {
+            forward: Arc::new(Mutex::new(forward)),
+            reverse: Arc::new(Mutex::new(reverse)),
+            id: block.id,
+        })
     }
 }
 

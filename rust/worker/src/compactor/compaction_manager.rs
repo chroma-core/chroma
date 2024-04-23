@@ -1,6 +1,5 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
@@ -11,6 +10,7 @@ use crate::errors::ErrorCodes;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
+use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
 use crate::storage::Storage;
@@ -26,6 +26,8 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
@@ -39,6 +41,7 @@ pub(crate) struct CompactionManager {
     sysdb: Box<dyn SysDb>,
     storage: Box<Storage>,
     blockfile_provider: BlockfileProvider,
+    hnsw_index_provider: HnswIndexProvider,
     // Dispatcher
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Config
@@ -67,6 +70,7 @@ impl CompactionManager {
         sysdb: Box<dyn SysDb>,
         storage: Box<Storage>,
         blockfile_provider: BlockfileProvider,
+        hnsw_index_provider: HnswIndexProvider,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
     ) -> Self {
@@ -77,6 +81,7 @@ impl CompactionManager {
             sysdb,
             storage,
             blockfile_provider,
+            hnsw_index_provider,
             dispatcher: None,
             compaction_manager_queue_size,
             compaction_interval,
@@ -111,6 +116,7 @@ impl CompactionManager {
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
+                    self.hnsw_index_provider.clone(),
                     dispatcher.clone(),
                     None,
                 );
@@ -224,13 +230,17 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             assignment_policy,
         );
 
+        // TODO: real path
+        let path = PathBuf::from("~/tmp");
         // TODO: blockfile proivder should be injected somehow
+        // TODO: hnsw index provider should be injected somehow
         Ok(CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
             BlockfileProvider::new_arrow(storage.clone()),
+            HnswIndexProvider::new(storage.clone(), path),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
         ))
@@ -285,6 +295,7 @@ impl Handler<Memberlist> for CompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
@@ -404,7 +415,8 @@ mod tests {
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage),
+            BlockfileProvider::new_arrow(storage.clone()),
+            HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
             compaction_manager_queue_size,
             compaction_interval,
         );

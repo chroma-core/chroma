@@ -4,11 +4,12 @@ use crate::{blockstore::key::CompositeKey, errors::ChromaError};
 // use super::provider::ArrowBlockProvider;
 use super::{
     block::Block,
+    flusher::ArrowBlockfileFlusher,
     provider::SparseIndexManager,
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
-use std::mem::transmute;
+use std::{collections::HashSet, mem::transmute};
 // use crate::blockstore::arrow::block::delta::BlockDelta;
 // use crate::blockstore::BlockfileError;
 use parking_lot::Mutex;
@@ -72,15 +73,25 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
         }
     }
 
-    pub(crate) fn commit(self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(self) -> Result<ArrowBlockfileFlusher<K, V>, Box<dyn ChromaError>> {
+        let mut delta_ids = HashSet::new();
         for delta in self.block_deltas.lock().values() {
             // TODO: might these error?
             self.block_manager.commit::<K, V>(delta);
+            delta_ids.insert(delta.id);
         }
         self.sparse_index_manager.commit(self.sparse_index.clone());
 
+        let flusher = ArrowBlockfileFlusher::new(
+            self.block_manager,
+            self.sparse_index_manager,
+            delta_ids,
+            self.sparse_index,
+            self.id,
+        );
+
         // TODO: we need to update the sparse index with the new min keys?
-        Ok(())
+        Ok(flusher)
     }
 
     pub(crate) async fn set(

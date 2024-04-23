@@ -1,3 +1,4 @@
+use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{LogRecord, Metadata};
 use async_trait::async_trait;
@@ -45,10 +46,15 @@ impl DataRecord<'_> {
     }
 }
 
-pub(super) trait SegmentWriter {
+pub(crate) trait SegmentWriter {
     fn apply_materialized_log_chunk(&self, records: Chunk<MaterializedLogRecord>);
     fn apply_log_chunk(&self, records: Chunk<LogRecord>);
-    fn commit(&self);
+    fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
+}
+
+#[async_trait]
+pub(crate) trait SegmentFlusher {
+    async fn flush(self) -> Result<(), Box<dyn ChromaError>>;
 }
 
 #[async_trait]

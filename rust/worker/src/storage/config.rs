@@ -1,6 +1,5 @@
-use std::path::Path;
-
 use serde::Deserialize;
+use std::path::Path;
 
 #[derive(Deserialize)]
 /// The configuration for the chosen storage.
@@ -15,11 +14,18 @@ pub(crate) enum StorageConfig {
 }
 
 #[derive(Deserialize)]
+pub(crate) enum S3CredentialsConfig {
+    Minio,
+    AWS,
+}
+
+#[derive(Deserialize)]
 /// The configuration for the s3 storage type
 /// # Fields
 /// - bucket: The name of the bucket to use.
 pub(crate) struct S3StorageConfig {
     pub(crate) bucket: String,
+    pub(crate) credentials: S3CredentialsConfig,
 }
 
 #[derive(Deserialize)]

@@ -6,7 +6,7 @@ use crate::blockstore::{key::KeyWrapper, Key, Value};
 use arrow::array::Array;
 use std::sync::Arc;
 
-pub(crate) trait ArrowWriteableKey: Key {
+pub(crate) trait ArrowWriteableKey: Key + Default {
     type ReadableKey<'referred_data>: ArrowReadableKey<'referred_data>;
 
     fn offset_size(item_count: usize) -> usize;
