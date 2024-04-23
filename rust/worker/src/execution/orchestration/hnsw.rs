@@ -6,6 +6,7 @@ use crate::execution::operators::brute_force_knn::{
     BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorResult,
 };
 use crate::execution::operators::pull_log::PullLogsResult;
+use crate::sysdb::metadata::Metadata;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::System;
 use crate::types::VectorQueryResult;
@@ -56,6 +57,7 @@ pub(crate) struct HnswQueryOrchestrator {
     // Services
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
+    metadata: Metadata,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // Result channel
     result_channel: Option<
@@ -82,35 +84,31 @@ impl HnswQueryOrchestrator {
             include_embeddings,
             segment_id,
             log,
-            sysdb,
+            sysdb: sysdb.clone(),
+            metadata: Metadata::new(sysdb),
             dispatcher,
             result_channel: None,
         }
     }
 
-    /// Get the collection id for a segment id.
-    /// TODO: This can be cached
-    async fn get_collection_id_for_segment_id(&mut self, segment_id: Uuid) -> Option<Uuid> {
-        let segments = self
-            .sysdb
-            .get_segments(Some(segment_id), None, None, None)
-            .await;
-        match segments {
-            Ok(segments) => match segments.get(0) {
-                Some(segment) => segment.collection,
-                None => None,
-            },
-            Err(e) => {
-                // Log an error and return
-                return None;
-            }
+    async fn get_collection_id_for_segment_id_metadata(
+        &mut self,
+        segment_id: Uuid,
+    ) -> Option<Uuid> {
+        let metadata = self.metadata.get_metadata(segment_id).await;
+        match metadata {
+            Some(metadata) => Some(metadata.collection_id),
+            None => None,
         }
     }
 
     async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
-        let collection_id = match self.get_collection_id_for_segment_id(self.segment_id).await {
+        let collection_id = match self
+            .get_collection_id_for_segment_id_metadata(self.segment_id)
+            .await
+        {
             Some(collection_id) => collection_id,
             None => {
                 // Log an error and reply + return

@@ -7,8 +7,10 @@ use crate::log::config::LogConfig;
 use crate::types::LogRecord;
 use crate::types::RecordConversionError;
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -42,7 +44,7 @@ pub(crate) trait Log: Send + Sync + LogClone + Debug {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError>;
+    ) -> Result<Arc<[LogRecord]>, PullLogsError>;
 
     async fn get_collections_with_new_data(
         &mut self,
@@ -125,7 +127,7 @@ impl Log for GrpcLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError> {
+    ) -> Result<Arc<[LogRecord]>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => -1,
@@ -152,7 +154,7 @@ impl Log for GrpcLog {
                         }
                     }
                 }
-                Ok(result)
+                Ok(result.into())
             }
             Err(e) => {
                 // TODO: switch to logging when logging is implemented
@@ -249,18 +251,26 @@ impl Debug for InternalLogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
+    inner: Arc<Mutex<Inner>>,
+}
+
+#[derive(Debug)]
+struct Inner {
     logs: HashMap<String, Vec<Box<InternalLogRecord>>>,
 }
 
 impl InMemoryLog {
     pub fn new() -> InMemoryLog {
         InMemoryLog {
-            logs: HashMap::new(),
+            inner: Arc::new(Mutex::new(Inner {
+                logs: HashMap::new(),
+            })),
         }
     }
 
     pub fn add_log(&mut self, collection_id: String, log: Box<InternalLogRecord>) {
-        let logs = self.logs.entry(collection_id).or_insert(Vec::new());
+        let mut inner = self.inner.lock();
+        let logs = inner.logs.entry(collection_id).or_insert(Vec::new());
         logs.push(log);
     }
 }
@@ -273,15 +283,16 @@ impl Log for InMemoryLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError> {
+    ) -> Result<Arc<[LogRecord]>, PullLogsError> {
+        let inner = self.inner.lock();
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
 
-        let logs = match self.logs.get(&collection_id.to_string()) {
+        let logs = match inner.logs.get(&collection_id.to_string()) {
             Some(logs) => logs,
-            None => return Ok(Vec::new()),
+            None => return Ok(Vec::new().into()),
         };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
@@ -289,14 +300,15 @@ impl Log for InMemoryLog {
                 result.push(logs[i as usize].record.clone());
             }
         }
-        Ok(result)
+        Ok(result.into())
     }
 
     async fn get_collections_with_new_data(
         &mut self,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+        let inner = self.inner.lock();
         let mut collections = Vec::new();
-        for (collection_id, log_record) in self.logs.iter() {
+        for (collection_id, log_record) in inner.logs.iter() {
             if log_record.is_empty() {
                 continue;
             }

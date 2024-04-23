@@ -1,4 +1,5 @@
 pub(crate) mod config;
+pub(crate) mod metadata;
 pub(crate) mod sysdb;
 pub(crate) mod test_sysdb;
 
