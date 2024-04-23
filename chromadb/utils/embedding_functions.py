@@ -387,6 +387,21 @@ class TensorFlowHubEmbeddingFunction(EmbeddingFunction[Documents]):
 
     
     def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            texts (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> tfhub_ai_fn = TensorFlowHubEmbeddingFunction("base")
+            >>> input = ["Hello, world!", "How are you?"]
+            >>> embeddings = tfhub_ai_fn(input)
+        """
+
         
         encoder = tf_hub.KerasLayer(self._hub_url)
         return encoder(tf.constant(input))
