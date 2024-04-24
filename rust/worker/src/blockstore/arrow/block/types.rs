@@ -92,6 +92,25 @@ impl Block {
         None
     }
 
+    pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        index: usize,
+    ) -> Option<(&str, K, V)> {
+        if index >= self.data.num_rows() {
+            return None;
+        }
+        let prefix_arr = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let prefix = prefix_arr.value(index);
+        let key = K::get(self.data.column(1), index);
+        let value = V::get(self.data.column(2), index);
+        Some((prefix, key, value))
+    }
+
     /// Returns the size of the block in bytes
     pub(crate) fn get_size(&self) -> usize {
         let mut total_size = 0;
@@ -150,14 +169,14 @@ impl Block {
         bytes
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn ChromaError>> {
+    pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, Box<dyn ChromaError>> {
         let cursor = std::io::Cursor::new(bytes);
         let mut reader =
             arrow::ipc::reader::FileReader::try_new(cursor, None).expect("Error creating reader");
-        return Self::load_with_reader(reader);
+        return Self::load_with_reader(reader, id);
     }
 
-    pub fn load(path: &str) -> Result<Self, Box<dyn ChromaError>> {
+    pub fn load(path: &str, id: Uuid) -> Result<Self, Box<dyn ChromaError>> {
         let file = std::fs::File::open(path);
         let file = match file {
             Ok(file) => file,
@@ -175,11 +194,12 @@ impl Block {
                 panic!("Error creating reader: {:?}", e)
             }
         };
-        return Self::load_with_reader(reader);
+        return Self::load_with_reader(reader, id);
     }
 
     fn load_with_reader<R>(
         mut reader: arrow::ipc::reader::FileReader<R>,
+        id: Uuid,
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         R: std::io::Read + std::io::Seek,
@@ -187,7 +207,7 @@ impl Block {
         let batch = reader.next().unwrap();
         // TODO: how to store / hydrate id?
         match batch {
-            Ok(batch) => Ok(Self::from_record_batch(Uuid::new_v4(), batch)),
+            Ok(batch) => Ok(Self::from_record_batch(id, batch)),
             Err(e) => {
                 panic!("Error reading batch: {:?}", e);
             }

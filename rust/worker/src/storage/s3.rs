@@ -91,6 +91,30 @@ impl S3Storage {
             }
             Err(e) => {
                 println!("error: {}", e);
+                match e {
+                    SdkError::ServiceError(err) => {
+                        let inner = err.into_err();
+                        match inner {
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
+                                println!("no such key: {}", msg);
+                                return Err::<_, String>(msg.to_string());
+                            }
+                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
+                                print!("invalid object state: {}", msg);
+                                return Err::<_, String>(msg.to_string());
+                            }
+                            aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) =>  {
+                                println!("unhandled error");
+                                return Err::<_, String>("unhandled error".to_string());
+                            }
+                            _ => {
+                                println!("error: {}", inner.to_string());
+                                return Err::<_, String>(inner.to_string());
+                            }
+                        };
+                    }
+                    _ => {}
+                }
                 return Err::<_, String>(e.to_string());
             }
         }

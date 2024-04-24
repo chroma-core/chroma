@@ -1,4 +1,3 @@
-use crate::blockstore::arrow::block::iterator::BlockIterator;
 use crate::blockstore::key::{CompositeKey, KeyWrapper};
 use crate::errors::ChromaError;
 use core::panic;
@@ -224,13 +223,14 @@ impl SparseIndex {
         Ok(Block::from_record_batch(delta.id, record_batch))
     }
 
-    fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
+    pub(super) fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
         block: &'block Block,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let mut forward = BTreeMap::new();
         let mut reverse = HashMap::new();
-        let iterator: BlockIterator<'block, K, &str> = BlockIterator::new(&block);
-        for (prefix, key, value) in iterator {
+        let id = block.id;
+        let mut i = 0;
+        while let Some((prefix, key, value)) = block.get_at_index::<K, &str>(i) {
             let (delimiter, block_id) = match prefix {
                 "START" => {
                     let block_id = Uuid::parse_str(value);
@@ -253,11 +253,12 @@ impl SparseIndex {
             };
             forward.insert(delimiter.clone(), block_id);
             reverse.insert(block_id, delimiter);
+            i += 1;
         }
         Ok(Self {
             forward: Arc::new(Mutex::new(forward)),
             reverse: Arc::new(Mutex::new(reverse)),
-            id: block.id,
+            id,
         })
     }
 }

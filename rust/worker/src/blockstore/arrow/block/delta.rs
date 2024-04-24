@@ -296,7 +296,8 @@ mod test {
 
         // test save/load
         block.save("test.arrow").unwrap();
-        let loaded = Block::load("test.arrow").unwrap();
+        let loaded = Block::load("test.arrow", delta_id).unwrap();
+        assert_eq!(loaded.id, delta_id);
         // TODO: make this sizing work
         // assert_eq!(block.get_size(), loaded.get_size());
         for i in 0..n {
