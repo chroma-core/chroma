@@ -12,6 +12,7 @@ use crate::system::{Receiver, System};
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
 use tonic::{transport::Server, Request, Response, Status};
+use tracing::{debug, trace, trace_span};
 use uuid::Uuid;
 
 pub struct WorkerServer {
@@ -93,6 +94,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         Err(Status::unimplemented("Not yet implemented"))
     }
 
+    #[tracing::instrument(skip(self, request), fields(request_metadata = ?request.metadata(), k = request.get_ref().k, segment_id = request.get_ref().segment_id, include_embeddings = request.get_ref().include_embeddings, allowed_ids = ?request.get_ref().allowed_ids))]
     async fn query_vectors(
         &self,
         request: Request<QueryVectorsRequest>,
@@ -108,15 +110,19 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
-        for proto_query_vector in request.vectors {
-            let (query_vector, _encoding) = match proto_query_vector.try_into() {
-                Ok((vector, encoding)) => (vector, encoding),
-                Err(e) => {
-                    return Err(Status::internal(format!("Error converting vector: {}", e)));
-                }
-            };
-            query_vectors.push(query_vector);
-        }
+        trace_span!("Input vectors parsing").in_scope(|| {
+            for proto_query_vector in request.vectors {
+                let (query_vector, _encoding) = match proto_query_vector.try_into() {
+                    Ok((vector, encoding)) => (vector, encoding),
+                    Err(e) => {
+                        return Err(Status::internal(format!("Error converting vector: {}", e)));
+                    }
+                };
+                query_vectors.push(query_vector);
+            }
+            trace!("Parsed vectors {:?}", query_vectors);
+            Ok(())
+        });
 
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
