@@ -683,10 +683,6 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                     embeddings.append(prediction["embeddings"]["values"])
             else:
                 if predictions is None:
-                    error_info = response.get('error')
-                    if error_info:
-                        raise error_types.get('AuthorizationError')(dumps(response))
-
                     raise KeyError(f'Key `predictions` of the response from Vertex Embedding API is not existed!! Please confirm the response. \n{response}')
                 elif not isinstance(predictions, Iterable):
                     raise TypeError(f'The response from Vertex Embedding API is not iterable!! Please confirm the response. \n{response}')
