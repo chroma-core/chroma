@@ -10,5 +10,7 @@ class QuotaProviderForTest(QuotaProvider):
         super().__init__(system)
 
     @overrides
-    def get_for_subject(self, resource: Resource, subject: Optional[str] = "", tier: Optional[str] = "") -> Optional[int]:
+    def get_for_subject(
+        self, resource: Resource, subject: Optional[str] = "", tier: Optional[str] = ""
+    ) -> Optional[int]:
         pass

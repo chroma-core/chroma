@@ -15,25 +15,25 @@ class LogServiceStub(object):
             channel: A grpc.Channel.
         """
         self.PushLogs = channel.unary_unary(
-                '/chroma.LogService/PushLogs',
-                request_serializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.FromString,
-                )
+            "/chroma.LogService/PushLogs",
+            request_serializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.FromString,
+        )
         self.PullLogs = channel.unary_unary(
-                '/chroma.LogService/PullLogs',
-                request_serializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.FromString,
-                )
+            "/chroma.LogService/PullLogs",
+            request_serializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.FromString,
+        )
         self.GetAllCollectionInfoToCompact = channel.unary_unary(
-                '/chroma.LogService/GetAllCollectionInfoToCompact',
-                request_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.FromString,
-                )
+            "/chroma.LogService/GetAllCollectionInfoToCompact",
+            request_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.FromString,
+        )
         self.UpdateCollectionLogOffset = channel.unary_unary(
-                '/chroma.LogService/UpdateCollectionLogOffset',
-                request_serializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetResponse.FromString,
-                )
+            "/chroma.LogService/UpdateCollectionLogOffset",
+            request_serializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetResponse.FromString,
+        )
 
 
 class LogServiceServicer(object):
@@ -42,124 +42,173 @@ class LogServiceServicer(object):
     def PushLogs(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def PullLogs(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetAllCollectionInfoToCompact(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def UpdateCollectionLogOffset(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
 
 def add_LogServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'PushLogs': grpc.unary_unary_rpc_method_handler(
-                    servicer.PushLogs,
-                    request_deserializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.SerializeToString,
-            ),
-            'PullLogs': grpc.unary_unary_rpc_method_handler(
-                    servicer.PullLogs,
-                    request_deserializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.SerializeToString,
-            ),
-            'GetAllCollectionInfoToCompact': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAllCollectionInfoToCompact,
-                    request_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.SerializeToString,
-            ),
-            'UpdateCollectionLogOffset': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateCollectionLogOffset,
-                    request_deserializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetResponse.SerializeToString,
-            ),
+        "PushLogs": grpc.unary_unary_rpc_method_handler(
+            servicer.PushLogs,
+            request_deserializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.SerializeToString,
+        ),
+        "PullLogs": grpc.unary_unary_rpc_method_handler(
+            servicer.PullLogs,
+            request_deserializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.SerializeToString,
+        ),
+        "GetAllCollectionInfoToCompact": grpc.unary_unary_rpc_method_handler(
+            servicer.GetAllCollectionInfoToCompact,
+            request_deserializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.SerializeToString,
+        ),
+        "UpdateCollectionLogOffset": grpc.unary_unary_rpc_method_handler(
+            servicer.UpdateCollectionLogOffset,
+            request_deserializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetResponse.SerializeToString,
+        ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'chroma.LogService', rpc_method_handlers)
+        "chroma.LogService", rpc_method_handlers
+    )
     server.add_generic_rpc_handlers((generic_handler,))
 
 
- # This class is part of an EXPERIMENTAL API.
+# This class is part of an EXPERIMENTAL API.
 class LogService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def PushLogs(request,
+    def PushLogs(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.LogService/PushLogs',
+            "/chroma.LogService/PushLogs",
             chromadb_dot_proto_dot_logservice__pb2.PushLogsRequest.SerializeToString,
             chromadb_dot_proto_dot_logservice__pb2.PushLogsResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def PullLogs(request,
+    def PullLogs(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.LogService/PullLogs',
+            "/chroma.LogService/PullLogs",
             chromadb_dot_proto_dot_logservice__pb2.PullLogsRequest.SerializeToString,
             chromadb_dot_proto_dot_logservice__pb2.PullLogsResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def GetAllCollectionInfoToCompact(request,
+    def GetAllCollectionInfoToCompact(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.LogService/GetAllCollectionInfoToCompact',
+            "/chroma.LogService/GetAllCollectionInfoToCompact",
             chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactRequest.SerializeToString,
             chromadb_dot_proto_dot_logservice__pb2.GetAllCollectionInfoToCompactResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def UpdateCollectionLogOffset(request,
+    def UpdateCollectionLogOffset(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.LogService/UpdateCollectionLogOffset',
+            "/chroma.LogService/UpdateCollectionLogOffset",
             chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetRequest.SerializeToString,
             chromadb_dot_proto_dot_logservice__pb2.UpdateCollectionLogOffsetResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )

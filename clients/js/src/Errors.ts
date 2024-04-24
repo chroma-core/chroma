@@ -2,7 +2,11 @@
  * This is a generic Chroma error.
  */
 export class ChromaError extends Error {
-  constructor(name: string, message: string, public readonly cause?: unknown) {
+  constructor(
+    name: string,
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = name;
   }
@@ -13,7 +17,10 @@ export class ChromaError extends Error {
  */
 export class ChromaConnectionError extends Error {
   name = "ChromaConnectionError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }
@@ -21,7 +28,10 @@ export class ChromaConnectionError extends Error {
 /** Indicates that the server encountered an error while handling the request. */
 export class ChromaServerError extends Error {
   name = "ChromaServerError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }
@@ -29,7 +39,10 @@ export class ChromaServerError extends Error {
 /** Indicate that there was an issue with the request that the client made. */
 export class ChromaClientError extends Error {
   name = "ChromaClientError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }
@@ -37,7 +50,10 @@ export class ChromaClientError extends Error {
 /** The request lacked valid authentication. */
 export class ChromaUnauthorizedError extends Error {
   name = "ChromaAuthError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }
@@ -45,21 +61,30 @@ export class ChromaUnauthorizedError extends Error {
 /** The user does not have permission to access the requested resource. */
 export class ChromaForbiddenError extends Error {
   name = "ChromaForbiddenError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }
 
 export class ChromaNotFoundError extends Error {
   name = "ChromaNotFoundError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }
 
 export class ChromaValueError extends Error {
   name = "ChromaValueError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }

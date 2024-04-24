@@ -17,6 +17,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 
 from hypothesis import Phase, settings
+
 settings.register_profile("ci", phases=[Phase.generate, Phase.target])
 
 
@@ -33,12 +34,11 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     For an example of an RBAC configuration file, see
     examples/basic_functionality/authz/authz.yaml.
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-        self._config = yaml.safe_load(
-            '\n'.join(self.read_config_or_config_file())
-        )
+        self._config = yaml.safe_load("\n".join(self.read_config_or_config_file()))
 
         # We favor preprocessing here to avoid having to parse the config file
         # on every request. This AuthorizationProvider does not support
@@ -51,8 +51,7 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
             _actions = self._config["roles_mapping"][user["role"]]["actions"]
             self._permissions[user["id"]] = set(_actions)
         logger.info(
-            "Authorization Provider SimpleRBACAuthorizationProvider "
-            "initialized"
+            "Authorization Provider SimpleRBACAuthorizationProvider " "initialized"
         )
 
     @trace_method(
@@ -60,14 +59,14 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         OpenTelemetryGranularity.ALL,
     )
     @override
-    def authorize_or_raise(self,
-                           user: UserIdentity,
-                           action: AuthzAction,
-                           resource: AuthzResource) -> None:
-
+    def authorize_or_raise(
+        self, user: UserIdentity, action: AuthzAction, resource: AuthzResource
+    ) -> None:
         policy_decision = False
-        if (user.user_id in self._permissions and
-                action in self._permissions[user.user_id]):
+        if (
+            user.user_id in self._permissions
+            and action in self._permissions[user.user_id]
+        ):
             policy_decision = True
 
         logger.debug(
