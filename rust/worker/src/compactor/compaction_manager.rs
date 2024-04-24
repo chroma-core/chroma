@@ -92,13 +92,6 @@ impl CompactionManager {
         &self,
         compaction_job: &CompactionJob,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
-        let collection_uuid = Uuid::from_str(&compaction_job.collection_id);
-        if collection_uuid.is_err() {
-            // handle error properly
-            println!("Failed to parse collection id");
-            return Err(Box::new(CompactionError::FailedToCompact));
-        }
-
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
@@ -112,7 +105,7 @@ impl CompactionManager {
                 let orchestrator = CompactOrchestrator::new(
                     compaction_job.clone(),
                     system.clone(),
-                    collection_uuid.unwrap(),
+                    compaction_job.collection_id,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
@@ -316,11 +309,10 @@ mod tests {
         )));
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
-            collection_id_1.clone(),
+            collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
+                collection_id: collection_uuid_1.clone(),
                 log_offset: 1,
                 log_ts: 1,
                 record: LogRecord {
@@ -337,11 +329,10 @@ mod tests {
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let collection_id_2 = collection_uuid_2.to_string();
         log.add_log(
-            collection_id_2.clone(),
+            collection_uuid_2.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_2.clone(),
+                collection_id: collection_uuid_2.clone(),
                 log_offset: 2,
                 log_ts: 2,
                 record: LogRecord {

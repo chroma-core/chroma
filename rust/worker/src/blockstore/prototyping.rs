@@ -9,6 +9,11 @@ struct NestedReferences<'value> {
     value: &'value [i32],
 }
 
+trait Value {
+    type Writeable<'writeable>: WriteableValue;
+    type Readable<'referred_data>: ReadableValue<'referred_data>;
+}
+
 // Used for dynamic dispatch to get the type of the value.
 // referred_data is the lifetime of the data that the value references (if any).
 trait ReadableValue<'referred_data> {
@@ -184,17 +189,13 @@ where
     }
 }
 
-struct Writer<V> {
+struct Writer {
     sparse_index: SparseIndex,
     active_block: Option<BlockBuilder>,
     block_manager: BlockManager,
-    marker: std::marker::PhantomData<V>,
 }
 
-impl<V> Writer<V>
-where
-    V: WriteableValue,
-{
+impl Writer {
     fn new(mut block_manager: BlockManager) -> Self {
         let sparse_index = SparseIndex::new();
         let new_block = block_manager.create();
@@ -202,7 +203,6 @@ where
             sparse_index: sparse_index,
             active_block: Some(new_block),
             block_manager: block_manager,
-            marker: std::marker::PhantomData,
         }
     }
 
@@ -212,11 +212,10 @@ where
             sparse_index: sparse_index,
             active_block: Some(new_block),
             block_manager: block_manager,
-            marker: std::marker::PhantomData,
         }
     }
 
-    fn store(&self, key: String, value: &V) {
+    fn store<V: WriteableValue>(&self, key: String, value: &V) {
         V::write_to_block(&key, value, self.active_block.as_ref().unwrap());
     }
 
@@ -232,6 +231,9 @@ where
     }
 }
 
+struct HoldsWriter {
+    writer: Writer,
+}
 // =====  Block Implementations  =====
 #[derive(Clone)]
 struct Block {
@@ -284,7 +286,7 @@ mod tests {
     #[test]
     fn test_self_reference_map() {
         let block_manager = BlockManager::new();
-        let writer = Writer::<NestedReferences>::new(block_manager.clone());
+        let writer = Writer::new(block_manager.clone());
         let nested_references = NestedReferences {
             id: &[1, 2, 3],
             value: &[4, 5, 6],
@@ -303,7 +305,7 @@ mod tests {
     #[test]
     fn test_string_map() {
         let block_manager = BlockManager::new();
-        let writer = Writer::<String>::new(block_manager.clone());
+        let writer = Writer::new(block_manager.clone());
         let string = "value".to_string();
         writer.store("key".to_string(), &string);
         let writer_sparse_index = writer.commit();
@@ -332,7 +334,7 @@ mod tests {
         let combined = combine(id_data_src, value_data_src);
 
         let block_manager = BlockManager::new();
-        let writer = Writer::<NestedReferences>::new(block_manager.clone());
+        let writer = Writer::new(block_manager.clone());
         writer.store("key".to_string(), &combined);
         let writer_sparse_index = writer.commit();
 
@@ -347,7 +349,7 @@ mod tests {
     #[test]
     fn test_reader_trait() {
         let block_manager = BlockManager::new();
-        let writer = Writer::<String>::new(block_manager.clone());
+        let writer = Writer::new(block_manager.clone());
         let string = "value".to_string();
         writer.store("key".to_string(), &string);
         let writer_sparse_index = writer.commit();

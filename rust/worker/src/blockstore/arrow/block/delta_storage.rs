@@ -12,7 +12,12 @@ use arrow::{
     util::bit_util,
 };
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    fmt::{Debug, Formatter},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub enum BlockStorage {
@@ -21,6 +26,18 @@ pub enum BlockStorage {
     UInt32(UInt32Storage),
     RoaringBitmap(RoaringBitmapStorage),
     DataRecord(DataRecordStorage),
+}
+
+impl Debug for BlockStorage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BlockStorage::String(_) => write!(f, "String"),
+            BlockStorage::Int32Array(_) => write!(f, "Int32Array"),
+            BlockStorage::UInt32(_) => write!(f, "UInt32"),
+            BlockStorage::RoaringBitmap(_) => write!(f, "RoaringBitmap"),
+            BlockStorage::DataRecord(_) => write!(f, "DataRecord"),
+        }
+    }
 }
 
 pub enum BlockKeyArrowBuilder {

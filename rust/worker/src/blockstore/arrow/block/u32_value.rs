@@ -13,7 +13,7 @@ use arrow::{
 use std::sync::Arc;
 
 impl ArrowWriteableValue for u32 {
-    type ReadableValue<'referred_data> = &'referred_data str;
+    type ReadableValue<'referred_data> = u32;
 
     fn offset_size(item_count: usize) -> usize {
         0
@@ -31,7 +31,7 @@ impl ArrowWriteableValue for u32 {
                     value,
                 );
             }
-            _ => panic!("Invalid builder type"),
+            _ => panic!("Invalid builder type: {:?}", &delta.builder),
         }
     }
 
@@ -44,7 +44,7 @@ impl ArrowWriteableValue for u32 {
                     key,
                 });
             }
-            _ => panic!("Invalid builder type"),
+            _ => panic!("Invalid builder type: {:?}", &delta.builder),
         }
     }
 

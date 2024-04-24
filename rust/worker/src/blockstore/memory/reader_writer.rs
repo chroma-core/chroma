@@ -5,21 +5,19 @@ use super::{
 use crate::{blockstore::key::KeyWrapper, errors::ChromaError};
 
 #[derive(Clone)]
-pub(crate) struct MemoryBlockfileWriter<K: Key, V: Value> {
+pub(crate) struct MemoryBlockfileWriter {
     builder: StorageBuilder,
     storage_manager: StorageManager,
-    marker: std::marker::PhantomData<(K, V)>,
     id: uuid::Uuid,
 }
 
-impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> MemoryBlockfileWriter<K, V> {
+impl MemoryBlockfileWriter {
     pub(super) fn new(storage_manager: StorageManager) -> Self {
         let builder = storage_manager.create();
         let id = builder.id;
         Self {
             builder,
             storage_manager,
-            marker: std::marker::PhantomData,
             id,
         }
     }
@@ -29,7 +27,12 @@ impl<K: Key + Into<KeyWrapper>, V: Value + Writeable> MemoryBlockfileWriter<K, V
         Ok(())
     }
 
-    pub(crate) fn set(&self, prefix: &str, key: K, value: V) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn set<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
+        &self,
+        prefix: &str,
+        key: K,
+        value: V,
+    ) -> Result<(), Box<dyn ChromaError>> {
         let key = key.clone().into();
         V::write_to_storage(prefix, key, value, &self.builder);
         Ok(())

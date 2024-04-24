@@ -21,19 +21,18 @@ use uuid::Uuid;
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
 #[derive(Clone)]
-pub(crate) struct ArrowBlockfileWriter<K: ArrowWriteableKey, V: ArrowWriteableValue> {
+pub(crate) struct ArrowBlockfileWriter {
     block_manager: BlockManager,
     sparse_index_manager: SparseIndexManager,
     block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
     sparse_index: SparseIndex,
-    marker: std::marker::PhantomData<(K, V)>,
     id: Uuid,
 }
 // TODO: method visibility should not be pub(crate)
 
-impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
+impl ArrowBlockfileWriter {
     /// Create a new blockfile and writer for it
-    pub(super) fn new(
+    pub(super) fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         id: Uuid,
         block_manager: BlockManager,
         sparse_index_manager: SparseIndexManager,
@@ -50,7 +49,6 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
         Self {
             block_manager,
             sparse_index_manager,
-            marker: std::marker::PhantomData,
             block_deltas: block_deltas,
             sparse_index: sparse_index,
             id,
@@ -67,14 +65,15 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
         Self {
             block_manager,
             sparse_index_manager,
-            marker: std::marker::PhantomData,
             block_deltas: block_deltas,
             sparse_index: new_sparse_index,
             id,
         }
     }
 
-    pub(crate) fn commit(self) -> Result<ArrowBlockfileFlusher<K, V>, Box<dyn ChromaError>> {
+    pub(crate) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        self,
+    ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut delta_ids = HashSet::new();
         for delta in self.block_deltas.lock().values() {
             // TODO: might these error?
@@ -95,7 +94,7 @@ impl<K: ArrowWriteableKey, V: ArrowWriteableValue> ArrowBlockfileWriter<K, V> {
         Ok(flusher)
     }
 
-    pub(crate) async fn set(
+    pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
@@ -288,9 +287,12 @@ mod tests {
         let value2 = Int32Array::from(vec![4, 5, 6]);
         writer.set(prefix_2, key2, &value2).await.unwrap();
 
-        writer.commit().unwrap();
+        writer.commit::<&str, &Int32Array>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, Int32Array>(&id).unwrap();
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id)
+            .await
+            .unwrap();
 
         let value = reader.get(prefix_1, key1).await.unwrap();
         assert_eq!(value.values(), &[1, 2, 3]);
@@ -313,11 +315,14 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", &key, &value).await.unwrap();
+            writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit().unwrap();
+        writer.commit::<&str, &Int32Array>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, Int32Array>(&id_1).unwrap();
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_1)
+            .await
+            .unwrap();
 
         for i in 0..n {
             let key = format!("{:04}", i);
@@ -335,16 +340,22 @@ mod tests {
         }
 
         // Add 5 new entries to the first block
-        let writer = blockfile_provider.fork::<&str, &Int32Array>(&id_1).unwrap();
+        let writer = blockfile_provider
+            .fork::<&str, &Int32Array>(&id_1)
+            .await
+            .unwrap();
         let id_2 = writer.id();
         for i in 0..5 {
             let key = format!("{:05}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", &key, &value).await.unwrap();
+            writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit().unwrap();
+        writer.commit::<&str, &Int32Array>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, Int32Array>(&id_2).unwrap();
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_2)
+            .await
+            .unwrap();
         for i in 0..5 {
             let key = format!("{:05}", i);
             println!("Getting key: {}", key);
@@ -362,16 +373,22 @@ mod tests {
         }
 
         // Add 1200 more entries, causing splits
-        let writer = blockfile_provider.fork::<&str, &Int32Array>(&id_2).unwrap();
+        let writer = blockfile_provider
+            .fork::<&str, &Int32Array>(&id_2)
+            .await
+            .unwrap();
         let id_3 = writer.id();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", &key, &value).await.unwrap();
+            writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit().unwrap();
+        writer.commit::<&str, &Int32Array>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, Int32Array>(&id_3).unwrap();
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_3)
+            .await
+            .unwrap();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
@@ -403,12 +420,15 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = format!("{:04}", i);
-            writer.set("key", &key, &value).await.unwrap();
+            writer
+                .set("key", key.as_str(), value.as_str())
+                .await
+                .unwrap();
         }
 
-        writer.commit().unwrap();
+        writer.commit::<&str, &str>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, &str>(&id).unwrap();
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
@@ -431,12 +451,12 @@ mod tests {
         for i in 0..n {
             let key = i as f32;
             let value = format!("{:04}", i);
-            writer.set("key", key, &value).await.unwrap();
+            writer.set("key", key, value.as_str()).await.unwrap();
         }
 
-        writer.commit().unwrap();
+        writer.commit::<f32, &str>().unwrap();
 
-        let reader = provider.open::<f32, &str>(&id).unwrap();
+        let reader = provider.open::<f32, &str>(&id).await.unwrap();
         for i in 0..n {
             let key = i as f32;
             let value = reader.get("key", key).await.unwrap();
@@ -461,12 +481,13 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
-            writer.set("key", &key, &value).await.unwrap();
+            writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit().unwrap();
+        writer.commit::<&str, &roaring::RoaringBitmap>().unwrap();
 
         let reader = blockfile_provider
             .open::<&str, roaring::RoaringBitmap>(&id)
+            .await
             .unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
@@ -497,9 +518,9 @@ mod tests {
             writer.set("key", key, value).await.unwrap();
         }
 
-        writer.commit().unwrap();
+        writer.commit::<u32, u32>().unwrap();
 
-        let reader = blockfile_provider.open::<u32, u32>(&id).unwrap();
+        let reader = blockfile_provider.open::<u32, u32>(&id).await.unwrap();
         for i in 0..n {
             let key = i as u32;
             let value = reader.get("key", key).await.unwrap();
@@ -529,12 +550,15 @@ mod tests {
                 document: None,
                 metadata: Some(metdata),
             };
-            writer.set("key", &key, &value).await.unwrap();
+            writer.set("key", key.as_str(), &value).await.unwrap();
         }
 
-        writer.commit().unwrap();
+        writer.commit::<&str, &DataRecord>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, DataRecord>(&id).unwrap();
+        let reader = blockfile_provider
+            .open::<&str, DataRecord>(&id)
+            .await
+            .unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();

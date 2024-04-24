@@ -43,16 +43,16 @@ impl HashMapBlockfileProvider {
         V: Value + Writeable + ArrowWriteableValue + 'new,
     >(
         &self,
-    ) -> Result<BlockfileWriter<K, V>, Box<CreateError>> {
-        let writer: MemoryBlockfileWriter<K, V> =
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
+        let writer: MemoryBlockfileWriter =
             MemoryBlockfileWriter::new(self.storage_manager.clone());
-        Ok(BlockfileWriter::<K, V>::MemoryBlockfileWriter(writer))
+        Ok(BlockfileWriter::MemoryBlockfileWriter(writer))
     }
 
     pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,
-    ) -> Result<BlockfileWriter<K, V>, Box<CreateError>> {
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
         todo!();
     }
 }

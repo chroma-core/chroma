@@ -50,7 +50,7 @@ pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: String,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -269,7 +269,7 @@ impl SysDb for GrpcSysDb {
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: String,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -292,7 +292,7 @@ impl SysDb for GrpcSysDb {
 
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
-            collection_id,
+            collection_id: collection_id.to_string(),
             log_position,
             collection_version,
             segment_compaction_info,

@@ -10,6 +10,7 @@ use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
 use roaring::RoaringBitmap;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
@@ -174,28 +175,34 @@ impl<'a> Value for &DataRecord<'a> {
 }
 
 #[derive(Clone)]
-pub(crate) enum BlockfileWriter<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> {
-    MemoryBlockfileWriter(MemoryBlockfileWriter<K, V>),
-    ArrowBlockfileWriter(ArrowBlockfileWriter<K, V>),
+pub(crate) enum BlockfileWriter {
+    MemoryBlockfileWriter(MemoryBlockfileWriter),
+    ArrowBlockfileWriter(ArrowBlockfileWriter),
 }
 
-impl<K: Key + Into<KeyWrapper> + ArrowWriteableKey, V: Value + Writeable + ArrowWriteableValue>
-    BlockfileWriter<K, V>
-{
-    pub(crate) fn commit(self) -> Result<BlockfileFlusher<K, V>, Box<dyn ChromaError>> {
+impl BlockfileWriter {
+    pub(crate) fn commit<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        self,
+    ) -> Result<BlockfileFlusher, Box<dyn ChromaError>> {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => match writer.commit() {
                 Ok(_) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(())),
                 Err(e) => Err(e),
             },
-            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit() {
+            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit::<K, V>() {
                 Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
                 Err(e) => Err(e),
             },
         }
     }
 
-    pub(crate) async fn set(
+    pub(crate) async fn set<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
         &self,
         prefix: &str,
         key: K,
@@ -215,16 +222,29 @@ impl<K: Key + Into<KeyWrapper> + ArrowWriteableKey, V: Value + Writeable + Arrow
     }
 }
 
-pub(crate) enum BlockfileFlusher<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> {
+pub(crate) enum BlockfileFlusher {
     MemoryBlockfileFlusher(()),
-    ArrowBlockfileFlusher(ArrowBlockfileFlusher<K, V>),
+    ArrowBlockfileFlusher(ArrowBlockfileFlusher),
 }
 
-impl<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue> BlockfileFlusher<K, V> {
-    pub(crate) async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+impl BlockfileFlusher {
+    pub(crate) async fn flush<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        self,
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => Ok(()),
-            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.flush().await,
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.flush::<K, V>().await,
+        }
+    }
+
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        match self {
+            // TODO: should memory blockfiles have ids?
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => uuid::Uuid::nil(),
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
         }
     }
 }

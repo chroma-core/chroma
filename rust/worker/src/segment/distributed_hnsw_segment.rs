@@ -5,15 +5,19 @@ use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
 use crate::types::{LogRecord, Operation, Segment};
 use async_trait::async_trait;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 use uuid::Uuid;
+
+const HNSW_INDEX: &str = "hnsw_index";
 
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
     hnsw_index_provider: HnswIndexProvider,
-    id: Uuid,
+    pub(crate) id: Uuid,
 }
 
 impl Debug for DistributedHNSWSegment {
@@ -35,7 +39,7 @@ impl DistributedHNSWSegment {
         });
     }
 
-    pub(crate) fn from_segment(
+    pub(crate) async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
@@ -49,7 +53,20 @@ impl DistributedHNSWSegment {
         // we can introduce a state in the segment metadata for this
         if segment.file_path.len() > 0 {
             // Load the index from the files
-            unimplemented!();
+            // TODO: we should not unwrap here
+            let index_id = &segment.file_path.get(HNSW_INDEX).unwrap()[0];
+            let index_uuid = Uuid::parse_str(index_id.as_str()).unwrap();
+            let index = hnsw_index_provider
+                .load(&index_uuid, segment, dimensionality as i32)
+                .await;
+            match index {
+                Ok(index) => Ok(Box::new(DistributedHNSWSegment::new(
+                    index,
+                    hnsw_index_provider,
+                    segment.id,
+                )?)),
+                Err(e) => Err(e),
+            }
         } else {
             let index = hnsw_index_provider.create(segment, dimensionality as i32)?;
             Ok(Box::new(DistributedHNSWSegment::new(
@@ -140,8 +157,11 @@ impl SegmentWriter for DistributedHNSWSegment {
 
 #[async_trait]
 impl SegmentFlusher for DistributedHNSWSegment {
-    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.read().id;
-        self.hnsw_index_provider.flush(&hnsw_index_id).await
+        self.hnsw_index_provider.flush(&hnsw_index_id).await?;
+        let mut flushed_files = HashMap::new();
+        flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
+        Ok(flushed_files)
     }
 }

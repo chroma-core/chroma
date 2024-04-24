@@ -11,6 +11,7 @@ use crate::{
         provider::{BlockfileProvider, CreateError, OpenError},
         BlockfileReader, BlockfileWriter, Key, Value,
     },
+    errors::ChromaError,
     storage::Storage,
 };
 use core::panic;
@@ -35,7 +36,7 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub(crate) fn open<
+    pub(crate) async fn open<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
@@ -43,7 +44,7 @@ impl ArrowBlockfileProvider {
         &self,
         id: &uuid::Uuid,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
-        let sparse_index = self.sparse_index_manager.get(id);
+        let sparse_index = self.sparse_index_manager.get::<K>(id).await;
         match sparse_index {
             Some(sparse_index) => Ok(BlockfileReader::ArrowBlockfileReader(
                 ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
@@ -60,10 +61,10 @@ impl ArrowBlockfileProvider {
         V: Value + crate::blockstore::memory::storage::Writeable + ArrowWriteableValue + 'new,
     >(
         &self,
-    ) -> Result<crate::blockstore::BlockfileWriter<K, V>, Box<CreateError>> {
+    ) -> Result<crate::blockstore::BlockfileWriter, Box<CreateError>> {
         // Create a new blockfile and return a writer
         let new_id = Uuid::new_v4();
-        let file = ArrowBlockfileWriter::new(
+        let file = ArrowBlockfileWriter::new::<K, V>(
             new_id,
             self.block_manager.clone(),
             self.sparse_index_manager.clone(),
@@ -71,12 +72,13 @@ impl ArrowBlockfileProvider {
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
-    pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+    pub(crate) async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,
-    ) -> Result<crate::blockstore::BlockfileWriter<K, V>, Box<CreateError>> {
+    ) -> Result<crate::blockstore::BlockfileWriter, Box<CreateError>> {
+        println!("Forking blockfile from {:?}", id);
         let new_id = Uuid::new_v4();
-        let new_sparse_index = self.sparse_index_manager.fork(id, new_id);
+        let new_sparse_index = self.sparse_index_manager.fork::<K>(id, new_id).await;
         let file = ArrowBlockfileWriter::from_sparse_index(
             new_id,
             self.block_manager.clone(),
@@ -171,7 +173,7 @@ impl BlockManager {
                                 return None;
                             }
                         }
-                        let block = Block::from_bytes(&buf);
+                        let block = Block::from_bytes(&buf, *id);
                         match block {
                             Ok(block) => {
                                 self.read_cache.write().insert(*id, block.clone());
@@ -255,8 +257,70 @@ impl SparseIndexManager {
         }
     }
 
-    pub fn get(&self, id: &Uuid) -> Option<SparseIndex> {
-        self.cache.read().get(id).cloned()
+    pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
+        &self,
+        id: &Uuid,
+    ) -> Option<SparseIndex> {
+        let read = match self.cache.read().get(id) {
+            Some(index) => Some(index.clone()),
+            None => None,
+        };
+        match read {
+            Some(index) => Some(index),
+            None => {
+                println!("Cache miss - fetching sparse index from storage");
+                // TODO: move this to a separate function
+                let key = format!("sparse_index/{}", id);
+                let bytes = self.storage.get(&key).await;
+                let mut buf: Vec<u8> = Vec::new();
+                match bytes {
+                    Ok(mut bytes) => {
+                        let res = bytes.read_to_end(&mut buf).await;
+                        match res {
+                            Ok(_) => {}
+                            Err(e) => {
+                                // TODO: return error
+                                println!("Error reading sparse index from storage: {}", e);
+                                return None;
+                            }
+                        }
+                        let block = Block::from_bytes(&buf, *id);
+                        match block {
+                            Ok(block) => {
+                                let block_ref = &block;
+                                // Use unsafe to promote the liftimes using unsafe, we know block lives as long as it needs to
+                                // it only needs to live as long as the SparseIndex is created in from_block
+                                // the sparse index copies the block so it can live as long as it needs to independently
+                                let promoted_block: &'new Block =
+                                    unsafe { std::mem::transmute(block_ref) };
+                                let index = SparseIndex::from_block::<K>(promoted_block);
+                                match index {
+                                    Ok(index) => {
+                                        self.cache.write().insert(*id, index.clone());
+                                        return Some(index);
+                                    }
+                                    Err(e) => {
+                                        // TODO: return error
+                                        println!("Error turning block into sparse index: {}", e);
+                                        return None;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // TODO: return error
+                                println!("Error turning bytes into block: {}", e);
+                                return None;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // TODO: return error
+                        println!("Error reading sparse index from storage: {}", e);
+                        return None;
+                    }
+                }
+            }
+        }
     }
 
     pub fn create(&self, id: &Uuid) -> SparseIndex {
@@ -268,8 +332,8 @@ impl SparseIndexManager {
         self.cache.write().insert(index.id, index);
     }
 
-    pub async fn flush<K: ArrowWriteableKey>(&self, id: &Uuid) {
-        let index = self.get(id);
+    pub async fn flush<'read, K: ArrowWriteableKey + 'read>(&self, id: &Uuid) {
+        let index = self.get::<K::ReadableKey<'read>>(id).await;
         match index {
             Some(index) => {
                 let as_block = index.to_block::<K>();
@@ -300,9 +364,14 @@ impl SparseIndexManager {
         }
     }
 
-    pub fn fork(&self, old_id: &Uuid, new_id: Uuid) -> SparseIndex {
+    pub async fn fork<'key, K: ArrowWriteableKey + 'key>(
+        &self,
+        old_id: &Uuid,
+        new_id: Uuid,
+    ) -> SparseIndex {
         // TODO: error handling
-        let original = self.get(old_id).unwrap();
+        println!("Forking sparse index from {:?}", old_id);
+        let original = self.get::<K::ReadableKey<'key>>(old_id).await.unwrap();
         let forked = original.fork(new_id);
         self.cache.write().insert(new_id, forked.clone());
         forked

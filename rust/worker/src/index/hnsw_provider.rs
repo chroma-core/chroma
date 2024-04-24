@@ -4,6 +4,7 @@ use crate::{errors::ChromaError, storage::Storage, types::Segment};
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -48,6 +49,72 @@ impl HnswIndexProvider {
         cache.get(id).cloned()
     }
 
+    // TODO: THIS SHOULD BE FORK AND SHOULD NOT OVERWITE THE SAME HNSW INDEX EVERYTIME
+    pub(crate) async fn load(
+        &self,
+        id: &Uuid,
+        segment: &Segment,
+        dimensionality: i32,
+    ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
+        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+        self.create_dir_all(&index_storage_path)?;
+
+        // Fetch the files from storage and put them in the index storage path
+        for file in FILES.iter() {
+            // TOOD: put key formatting as function
+            let key = format!("hnsw/{}/{}", id, file);
+            println!("Loading hnsw index file: {}", key);
+            let res = self.storage.get(&key).await;
+            let mut reader = match res {
+                Ok(reader) => reader,
+                Err(e) => {
+                    // TODO: return Err(e);
+                    panic!("Failed to load hnsw index file from storage: {}", e);
+                }
+            };
+
+            let file_path = index_storage_path.join(file);
+            // For now, we never evict from the cache, so if the index is being loaded, the file does not exist
+            let file_handle = tokio::fs::File::create(&file_path).await;
+            let mut file_handle = match file_handle {
+                Ok(file) => file,
+                Err(e) => {
+                    // TODO: cleanup created files if this fails
+                    panic!("Failed to create file: {}", e);
+                }
+            };
+            let copy_res = tokio::io::copy(&mut reader, &mut file_handle).await;
+            match copy_res {
+                Ok(_) => {
+                    println!(
+                        "Copied storage key: {} to file: {}",
+                        key,
+                        file_path.to_str().unwrap()
+                    );
+                }
+                Err(e) => {
+                    // TODO: cleanup created files if this fails and error handle
+                    panic!("Failed to copy file: {}", e);
+                }
+            }
+            // bytes is an AsyncBufRead, so we fil and consume it to a file
+            println!("Loaded hnsw index file: {}", file);
+        }
+
+        let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
+        let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
+        // TODO: don't unwrap path conv here
+        match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
+            Ok(index) => {
+                let index = Arc::new(RwLock::new(index));
+                let mut cache = self.cache.write();
+                cache.insert(*id, index.clone());
+                Ok(index)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     // Compactor
     // Cases
     // A write comes in and no files are in the segment -> we know we need to create a new index
@@ -61,19 +128,13 @@ impl HnswIndexProvider {
 
     pub(crate) fn create(
         &self,
+        // TODO: This should not take Segment. The index layer should not know about the segment concept
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
         let id = Uuid::new_v4();
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        // Create the storage path, if it doesn't exist
-        match std::fs::create_dir_all(&index_storage_path) {
-            Ok(_) => {}
-            Err(e) => {
-                // TODO: log error
-                panic!("Failed to create index storage path: {}", e);
-            }
-        }
+        self.create_dir_all(&index_storage_path)?;
         let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
         let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
         let mut cache = self.cache.write();
@@ -132,5 +193,15 @@ impl HnswIndexProvider {
             }
         }
         Ok(())
+    }
+
+    fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<dyn ChromaError>> {
+        match std::fs::create_dir_all(path) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // TODO: return error
+                panic!("Failed to create directory: {}", e);
+            }
+        }
     }
 }

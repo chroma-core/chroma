@@ -1,25 +1,32 @@
+use crate::errors::ChromaError;
+use crate::errors::ErrorCodes;
 use crate::execution::operator::Operator;
+use crate::log::log::Log;
+use crate::log::log::UpdateCollectionLogOffsetError;
 use crate::sysdb::sysdb::FlushCompactionError;
 use crate::sysdb::sysdb::SysDb;
 use crate::types::FlushCompactionResponse;
 use crate::types::SegmentFlushInfo;
 use async_trait::async_trait;
 use std::sync::Arc;
+use thiserror::Error;
+use uuid::Uuid;
 
-/// The flush sysdb operator is responsible for flushing compaction data to the sysdb.
+/// The register  operator is responsible for flushing compaction data to the sysdb
+/// as well as updating the log offset in the log service.
 #[derive(Debug)]
-pub struct FlushSysDbOperator {}
+pub struct RegisterOperator {}
 
-impl FlushSysDbOperator {
+impl RegisterOperator {
     /// Create a new flush sysdb operator.
     pub fn new() -> Box<Self> {
-        Box::new(FlushSysDbOperator {})
+        Box::new(RegisterOperator {})
     }
 }
 
 #[derive(Debug)]
 /// The input for the flush sysdb operator.
-/// This input is used to flush compaction data to the sysdb.
+/// This input is used to flush compaction data to the sysdb as well as update the log offset in the log service.
 /// # Parameters
 /// * `tenant` - The tenant id.
 /// * `collection_id` - The collection id.
@@ -30,32 +37,37 @@ impl FlushSysDbOperator {
 /// collection version in sysdb is not the same as the current collection version, the flush operation
 /// will fail.
 /// * `segment_flush_info` - The segment flush info.
-pub struct FlushSysDbInput {
+/// * `sysdb` - The sysdb client.
+/// * `log` - The log client.
+pub struct RegisterInput {
     tenant: String,
-    collection_id: String,
+    collection_id: Uuid,
     log_position: i64,
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
     sysdb: Box<dyn SysDb>,
+    log: Box<dyn Log>,
 }
 
-impl FlushSysDbInput {
+impl RegisterInput {
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
-        collection_id: String,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         sysdb: Box<dyn SysDb>,
+        log: Box<dyn Log>,
     ) -> Self {
-        FlushSysDbInput {
+        RegisterInput {
             tenant,
             collection_id,
             log_position,
             collection_version,
             segment_flush_info,
             sysdb,
+            log,
         }
     }
 }
@@ -64,18 +76,36 @@ impl FlushSysDbInput {
 /// # Parameters
 /// * `result` - The result of the flush compaction operation.
 #[derive(Debug)]
-pub struct FlushSysDbOutput {
-    result: FlushCompactionResponse,
+pub struct RegisterOutput {
+    sysdb_registration_result: FlushCompactionResponse,
 }
 
-pub type FlushSysDbResult = Result<FlushSysDbOutput, FlushCompactionError>;
+#[derive(Error, Debug)]
+pub(crate) enum RegisterError {
+    #[error("Flush compaction error: {0}")]
+    FlushCompactionError(#[from] FlushCompactionError),
+    #[error("Update log offset error: {0}")]
+    UpdateLogOffsetError(#[from] UpdateCollectionLogOffsetError),
+}
+
+impl ChromaError for RegisterError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            RegisterError::FlushCompactionError(e) => e.code(),
+            RegisterError::UpdateLogOffsetError(e) => e.code(),
+        }
+    }
+}
+
+pub type RegisterResult = Result<RegisterOutput, RegisterError>;
 
 #[async_trait]
-impl Operator<FlushSysDbInput, FlushSysDbOutput> for FlushSysDbOperator {
-    type Error = FlushCompactionError;
+impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
+    type Error = RegisterError;
 
-    async fn run(&self, input: &FlushSysDbInput) -> FlushSysDbResult {
+    async fn run(&self, input: &RegisterInput) -> RegisterResult {
         let mut sysdb = input.sysdb.clone();
+        let mut log = input.log.clone();
         let result = sysdb
             .flush_compaction(
                 input.tenant.clone(),
@@ -85,9 +115,20 @@ impl Operator<FlushSysDbInput, FlushSysDbOutput> for FlushSysDbOperator {
                 input.segment_flush_info.clone(),
             )
             .await;
+        let sysdb_registration_result = match result {
+            Ok(response) => response,
+            Err(error) => return Err(RegisterError::FlushCompactionError(error)),
+        };
+
+        let result = log
+            .update_collection_log_offset(input.collection_id, input.log_position)
+            .await;
+
         match result {
-            Ok(response) => Ok(FlushSysDbOutput { result: response }),
-            Err(error) => Err(error),
+            Ok(_) => Ok(RegisterOutput {
+                sysdb_registration_result: sysdb_registration_result,
+            }),
+            Err(error) => Err(RegisterError::UpdateLogOffsetError(error)),
         }
     }
 }
@@ -95,6 +136,7 @@ impl Operator<FlushSysDbInput, FlushSysDbOutput> for FlushSysDbOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::log::log::InMemoryLog;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::types::Collection;
     use crate::types::Segment;
@@ -105,8 +147,9 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
-    async fn test_flush_sysdb_operator() {
+    async fn test_register_operator() {
         let mut sysdb = Box::new(TestSysDb::new());
+        let mut log = Box::new(InMemoryLog::new());
         let collection_version = 0;
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
@@ -180,22 +223,29 @@ mod tests {
         ];
 
         let log_position = 100;
-        let operator = FlushSysDbOperator::new();
-        let input = FlushSysDbInput::new(
+        let operator = RegisterOperator::new();
+        let input = RegisterInput::new(
             tenant_1.clone(),
-            collection_uuid_1.to_string(),
+            collection_uuid_1,
             log_position,
             collection_version,
             segment_flush_info.into(),
             sysdb.clone(),
+            log.clone(),
         );
 
         let result = operator.run(&input).await;
 
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.result.collection_id, collection_uuid_1.to_string());
-        assert_eq!(result.result.collection_version, collection_version + 1);
+        assert_eq!(
+            result.sysdb_registration_result.collection_id,
+            collection_uuid_1
+        );
+        assert_eq!(
+            result.sysdb_registration_result.collection_version,
+            collection_version + 1
+        );
 
         let collections = sysdb
             .get_collections(Some(collection_uuid_1), None, None, None)

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{LogRecord, Metadata};
@@ -54,7 +56,7 @@ pub(crate) trait SegmentWriter {
 
 #[async_trait]
 pub(crate) trait SegmentFlusher {
-    async fn flush(self) -> Result<(), Box<dyn ChromaError>>;
+    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
 }
 
 #[async_trait]
