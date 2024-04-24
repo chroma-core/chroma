@@ -175,7 +175,7 @@ impl CustomResourceMemberlistProvider {
         };
 
         for subscriber in self.subscribers.iter() {
-            let _ = subscriber.send(curr_memberlist.clone()).await;
+            let _ = subscriber.send(curr_memberlist.clone(), None).await;
         }
     }
 }
