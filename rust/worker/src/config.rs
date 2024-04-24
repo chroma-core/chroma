@@ -176,7 +176,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
-                
+
                 compaction_service:
                     my_ip: "192.0.0.1"
                     my_port: 50051
@@ -344,7 +344,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
-                
+
                 compaction_service:
                     my_ip: "192.0.0.1"
                     my_port: 50051
@@ -417,7 +417,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
-                
+
                 compaction_service:
                     assignment_policy:
                         RendezvousHashing:

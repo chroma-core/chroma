@@ -35,36 +35,18 @@ def many_unique_names(draw: st.DrawFn) -> List[str]:
 @st.composite
 def random_token(draw: st.DrawFn) -> str:
     return draw(
-        st.text(
-            alphabet=string.ascii_letters + string.digits,
-            min_size=1,
-            max_size=50
-        )
+        st.text(alphabet=string.ascii_letters + string.digits, min_size=1, max_size=50)
     )
 
 
 @st.composite
 def random_token_transport_header(draw: st.DrawFn) -> Optional[str]:
-    return draw(
-        st.sampled_from(
-            [
-                "AUTHORIZATION",
-                "X_CHROMA_TOKEN",
-                None
-            ]
-        )
-    )
+    return draw(st.sampled_from(["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
 
 
 @st.composite
 def random_user_name(draw: st.DrawFn) -> str:
-    return draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=1,
-            max_size=20
-        )
-    )
+    return draw(st.text(alphabet=string.ascii_letters, min_size=1, max_size=20))
 
 
 @st.composite
@@ -74,15 +56,11 @@ def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
             st.fixed_dictionaries(
                 {
                     "id": random_user_name(),
-                    "tokens": st.lists(
-                        random_token(),
-                        min_size=3,
-                        max_size=10
-                    )
+                    "tokens": st.lists(random_token(), min_size=3, max_size=10),
                 }
             ),
             min_size=1,
-            max_size=1
+            max_size=1,
         )
     )
     unseen_users = []
@@ -107,10 +85,7 @@ def random_users_with_tokens(draw: st.DrawFn) -> List[Dict[str, Any]]:
 def token_test_conf(draw: st.DrawFn) -> Dict[str, Any]:
     users = draw(random_users_with_tokens())
     filename = _dump_to_tmpfile({"users": users})
-    return {
-        "users": users,
-        "filename": filename
-    }
+    return {"users": users, "filename": filename}
 
 
 valid_action_space = [
@@ -137,40 +112,22 @@ valid_action_space = [
 
 
 def unauthorized_actions(authorized_actions: List[str]) -> List[str]:
-    return [
-        action
-        for action in valid_action_space
-        if action not in authorized_actions
-    ]
+    return [action for action in valid_action_space if action not in authorized_actions]
 
 
 @st.composite
 def random_role_name(draw: st.DrawFn) -> str:
-    return draw(
-        st.text(
-            alphabet=string.ascii_letters,
-            min_size=1,
-            max_size=20
-        )
-    )
+    return draw(st.text(alphabet=string.ascii_letters, min_size=1, max_size=20))
 
 
 @st.composite
 def random_action(draw: st.DrawFn) -> str:
-    return draw(
-        st.sampled_from(valid_action_space)
-    )
+    return draw(st.sampled_from(valid_action_space))
 
 
 @st.composite
 def random_allowed_actions_for_role(draw: st.DrawFn) -> List[str]:
-    actions = draw(
-        st.sets(
-            random_action(),
-            min_size=1,
-            max_size=10
-        )
-    )
+    actions = draw(st.sets(random_action(), min_size=1, max_size=10))
 
     if any(
         action in actions
@@ -202,13 +159,10 @@ def random_roles(draw: st.DrawFn) -> List[Dict[str, Any]]:
     roles = draw(
         st.lists(
             st.fixed_dictionaries(
-                {
-                    "id": random_role_name(),
-                    "actions": random_allowed_actions_for_role()
-                }
+                {"id": random_role_name(), "actions": random_allowed_actions_for_role()}
             ),
             min_size=1,
-            max_size=10
+            max_size=10,
         ),
     )
     unseen_roles = []
@@ -224,11 +178,7 @@ def random_roles(draw: st.DrawFn) -> List[Dict[str, Any]]:
 def _transform_roles_for_flush(roles: List[Dict[str, Any]]) -> Dict[str, Any]:
     roles_mapping = {}
     for role in roles:
-        roles_mapping.update({
-            role["id"]: {
-                "actions": role["actions"]
-            }
-        })
+        roles_mapping.update({role["id"]: {"actions": role["actions"]}})
     return roles_mapping
 
 
@@ -239,25 +189,13 @@ def random_users_and_roles(draw: st.DrawFn) -> Dict[str, Any]:
     for user in users:
         role_index = draw(st.integers(min_value=0, max_value=len(roles) - 1))
         user["role"] = roles[role_index]["id"]
-    return {
-        "users": users,
-        "roles": roles
-    }
+    return {"users": users, "roles": roles}
 
 
 def _root_user_and_role() -> Dict[str, Any]:
     return {
-        "users": [{
-            "id": "__root__",
-            "tokens": ["__root__"],
-            "role": "__root__"
-        }],
-        "roles": [
-            {
-                "id": "__root__",
-                "actions": valid_action_space
-            }
-        ]
+        "users": [{"id": "__root__", "tokens": ["__root__"], "role": "__root__"}],
+        "roles": [{"id": "__root__", "actions": valid_action_space}],
     }
 
 
@@ -268,14 +206,16 @@ def rbac_test_conf(draw: st.DrawFn) -> Dict[str, Any]:
     users_and_roles["users"].extend(root_user_and_role["users"])
     users_and_roles["roles"].extend(root_user_and_role["roles"])
 
-    filename = _dump_to_tmpfile({
-        "users": users_and_roles["users"],
-        "roles_mapping": _transform_roles_for_flush(users_and_roles["roles"])
-    })
+    filename = _dump_to_tmpfile(
+        {
+            "users": users_and_roles["users"],
+            "roles_mapping": _transform_roles_for_flush(users_and_roles["roles"]),
+        }
+    )
     return {
         "users": users_and_roles["users"],
         "roles": users_and_roles["roles"],
-        "filename": filename
+        "filename": filename,
     }
 
 
