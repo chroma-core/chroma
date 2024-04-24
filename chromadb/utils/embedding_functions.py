@@ -372,6 +372,41 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 
+class SpacyEmbeddingFunction():
+    def __init__(self, model_name: str = "lg"):
+        try:
+            import spacy
+        except ImportError:
+            raise ValueError(
+                "The spacy python package is not installed. Please install it with `pip install spacy`"
+            )
+        self._model_name = model_name
+        
+        try: 
+            self._nlp = spacy.load("en_core_web_{model}".format(model=self._model_name))
+        except OSError:
+            raise ValueError(
+                "spacy models are not downloaded, please download them using `spacy download en-core-web-lg or en-core-web-md`"
+            )
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            texts (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> spacy_fn = SpacyEmbeddingFunction(model_name="md")
+            >>> input = ["Hello, world!", "How are you?"]
+            >>> embeddings = spacy_fn(input)
+        """
+
+        return [self._nlp(doc).vector for doc in input]
+
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
 # implements the same functionality as "all-MiniLM-L6-v2" from sentence-transformers.
