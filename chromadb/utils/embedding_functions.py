@@ -372,7 +372,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 
-class SpacyEmbeddingFunction():
+class SpacyEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(self, model_name: str = "lg"):
         try:
             import spacy
