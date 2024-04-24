@@ -4,6 +4,7 @@ import { IncludeEnum } from "../src/types";
 import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 
 import { IEmbeddingFunction } from "../src/embeddings/IEmbeddingFunction";
+import { InvalidCollectionError } from "../src/Errors";
 
 export class TestEmbeddingFunction implements IEmbeddingFunction {
   constructor() {}
@@ -55,7 +56,7 @@ test("it should get embedding with matching documents", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
+    expect.arrayContaining(results.documents[0])
   );
 
   const results2 = await collection.query({
@@ -120,7 +121,7 @@ test("it should query a collection with text", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
+    expect.arrayContaining(results.documents[0])
   );
 });
 
@@ -150,7 +151,7 @@ test("it should query a collection with text and where", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
+    expect.arrayContaining(results.documents[0])
   );
 });
 
@@ -180,7 +181,7 @@ test("it should query a collection with text and where in", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
+    expect.arrayContaining(results.documents[0])
   );
 });
 
@@ -210,6 +211,15 @@ test("it should query a collection with text and where nin", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
+    expect.arrayContaining(results.documents[0])
   );
+});
+
+test("should error on non existing collection", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.deleteCollection({ name: "test" });
+  expect(async () => {
+    await collection.query({ queryEmbeddings: [1, 2, 3] });
+  }).rejects.toThrow(InvalidCollectionError);
 });

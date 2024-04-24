@@ -7,6 +7,7 @@ import {
   ChromaServerError,
   ChromaValueError,
   ChromaError,
+  createErrorByType,
 } from "./Errors";
 import { FetchAPI } from "./generated";
 
@@ -50,6 +51,10 @@ export const chromaFetch: FetchAPI = async (
     const clonedResp = resp.clone();
     const respBody = await clonedResp.json();
     if (!clonedResp.ok) {
+      const error = createErrorByType(respBody?.error, respBody?.message);
+      if (error) {
+        throw error;
+      }
       switch (resp.status) {
         case 400:
           throw new ChromaClientError(
