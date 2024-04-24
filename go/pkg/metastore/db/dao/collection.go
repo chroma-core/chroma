@@ -33,10 +33,10 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	var collections []*dbmodel.CollectionAndMetadata
 
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, collections.created_at, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Order("collections.id")
+		Order("collections.id asc")
 	if limit != nil {
 		query = query.Limit(int(*limit))
 		getCollectionInput.WriteString("limit: " + string(*limit) + ", ")
@@ -85,6 +85,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 			collectionName       string
 			collectionDimension  sql.NullInt32
 			collectionDatabaseID string
+			collectionCreatedAt  sql.NullTime
 			databaseName         string
 			databaseTenantID     string
 			key                  sql.NullString
@@ -93,7 +94,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 			floatValue           sql.NullFloat64
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionDimension, &collectionDatabaseID, &collectionCreatedAt, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
@@ -118,6 +119,9 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 				currentCollection.Collection.Dimension = &collectionDimension.Int32
 			} else {
 				currentCollection.Collection.Dimension = nil
+			}
+			if collectionCreatedAt.Valid {
+				currentCollection.Collection.CreatedAt = collectionCreatedAt.Time
 			}
 
 			if currentCollectionID != "" {

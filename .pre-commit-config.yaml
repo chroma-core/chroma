@@ -1,4 +1,4 @@
-exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2)\.(py|pyi|py_grpc\.py)' # Generated files
+exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2)\.(py|pyi|py_grpc\.py)' # Generated files
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -6,6 +6,7 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
       - id: end-of-file-fixer
+        exclude: "go/migrations"
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
@@ -32,9 +33,26 @@ repos:
     rev: "v1.2.0"
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract, --config-file=./pyproject.toml]
-        additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika", "numpy", "types-protobuf", "kubernetes"]
-
+        args:
+          [
+            --strict,
+            --ignore-missing-imports,
+            --follow-imports=silent,
+            --disable-error-code=type-abstract,
+            --config-file=./pyproject.toml,
+          ]
+        additional_dependencies:
+          [
+            "types-requests",
+            "pydantic",
+            "overrides",
+            "hypothesis",
+            "pytest",
+            "pypika",
+            "numpy",
+            "types-protobuf",
+            "kubernetes",
+          ]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.1.0"

@@ -1,6 +1,5 @@
 import base64
 import bcrypt
-import importlib
 import logging
 
 from fastapi import HTTPException
@@ -31,25 +30,20 @@ class BasicAuthClientProvider(ClientAuthProvider):
     Client auth provider for basic auth. The credentials are passed as a
     base64-encoded string in the Authorization header prepended with "Basic ".
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
         system.settings.require("chroma_client_auth_credentials")
-        self._creds = SecretStr(
-            str(system.settings.chroma_client_auth_credentials)
-        )
+        self._creds = SecretStr(str(system.settings.chroma_client_auth_credentials))
 
     @override
     def authenticate(self) -> ClientAuthHeaders:
         encoded = base64.b64encode(
             f"{self._creds.get_secret_value()}".encode("utf-8")
-        ).decode(
-            "utf-8"
-        )
+        ).decode("utf-8")
         return {
-            "Authorization": SecretStr(
-                f"Basic {encoded}"
-            ),
+            "Authorization": SecretStr(f"Basic {encoded}"),
         }
 
 
@@ -62,6 +56,7 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
     Expects tokens to be passed as a base64-encoded string in the Authorization
     header prepended with "Basic".
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -73,8 +68,12 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
             if not line.strip():
                 continue
             _raw_creds = [v for v in line.strip().split(":")]
-            if (_raw_creds and _raw_creds[0] and
-                    len(_raw_creds) != 2 or not all(_raw_creds)):
+            if (
+                _raw_creds
+                and _raw_creds[0]
+                and len(_raw_creds) != 2
+                or not all(_raw_creds)
+            ):
                 raise ValueError(
                     f"Invalid htpasswd credentials found: {_raw_creds}. "
                     "Lines must be exactly <username>:<bcrypt passwd>."
@@ -89,12 +88,11 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 )
             self._creds[username] = SecretStr(password)
 
-    @trace_method("BasicAuthenticationServerProvider.authenticate",
-                  OpenTelemetryGranularity.ALL)
+    @trace_method(
+        "BasicAuthenticationServerProvider.authenticate", OpenTelemetryGranularity.ALL
+    )
     @override
-    def authenticate_or_raise(
-        self, headers: Headers
-    ) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
         try:
             _auth_header = headers["Authorization"]
             _auth_header = _auth_header.replace("Basic ", "")
@@ -115,7 +113,6 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
 
         except Exception as e:
             logger.error(
-                "BasicAuthenticationServerProvider.authenticate "
-                f"failed: {repr(e)}"
+                "BasicAuthenticationServerProvider.authenticate " f"failed: {repr(e)}"
             )
         raise HTTPException(status_code=403, detail="Forbidden")

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.24"
+__version__ = "0.5.0"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:
@@ -246,7 +246,9 @@ def CloudClient(
     # Always use SSL for cloud
     settings.chroma_server_ssl_enabled = enable_ssl
 
-    settings.chroma_client_auth_provider = "chromadb.auth.token_authn.TokenAuthClientProvider"
+    settings.chroma_client_auth_provider = (
+        "chromadb.auth.token_authn.TokenAuthClientProvider"
+    )
     settings.chroma_client_auth_credentials = api_key
     settings.chroma_auth_token_transport_header = (
         TokenTransportHeader.X_CHROMA_TOKEN.name

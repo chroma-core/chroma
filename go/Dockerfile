@@ -21,4 +21,3 @@ FROM debian:bookworm-slim as logservice
 WORKDIR /app
 COPY --from=builder /build-dir/bin/logservice .
 CMD ["./logservice"]
-

@@ -368,7 +368,7 @@ def test_modify_warn_on_DF_change(api, caplog):
 
     collection = api.create_collection("testspace")
 
-    with pytest.raises(Exception, match="not supported") as e:
+    with pytest.raises(Exception, match="not supported"):
         collection.modify(metadata={"hnsw:space": "cosine"})
 
 
