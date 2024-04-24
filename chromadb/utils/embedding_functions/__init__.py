@@ -87,7 +87,7 @@ def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction[Documents]]:
 _classes = [
     name
     for name, obj in inspect.getmembers(sys.modules[__name__], inspect.isclass)
-    if obj.__module__ == __name__
+    if __name__ in obj.__module__
 ]
 
 
