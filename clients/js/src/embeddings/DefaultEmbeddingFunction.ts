@@ -1,3 +1,4 @@
+import { isBrowser } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 // Dynamically import module
@@ -85,12 +86,28 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
 
   /** @ignore */
   static async import(): Promise<{
-    // @ts-ignore
+    // @ts-expect-error
     pipeline: typeof import("chromadb-default-embed");
   }> {
     try {
-      // @ts-ignore
-      const { pipeline } = await import("chromadb-default-embed");
+      let importResult;
+      if (isBrowser()) {
+        importResult = await import(
+          // todo: we can't import chromadb-default-embed here yet because the `build` script was not run before publishing our fork to NPM, so the entrypoint in our forked package points to a non-existent file.
+          // @ts-expect-error
+          "https://unpkg.com/@xenova/transformers@2.13.2"
+        );
+      } else {
+        // @ts-expect-error
+        importResult = await import("chromadb-default-embed");
+      }
+      const { pipeline, env } = importResult;
+
+      // By default, transformers.js attempts to first load models from the site origin when running in a browser (and then falls back to loading from HuggingFace).
+      // SPAs like Vite tend to break this because by default they serve the same document regardless of the path, so transformers.js sees a 200 response and treats the HTML response as model JSON.
+      // todo: expose this as a config parameter in the future?
+      env.allowLocalModels = false;
+
       return { pipeline };
     } catch (e) {
       throw new Error(
