@@ -40,40 +40,53 @@ const useDocuments = (query?: string) => {
     { document: string; relativeDistance?: number }[]
   >([]);
 
-  const revalidate = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      if (query) {
-        collection?.query({ queryTexts: query }).then((results) => {
-          const maxDistance = Math.max(...(results.distances?.[0] ?? []));
-          setDocuments(
-            results.documents[0].map((document, i) => {
-              const distance = results.distances?.[0][i] ?? 0;
-              const relativeDistance = distance / maxDistance;
+  const revalidate = useCallback(
+    async (abortSignal?: AbortSignal) => {
+      setIsLoading(true);
+      try {
+        if (query) {
+          collection?.query({ queryTexts: query }).then((results) => {
+            if (abortSignal?.aborted) {
+              return;
+            }
 
-              return {
+            const maxDistance = Math.max(...(results.distances?.[0] ?? []));
+            setDocuments(
+              results.documents[0].map((document, i) => {
+                const distance = results.distances?.[0][i] ?? 0;
+                const relativeDistance = distance / maxDistance;
+
+                return {
+                  document: document!,
+                  relativeDistance,
+                };
+              }),
+            );
+          });
+        } else {
+          collection?.get({}).then((results) => {
+            if (abortSignal?.aborted) {
+              return;
+            }
+
+            setDocuments(
+              results.documents.map((document) => ({
                 document: document!,
-                relativeDistance,
-              };
-            }),
-          );
-        });
-      } else {
-        collection?.get({}).then((results) =>
-          setDocuments(
-            results.documents.map((document) => ({
-              document: document!,
-            })),
-          ),
-        );
+              })),
+            );
+          });
+        }
+      } finally {
+        setIsLoading(false);
       }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [collection, query]);
+    },
+    [collection, query],
+  );
 
   useEffect(() => {
-    revalidate();
+    const abort = new AbortController();
+    revalidate(abort.signal);
+    return () => abort.abort();
   }, [revalidate]);
 
   return { documents, revalidate, isLoading };
@@ -143,7 +156,7 @@ export function App() {
 
       <p>
         This assumes that you have a locally running Chroma instance at port{" "}
-        <code>8000</code> and that CORS is allowed for Parcel's dev server. To
+        <code>8000</code> and that CORS is allowed for Vite's dev server. To
         start Chroma, you can use this command:
       </p>
 
