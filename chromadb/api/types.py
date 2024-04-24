@@ -394,7 +394,7 @@ def validate_where(where: Where) -> Where:
                     or not all(isinstance(x, type(operand[0])) for x in operand)
                 ):
                     raise ValueError(
-                        f"Expected where operand value to be a non-empty list, and all values to obe of the same type "
+                        f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                         f"got {operand}"
                     )
     return where
