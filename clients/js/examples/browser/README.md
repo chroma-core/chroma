@@ -1,16 +1,15 @@
 ## Demo in browser
 
-Update your settings to add `localhost:3000` to `chroma_server_cors_allow_origins`.
+First, update Chroma's config to allow the `localhost:3000` origin for CORS.
 
-For example in `docker-compose.yml`
+For example, you could start Chroma with
 
-```
-environment:
-      - CHROMA_DB_IMPL=clickhouse
-      - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_PORT=8123
-      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["http://localhost:3000"]
+```bash
+CHROMA_SERVER_CORS_ALLOW_ORIGINS='["http://localhost:3000"]' chroma run
 ```
 
-1. `yarn dev`
-2. visit `localhost:3000`
+Then, in this folder:
+
+1. `pnpm i`
+2. `pnpm dev`
+3. visit `localhost:3000`

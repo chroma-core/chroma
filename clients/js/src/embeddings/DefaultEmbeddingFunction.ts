@@ -104,7 +104,7 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
       const { pipeline, env } = importResult;
 
       // By default, transformers.js attempts to first load models from the site origin when running in a browser (and then falls back to loading from HuggingFace).
-      // SPAs like Vite tend to break this because by default they serve the same document regardless of the path, so transformers.js sees a 200 response and treats the HTML response as model JSON.
+      // SPA servers like Vite tend to break this because by default they serve the same document regardless of the path, so transformers.js sees a 200 response and treats the HTML response as model JSON.
       // todo: expose this as a config parameter in the future?
       env.allowLocalModels = false;
 
