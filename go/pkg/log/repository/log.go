@@ -90,6 +90,11 @@ func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Con
 	return
 }
 
+func (r *LogRepository) PurgeRecords(ctx context.Context) (err error) {
+	err = r.queries.PurgeRecords(ctx)
+	return
+}
+
 func NewLogRepository(conn *pgx.Conn) *LogRepository {
 	return &LogRepository{
 		conn:    conn,
