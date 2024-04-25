@@ -11,6 +11,7 @@ pub(crate) struct LocalStorage {
 
 impl LocalStorage {
     pub(crate) fn new(root: &str) -> LocalStorage {
+        // Create the local storage with the root path.
         return LocalStorage {
             root: root.to_string(),
         };
@@ -20,7 +21,6 @@ impl LocalStorage {
         &self,
         key: &str,
     ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, String> {
-        // Checks if a file exits with the key. If it does, it copies the file to the path.
         let file_path = format!("{}/{}", self.root, key);
         let file = tokio::fs::File::open(file_path).await;
         match file {
@@ -35,10 +35,13 @@ impl LocalStorage {
 
     pub(crate) async fn put_bytes(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
         let path = format!("{}/{}", self.root, key);
+        // Create the path if it doesn't exist, we unwrap since this should only be used in tests
+        let as_path = std::path::Path::new(&path);
+        let parent = as_path.parent().unwrap();
+        tokio::fs::create_dir_all(parent).await.unwrap();
         let res = tokio::fs::write(&path, bytes).await;
         match res {
             Ok(_) => {
-                println!("copied file {} to {}", path, key);
                 return Ok(());
             }
             Err(e) => {

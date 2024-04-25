@@ -321,14 +321,23 @@ impl LogMaterializer for RecordSegmentWriter {
                     let next_offset_id = self
                         .curr_max_offset_id
                         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    let metadata = log_entry.record.metadata.as_ref().unwrap();
-                    // TODO: don't unwrap
-                    let metadata = update_metdata_to_metdata(metadata).unwrap();
+                    let metadata = match &log_entry.record.metadata {
+                        Some(metadata) => match update_metdata_to_metdata(&metadata) {
+                            Ok(metadata) => Some(metadata),
+                            Err(e) => {
+                                // TODO: this should error out and return an error
+                                panic!("Error converting metadata: {}", e);
+                            }
+                        },
+                        None => None,
+                    };
                     let data_record = DataRecord {
                         id: &log_entry.record.id,
+                        // TODO: don't unwrap here, it should never happen as Adds always have embeddings
+                        // but we should handle this gracefully
                         embedding: log_entry.record.embedding.as_ref().unwrap(),
                         document: None, // TODO: document
-                        metadata: Some(metadata),
+                        metadata: metadata,
                     };
                     let materialized =
                         MaterializedLogRecord::new(next_offset_id, log_entry, data_record);

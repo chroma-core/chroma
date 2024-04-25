@@ -232,8 +232,8 @@ impl BlockManager {
                     Ok(_) => {
                         println!("Block written to storage")
                     }
-                    Err(_) => {
-                        println!("Error writing block to storage");
+                    Err(e) => {
+                        println!("Error writing block to storage {}", e);
                     }
                 }
                 // TODO: error handling

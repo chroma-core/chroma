@@ -287,6 +287,8 @@ impl Handler<Memberlist> for CompactionManager {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
@@ -299,9 +301,11 @@ mod tests {
     use crate::types::LogRecord;
     use crate::types::Operation;
     use crate::types::OperationRecord;
+    use crate::types::Segment;
 
     #[tokio::test]
     async fn test_compaction_manager() {
+        println!("Running test_compaction_manager");
         let mut log = Box::new(InMemoryLog::new());
         let tmpdir = tempfile::tempdir().unwrap();
         let storage = Box::new(Storage::Local(LocalStorage::new(
@@ -313,13 +317,13 @@ mod tests {
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
-                log_offset: 1,
+                log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
-                    log_offset: 1,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_1".to_string(),
-                        embedding: None,
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
                         encoding: None,
                         metadata: None,
                         operation: Operation::Add,
@@ -333,13 +337,13 @@ mod tests {
             collection_uuid_2.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_2.clone(),
-                log_offset: 2,
+                log_offset: 0,
                 log_ts: 2,
                 record: LogRecord {
-                    log_offset: 2,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_2".to_string(),
-                        embedding: None,
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
                         encoding: None,
                         metadata: None,
                         operation: Operation::Add,
@@ -375,6 +379,47 @@ mod tests {
         };
         sysdb.add_collection(collection_1);
         sysdb.add_collection(collection_2);
+
+        let collection_1_record_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::Record,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(collection_uuid_1),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let collection_2_record_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::Record,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(collection_uuid_2),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let collection_1_hnsw_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::HnswDistributed,
+            scope: crate::types::SegmentScope::VECTOR,
+            collection: Some(collection_uuid_1),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let collection_2_hnsw_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::HnswDistributed,
+            scope: crate::types::SegmentScope::VECTOR,
+            collection: Some(collection_uuid_2),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        sysdb.add_segment(collection_1_record_segment);
+        sysdb.add_segment(collection_2_record_segment);
+        sysdb.add_segment(collection_1_hnsw_segment);
+        sysdb.add_segment(collection_2_hnsw_segment);
 
         let last_compaction_time_1 = 2;
         sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
@@ -418,6 +463,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle.receiver());
         manager.set_system(system);
+        println!("Starting compaction manager");
         let (num_completed, number_failed) = manager.compact_batch().await;
         assert_eq!(num_completed, 2);
         assert_eq!(number_failed, 0);

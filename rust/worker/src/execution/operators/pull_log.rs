@@ -163,10 +163,10 @@ mod tests {
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
-                log_offset: 1,
+                log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
-                    log_offset: 1,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_1".to_string(),
                         embedding: None,
@@ -181,10 +181,10 @@ mod tests {
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
-                log_offset: 2,
+                log_offset: 1,
                 log_ts: 2,
                 record: LogRecord {
-                    log_offset: 2,
+                    log_offset: 1,
                     record: OperationRecord {
                         id: "embedding_id_2".to_string(),
                         embedding: None,

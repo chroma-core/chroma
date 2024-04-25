@@ -438,6 +438,7 @@ impl Handler<PullLogsResult> for CompactOrchestrator {
                 return;
             }
         };
+        println!("Pulled Records: {:?}", records.len());
         let final_record_pulled = records.get(records.len() - 1);
         match final_record_pulled {
             Some(record) => {
