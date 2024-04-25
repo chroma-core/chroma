@@ -61,7 +61,6 @@ impl RootConfig {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
-            k if k == "num_indexing_threads" => k.into(),
             k if k == "my_ip" => k.into(),
             k => k.as_str().replace("__", ".").into(),
         }));
@@ -70,10 +69,10 @@ impl RootConfig {
         }
         // Apply defaults - this seems to be the best way to do it.
         // https://github.com/SergioBenitez/Figment/issues/77#issuecomment-1642490298
-        f = f.join(Serialized::default(
-            "worker.num_indexing_threads",
-            num_cpus::get(),
-        ));
+        // f = f.join(Serialized::default(
+        //     "worker.num_indexing_threads",
+        //     num_cpus::get(),
+        // ));
         let res = f.extract();
         match res {
             Ok(config) => return config,
