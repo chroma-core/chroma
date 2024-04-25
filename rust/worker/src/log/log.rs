@@ -292,23 +292,32 @@ impl Debug for InternalLogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
-    logs: HashMap<String, Vec<Box<InternalLogRecord>>>,
+    collection_to_log: HashMap<String, Vec<Box<InternalLogRecord>>>,
     offsets: HashMap<String, i64>,
 }
 
 impl InMemoryLog {
     pub fn new() -> InMemoryLog {
         InMemoryLog {
-            logs: HashMap::new(),
+            collection_to_log: HashMap::new(),
             offsets: HashMap::new(),
         }
     }
 
     pub fn add_log(&mut self, collection_id: Uuid, log: Box<InternalLogRecord>) {
         let logs = self
-            .logs
+            .collection_to_log
             .entry(collection_id.to_string())
             .or_insert(Vec::new());
+        // Ensure that the log offset is correct. Since we only use the InMemoryLog for testing,
+        // we expect callers to send us logs in the correct order.
+        let next_offset = logs.len() as i64;
+        if log.log_offset != next_offset {
+            panic!(
+                "Expected log offset to be {}, but got {}",
+                next_offset, log.log_offset
+            );
+        }
         logs.push(log);
     }
 }
@@ -327,7 +336,7 @@ impl Log for InMemoryLog {
             None => i64::MAX,
         };
 
-        let logs = match self.logs.get(&collection_id.to_string()) {
+        let logs = match self.collection_to_log.get(&collection_id.to_string()) {
             Some(logs) => logs,
             None => return Ok(Vec::new()),
         };
@@ -344,7 +353,7 @@ impl Log for InMemoryLog {
         &mut self,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         let mut collections = Vec::new();
-        for (collection_id, log_records) in self.logs.iter() {
+        for (collection_id, log_records) in self.collection_to_log.iter() {
             if log_records.is_empty() {
                 continue;
             }
