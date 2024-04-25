@@ -353,31 +353,6 @@ class FastAPI(Server):
         if (not database or database == DEFAULT_DATABASE) and new_database:
             database = new_database
 
-        if (
-            self._system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth
-            and collection is not None
-            and action != AuthzAction.CREATE_COLLECTION
-            and action != AuthzAction.GET_OR_CREATE_COLLECTION
-        ):
-            try:
-                uuid = _uuid(collection)
-                collec = self._api.get_collection(
-                    id=uuid,
-                )
-            except InvalidUUIDError:
-                collec = self._api.get_collection(
-                    name=collection,
-                )
-            if not collec:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"collection {collection} not found",
-                )
-            if not tenant:
-                tenant = collec.tenant
-            if not database:
-                database = collec.database
-
         if not self.authz_provider:
             return (tenant, database)
 
