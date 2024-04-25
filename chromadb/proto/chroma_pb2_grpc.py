@@ -6,7 +6,7 @@ from chromadb.proto import chroma_pb2 as chromadb_dot_proto_dot_chroma__pb2
 
 
 class MetadataReaderStub(object):
-    """Metadata Reader Interface 
+    """Metadata Reader Interface
 
     """
 
@@ -24,7 +24,7 @@ class MetadataReaderStub(object):
 
 
 class MetadataReaderServicer(object):
-    """Metadata Reader Interface 
+    """Metadata Reader Interface
 
     """
 
@@ -50,7 +50,7 @@ def add_MetadataReaderServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class MetadataReader(object):
-    """Metadata Reader Interface 
+    """Metadata Reader Interface
 
     """
 
@@ -73,7 +73,7 @@ class MetadataReader(object):
 
 
 class VectorReaderStub(object):
-    """Vector Reader Interface 
+    """Vector Reader Interface
 
     """
 
@@ -96,7 +96,7 @@ class VectorReaderStub(object):
 
 
 class VectorReaderServicer(object):
-    """Vector Reader Interface 
+    """Vector Reader Interface
 
     """
 
@@ -133,7 +133,7 @@ def add_VectorReaderServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class VectorReader(object):
-    """Vector Reader Interface 
+    """Vector Reader Interface
 
     """
 
