@@ -85,6 +85,9 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 		if collectionDimension.Valid {
 			collection.Dimension = &collectionDimension.Int32
 		}
+		if collectionCreatedAt.Valid {
+			collection.CreatedAt = collectionCreatedAt.Time
+		}
 
 		collectionWithMetdata = append(collectionWithMetdata, &dbmodel.CollectionAndMetadata{
 			Collection:   collection,
