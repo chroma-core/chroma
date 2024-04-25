@@ -204,9 +204,14 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	_, err = s.coordinator.UpdateCollection(ctx, updateCollection)
+
 	if err != nil {
 		log.Error("error updating collection", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		if err == common.ErrCollectionUniqueConstraintViolation {
+			res.Status = failResponseWithError(err, 409)
+		} else {
+			res.Status = failResponseWithError(err, errorCode)
+		}
 		return res, nil
 	}
 
