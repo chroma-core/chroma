@@ -24,6 +24,7 @@ from chromadb.auth import (
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.api import ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.errors import (
     ChromaError,
     InvalidDimensionException,
@@ -607,6 +608,9 @@ class FastAPI(Server):
                 get_or_create=create.get_or_create,
                 tenant=tenant,
                 database=database,
+                configuration=CollectionConfiguration.from_json(create.configuration)
+                if create.configuration
+                else None,
             )
 
             return api_collection.get_model()

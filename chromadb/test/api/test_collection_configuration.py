@@ -11,13 +11,18 @@ def test_default_collection_configuration(client: ClientAPI):
     assert collection.configuration == CollectionConfiguration()
 
 
-# def test_create_collection_configuration(client: ClientAPI):
-#     """Test the creation default of a collection configuration."""
-#     client.reset()
-#     configuration = CollectionConfiguration(parameters=[ConfigurationParameter("space", "cosine"), ConfigurationParameter("ef_construction", 1000)])
+def test_create_collection_configuration(client: ClientAPI):
+    """Test the creation default of a collection configuration."""
+    client.reset()
+    configuration = CollectionConfiguration(
+        parameters=[
+            ConfigurationParameter("space", "cosine"),
+            ConfigurationParameter("ef_construction", 1000),
+        ]
+    )
 
-#     collection = client.create_collection("test", configuration=configuration)
-#     assert collection.configuration == configuration
+    collection = client.create_collection("test", configuration=configuration)
+    assert collection.configuration == configuration
 
 
 def test_create_get_collection_configuration(client: ClientAPI):
