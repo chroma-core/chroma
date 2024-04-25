@@ -73,6 +73,7 @@ class DistributedSegmentManager(SegmentManager):
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
         return [s["id"] for s in segments]
+
     @trace_method(
         "DistributedSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
