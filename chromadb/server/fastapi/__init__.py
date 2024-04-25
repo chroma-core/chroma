@@ -343,19 +343,15 @@ class FastAPI(Server):
             return (tenant, database)
 
         user_identity = self.authn_provider.authenticate_or_raise(headers)
-        print("user_identity: ", user_identity)
 
         (
             new_tenant,
             new_database,
         ) = self.authn_provider.singleton_tenant_database_if_applicable(user_identity)
-        print("new_tenant: ", new_tenant)
-        print("new_database: ", new_database)
+
         if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:
-            print(f"Updating from {tenant} to {new_tenant}")
             tenant = new_tenant
         if (not database or database == DEFAULT_DATABASE) and new_database:
-            print(f"Updating from {database} to {new_database}")
             database = new_database
 
         if not self.authz_provider:
