@@ -343,6 +343,7 @@ class FastAPI(Server):
             return (tenant, database)
 
         user_identity = self.authn_provider.authenticate_or_raise(headers)
+        print("user_identity: ", user_identity)
 
         (
             new_tenant,
