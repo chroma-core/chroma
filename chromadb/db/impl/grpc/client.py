@@ -251,6 +251,8 @@ class GrpcSysDB(SysDB):
             name=name,
             tenant=tenant,
             database=database,
+            limit=limit,
+            offset=offset,
         )
         response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
         results: List[Collection] = []
@@ -293,6 +295,8 @@ class GrpcSysDB(SysDB):
         response = self._sys_db_stub.UpdateCollection(request)
         if response.status.code == 404:
             raise NotFoundError()
+        if response.status.code == 409:
+            raise UniqueConstraintError()
 
     def reset_and_wait_for_ready(self) -> None:
         self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)

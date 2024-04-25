@@ -121,6 +121,7 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 		Name:       &collectionName,
 		Dimension:  &dimension,
 		DatabaseID: databaseID,
+		CreatedAt:  time.Now(),
 	})
 	if err != nil {
 		return "", err
