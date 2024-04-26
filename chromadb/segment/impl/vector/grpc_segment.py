@@ -86,10 +86,17 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            request_metadata=query["request_metadata"],
         )
-        response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
-            request, timeout=self._request_timeout_seconds
-        )
+        try:
+            response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            if e.details() == "Collection version mismatch":
+                raise ValueError("Collection version mismatch")
+            raise e
+
         results: List[List[VectorQueryResult]] = []
         for result in response.results:
             curr_result: List[VectorQueryResult] = []

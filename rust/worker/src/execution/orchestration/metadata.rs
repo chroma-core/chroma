@@ -66,6 +66,8 @@ pub(crate) struct MetadataQueryOrchestrator {
     include_metadata: bool,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<MetadataQueryOrchestratorResult>>,
+    // information from the frontend
+    collection_version: Option<i32>,
 }
 
 #[derive(Debug)]
@@ -103,6 +105,8 @@ enum MetadataSegmentQueryError {
     CollectionNotFound(Uuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for MetadataSegmentQueryError {
@@ -117,6 +121,7 @@ impl ChromaError for MetadataSegmentQueryError {
             MetadataSegmentQueryError::SystemTimeError(_) => ErrorCodes::Internal,
             MetadataSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             MetadataSegmentQueryError::GetCollectionError(e) => e.code(),
+            MetadataSegmentQueryError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
     }
 }
@@ -440,6 +445,7 @@ impl MetadataQueryOrchestrator {
         where_clause: Option<Where>,
         where_document_clause: Option<WhereDocument>,
         include_metadata: bool,
+        collection_version: Option<i32>,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
@@ -459,6 +465,7 @@ impl MetadataQueryOrchestrator {
             where_document_clause,
             include_metadata,
             result_channel: None,
+            collection_version,
         }
     }
 
@@ -506,6 +513,17 @@ impl MetadataQueryOrchestrator {
                 return;
             }
         };
+
+        if self.collection_version.is_some() {
+            if collection.version != self.collection_version.unwrap() {
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(MetadataSegmentQueryError::CollectionVersionMismatch),
+                    ctx,
+                );
+                return;
+            }
+        }
 
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);

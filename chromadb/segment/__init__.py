@@ -12,6 +12,7 @@ from chromadb.types import (
     Segment,
     SeqId,
     Metadata,
+    RequestMetadata,
 )
 from chromadb.config import Component, System
 from uuid import UUID
@@ -70,6 +71,7 @@ class MetadataReader(SegmentImplementation):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         include_metadata: bool = True,
+        request_metadata: Optional[RequestMetadata] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
         pass

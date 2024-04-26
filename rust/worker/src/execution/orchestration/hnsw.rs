@@ -88,6 +88,8 @@ enum HnswSegmentQueryError {
     RecordSegmentNotFound(Uuid),
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for HnswSegmentQueryError {
@@ -99,6 +101,7 @@ impl ChromaError for HnswSegmentQueryError {
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
+            HnswSegmentQueryError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
     }
 }
@@ -143,6 +146,8 @@ pub(crate) struct HnswQueryOrchestrator {
     result_channel: Option<
         tokio::sync::oneshot::Sender<Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>>>,
     >,
+    // information from the frontend
+    collection_version: Option<i32>,
 }
 
 impl HnswQueryOrchestrator {
@@ -159,6 +164,7 @@ impl HnswQueryOrchestrator {
         hnsw_index_provider: HnswIndexProvider,
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
+        collection_version: Option<i32>,
     ) -> Self {
         // Set the merge dependency count to the number of query vectors * 2
         // N for the HNSW query and N for the Brute force query
@@ -203,6 +209,7 @@ impl HnswQueryOrchestrator {
             hnsw_index_provider,
             blockfile_provider,
             result_channel: None,
+            collection_version,
         }
     }
 
@@ -567,6 +574,17 @@ impl Component for HnswQueryOrchestrator {
                 return;
             }
         };
+
+        if self.collection_version.is_some() {
+            if collection.version != self.collection_version.unwrap() {
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(HnswSegmentQueryError::CollectionVersionMismatch),
+                    ctx,
+                );
+                return;
+            }
+        }
 
         // If segment is uninitialized and dimension is not set then we assume
         // that this is a query before any add so return empty response.

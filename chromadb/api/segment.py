@@ -14,8 +14,10 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.types import Collection as CollectionModel
+from chromadb.types import RequestMetadata
 from chromadb import __version__
 from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+from tenacity import retry, wait_fixed, stop_after_attempt, retry_if_exception
 
 from chromadb.api.types import (
     URI,
@@ -320,8 +322,6 @@ class SegmentAPI(ServerAPI):
             )
             for s in self._manager.delete_segments(existing[0].id):
                 self._sysdb.delete_segment(existing[0].id, s)
-            if existing and existing[0].id in self._collection_cache:
-                del self._collection_cache[existing[0].id]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -629,6 +629,14 @@ class SegmentAPI(ServerAPI):
         return metadata_segment.count()
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
+    @retry(
+        retry=retry_if_exception(
+            lambda e: isinstance(e, ValueError)
+            and str(e) == "Collection version mismatch"
+        ),
+        wait=wait_fixed(2),
+        stop=stop_after_attempt(5),
+    )  # type: ignore
     @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
     @override
     def _query(
@@ -676,10 +684,18 @@ class SegmentAPI(ServerAPI):
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
+        request_metadata = RequestMetadata(
+            collection_version=coll.version,
+            log_position=coll.log_position,
+        )
+
         if where or where_document:
             metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(
-                where=where, where_document=where_document, include_metadata=False
+                where=where,
+                where_document=where_document,
+                include_metadata=False,
+                request_metadata=request_metadata,
             )
             allowed_ids = [r["id"] for r in records]
 
@@ -712,6 +728,7 @@ class SegmentAPI(ServerAPI):
                 allowed_ids=allowed_ids,
                 include_embeddings="embeddings" in include,
                 options=None,
+                request_metadata=request_metadata,
             )
 
             vector_reader = self._manager.get_segment(collection_id, VectorReader)
@@ -822,7 +839,6 @@ class SegmentAPI(ServerAPI):
             if update:
                 id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
-                self._collection_cache[id]["dimension"] = dim
         elif collection["dimension"] != dim:
             raise InvalidDimensionException(
                 f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
@@ -832,15 +848,13 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
     def _get_collection(self, collection_id: UUID) -> t.Collection:
-        """Read-through cache for collection data"""
-        if collection_id not in self._collection_cache:
-            collections = self._sysdb.get_collections(id=collection_id)
-            if not collections:
-                raise InvalidCollectionException(
-                    f"Collection {collection_id} does not exist."
-                )
-            self._collection_cache[collection_id] = collections[0]
-        return self._collection_cache[collection_id]
+        """Get a collection database."""
+        collections = self._sysdb.get_collections(id=collection_id)
+        if not collections:
+            raise InvalidCollectionException(
+                f"Collection {collection_id} does not exist."
+            )
+        return collections[0]
 
     def _validate_collection(self, collection_id: UUID) -> None:
         self._get_collection(collection_id)

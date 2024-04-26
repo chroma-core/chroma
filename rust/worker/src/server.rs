@@ -167,6 +167,14 @@ impl WorkerServer {
             }
         };
 
+        let collection_version = match request.request_metadata {
+            Some(request_metadata) => Some(request_metadata.collection_version),
+            None => {
+                tracing::error!("No query metadata found");
+                None
+            }
+        };
+
         let result = match self.system {
             Some(ref system) => {
                 let orchestrator = HnswQueryOrchestrator::new(
@@ -183,6 +191,7 @@ impl WorkerServer {
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
                     dispatcher,
+                    collection_version,
                 );
                 orchestrator.run().await
             }
@@ -193,12 +202,17 @@ impl WorkerServer {
 
         let result = match result {
             Ok(result) => result,
-            Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
-            }
+            Err(e) => match e.code() {
+                chroma_error::ErrorCodes::VersionMismatch => {
+                    return Err(Status::aborted("Collection version mismatch"));
+                }
+                _ => {
+                    return Err(Status::internal(format!(
+                        "Error running orchestrator: {}",
+                        e
+                    )));
+                }
+            },
         };
 
         for result_set in result {
@@ -388,6 +402,14 @@ impl WorkerServer {
             None => None,
         };
 
+        let collection_version = match request.request_metadata {
+            Some(request_metadata) => Some(request_metadata.collection_version),
+            None => {
+                tracing::error!("No query metadata found");
+                None
+            }
+        };
+
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
@@ -400,18 +422,23 @@ impl WorkerServer {
             where_clause,
             where_document_clause,
             request.include_metadata,
+            collection_version,
         );
 
         let result = orchestrator.run().await;
         let result = match result {
             Ok(result) => result,
-            Err(e) => {
-                tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
-            }
+            Err(e) => match e.code() {
+                chroma_error::ErrorCodes::VersionMismatch => {
+                    return Err(Status::aborted("Collection version mismatch"));
+                }
+                _ => {
+                    return Err(Status::internal(format!(
+                        "Error running orchestrator: {}",
+                        e
+                    )));
+                }
+            },
         };
 
         let mut output = Vec::new();

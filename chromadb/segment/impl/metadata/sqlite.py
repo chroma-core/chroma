@@ -25,6 +25,7 @@ from chromadb.types import (
     UpdateMetadata,
     LiteralValue,
     WhereOperator,
+    RequestMetadata,
 )
 from uuid import UUID
 from pypika import Table, Tables
@@ -118,6 +119,7 @@ class SqliteMetadataSegment(MetadataReader):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         include_metadata: bool = True,
+        request_metadata: Optional[RequestMetadata] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
         embeddings_t, metadata_t, fulltext_t = Tables(

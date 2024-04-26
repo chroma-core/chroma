@@ -3,6 +3,7 @@ from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
 from chromadb.types import Segment
+from chromadb.types import RequestMetadata
 from overrides import override
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -78,6 +79,7 @@ class GrpcMetadataSegment(MetadataReader):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         include_metadata: bool = True,
+        request_metadata: Optional[RequestMetadata] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
@@ -96,16 +98,24 @@ class GrpcMetadataSegment(MetadataReader):
             limit=limit,
             offset=offset,
             include_metadata=include_metadata,
+            request_metadata=request_metadata,
         )
         limit = limit or 2**63 - 1
         offset = offset or 0
 
         if limit and limit < 0:
             raise ValueError("Limit cannot be negative")
+        try:
+            response: pb.QueryMetadataResponse = (
+                self._metadata_reader_stub.QueryMetadata(
+                    request, timeout=self._request_timeout_seconds
+                )
+            )
+        except grpc.RpcError as e:
+            if e.details() == "Collection version mismatch":
+                raise ValueError("Collection version mismatch")
+            raise e
 
-        response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
-            request, timeout=self._request_timeout_seconds
-        )
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
             result = self._from_proto(record)

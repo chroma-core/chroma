@@ -69,6 +69,8 @@ class Collection(
     # The version is only used in the distributed version of chroma
     # in single-node chroma, this field is always 0
     version: int
+    # The log position of the collection
+    log_position: int
 
     def __init__(
         self,
@@ -80,6 +82,7 @@ class Collection(
         tenant: str,
         database: str,
         version: int = 0,
+        log_position: int = 0,
     ):
         super().__init__(
             id=id,
@@ -90,6 +93,7 @@ class Collection(
             tenant=tenant,
             database=database,
             version=version,
+            log_position=log_position,
         )
 
     # TODO: This throws away type information.
@@ -216,6 +220,13 @@ class LogRecord(TypedDict):
     record: OperationRecord
 
 
+class RequestMetadata(TypedDict):
+    """Metadata for a request"""
+
+    collection_version: int
+    log_position: int
+
+
 class VectorQuery(TypedDict):
     """A KNN/ANN query"""
 
@@ -224,6 +235,7 @@ class VectorQuery(TypedDict):
     allowed_ids: Optional[Sequence[str]]
     include_embeddings: bool
     options: Optional[Dict[str, Union[str, int, float, bool]]]
+    request_metadata: RequestMetadata
 
 
 class VectorQueryResult(TypedDict):
