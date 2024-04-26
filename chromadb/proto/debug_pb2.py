@@ -15,13 +15,14 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x63hromadb/proto/debug.proto\x12\x06\x63hroma\x1a\x1bgoogle/protobuf/empty.proto\"\"\n\x0fGetInfoResponse\x12\x0f\n\x07version\x18\x01 \x01(\t2\x87\x01\n\x05\x44\x65\x62ug\x12<\n\x07GetInfo\x12\x16.google.protobuf.Empty\x1a\x17.chroma.GetInfoResponse\"\x00\x12@\n\x0cTriggerPanic\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x63hromadb/proto/debug.proto\x12\x06\x63hroma\x1a\x1bgoogle/protobuf/empty.proto\"\"\n\x0fGetInfoResponse\x12\x0f\n\x07version\x18\x01 \x01(\t2\x87\x01\n\x05\x44\x65\x62ug\x12<\n\x07GetInfo\x12\x16.google.protobuf.Empty\x1a\x17.chroma.GetInfoResponse\"\x00\x12@\n\x0cTriggerPanic\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x42\x34Z2github.com/chroma-core/chroma/go/pkg/proto/debugpbb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'chromadb.proto.debug_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
-  DESCRIPTOR._options = None
+  _globals['DESCRIPTOR']._options = None
+  _globals['DESCRIPTOR']._serialized_options = b'Z2github.com/chroma-core/chroma/go/pkg/proto/debugpb'
   _globals['_GETINFORESPONSE']._serialized_start=67
   _globals['_GETINFORESPONSE']._serialized_end=101
   _globals['_DEBUG']._serialized_start=104
