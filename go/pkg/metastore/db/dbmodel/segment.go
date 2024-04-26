@@ -13,15 +13,17 @@ type Segment struct {
 	   This requires us to push down CollectionID from the caller. We don't think there is
 	   need to modify CollectionID in the near future. Each Segment should always have a
 	   collection as a parent and cannot be modified. */
-	CollectionID *string             `gorm:"collection_id;primaryKey;not null"`
-	ID           string              `gorm:"id;primaryKey"`
-	Type         string              `gorm:"type;type:string;not null"`
-	Scope        string              `gorm:"scope"`
-	Ts           types.Timestamp     `gorm:"ts;type:bigint;default:0"`
-	IsDeleted    bool                `gorm:"is_deleted;type:bool;default:false"`
-	CreatedAt    time.Time           `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
-	UpdatedAt    time.Time           `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
-	FilePaths    map[string][]string `gorm:"file_paths;serializer:json;default:'{}'"`
+	CollectionID      *string             `gorm:"collection_id;primaryKey"`
+	ID                string              `gorm:"id;primaryKey"`
+	Type              string              `gorm:"type;type:string;not null"`
+	Scope             string              `gorm:"scope"`
+	Ts                types.Timestamp     `gorm:"ts;type:bigint;default:0"`
+	IsDeleted         bool                `gorm:"is_deleted;type:bool;default:false"`
+	CreatedAt         time.Time           `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt         time.Time           `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	FilePaths         map[string][]string `gorm:"file_paths;serializer:json;default:'{}'"`
+	LogPosition       int64               `gorm:"log_position;default:0"`
+	CollectionVersion int32               `gorm:"collection_version;default:0"`
 }
 
 func (s Segment) TableName() string {
