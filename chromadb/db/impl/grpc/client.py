@@ -246,14 +246,32 @@ class GrpcSysDB(SysDB):
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         # TODO: implement limit and offset in the gRPC service
-        request = GetCollectionsRequest(
-            id=id.hex if id else None,
-            name=name,
-            tenant=tenant,
-            database=database,
-            limit=limit,
-            offset=offset,
-        )
+        request = None
+        if id is not None:
+            request = GetCollectionsRequest(
+                id=id.hex,
+                limit=limit,
+                offset=offset,
+            )
+        if name is not None:
+            if tenant is None and database is None:
+                raise ValueError(
+                    "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
+                )
+            request = GetCollectionsRequest(
+                name=name,
+                tenant=tenant,
+                database=database,
+                limit=limit,
+                offset=offset,
+            )
+        if id is None and name is None:
+            request = GetCollectionsRequest(
+                tenant=tenant,
+                database=database,
+                limit=limit,
+                offset=offset,
+            )
         response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
         results: List[Collection] = []
         for collection in response.collections:
