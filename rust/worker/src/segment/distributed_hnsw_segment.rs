@@ -52,21 +52,23 @@ impl DistributedHNSWSegment {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if segment.file_path.len() > 0 {
-            // Load the index from the files
+            // Check if its in the providers cache, if not load the index from the files
             // TODO: we should not unwrap here
             let index_id = &segment.file_path.get(HNSW_INDEX).unwrap()[0];
             let index_uuid = Uuid::parse_str(index_id.as_str()).unwrap();
-            let index = hnsw_index_provider
-                .load(&index_uuid, segment, dimensionality as i32)
-                .await;
-            match index {
-                Ok(index) => Ok(Box::new(DistributedHNSWSegment::new(
-                    index,
-                    hnsw_index_provider,
-                    segment.id,
-                )?)),
-                Err(e) => Err(e),
-            }
+            let index = match hnsw_index_provider.get(&index_uuid) {
+                Some(index) => index,
+                None => {
+                    hnsw_index_provider
+                        .load(&index_uuid, segment, dimensionality as i32)
+                        .await?
+                }
+            };
+            Ok(Box::new(DistributedHNSWSegment::new(
+                index,
+                hnsw_index_provider,
+                segment.id,
+            )?))
         } else {
             let index = hnsw_index_provider.create(segment, dimensionality as i32)?;
             Ok(Box::new(DistributedHNSWSegment::new(
@@ -103,21 +105,10 @@ impl DistributedHNSWSegment {
     //     return records;
     // }
 
-    // pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<String>, Vec<f32>) {
-    //     let index = self.index.read();
-    //     let mut return_user_ids = Vec::new();
-    //     let (ids, distances) = index.query(vector, k);
-    //     let user_ids = self.id_to_user_id.read();
-    //     for id in ids {
-    //         match user_ids.get(&id) {
-    //             Some(user_id) => return_user_ids.push(user_id.clone()),
-    //             None => {
-    //                 // TODO: error
-    //             }
-    //         };
-    //     }
-    //     return (return_user_ids, distances);
-    // }
+    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+        let index = self.index.read();
+        index.query(vector, k)
+    }
 }
 
 impl SegmentWriter for DistributedHNSWSegment {

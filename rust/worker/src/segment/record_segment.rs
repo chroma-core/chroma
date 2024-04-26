@@ -53,7 +53,7 @@ pub enum RecordSegmentCreationError {
     BlockfileCreateError(#[from] Box<CreateError>),
 }
 
-impl<'a> RecordSegmentWriter {
+impl RecordSegmentWriter {
     pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
@@ -372,5 +372,59 @@ impl LogMaterializer for RecordSegmentWriter {
         }
 
         Chunk::new(materialized_records.into())
+    }
+}
+
+pub(crate) struct RecordSegmentReader<'me> {
+    user_id_to_id: BlockfileReader<'me, &'me str, u32>,
+    id_to_user_id: BlockfileReader<'me, u32, &'me str>,
+    id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
+}
+
+impl RecordSegmentReader<'_> {
+    pub(crate) async fn from_segment(
+        segment: &Segment,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let (user_id_to_id, id_to_user_id, id_to_data) = match segment.file_path.len() {
+            3 => {
+                let user_id_to_id_bf_id = &segment.file_path.get(USER_ID_TO_OFFSET_ID).unwrap()[0];
+                let id_to_user_id_bf_id = &segment.file_path.get(OFFSET_ID_TO_USER_ID).unwrap()[0];
+                let id_to_data_bf_id = &segment.file_path.get(OFFSET_ID_TO_DATA).unwrap()[0];
+
+                // TODO: don't unwrap here
+                let user_id_to_id = blockfile_provider
+                    .open::<&str, u32>(&Uuid::parse_str(user_id_to_id_bf_id).unwrap())
+                    .await
+                    .unwrap();
+                let id_to_user_id = blockfile_provider
+                    .open::<u32, &str>(&Uuid::parse_str(id_to_user_id_bf_id).unwrap())
+                    .await
+                    .unwrap();
+                let id_to_data = blockfile_provider
+                    .open::<u32, DataRecord>(&Uuid::parse_str(id_to_data_bf_id).unwrap())
+                    .await
+                    .unwrap();
+
+                (user_id_to_id, id_to_user_id, id_to_data)
+            }
+            _ => {
+                // TODO: error
+                panic!("Invalid number of files for RecordSegment");
+            }
+        };
+
+        Ok(RecordSegmentReader {
+            user_id_to_id,
+            id_to_user_id,
+            id_to_data,
+        })
+    }
+
+    pub(crate) async fn get_user_id_for_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<&str, Box<dyn ChromaError>> {
+        self.id_to_user_id.get("", offset_id).await
     }
 }

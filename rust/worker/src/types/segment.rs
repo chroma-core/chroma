@@ -14,6 +14,18 @@ pub(crate) enum SegmentType {
     Sqlite,
 }
 
+impl From<SegmentType> for String {
+    fn from(segment_type: SegmentType) -> String {
+        match segment_type {
+            SegmentType::HnswDistributed => {
+                "urn:chroma:segment/vector/hnsw-distributed".to_string()
+            }
+            SegmentType::Record => "urn:chroma:segment/record".to_string(),
+            SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Segment {
     pub(crate) id: Uuid,
