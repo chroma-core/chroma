@@ -27,7 +27,6 @@ from chromadb.errors import (
     ChromaError,
     InvalidDimensionException,
     InvalidHTTPVersion,
-    InvalidUUIDError,
 )
 from chromadb.quota import QuotaError
 from chromadb.rate_limiting import RateLimitError
