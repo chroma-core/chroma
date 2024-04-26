@@ -41,6 +41,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
+use tracing::Span;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -236,7 +237,7 @@ impl CompactOrchestrator {
                 parition.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
-            match self.dispatcher.send(task).await {
+            match self.dispatcher.send(task, Some(Span::current())).await {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error and reply to caller
@@ -257,7 +258,7 @@ impl CompactOrchestrator {
         let input = FlushS3Input::new(record_segment_writer, hnsw_segment_writer);
 
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 // Log an error and reply to caller
