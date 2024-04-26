@@ -1,4 +1,4 @@
-exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2|chroma_pb2_grpc|coordinator_pb2_grpc|logservice_pb2_grpc)\.(py|pyi\.py)' # Generated files
+exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2|chroma_pb2_grpc|coordinator_pb2_grpc|logservice_pb2_grpc)\.(py|pyi)' # Generated files
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
