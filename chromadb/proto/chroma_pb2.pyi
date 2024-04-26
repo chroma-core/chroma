@@ -99,7 +99,7 @@ class FilePaths(_message.Message):
     def __init__(self, paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Segment(_message.Message):
-    __slots__ = ("id", "type", "scope", "collection", "metadata", "file_paths")
+    __slots__ = ("id", "type", "scope", "collection", "metadata", "file_paths", "log_position", "collection_version")
     class FilePathsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -113,13 +113,17 @@ class Segment(_message.Message):
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     FILE_PATHS_FIELD_NUMBER: _ClassVar[int]
+    LOG_POSITION_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_VERSION_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
     scope: SegmentScope
     collection: str
     metadata: UpdateMetadata
     file_paths: _containers.MessageMap[str, FilePaths]
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
+    log_position: int
+    collection_version: int
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ..., log_position: _Optional[int] = ..., collection_version: _Optional[int] = ...) -> None: ...
 
 class Collection(_message.Message):
     __slots__ = ("id", "name", "configuration_json_str", "metadata", "dimension", "tenant", "database", "log_position", "version")
@@ -211,7 +215,7 @@ class CountRecordsResponse(_message.Message):
     def __init__(self, count: _Optional[int] = ...) -> None: ...
 
 class QueryMetadataRequest(_message.Message):
-    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id")
+    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id", "query_metadata")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     WHERE_FIELD_NUMBER: _ClassVar[int]
     WHERE_DOCUMENT_FIELD_NUMBER: _ClassVar[int]
@@ -219,6 +223,7 @@ class QueryMetadataRequest(_message.Message):
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    QUERY_METADATA_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
     where: Where
     where_document: WhereDocument
@@ -226,7 +231,8 @@ class QueryMetadataRequest(_message.Message):
     limit: int
     offset: int
     collection_id: str
-    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ...) -> None: ...
+    query_metadata: RequestMetadata
+    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ..., query_metadata: _Optional[_Union[RequestMetadata, _Mapping]] = ...) -> None: ...
 
 class QueryMetadataResponse(_message.Message):
     __slots__ = ("records",)

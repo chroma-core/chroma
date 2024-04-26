@@ -151,6 +151,8 @@ mod tests {
             collection: "00000000-0000-0000-0000-000000000000".to_string(),
             metadata: Some(metadata),
             file_paths: HashMap::new(),
+            log_position: 0,
+            collection_version: 0,
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
         assert_eq!(converted_segment.id, Uuid::nil());

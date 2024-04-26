@@ -46,6 +46,8 @@ message Segment {
     string collection = 5;
     optional UpdateMetadata metadata = 6;
     map<string,FilePaths> file_paths = 7;
+    int64 log_position = 8;
+    int32 collection_version = 9;
 }
 
 message Collection {
@@ -118,6 +120,7 @@ message QueryMetadataRequest {
     optional int32 limit = 5;
     optional int32 offset = 6;
     string collection_id = 7;
+    optional RequestMetadata query_metadata = 8;
 }
 
 message QueryMetadataResponse {
