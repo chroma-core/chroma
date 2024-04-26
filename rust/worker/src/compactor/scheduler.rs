@@ -147,7 +147,7 @@ impl Scheduler {
     }
 
     pub(crate) async fn schedule(&mut self) {
-        // TODO: I ADDED THIS CLEAR, ASK LIQUAN IF IT'S OK
+        // For now, we clear the job queue every time, assuming we will not have any pending jobs running
         self.job_queue.clear();
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
             // TODO: Log error
