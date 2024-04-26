@@ -684,9 +684,8 @@ class SegmentAPI(ServerAPI):
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
-        metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
-
         if where or where_document:
+            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(
                 where=where, where_document=where_document
             )
@@ -721,6 +720,7 @@ class SegmentAPI(ServerAPI):
             all_ids: Set[str] = set()
             for id_list in ids:
                 all_ids.update(id_list)
+            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(ids=list(all_ids))
             metadata_by_id = {r["id"]: r["metadata"] for r in records}
             for id_list in ids:
