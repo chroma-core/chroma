@@ -14,7 +14,7 @@ spec:
         - command:
             - "/bin/sh"
             - "-c"
-            - "atlas migrate apply --env prod"
+            - "atlas migrate apply --url postgres://{{ .Values.logServiceMigration.username }}:{{ .Values.logServiceMigration.password }}@{{ .Values.logServiceMigration.netloc }}:{{ .Values.logServiceMigration.port }}/{{ .Values.logServiceMigration.dbName }}?sslmode={{ .Values.logServiceMigration.sslmode }}"
           image: "{{ .Values.logServiceMigration.image.repository }}:{{ .Values.logServiceMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration
