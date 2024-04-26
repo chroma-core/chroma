@@ -247,10 +247,9 @@ class GrpcSysDB(SysDB):
     ) -> Sequence[Collection]:
         # TODO: implement limit and offset in the gRPC service
         request = None
-        if id is not None :
+        if id is not None:
             request = GetCollectionsRequest(
                 id=id.hex,
-
                 limit=limit,
                 offset=offset,
             )
@@ -273,14 +272,11 @@ class GrpcSysDB(SysDB):
                 limit=limit,
                 offset=offset,
             )
-        try:
-            response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
-            results: List[Collection] = []
-            for collection in response.collections:
-                results.append(from_proto_collection(collection))
-            return results
-        except Exception as e:
-            logger.error(f"Error getting collections: {e}")
+        response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
+        results: List[Collection] = []
+        for collection in response.collections:
+            results.append(from_proto_collection(collection))
+        return results
 
     @overrides
     def update_collection(

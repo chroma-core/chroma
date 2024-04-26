@@ -367,7 +367,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 if request.database != "" and database != request.database:
                     continue
                 allCollections.update(collections)
-                print(f"Tenant: {tenant}, Database: {database}, Collections: {collections}")
+                print(
+                    f"Tenant: {tenant}, Database: {database}, Collections: {collections}"
+                )
         found_collections = []
         for collection in allCollections.values():
             if target_id and collection["id"] != target_id:
