@@ -363,11 +363,7 @@ class FastAPI(Server):
             collection=collection,
         )
 
-        self.authz_provider.authorize_or_raise(
-            user_identity,
-            action,
-            authz_resource
-        )
+        self.authz_provider.authorize_or_raise(user_identity, action, authz_resource)
         return (tenant, database)
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
