@@ -305,7 +305,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_manager() {
-        println!("Running test_compaction_manager");
         let mut log = Box::new(InMemoryLog::new());
         let tmpdir = tempfile::tempdir().unwrap();
         let storage = Box::new(Storage::Local(LocalStorage::new(
@@ -463,7 +462,6 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle.receiver());
         manager.set_system(system);
-        println!("Starting compaction manager");
         let (num_completed, number_failed) = manager.compact_batch().await;
         assert_eq!(num_completed, 2);
         assert_eq!(number_failed, 0);
