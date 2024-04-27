@@ -1,4 +1,6 @@
 from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
+
+from chromadb.api.types import METADATA_TOMBSTONE
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
@@ -298,7 +300,7 @@ class SqliteMetadataSegment(MetadataReader):
         """Update the metadata for a single EmbeddingRecord"""
         t = Table("embedding_metadata")
         to_delete = [k for k, v in metadata.items() if v is None]
-        if to_delete:
+        if to_delete and METADATA_TOMBSTONE not in metadata.keys():
             q = (
                 self._db.querybuilder()
                 .from_(t)
@@ -308,7 +310,18 @@ class SqliteMetadataSegment(MetadataReader):
             )
             sql, params = get_sql(q)
             cur.execute(sql, params)
-
+        # remove the full metadata
+        if METADATA_TOMBSTONE in metadata.keys():
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .where(t.id == ParameterValue(id))
+                .where(t.key.notin(ParameterValue(["chroma:document"])))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+            metadata = {k: v for k, v in metadata.items() if k == "chroma:document"}
         self._insert_metadata(cur, id, metadata)
 
     @trace_method(
