@@ -7,6 +7,7 @@ import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
 from chromadb.api import AdminAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
+from chromadb.utils.query_helper import WhereFilter
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -37,6 +38,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "WhereFilter",
 ]
 
 logger = logging.getLogger(__name__)
