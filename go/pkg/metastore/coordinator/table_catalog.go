@@ -488,11 +488,13 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	segments := make([]*model.Segment, 0, len(segmentAndMetadataList))
 	for _, segmentAndMetadata := range segmentAndMetadataList {
 		segment := &model.Segment{
-			ID:        types.MustParse(segmentAndMetadata.Segment.ID),
-			Type:      segmentAndMetadata.Segment.Type,
-			Scope:     segmentAndMetadata.Segment.Scope,
-			Ts:        segmentAndMetadata.Segment.Ts,
-			FilePaths: segmentAndMetadata.Segment.FilePaths,
+			ID:                types.MustParse(segmentAndMetadata.Segment.ID),
+			Type:              segmentAndMetadata.Segment.Type,
+			Scope:             segmentAndMetadata.Segment.Scope,
+			Ts:                segmentAndMetadata.Segment.Ts,
+			FilePaths:         segmentAndMetadata.Segment.FilePaths,
+			LogPosition:       segmentAndMetadata.Segment.LogPosition,
+			CollectionVersion: segmentAndMetadata.Segment.CollectionVersion,
 		}
 
 		if segmentAndMetadata.Segment.CollectionID != nil {
@@ -648,9 +650,15 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		if err != nil {
 			return err
 		}
+		// update segment log position and version, this assumes that the log position and collection version are already successfully updated in the collection
+		collectionVersion, err = tc.metaDomain.SegmentDb(txCtx).UpdateLogPositionAndVersion(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, collectionVersion)
+		if err != nil {
+			return err
+		}
+
 		flushCollectionInfo.CollectionVersion = collectionVersion
 
-		// update tenant last compaction time
+		// Update tenant last compaction time
 		// TODO: add a system configuration to disable
 		// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
 		lastCompactionTime := time.Now().Unix()

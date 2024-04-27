@@ -58,7 +58,7 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 	var segments []*dbmodel.SegmentAndMetadata
 
 	query := s.db.Table("segments").
-		Select("segments.id, segments.collection_id, segments.type, segments.scope, segments.file_paths, segment_metadata.key, segment_metadata.str_value, segment_metadata.int_value, segment_metadata.float_value, segment_metadata.bool_value").
+		Select("segments.id, segments.collection_id, segments.type, segments.scope, segments.file_paths, segments.log_position, segments.collection_version, segment_metadata.key, segment_metadata.str_value, segment_metadata.int_value, segment_metadata.float_value, segment_metadata.bool_value").
 		Joins("LEFT JOIN segment_metadata ON segments.id = segment_metadata.segment_id").
 		Where("segments.collection_id = ?", collectionID.String()).
 		Order("segments.id")
@@ -101,19 +101,20 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 
 	for rows.Next() {
 		var (
-			segmentID     string
-			collectionID  sql.NullString
-			segmentType   string
-			scope         string
-			filePathsJson string
-			key           sql.NullString
-			strValue      sql.NullString
-			intValue      sql.NullInt64
-			floatValue    sql.NullFloat64
-			boolValue     sql.NullBool
+			segmentID         string
+			collectionID      sql.NullString
+			segmentType       string
+			scope             string
+			filePathsJson     string
+			key               sql.NullString
+			logPosition       int64
+			collectionVersion int32
+			strValue          sql.NullString
+			intValue          sql.NullInt64
+			floatValue        sql.NullFloat64
+			boolValue         sql.NullBool
 		)
-
-		err := rows.Scan(&segmentID, &collectionID, &segmentType, &scope, &filePathsJson, &key, &strValue, &intValue, &floatValue, &boolValue)
+		err := rows.Scan(&segmentID, &collectionID, &segmentType, &scope, &filePathsJson, &logPosition, &collectionVersion, &key, &strValue, &intValue, &floatValue, &boolValue)
 		if err != nil {
 			log.Error("scan segment failed", zap.Error(err))
 		}
@@ -128,10 +129,12 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 			}
 			currentSegment = &dbmodel.SegmentAndMetadata{
 				Segment: &dbmodel.Segment{
-					ID:        segmentID,
-					Type:      segmentType,
-					Scope:     scope,
-					FilePaths: filePaths,
+					ID:                segmentID,
+					Type:              segmentType,
+					Scope:             scope,
+					FilePaths:         filePaths,
+					LogPosition:       logPosition,
+					CollectionVersion: collectionVersion,
 				},
 				SegmentMetadata: metadata,
 			}
@@ -228,4 +231,19 @@ func (s *segmentDb) RegisterFilePaths(flushSegmentCompactions []*model.FlushSegm
 		}
 	}
 	return nil
+}
+
+func (s *segmentDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
+	// This assumes that the log position and collection version are already successfully updated in the collection.
+	err := s.db.Model(&dbmodel.Segment{}).
+		Where("collection_id = ?", collectionID).
+		Updates(map[string]interface{}{
+			"log_position":       logPosition,
+			"collection_version": currentCollectionVersion,
+		}).Error
+	if err != nil {
+		log.Error("update log position and version failed", zap.Error(err))
+		return 0, err
+	}
+	return currentCollectionVersion, nil
 }
