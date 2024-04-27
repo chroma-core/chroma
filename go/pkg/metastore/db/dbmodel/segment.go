@@ -49,4 +49,5 @@ type ISegmentDb interface {
 	Update(*UpdateSegment) error
 	DeleteAll() error
 	RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error
+	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
 }
