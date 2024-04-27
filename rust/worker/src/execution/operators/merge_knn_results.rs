@@ -48,18 +48,11 @@ pub struct MergeKnnResultsOperatorOutput {
 }
 
 #[derive(Error, Debug)]
-pub enum MergeKnnResultsOperatorError {
-    #[error("Input lengths do not match k")]
-    InputLengthMismatchError,
-}
+pub enum MergeKnnResultsOperatorError {}
 
 impl ChromaError for MergeKnnResultsOperatorError {
     fn code(&self) -> crate::errors::ErrorCodes {
-        match self {
-            MergeKnnResultsOperatorError::InputLengthMismatchError => {
-                crate::errors::ErrorCodes::InvalidArgument
-            }
-        }
+        return crate::errors::ErrorCodes::UNKNOWN;
     }
 }
 
@@ -73,17 +66,6 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
     type Error = Box<dyn ChromaError>;
 
     async fn run(&self, input: &MergeKnnResultsOperatorInput) -> MergeKnnResultsOperatorResult {
-        // All inputs should be of length k
-        if input.hnsw_result_offset_ids.len() != input.k
-            || input.hnsw_result_distances.len() != input.k
-            || input.brute_force_result_user_ids.len() != input.k
-            || input.brute_force_result_distances.len() != input.k
-        {
-            return Err(Box::new(
-                MergeKnnResultsOperatorError::InputLengthMismatchError,
-            ));
-        }
-
         // Convert the HNSW result offset IDs to user IDs
         let mut hnsw_result_user_ids = Vec::new();
 
@@ -121,17 +103,33 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
         let mut hnsw_index = 0;
         let mut brute_force_index = 0;
 
-        // We know that the input lengths are the same. For now this logic clones, but it could
-        // be optimized to avoid cloning.
-        for _ in 0..input.k {
-            if input.hnsw_result_distances[hnsw_index]
-                < input.brute_force_result_distances[brute_force_index]
+        // TODO: This doesn't have to clone the user IDs, but it's easier for now
+        while (result_user_ids.len() <= input.k)
+            && (hnsw_index < input.hnsw_result_offset_ids.len()
+                || brute_force_index < input.brute_force_result_user_ids.len())
+        {
+            if hnsw_index < input.hnsw_result_offset_ids.len()
+                && brute_force_index < input.brute_force_result_user_ids.len()
             {
+                if input.hnsw_result_distances[hnsw_index]
+                    < input.brute_force_result_distances[brute_force_index]
+                {
+                    result_user_ids.push(hnsw_result_user_ids[hnsw_index].to_string());
+                    result_distances.push(input.hnsw_result_distances[hnsw_index]);
+                    hnsw_index += 1;
+                } else {
+                    result_user_ids
+                        .push(input.brute_force_result_user_ids[brute_force_index].to_string());
+                    result_distances.push(input.brute_force_result_distances[brute_force_index]);
+                    brute_force_index += 1;
+                }
+            } else if hnsw_index < input.hnsw_result_offset_ids.len() {
                 result_user_ids.push(hnsw_result_user_ids[hnsw_index].to_string());
                 result_distances.push(input.hnsw_result_distances[hnsw_index]);
                 hnsw_index += 1;
             } else {
-                result_user_ids.push(input.brute_force_result_user_ids[brute_force_index].clone());
+                result_user_ids
+                    .push(input.brute_force_result_user_ids[brute_force_index].to_string());
                 result_distances.push(input.brute_force_result_distances[brute_force_index]);
                 brute_force_index += 1;
             }
