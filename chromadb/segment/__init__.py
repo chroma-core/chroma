@@ -23,7 +23,9 @@ class SegmentType(Enum):
     HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
     HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
     HNSW_DISTRIBUTED = "urn:chroma:segment/vector/hnsw-distributed"
+    # TODO: rename record to blockfile record
     RECORD = "urn:chroma:segment/record"
+    BLOCKFILE_METADATA = "urn:chroma:segment/metadata/blockfile"
 
 
 class SegmentImplementation(Component):

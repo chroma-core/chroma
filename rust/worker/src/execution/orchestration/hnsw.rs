@@ -382,10 +382,6 @@ impl HnswQueryOrchestrator {
         let segment = match segments {
             Ok(mut segments) => {
                 if segments.is_empty() {
-                    println!(
-                        "1. Record segment not found for collection: {:?}",
-                        collection_id
-                    );
                     return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
                         *collection_id,
                     )));
@@ -398,10 +394,6 @@ impl HnswQueryOrchestrator {
         };
 
         if segment.r#type != SegmentType::Record {
-            println!(
-                "2. Record segment not found for collection: {:?}",
-                collection_id
-            );
             return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
                 *collection_id,
             )));

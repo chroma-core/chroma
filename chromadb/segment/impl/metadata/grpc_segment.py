@@ -65,12 +65,12 @@ class GrpcMetadataSegment(MetadataReader):
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
-        where_pb = self._where_to_proto(where)
-        where_document_pb = self._where_document_to_proto(where_document)
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,
-            where=where_pb,
-            where_document=where_document_pb,
+            where=self._where_to_proto(where) if where is not None else None,
+            where_document=self._where_document_to_proto(where_document)
+            if where_document is not None
+            else None,
             ids=ids,
             limit=limit,
             offset=offset,
@@ -89,7 +89,7 @@ class GrpcMetadataSegment(MetadataReader):
             result = self._from_proto(record)
             results.append(result)
 
-        return []
+        return results
 
     def _where_to_proto(self, where: Optional[Where]) -> pb.Where:
         response = pb.Where()
@@ -263,7 +263,7 @@ class GrpcMetadataSegment(MetadataReader):
                             sfc = pb.SingleDoubleComparison()
                             sfc.value = operand
                             sfc.generic_comparator = pb.GenericComparator.EQ
-                            dc.double_list_operand.CopyFrom(sfc)
+                            dc.single_double_operand.CopyFrom(sfc)
 
             response.direct_comparison.CopyFrom(dc)
         return response
