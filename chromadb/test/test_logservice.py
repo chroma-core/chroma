@@ -1,6 +1,6 @@
 import array
 from typing import Dict, Any, Callable
-
+import pytest
 from chromadb.config import System, Settings
 from chromadb.logservice.logservice import LogService
 from chromadb.test.conftest import skip_if_not_cluster
@@ -123,7 +123,19 @@ def test_delete(api):  # type: ignore
     pushed_records = logservice.pull_logs(collection.id, 1, 100)
     assert len(pushed_records) == 2
 
-    # delete by where does not work atm
+
+# TODO: These tests should be enabled when the distributed system has metadata segments
+@pytest.mark.xfail
+@skip_if_not_cluster()
+def test_delete_filter(api):  # type: ignore
+    system = System(Settings(allow_reset=True))
+    logservice = system.instance(LogService)
+    system.start()
+    api.reset()
+
+    collection = api.create_collection("testdelete_filter")
+
+    # delete by where
     collection.delete(where_document={"$contains": "doc1"})
     collection.delete(where_document={"$contains": "bad"})
     collection.delete(where_document={"$contains": "great"})
