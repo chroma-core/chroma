@@ -103,15 +103,14 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         return tenant in self.tenant_to_database_to_model
 
     def get_tenant_model(
-        self,
-        tenant: str
+        self, tenant: str
     ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
         return self.tenant_to_database_to_model[tenant]
 
     def set_tenant_model(
         self,
         tenant: str,
-        model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]]
+        model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]],
     ) -> None:
         self.tenant_to_database_to_model[tenant] = model
 
@@ -122,17 +121,13 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self,
         tenant: str,
         database: str,
-        database_model: Dict[str, Optional[types.CollectionMetadata]]
+        database_model: Dict[str, Optional[types.CollectionMetadata]],
     ) -> None:
         self.tenant_to_database_to_model[tenant][database] = database_model
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
-        return self.tenant_to_database_to_model[
-            self.curr_tenant
-        ][
-            self.curr_database
-        ]
+        return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
 def test_collections(caplog: pytest.LogCaptureFixture, client: Client) -> None:

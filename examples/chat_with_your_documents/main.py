@@ -1,6 +1,6 @@
 import argparse
 import os
-from typing import List, Dict
+from typing import List
 from openai.types.chat import ChatCompletionMessageParam
 import openai
 import chromadb
@@ -36,7 +36,7 @@ def build_prompt(query: str, context: List[str]) -> List[ChatCompletionMessagePa
         "role": "user",
         "content": f"The question is {query}. Here is all the context you have:"
         f'{(" ").join(context)}',
-    } 
+    }
 
     return [system, user]
 
@@ -63,7 +63,6 @@ def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str
 def main(
     collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
-
     # Check if the OPENAI_API_KEY environment variable is set. Prompt the user to set it if not.
     if "OPENAI_API_KEY" not in os.environ:
         openai.api_key = input(

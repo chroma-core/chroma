@@ -5,7 +5,6 @@ from chromadb import CloudClient
 from chromadb.api import ServerAPI
 from chromadb.auth.token_authn import TokenTransportHeader
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-from chromadb.errors import ChromaError
 
 from chromadb.test.conftest import _await_server, _run_server, find_free_port
 
@@ -20,7 +19,9 @@ def valid_token() -> str:
 
 @pytest.fixture(scope="module")
 def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
-    chroma_server_authn_provider: str = "chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+    chroma_server_authn_provider: str = (
+        "chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+    )
     chroma_server_authn_credentials: str = valid_token
     chroma_auth_token_transport_header: str = TOKEN_TRANSPORT_HEADER
 

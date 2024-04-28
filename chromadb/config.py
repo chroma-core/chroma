@@ -72,23 +72,17 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
-    "chromadb.auth.ServerAuthenticationProvider":
-        "chroma_server_authn_provider",
-    "chromadb.auth.ServerAuthorizationProvider":
-        "chroma_server_authz_provider",
+    "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
+    "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
-    "chromadb.rate_limiting.RateLimitingProvider":
-        "chroma_rate_limiting_provider_impl",
+    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
-    "chromadb.segment.distributed.SegmentDirectory":
-        "chroma_segment_directory_impl",
-    "chromadb.segment.distributed.MemberlistProvider":
-        "chroma_memberlist_provider_impl",
-    "chromadb.telemetry.product.ProductTelemetryClient":
-        "chroma_product_telemetry_impl",
+    "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
+    "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
+    "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
 }
 
 DEFAULT_TENANT = "default_tenant"
@@ -96,7 +90,6 @@ DEFAULT_DATABASE = "default_database"
 
 
 class Settings(BaseSettings):  # type: ignore
-
     # ==============
     # Generic config
     # ==============
@@ -198,8 +191,7 @@ class Settings(BaseSettings):  # type: ignore
     # Telemetry
     # =========
 
-    chroma_product_telemetry_impl: str = \
-        "chromadb.telemetry.product.posthog.Posthog"
+    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
     # Required for backwards compatibility
     chroma_telemetry_impl: str = chroma_product_telemetry_impl
 

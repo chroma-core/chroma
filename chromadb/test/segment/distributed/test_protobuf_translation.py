@@ -1,4 +1,3 @@
-from typing import Dict, Generator, List, Optional, Sequence
 import uuid
 
 from chromadb.config import Settings, System
@@ -6,7 +5,6 @@ from chromadb.segment.impl.metadata.grpc_segment import GrpcMetadataSegment
 from chromadb.types import (
     Segment,
     SegmentScope,
-    UpdateMetadata,
     Where,
     WhereDocument,
     MetadataEmbeddingRecord,
@@ -29,7 +27,7 @@ def unstarted_grpc_metadata_segment() -> GrpcMetadataSegment:
         collection=None,
         metadata={
             "grpc_url": "test",
-        }
+        },
     )
     grpc_metadata_segment = GrpcMetadataSegment(
         system=system,
@@ -106,14 +104,18 @@ def test_where_document_to_proto_nested_boolean_operators() -> None:
     md_segment = unstarted_grpc_metadata_segment()
     where_document: WhereDocument = {
         "$and": [
-            {"$or": [
-                {"$contains": "test"},
-                {"$not_contains": "test"},
-            ]},
-            {"$or": [
-                {"$contains": "test"},
-                {"$not_contains": "test"},
-            ]},
+            {
+                "$or": [
+                    {"$contains": "test"},
+                    {"$not_contains": "test"},
+                ]
+            },
+            {
+                "$or": [
+                    {"$contains": "test"},
+                    {"$not_contains": "test"},
+                ]
+            },
         ]
     }
     proto = md_segment._where_document_to_proto(where_document)
@@ -133,7 +135,9 @@ def test_where_document_to_proto_nested_boolean_operators() -> None:
             assert nested_child.direct.document == "test"
         # Protobuf retains the order of repeated fields so this is safe.
         assert nested_children[0].direct.operator == pb.WhereDocumentOperator.CONTAINS
-        assert nested_children[1].direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
+        assert (
+            nested_children[1].direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
+        )
 
 
 def test_where_to_proto_string_value() -> None:
@@ -229,14 +233,18 @@ def test_where_to_proto_nested_boolean_operators() -> None:
     md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "$and": [
-            {"$or": [
-                {"test": 1},
-                {"test": "value"},
-            ]},
-            {"$or": [
-                {"test": 1},
-                {"test": "value"},
-            ]},
+            {
+                "$or": [
+                    {"test": 1},
+                    {"test": "value"},
+                ]
+            },
+            {
+                "$or": [
+                    {"test": 1},
+                    {"test": "value"},
+                ]
+            },
         ]
     }
     proto = md_segment._where_to_proto(where)
@@ -258,7 +266,9 @@ def test_where_to_proto_nested_boolean_operators() -> None:
         assert nested_children[0].direct_comparison.HasField("single_int_operand")
         assert nested_children[0].direct_comparison.single_int_operand.value == 1
         assert nested_children[1].direct_comparison.HasField("single_string_operand")
-        assert nested_children[1].direct_comparison.single_string_operand.value == "value"
+        assert (
+            nested_children[1].direct_comparison.single_string_operand.value == "value"
+        )
 
 
 def test_metadata_embedding_record_string_from_proto() -> None:

@@ -33,6 +33,7 @@ class TokenTransportHeader(Enum):
     """
     Accceptable token transport headers.
     """
+
     # I don't love having this enum here -- it's weird to have an enum
     # for just two values and it's weird to have users pass X_CHROMA_TOKEN
     # to configure "x-chroma-token". But I also like having a single source
@@ -47,8 +48,10 @@ def _check_token(token: str) -> None:
         c in string.digits + string.ascii_letters + string.punctuation
         for c in token_str
     ):
-        raise ValueError("Invalid token. Must contain \
-                         only ASCII letters and digits.")
+        raise ValueError(
+            "Invalid token. Must contain \
+                         only ASCII letters and digits."
+        )
 
 
 class TokenAuthClientProvider(ClientAuthProvider):
@@ -58,14 +61,13 @@ class TokenAuthClientProvider(ClientAuthProvider):
     `chroma_auth_token_transport_header`. If the header is "Authorization",
     the token is passed as a bearer token.
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
 
         system.settings.require("chroma_client_auth_credentials")
-        self._token = SecretStr(
-            str(system.settings.chroma_client_auth_credentials)
-        )
+        self._token = SecretStr(str(system.settings.chroma_client_auth_credentials))
         _check_token(self._token.get_secret_value())
 
         if system.settings.chroma_auth_token_transport_header:
@@ -81,8 +83,7 @@ class TokenAuthClientProvider(ClientAuthProvider):
         if self._token_transport_header == TokenTransportHeader.AUTHORIZATION:
             val = f"Bearer {val}"
         return {
-            self._token_transport_header.value:
-            SecretStr(val),
+            self._token_transport_header.value: SecretStr(val),
         }
 
 
@@ -92,6 +93,7 @@ class User(TypedDict):
     way to represent a User, please use UserIdentity as this class keeps
     track of sensitive tokens.
     """
+
     id: str
     role: str
     tenant: Optional[str]
@@ -112,6 +114,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     - If the token is valid, the server will return the user identity
         associated with the token.
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
@@ -128,15 +131,15 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         # If we only get one cred, assume it's just a valid token.
         if len(creds) == 1:
             self._token_user_mapping[creds[0]] = User(
-                id='anonymous',
-                tenant='*',
-                databases=['*'],
-                role='anonymous',
-                tokens=[creds[0]]
+                id="anonymous",
+                tenant="*",
+                databases=["*"],
+                role="anonymous",
+                tokens=[creds[0]],
             )
             return
 
-        self._users = cast(List[User], yaml.safe_load('\n'.join(creds))["users"])
+        self._users = cast(List[User], yaml.safe_load("\n".join(creds))["users"])
         for user in self._users:
             if "tokens" not in user:
                 raise ValueError("User missing tokens")
@@ -146,8 +149,10 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                 user["databases"] = ["*"]
             for token in user["tokens"]:
                 _check_token(token)
-                if token in self._token_user_mapping and \
-                        self._token_user_mapping[token] != user:
+                if (
+                    token in self._token_user_mapping
+                    and self._token_user_mapping[token] != user
+                ):
                     raise ValueError(
                         f"Token {token} already in use: wanted to use it for "
                         f"user {user['id']} but it's already in use by "
@@ -155,18 +160,14 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                     )
                 self._token_user_mapping[token] = user
 
-    @trace_method("TokenAuthenticationServerProvider.authenticate",
-                  OpenTelemetryGranularity.ALL)
+    @trace_method(
+        "TokenAuthenticationServerProvider.authenticate", OpenTelemetryGranularity.ALL
+    )
     @override
-    def authenticate_or_raise(
-        self, headers: Headers
-    ) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
         try:
-            token = headers[
-                self._token_transport_header.value
-            ]
-            if (self._token_transport_header ==
-                    TokenTransportHeader.AUTHORIZATION):
+            token = headers[self._token_transport_header.value]
+            if self._token_transport_header == TokenTransportHeader.AUTHORIZATION:
                 if not token.startswith("Bearer "):
                     raise HTTPException(status_code=401, detail="Unauthorized")
                 token = token.replace("Bearer ", "")
@@ -185,7 +186,6 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
             return user_identity
         except Exception as e:
             logger.debug(
-                "TokenAuthenticationServerProvider.authenticate "
-                f"failed: {repr(e)}"
+                "TokenAuthenticationServerProvider.authenticate " f"failed: {repr(e)}"
             )
             raise HTTPException(status_code=403, detail="Forbidden")

@@ -14,7 +14,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from typing import Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import numpy
 from chromadb.test.property.strategies import hashing_embedding_function
@@ -264,30 +264,24 @@ def test_previously_failing_one(api: ClientAPI) -> None:
     # pulled from the logs.
     (v1,) = state.get_or_create_coll(
         coll=strategies.ExternalCollection(
-            name='jjn2yjLW1zp2T\n',
+            name="jjn2yjLW1zp2T\n",
             metadata=None,
-            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863)
+            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),
         ),
-        new_metadata=None
+        new_metadata=None,
     )
     (v6,) = state.get_or_create_coll(
         coll=strategies.ExternalCollection(
-            name='jjn2yjLW1zp2T\n',
+            name="jjn2yjLW1zp2T\n",
             metadata=None,
-            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863)
+            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),
         ),
-        new_metadata=None
-    )
-    state.modify_coll(
-        coll=v1,
-        new_metadata={'7': -1281, 'fGe': -0.0, 'K5j': 'im'},
-        new_name=None
-    )
-    state.modify_coll(
-        coll=v6,
         new_metadata=None,
-        new_name=None
     )
+    state.modify_coll(
+        coll=v1, new_metadata={"7": -1281, "fGe": -0.0, "K5j": "im"}, new_name=None
+    )
+    state.modify_coll(coll=v6, new_metadata=None, new_name=None)
 
 
 # https://github.com/chroma-core/chroma/commit/cf476d70f0cebb7c87cb30c7172ba74d6ea175cd#diff-e81868b665d149bb315d86890dea6fc6a9fc9fc9ea3089aa7728142b54f622c5R210
@@ -296,41 +290,55 @@ def test_previously_failing_two(api: ClientAPI) -> None:
     state.initialize()
     (v13,) = state.get_or_create_coll(
         coll=strategies.ExternalCollection(
-            name='C1030',
+            name="C1030",
             metadata={},
-            embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32)
+            embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32),
         ),
-        new_metadata=None
+        new_metadata=None,
     )
     (v15,) = state.modify_coll(
         coll=v13,
-        new_metadata={'0': '10', '40': '0', 'p1nviWeL7fO': 'qN', '7b': 'YS', 'VYWq4LEMWjCo': True},
-        new_name='OF5F0MzbQg\n'
+        new_metadata={
+            "0": "10",
+            "40": "0",
+            "p1nviWeL7fO": "qN",
+            "7b": "YS",
+            "VYWq4LEMWjCo": True,
+        },
+        new_name="OF5F0MzbQg\n",
     )
     state.get_or_create_coll(
         coll=strategies.ExternalCollection(
-            name='VS0QGh',
-            metadata={'h': 5.681951615025145e-227, 'A1': 61126, 'uhUhLEEMfeC_kN': 2147483647, 'weF': 'pSP', 'B3DSaP': False, '6H533K': 1.192092896e-07},
-            embedding_function=hashing_embedding_function(dim=1915, dtype=numpy.float32)
+            name="VS0QGh",
+            metadata={
+                "h": 5.681951615025145e-227,
+                "A1": 61126,
+                "uhUhLEEMfeC_kN": 2147483647,
+                "weF": "pSP",
+                "B3DSaP": False,
+                "6H533K": 1.192092896e-07,
+            },
+            embedding_function=hashing_embedding_function(
+                dim=1915, dtype=numpy.float32
+            ),
         ),
-        new_metadata={'xVW09xUpDZA': 31734,
-                      'g': 1.1,
-                      'n1dUTalF-MY': -1000000.0,
-                      'y': 'G3EtXTZ',
-                      'ugXZ_hK': 5494
-                      }
+        new_metadata={
+            "xVW09xUpDZA": 31734,
+            "g": 1.1,
+            "n1dUTalF-MY": -1000000.0,
+            "y": "G3EtXTZ",
+            "ugXZ_hK": 5494,
+        },
     )
     (v17,) = state.modify_coll(
-        coll=v15,
-        new_metadata={'L35J2S': 'K0l026'},
-        new_name='Ai1\n'
+        coll=v15, new_metadata={"L35J2S": "K0l026"}, new_name="Ai1\n"
     )
     (v18,) = state.get_or_create_coll(coll=v13, new_metadata=None)
     state.get_or_create_coll(
         coll=strategies.ExternalCollection(
-            name='VS0QGh',
+            name="VS0QGh",
             metadata=None,
-            embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16)
+            embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16),
         ),
-        new_metadata=None
+        new_metadata=None,
     )

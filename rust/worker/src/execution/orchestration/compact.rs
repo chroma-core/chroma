@@ -1,10 +1,11 @@
 use super::super::operator::{wrap, TaskMessage};
 use crate::compactor::CompactionJob;
 use crate::errors::ChromaError;
-use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operators::flush_sysdb::FlushSysDbInput;
 use crate::execution::operators::flush_sysdb::FlushSysDbOperator;
 use crate::execution::operators::flush_sysdb::FlushSysDbResult;
+use crate::execution::operators::partition;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionResult;
@@ -18,8 +19,8 @@ use crate::system::Component;
 use crate::system::Handler;
 use crate::system::Receiver;
 use crate::system::System;
+use crate::types::LogRecord;
 use crate::types::SegmentFlushInfo;
-use arrow::compute::kernels::partition;
 use async_trait::async_trait;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -130,7 +131,7 @@ impl CompactOrchestrator {
 
     async fn partition(
         &mut self,
-        records: DataChunk,
+        records: Chunk<LogRecord>,
         self_address: Box<dyn Receiver<PartitionResult>>,
     ) {
         self.state = ExecutionState::Partition;
@@ -147,7 +148,7 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn write(&mut self, partitions: Vec<DataChunk>) {
+    async fn write(&mut self, partitions: Vec<Chunk<LogRecord>>) {
         self.state = ExecutionState::Write;
 
         self.num_write_tasks = partitions.len() as i32;

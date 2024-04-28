@@ -71,7 +71,8 @@ class DistributedSegmentManager(SegmentManager):
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
-        raise NotImplementedError()
+        segments = self._sysdb.get_segments(collection=collection_id)
+        return [s["id"] for s in segments]
 
     @trace_method(
         "DistributedSegmentManager.get_segment",
@@ -125,7 +126,7 @@ class DistributedSegmentManager(SegmentManager):
                     collection=collection_id, scope=SegmentScope.VECTOR
                 )
                 known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
-                segment = next(filter(lambda s: s["type"] in known_types, segments))  # noqa
+                next(filter(lambda s: s["type"] in known_types, segments))  # noqa
                 # grpc_url = self._segment_directory.get_segment_endpoint(segment)
 
                 # if grpc_url not in self._segment_server_stubs:

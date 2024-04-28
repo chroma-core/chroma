@@ -19,6 +19,7 @@ import grpc
 
 class GrpcMetadataSegment(MetadataReader):
     """Embedding Metadata segment interface"""
+
     _metadata_reader_stub: MetadataReaderStub
     _segment: Segment
 
@@ -31,8 +32,7 @@ class GrpcMetadataSegment(MetadataReader):
 
     @override
     def start(self) -> None:
-        if (not self._segment["metadata"] or
-                not self._segment["metadata"]["grpc_url"]):
+        if not self._segment["metadata"] or not self._segment["metadata"]["grpc_url"]:
             raise Exception("Missing grpc_url in segment metadata")
 
         channel = grpc.insecure_channel(self._segment["metadata"]["grpc_url"])
@@ -81,7 +81,9 @@ class GrpcMetadataSegment(MetadataReader):
         if limit and limit < 0:
             raise ValueError("Limit cannot be negative")
 
-        response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(request)
+        response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
+            request
+        )
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
             result = self._from_proto(record)
@@ -94,7 +96,9 @@ class GrpcMetadataSegment(MetadataReader):
         if where is None:
             return response
         if len(where) != 1:
-            raise ValueError(f"Expected where to have exactly one operator, got {where}")
+            raise ValueError(
+                f"Expected where to have exactly one operator, got {where}"
+            )
 
         for key, value in where.items():
             if not isinstance(key, str):
@@ -150,11 +154,9 @@ class GrpcMetadataSegment(MetadataReader):
                             raise ValueError(
                                 f"Expected where value for $in or $nin to be a list of values, got {value}"
                             )
-                        if (len(operand) == 0
-                            or not all(
-                                isinstance(x, type(operand[0]))
-                                for x in operand
-                        )):
+                        if len(operand) == 0 or not all(
+                            isinstance(x, type(operand[0])) for x in operand
+                        ):
                             raise ValueError(
                                 f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                                 f"got {operand}"
@@ -267,14 +269,15 @@ class GrpcMetadataSegment(MetadataReader):
         return response
 
     def _where_document_to_proto(
-            self,
-            where_document: Optional[WhereDocument]
+        self, where_document: Optional[WhereDocument]
     ) -> pb.WhereDocument:
         response = pb.WhereDocument()
         if where_document is None:
             return response
         if len(where_document) != 1:
-            raise ValueError(f"Expected where_document to have exactly one operator, got {where_document}")
+            raise ValueError(
+                f"Expected where_document to have exactly one operator, got {where_document}"
+            )
 
         for operator, operand in where_document.items():
             if operator == "$and" or operator == "$or":
@@ -284,9 +287,7 @@ class GrpcMetadataSegment(MetadataReader):
                         f"Expected where_document value for $and or $or to be a list of where_document expressions, got {operand}"
                     )
                 children: pb.WhereDocumentChildren = pb.WhereDocumentChildren(
-                    children=[
-                        self._where_document_to_proto(w) for w in operand
-                    ]
+                    children=[self._where_document_to_proto(w) for w in operand]
                 )
                 if operator == "$and":
                     children.operator = pb.BooleanOperator.AND
@@ -316,8 +317,7 @@ class GrpcMetadataSegment(MetadataReader):
         return response
 
     def _from_proto(
-            self,
-            record: pb.MetadataEmbeddingRecord
+        self, record: pb.MetadataEmbeddingRecord
     ) -> MetadataEmbeddingRecord:
         translated_metadata: Dict[str, str | int | float] = {}
         record_metadata_map = record.metadata.metadata
@@ -331,9 +331,6 @@ class GrpcMetadataSegment(MetadataReader):
             else:
                 raise ValueError(f"Unknown metadata value type: {value}")
 
-        mer = MetadataEmbeddingRecord(
-            id=record.id,
-            metadata=translated_metadata
-        )
+        mer = MetadataEmbeddingRecord(id=record.id, metadata=translated_metadata)
 
         return mer
