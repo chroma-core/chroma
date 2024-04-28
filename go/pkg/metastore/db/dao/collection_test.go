@@ -109,7 +109,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	offset = int32(2)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
 	suite.NoError(err)
-	suite.Nil(collections)
+	suite.Equal(len(collections), 0)
 
 	// clean up
 	err = CleanUpTestCollection(suite.db, collectionID)

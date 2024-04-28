@@ -129,7 +129,7 @@ k8s_resource(
 )
 
 # Production Chroma
-k8s_resource('postgres', resource_deps=['k8s_setup', 'namespace'], labels=["infrastructure"])
+k8s_resource('postgres', resource_deps=['k8s_setup', 'namespace'], labels=["infrastructure"], port_forwards='5432:5432')
 k8s_resource('sysdb-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
 k8s_resource('logservice-migration', resource_deps=['postgres', 'namespace'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['sysdb-migration'], labels=["chroma"], port_forwards='50052:50051')

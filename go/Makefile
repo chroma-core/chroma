@@ -29,4 +29,3 @@ log_db_generate: log_db_clean
 
 log_db_migration:
 	 atlas migrate diff initial --to file://$(DATABABASE_LOG_DIR)/schema --dev-url "docker://postgres/15/dev"  --format '{{ sql . "  " }}' --dir file://$(DATABABASE_LOG_DIR)/migrations
-

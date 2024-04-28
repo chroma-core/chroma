@@ -1,7 +1,7 @@
 import inspect
 from abc import abstractmethod
 from functools import wraps
-from typing import Optional, Any, Dict, Callable, cast
+from typing import Optional, Any, Dict, Callable
 
 from chromadb.config import Component
 from chromadb.quota import QuotaProvider, Resource
@@ -12,6 +12,7 @@ class RateLimitError(Exception):
         super().__init__(f"rate limit error. resource: {resource} quota: {quota}")
         self.quota = quota
         self.resource = resource
+
 
 class RateLimitingProvider(Component):
     @abstractmethod
@@ -28,15 +29,16 @@ class RateLimitingProvider(Component):
 
 
 def rate_limit(
-    subject: str,
-    resource: Resource
+    subject: str, resource: Resource
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         args_name = inspect.getfullargspec(f)[0]
         if subject not in args_name:
-            raise Exception(f'rate_limit decorator have unknown subject "{subject}", available {args_name}')
+            raise Exception(
+                f'rate_limit decorator have unknown subject "{subject}", available {args_name}'
+            )
         key_index = args_name.index(subject)
+
         @wraps(f)
         def wrapper(self, *args: Any, **kwargs: Dict[Any, Any]) -> Any:
             # If not rate limiting provider is present, just run and return the function.
@@ -49,18 +51,21 @@ def rate_limit(
             else:
                 if len(args) < key_index:
                     return f(self, *args, **kwargs)
-                subject_value = args[key_index-1]
+                subject_value = args[key_index - 1]
             key_value = resource.value + "-" + str(subject_value)
             self._system.settings.chroma_rate_limiting_provider_impl
             quota_provider = self._system.require(QuotaProvider)
             rate_limiter = self._system.require(RateLimitingProvider)
-            quota = quota_provider.get_for_subject(resource=resource,subject=str(subject_value))
+            quota = quota_provider.get_for_subject(
+                resource=resource, subject=str(subject_value)
+            )
             if quota is None:
                 return f(self, *args, **kwargs)
             is_allowed = rate_limiter.is_allowed(key_value, quota)
             if is_allowed is False:
                 raise RateLimitError(resource=resource.value, quota=quota)
             return f(self, *args, **kwargs)
+
         return wrapper
 
     return decorator

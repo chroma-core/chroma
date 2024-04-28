@@ -7,15 +7,16 @@ import chromadb
 from chromadb.config import Settings
 import sys
 
+
 def main() -> None:
     try:
         chromadb.HttpClient(
-            host='localhost',
+            host="localhost",
             port=8000,
             settings=Settings(
                 chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-                chroma_client_auth_credentials="admin:testDb@home2"
-            )
+                chroma_client_auth_credentials="admin:testDb@home2",
+            ),
         )
     except ValueError:
         # We don't expect to be able to connect to Chroma. We just want to make sure

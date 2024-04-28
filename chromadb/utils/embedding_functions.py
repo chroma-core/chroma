@@ -774,9 +774,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 
 
 class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
-    def __init__(
-        self, api_key: str = "", api_url = "https://infer.roboflow.com"
-    ) -> None:
+    def __init__(self, api_key: str = "", api_url="https://infer.roboflow.com") -> None:
         """
         Create a RoboflowEmbeddingFunction.
 
@@ -788,7 +786,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             api_key = os.environ.get("ROBOFLOW_API_KEY")
 
         self._api_url = api_url
-        self._api_key = api_key 
+        self._api_key = api_key
 
         try:
             self._PILImage = importlib.import_module("PIL.Image")
@@ -820,10 +818,10 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     json=infer_clip_payload,
                 )
 
-                result = res.json()['embeddings']
+                result = res.json()["embeddings"]
 
                 embeddings.append(result[0])
-            
+
             elif is_document(item):
                 infer_clip_payload = {
                     "text": input,
@@ -834,13 +832,13 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     json=infer_clip_payload,
                 )
 
-                result = res.json()['embeddings']
+                result = res.json()["embeddings"]
 
                 embeddings.append(result[0])
 
         return embeddings
 
-      
+
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
@@ -993,7 +991,7 @@ def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
 
     return ChromaLangchainEmbeddingFunction(embedding_function=langchain_embdding_fn)
 
- 
+
 class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the Ollama Embedding API (https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
@@ -1049,7 +1047,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             ],
         )
 
-      
+
 # List of all classes in this module
 _classes = [
     name
