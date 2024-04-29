@@ -5,11 +5,12 @@ import (
 	"errors"
 	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"time"
 )
 
 type LogRepository struct {
-	conn    *pgx.Conn
+	conn    *pgxpool.Pool
 	queries *log.Queries
 }
 
@@ -95,7 +96,7 @@ func (r *LogRepository) PurgeRecords(ctx context.Context) (err error) {
 	return
 }
 
-func NewLogRepository(conn *pgx.Conn) *LogRepository {
+func NewLogRepository(conn *pgxpool.Pool) *LogRepository {
 	return &LogRepository{
 		conn:    conn,
 		queries: log.New(conn),
