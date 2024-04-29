@@ -95,7 +95,7 @@ class FilePaths(_message.Message):
     def __init__(self, paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Segment(_message.Message):
-    __slots__ = ("id", "type", "scope", "collection", "metadata", "file_paths")
+    __slots__ = ("id", "type", "scope", "collection", "metadata", "file_paths", "log_position", "collection_version")
     class FilePathsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -109,13 +109,17 @@ class Segment(_message.Message):
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     FILE_PATHS_FIELD_NUMBER: _ClassVar[int]
+    LOG_POSITION_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_VERSION_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
     scope: SegmentScope
     collection: str
     metadata: UpdateMetadata
     file_paths: _containers.MessageMap[str, FilePaths]
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
+    log_position: int
+    collection_version: int
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ..., log_position: _Optional[int] = ..., collection_version: _Optional[int] = ...) -> None: ...
 
 class Collection(_message.Message):
     __slots__ = ("id", "name", "metadata", "dimension", "tenant", "database", "log_position", "version")
@@ -328,13 +332,23 @@ class SingleDoubleComparison(_message.Message):
     number_comparator: NumberComparator
     def __init__(self, value: _Optional[float] = ..., generic_comparator: _Optional[_Union[GenericComparator, str]] = ..., number_comparator: _Optional[_Union[NumberComparator, str]] = ...) -> None: ...
 
+class RequestMetadata(_message.Message):
+    __slots__ = ("collection_version", "log_position")
+    COLLECTION_VERSION_FIELD_NUMBER: _ClassVar[int]
+    LOG_POSITION_FIELD_NUMBER: _ClassVar[int]
+    collection_version: int
+    log_position: int
+    def __init__(self, collection_version: _Optional[int] = ..., log_position: _Optional[int] = ...) -> None: ...
+
 class GetVectorsRequest(_message.Message):
-    __slots__ = ("ids", "segment_id")
+    __slots__ = ("ids", "segment_id", "query_metadata")
     IDS_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    QUERY_METADATA_FIELD_NUMBER: _ClassVar[int]
     ids: _containers.RepeatedScalarFieldContainer[str]
     segment_id: str
-    def __init__(self, ids: _Optional[_Iterable[str]] = ..., segment_id: _Optional[str] = ...) -> None: ...
+    query_metadata: RequestMetadata
+    def __init__(self, ids: _Optional[_Iterable[str]] = ..., segment_id: _Optional[str] = ..., query_metadata: _Optional[_Union[RequestMetadata, _Mapping]] = ...) -> None: ...
 
 class GetVectorsResponse(_message.Message):
     __slots__ = ("records",)
@@ -351,18 +365,20 @@ class VectorEmbeddingRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class QueryVectorsRequest(_message.Message):
-    __slots__ = ("vectors", "k", "allowed_ids", "include_embeddings", "segment_id")
+    __slots__ = ("vectors", "k", "allowed_ids", "include_embeddings", "segment_id", "query_metadata")
     VECTORS_FIELD_NUMBER: _ClassVar[int]
     K_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_IDS_FIELD_NUMBER: _ClassVar[int]
     INCLUDE_EMBEDDINGS_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    QUERY_METADATA_FIELD_NUMBER: _ClassVar[int]
     vectors: _containers.RepeatedCompositeFieldContainer[Vector]
     k: int
     allowed_ids: _containers.RepeatedScalarFieldContainer[str]
     include_embeddings: bool
     segment_id: str
-    def __init__(self, vectors: _Optional[_Iterable[_Union[Vector, _Mapping]]] = ..., k: _Optional[int] = ..., allowed_ids: _Optional[_Iterable[str]] = ..., include_embeddings: bool = ..., segment_id: _Optional[str] = ...) -> None: ...
+    query_metadata: RequestMetadata
+    def __init__(self, vectors: _Optional[_Iterable[_Union[Vector, _Mapping]]] = ..., k: _Optional[int] = ..., allowed_ids: _Optional[_Iterable[str]] = ..., include_embeddings: bool = ..., segment_id: _Optional[str] = ..., query_metadata: _Optional[_Union[RequestMetadata, _Mapping]] = ...) -> None: ...
 
 class QueryVectorsResponse(_message.Message):
     __slots__ = ("results",)
