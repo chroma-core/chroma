@@ -271,6 +271,34 @@ def test_where_to_proto_nested_boolean_operators() -> None:
         )
 
 
+def test_where_to_proto_float_operator() -> None:
+    md_segment = unstarted_grpc_metadata_segment()
+    where: Where = {
+        "$and": [
+            {"test1": 1.0},
+            {"test2": 2.0},
+        ]
+    }
+    proto = md_segment._where_to_proto(where)
+    assert proto.HasField("children")
+    children_pb = proto.children
+    assert children_pb.operator == pb.BooleanOperator.AND
+    assert len(children_pb.children) == 2
+
+    children = children_pb.children
+    child_0 = children[0]
+    assert child_0.HasField("direct_comparison")
+    assert child_0.direct_comparison.key == "test1"
+    assert child_0.direct_comparison.HasField("single_double_operand")
+    assert child_0.direct_comparison.single_double_operand.value == 1.0
+
+    child_1 = children[1]
+    assert child_1.HasField("direct_comparison")
+    assert child_1.direct_comparison.key == "test2"
+    assert child_1.direct_comparison.HasField("single_double_operand")
+    assert child_1.direct_comparison.single_double_operand.value == 2.0
+
+
 def test_metadata_embedding_record_string_from_proto() -> None:
     md_segment = unstarted_grpc_metadata_segment()
     val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
