@@ -39,6 +39,8 @@ aws-config = { version = "1.1.2", features = ["behavior-version-latest"] }
 arrow = "50.0.0"
 roaring = "0.10.3"
 tantivy = "0.21.1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 [dev-dependencies]
 proptest = "1.4.0"

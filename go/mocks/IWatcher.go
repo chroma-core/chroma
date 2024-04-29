@@ -12,27 +12,29 @@ type IWatcher struct {
 	mock.Mock
 }
 
-// GetStatus provides a mock function with given fields: node_ip
-func (_m *IWatcher) GetStatus(node_ip string) (memberlist_manager.Status, error) {
-	ret := _m.Called(node_ip)
+// ListReadyMembers provides a mock function with given fields:
+func (_m *IWatcher) ListReadyMembers() (memberlist_manager.Memberlist, error) {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetStatus")
+		panic("no return value specified for ListReadyMembers")
 	}
 
-	var r0 memberlist_manager.Status
+	var r0 memberlist_manager.Memberlist
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (memberlist_manager.Status, error)); ok {
-		return rf(node_ip)
+	if rf, ok := ret.Get(0).(func() (memberlist_manager.Memberlist, error)); ok {
+		return rf()
 	}
-	if rf, ok := ret.Get(0).(func(string) memberlist_manager.Status); ok {
-		r0 = rf(node_ip)
+	if rf, ok := ret.Get(0).(func() memberlist_manager.Memberlist); ok {
+		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(memberlist_manager.Status)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(memberlist_manager.Memberlist)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(node_ip)
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}

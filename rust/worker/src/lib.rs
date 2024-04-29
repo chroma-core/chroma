@@ -18,6 +18,9 @@ mod types;
 use config::Configurable;
 use memberlist::MemberlistProvider;
 
+use tokio::select;
+use tokio::signal::unix::{signal, SignalKind};
+
 mod chroma_proto {
     tonic::include_proto!("chroma");
 }
@@ -42,14 +45,38 @@ pub async fn query_service_entrypoint() {
             return;
         }
     };
-    worker_server.set_system(system);
+    worker_server.set_system(system.clone());
     worker_server.set_dispatcher(dispatcher_handle.receiver());
 
     let server_join_handle = tokio::spawn(async move {
         let _ = crate::server::WorkerServer::run(worker_server).await;
     });
 
-    let _ = tokio::join!(server_join_handle, dispatcher_handle.join());
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(sigterm) => sigterm,
+        Err(e) => {
+            println!("Failed to create signal handler: {:?}", e);
+            return;
+        }
+    };
+
+    println!("Waiting for SIGTERM to stop the server");
+    select! {
+        // Kubernetes will send SIGTERM to stop the pod gracefully
+        // TODO: add more signal handling
+        _ = sigterm.recv() => {
+            server_join_handle.abort();
+            match server_join_handle.await {
+                Ok(_) => println!("Server stopped"),
+                Err(e) => println!("Server stopped with error {}", e),
+            }
+            dispatcher_handle.stop();
+            dispatcher_handle.join().await;
+            system.stop().await;
+            system.join().await;
+        },
+    };
+    println!("Server stopped");
 }
 
 pub async fn compaction_service_entrypoint() {
@@ -94,9 +121,27 @@ pub async fn compaction_service_entrypoint() {
 
     let mut memberlist_handle = system.start_component(memberlist);
 
-    tokio::join!(
-        memberlist_handle.join(),
-        compaction_manager_handle.join(),
-        dispatcher_handle.join()
-    );
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(sigterm) => sigterm,
+        Err(e) => {
+            println!("Failed to create signal handler: {:?}", e);
+            return;
+        }
+    };
+    println!("Waiting for SIGTERM to stop the server");
+    select! {
+        // Kubernetes will send SIGTERM to stop the pod gracefully
+        // TODO: add more signal handling
+        _ = sigterm.recv() => {
+            memberlist_handle.stop();
+            memberlist_handle.join().await;
+            dispatcher_handle.stop();
+            dispatcher_handle.join().await;
+            compaction_manager_handle.stop();
+            compaction_manager_handle.join().await;
+            system.stop().await;
+            system.join().await;
+        },
+    };
+    println!("Server stopped");
 }

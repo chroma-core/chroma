@@ -39,6 +39,10 @@ type Config struct {
 	// Kubernetes config
 	KubernetesNamespace string
 
+	// Memberlist config
+	ReconcileInterval time.Duration
+	ReconcileCount    uint
+
 	// Query service memberlist config
 	QueryServiceMemberlistName string
 	QueryServicePodLabel       string
@@ -114,13 +118,13 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	if !config.Testing {
 		namespace := config.KubernetesNamespace
 		// Create memberlist manager for query service
-		queryMemberlistManager, err := createMemberlistManager(namespace, config.QueryServiceMemberlistName, config.QueryServicePodLabel, config.WatchInterval)
+		queryMemberlistManager, err := createMemberlistManager(namespace, config.QueryServiceMemberlistName, config.QueryServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
 		if err != nil {
 			return nil, err
 		}
 
 		// Create memberlist manager for compaction service
-		compactionMemberlistManager, err := createMemberlistManager(namespace, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel, config.WatchInterval)
+		compactionMemberlistManager, err := createMemberlistManager(namespace, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +150,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	return s, nil
 }
 
-func createMemberlistManager(namespace string, memberlistName string, podLabel string, watchInterval time.Duration) (*memberlist_manager.MemberlistManager, error) {
+func createMemberlistManager(namespace string, memberlistName string, podLabel string, watchInterval time.Duration, reconcileInterval time.Duration, reconcileCount uint) (*memberlist_manager.MemberlistManager, error) {
 	log.Info("Creating memberlist manager for {}", zap.String("memberlist", memberlistName))
 	clientset, err := utils.GetKubernetesInterface()
 	if err != nil {
@@ -159,6 +163,8 @@ func createMemberlistManager(namespace string, memberlistName string, podLabel s
 	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, podLabel, watchInterval)
 	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
 	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
+	memberlist_manager.SetReconcileInterval(reconcileInterval)
+	memberlist_manager.SetReconcileCount(reconcileCount)
 	return memberlist_manager, nil
 }
 

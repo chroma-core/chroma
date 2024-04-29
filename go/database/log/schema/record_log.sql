@@ -5,4 +5,3 @@ CREATE TABLE record_log (
                         record bytea NOT NULL,
                         PRIMARY KEY(collection_id, "offset")
 );
-

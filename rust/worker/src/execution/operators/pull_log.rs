@@ -1,8 +1,11 @@
-use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
+use crate::types::LogRecord;
 use async_trait::async_trait;
+use tracing::debug;
+use tracing::trace;
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.
@@ -64,21 +67,21 @@ impl PullLogsInput {
 /// The output of the pull logs operator.
 #[derive(Debug)]
 pub struct PullLogsOutput {
-    logs: DataChunk,
+    logs: Chunk<LogRecord>,
 }
 
 impl PullLogsOutput {
     /// Create a new pull logs output.
     /// # Parameters
     /// * `logs` - The logs that were read.
-    pub fn new(logs: DataChunk) -> Self {
+    pub fn new(logs: Chunk<LogRecord>) -> Self {
         PullLogsOutput { logs }
     }
 
     /// Get the log entries that were read by an invocation of the pull logs operator.
     /// # Returns
     /// The log entries that were read.
-    pub fn logs(&self) -> DataChunk {
+    pub fn logs(&self) -> Chunk<LogRecord> {
         self.logs.clone()
     }
 }
@@ -130,11 +133,13 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
                 break;
             }
         }
+        trace!("Log records {:?}", result);
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
+            trace!("Truncated log records {:?}", result);
         }
         // Convert to DataChunk
-        let data_chunk = DataChunk::new(result.into());
+        let data_chunk = Chunk::new(result.into());
         Ok(PullLogsOutput::new(data_chunk))
     }
 }
@@ -148,7 +153,6 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_pull_logs() {

@@ -228,7 +228,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 
 		collectionName := createCollection.Name
-		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName)
+		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err
@@ -280,7 +280,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			}
 		}
 		// get collection
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName)
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName, nil, nil)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err
@@ -306,8 +306,8 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	return result, nil
 }
 
-func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) ([]*model.Collection, error) {
-	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName)
+func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
+	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +319,7 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 	log.Info("deleting collection", zap.Any("deleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
-		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName)
+		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -399,7 +399,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		}
 		databaseName := updateCollection.DatabaseName
 		tenantID := updateCollection.TenantID
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, tenantID, databaseName)
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, tenantID, databaseName, nil, nil)
 		if err != nil {
 			return err
 		}

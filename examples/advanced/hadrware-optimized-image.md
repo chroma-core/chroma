@@ -7,4 +7,3 @@ from source. To do that run:
 ```bash
 docker build -t chroma-test1 --build-arg REBUILD_HNSWLIB=true --no-cache .
 ```
-
