@@ -89,7 +89,7 @@ class GrpcMetadataSegment(MetadataReader):
             result = self._from_proto(record)
             results.append(result)
 
-        return []
+        return results
 
     def _where_to_proto(self, where: Optional[Where]) -> pb.Where:
         response = pb.Where()
