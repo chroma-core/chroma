@@ -25,3 +25,4 @@ jobs:
           pre-commit run --all-files black
           pre-commit run --all-files flake8
           pre-commit run --all-files prettier
+          pre-commit run --all-files check-yaml
