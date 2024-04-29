@@ -153,12 +153,14 @@ func convertSegmentToProto(segment *model.Segment) *coordinatorpb.Segment {
 		}
 	}
 	segmentpb := &coordinatorpb.Segment{
-		Id:         segment.ID.String(),
-		Type:       segment.Type,
-		Scope:      segmentSceope,
-		Collection: nil,
-		Metadata:   nil,
-		FilePaths:  filePaths,
+		Id:                segment.ID.String(),
+		Type:              segment.Type,
+		Scope:             segmentSceope,
+		Collection:        nil,
+		Metadata:          nil,
+		FilePaths:         filePaths,
+		LogPosition:       segment.LogPosition,
+		CollectionVersion: segment.CollectionVersion,
 	}
 
 	collectionID := segment.CollectionID
