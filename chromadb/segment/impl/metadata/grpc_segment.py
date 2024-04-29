@@ -263,7 +263,7 @@ class GrpcMetadataSegment(MetadataReader):
                             sfc = pb.SingleDoubleComparison()
                             sfc.value = operand
                             sfc.generic_comparator = pb.GenericComparator.EQ
-                            dc.double_list_operand.CopyFrom(sfc)
+                            dc.single_double_operand.CopyFrom(sfc)
 
             response.direct_comparison.CopyFrom(dc)
         return response
