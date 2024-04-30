@@ -11,7 +11,7 @@ use thiserror::Error;
 /// # Notes
 /// See https://docs.trychroma.com/usage-guide#changing-the-distance-function
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum DistanceFunction {
+pub enum DistanceFunction {
     Euclidean,
     Cosine,
     InnerProduct,
@@ -19,14 +19,37 @@ pub(crate) enum DistanceFunction {
 
 impl DistanceFunction {
     // TOOD: Should we error if mismatched dimensions?
-    pub(crate) fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
-        // TODO: implement this in SSE/AVX SIMD
-        // For now we write these as loops since we suspect that will more likely
-        // lead to the compiler vectorizing the code. (We saw this on
-        // Apple Silicon Macs who didn't have hand-rolled SIMD instructions in our
-        // C++ code).
+    pub fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
+        // TODO: Figure out why the compiler is not auto vectorizing these
+        // by default.
         match self {
             DistanceFunction::Euclidean => {
+                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+                {
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        return unsafe { crate::distance::distance_neon::euclidean_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance::distance_sse::euclidean_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    target_arch = "x86_64",
+                    all(target_feature = "avx", target_feature = "fma")
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("avx")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance::distance_avx::euclidean_distance(a, b) };
+                    }
+                }
                 let mut sum = 0.0;
                 for i in 0..a.len() {
                     sum += (a[i] - b[i]).powi(2);
@@ -34,6 +57,32 @@ impl DistanceFunction {
                 sum
             }
             DistanceFunction::Cosine => {
+                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+                {
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        return unsafe { crate::distance::distance_neon::cosine_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance::distance_sse::cosine_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    target_arch = "x86_64",
+                    all(target_feature = "avx", target_feature = "fma")
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("avx")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance::distance_avx::cosine_distance(a, b) };
+                    }
+                }
                 // For cosine we just assume the vectors have been normalized, since that
                 // is what our indices expect.
                 let mut sum = 0.0;
@@ -43,6 +92,32 @@ impl DistanceFunction {
                 1.0_f32 - sum
             }
             DistanceFunction::InnerProduct => {
+                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+                {
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        return unsafe { crate::distance::distance_neon::inner_product(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance::distance_sse::inner_product(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    target_arch = "x86_64",
+                    all(target_feature = "avx", target_feature = "fma")
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("avx")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance::distance_avx::inner_product(a, b) };
+                    }
+                }
                 let mut sum = 0.0;
                 for i in 0..a.len() {
                     sum += a[i] * b[i];
@@ -54,7 +129,7 @@ impl DistanceFunction {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum DistanceFunctionError {
+pub enum DistanceFunctionError {
     #[error("Invalid distance function `{0}`")]
     InvalidDistanceFunction(String),
 }
