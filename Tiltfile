@@ -102,6 +102,7 @@ k8s_resource(
     'sysdb-serviceaccount:serviceaccount',
     'sysdb-serviceaccount-rolebinding:RoleBinding',
     'sysdb-query-service-memberlist-binding:clusterrolebinding',
+    'sysdb-compaction-service-memberlist-binding:clusterrolebinding',
 
     'logservice-serviceaccount:serviceaccount',
 
@@ -110,6 +111,7 @@ k8s_resource(
     'query-service-memberlist-readerwriter:ClusterRole',
     'query-service-query-service-memberlist-binding:clusterrolebinding',
     'query-service-memberlist-readerwriter-binding:clusterrolebinding',
+    'query-service:service',
 
     'compaction-service-memberlist-readerwriter:ClusterRole',
     'compaction-service-compaction-service-memberlist-binding:clusterrolebinding',
