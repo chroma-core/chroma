@@ -372,8 +372,8 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 def get_base_path() -> Path:
-    if "CHROMA_CACHE_DIR" in os.environ:
-        return Path(os.environ["CHROMA_CACHE_DIR"])
+    if "CHROMA_HOME" in os.environ:
+        return Path(os.environ["CHROMA_HOME"])
     return Path.home()
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
