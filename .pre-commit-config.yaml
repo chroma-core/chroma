@@ -10,6 +10,8 @@ repos:
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
+        # Exclude Helm templates from YAML linting as they are not valid YAML
+        exclude: "k8s/distributed-chroma/templates/"
       - id: check-xml
       - id: check-merge-conflict
       - id: check-case-conflict
