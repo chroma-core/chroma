@@ -91,7 +91,10 @@ export class ChromaValueError extends Error {
 
 export class InvalidCollectionError extends Error {
   name = "InvalidCollectionError";
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
   }
 }

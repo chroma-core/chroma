@@ -59,7 +59,7 @@ test("it should get embedding with matching documents", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
 
   const results2 = await collection.query({
@@ -125,7 +125,7 @@ test("it should query a collection with text", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
 });
 
@@ -155,7 +155,7 @@ test("it should query a collection with text and where", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
 });
 
@@ -185,7 +185,7 @@ test("it should query a collection with text and where in", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
 });
 
@@ -215,7 +215,7 @@ test("it should query a collection with text and where nin", async () => {
   expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
   expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0])
+    expect.arrayContaining(results.documents[0]),
   );
 });
 
