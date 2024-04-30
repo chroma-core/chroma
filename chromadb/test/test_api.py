@@ -7,6 +7,7 @@ import chromadb
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
+from chromadb.errors import InvalidCollectionException
 import chromadb.server.fastapi
 import pytest
 import tempfile
@@ -224,6 +225,17 @@ def test_add(api):
     assert collection.count() == 2
 
 
+def test_collection_add_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.add(**batch_records)
+
+
 def test_get_or_create(api):
     api.reset()
 
@@ -270,6 +282,17 @@ def test_get_from_db(api):
             assert set(records[key]) == set(includes)
         else:
             assert records[key] is None
+
+
+def test_collection_get_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.get()
 
 
 def test_reset_db(api):
@@ -350,12 +373,34 @@ def test_delete_with_index(api):
     collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
 
 
+def test_collection_delete_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.delete(ids=["id1"])
+
+
 def test_count(api):
     api.reset()
     collection = api.create_collection("testspace")
     assert collection.count() == 0
     collection.add(**batch_records)
     assert collection.count() == 2
+
+
+def test_collection_count_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.count()
 
 
 def test_modify(api):
@@ -365,6 +410,17 @@ def test_modify(api):
 
     # collection name is modify
     assert collection.name == "testspace2"
+
+
+def test_collection_modify_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.modify(name="test2")
 
 
 def test_modify_error_on_existing_name(api):
@@ -509,6 +565,39 @@ def test_peek(api):
             assert set(peek[key]) == set(["embeddings", "metadatas", "documents"])
         else:
             assert peek[key] is None
+
+
+def test_collection_peek_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.peek()
+
+
+def test_collection_query_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.query(query_texts=["test"])
+
+
+def test_collection_update_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.update(ids=["id1"], documents=["test"])
 
 
 # TEST METADATA AND METADATA FILTERING
@@ -1425,6 +1514,17 @@ def test_upsert(api):
     assert vector_approx_equal(get_result["embeddings"][0], [1.1, 0.99, 2.21])
     assert get_result["metadatas"][0] == {"string_value": "a new string value"}
     assert get_result["documents"][0] is None
+
+
+def test_collection_upsert_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.upsert(**initial_records)
 
 
 # test to make sure add, query, update, upsert error on invalid embeddings input

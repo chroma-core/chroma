@@ -323,6 +323,8 @@ class SegmentAPI(ServerAPI):
         if new_metadata:
             validate_update_metadata(new_metadata)
 
+        self._validate_collection(id)
+
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
         if new_name and new_metadata:
@@ -498,6 +500,8 @@ class SegmentAPI(ServerAPI):
             }
         )
 
+        self._validate_collection(collection_id)
+
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
             validate_where_document(where_document)
@@ -651,6 +655,8 @@ class SegmentAPI(ServerAPI):
     @override
     def _count(self, collection_id: UUID) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
+        self._validate_collection(collection_id)
+
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
 
@@ -842,6 +848,9 @@ class SegmentAPI(ServerAPI):
                 )
             self._collection_cache[collection_id] = collections[0]
         return self._collection_cache[collection_id]
+
+    def _validate_collection(self, collection_id: UUID) -> None:
+        self._get_collection(collection_id)
 
 
 def _records(

@@ -1,7 +1,7 @@
 import { expect, test } from "@jest/globals";
 import chroma from "./initClient";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
-import { ChromaValueError } from "../src/Errors";
+import { ChromaValueError, InvalidCollectionError } from "../src/Errors";
 
 test("it should get a collection", async () => {
   await chroma.reset();
@@ -47,7 +47,7 @@ test("wrong code returns an error", async () => {
     expect(error).toBeDefined();
     expect(error).toBeInstanceOf(ChromaValueError);
     expect(error.message).toMatchInlineSnapshot(
-      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
+      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`
     );
   }
 });
@@ -101,10 +101,19 @@ test("test gt, lt, in a simple small way", async () => {
   expect(["test2", "test3"]).toEqual(expect.arrayContaining(items.ids));
 });
 
+test("should error on non existing collection", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.deleteCollection({ name: "test" });
+  expect(async () => {
+    await collection.get({ ids: IDS });
+  }).rejects.toThrow(InvalidCollectionError);
+});
+
 test("it should throw an error if the collection does not exist", async () => {
   await chroma.reset();
 
   await expect(
-    async () => await chroma.getCollection({ name: "test" }),
+    async () => await chroma.getCollection({ name: "test" })
   ).rejects.toThrow(Error);
 });
