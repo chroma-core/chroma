@@ -1,3 +1,4 @@
+use crate::cache::log_cache;
 use crate::chroma_proto;
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
@@ -6,13 +7,14 @@ use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::HnswQueryOrchestrator;
+use crate::log::cached_log::CachedLog;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{Receiver, System};
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{debug, trace, trace_span};
+use tracing::{trace, trace_span};
 use uuid::Uuid;
 
 pub struct WorkerServer {
@@ -37,12 +39,21 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             }
         };
         let log_config = &config.log;
-        let log = match crate::log::from_config(log_config).await {
+        let mut log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
             }
         };
+
+        let log_cache_config = &config.log_cache;
+        match log_cache_config {
+            None => {}
+            Some(log_cache_config) => {
+                log_cache::init(log_cache_config);
+                log = Box::new(CachedLog::new(log));
+            }
+        }
         Ok(WorkerServer {
             dispatcher: None,
             system: None,

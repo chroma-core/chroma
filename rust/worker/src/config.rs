@@ -99,6 +99,7 @@ pub(crate) struct QueryServiceConfig {
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) log_cache: Option<crate::cache::config::LogCacheConfig>,
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
 }
@@ -167,6 +168,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log_cache:
+                        capacity: 1000
+                        shard_num: 1
+                        eviction: Lru
                     log:
                         Grpc:
                             host: "localhost"
@@ -242,6 +247,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log_cache:
+                        capacity: 1000
+                        shard_num: 1
+                        eviction: Lru
                     log:
                         Grpc:
                             host: "localhost"
@@ -335,6 +344,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log_cache:
+                        capacity: 1000
+                        shard_num: 1
+                        eviction: Lru
                     log:
                         Grpc:
                             host: "localhost"
@@ -408,6 +421,10 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                    log_cache:
+                        capacity: 1000
+                        shard_num: 1
+                        eviction: Lru
                     log:
                         Grpc:
                             host: "localhost"

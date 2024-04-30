@@ -1,3 +1,4 @@
+pub(crate) mod cached_log;
 pub(crate) mod config;
 pub(crate) mod log;
 
