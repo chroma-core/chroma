@@ -29,7 +29,7 @@ RUN apt-get update --fix-missing && apt-get install -y curl && \
     chmod +x /docker_entrypoint.sh && \
     rm -rf /var/lib/apt/lists/*
 
-ENV CHROMA_HOST_ADDR "0.0.0.0"
+ENV CHROMA_HOST_ADDR "localhost"
 ENV CHROMA_HOST_PORT 8000
 ENV CHROMA_WORKERS 1
 ENV CHROMA_LOG_CONFIG "chromadb/log_config.yml"
