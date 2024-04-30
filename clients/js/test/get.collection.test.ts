@@ -17,7 +17,9 @@ test("it should get a collection", async () => {
   expect(results.ids.length).toBe(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
-  expect(results.included).toEqual(expect.arrayContaining(["metadatas", "documents"]))
+  expect(results.included).toEqual(
+    expect.arrayContaining(["metadatas", "documents"]),
+  );
 
   const results2 = await collection.get({ where: { test: "test1" } });
   expect(results2).toBeDefined();
