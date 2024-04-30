@@ -6,6 +6,7 @@ from chromadb.logservice.logservice import LogService
 from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.test_api import records  # type: ignore
 from chromadb.api.models.Collection import Collection
+import time
 
 batch_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
@@ -30,6 +31,9 @@ contains_records = {
         {"int_value": 2, "float_value": 2.002, "string_value": "two"},
     ],
 }
+
+# Sleep to allow memberlist to initialize after reset()
+MEMBERLIST_DELAY_SLEEP_TIME = 5
 
 
 def verify_records(
@@ -79,6 +83,7 @@ def test_add(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
         "batch_records": batch_records,
@@ -96,6 +101,7 @@ def test_update(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
         "updated_records": {
@@ -115,6 +121,7 @@ def test_delete(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     collection = api.create_collection("testdelete")
 
@@ -145,6 +152,7 @@ def test_upsert(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
         "batch_records": batch_records,
