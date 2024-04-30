@@ -50,8 +50,6 @@ def test_add(
     ]
     ground_truth_distances.sort()
     retrieved_distances = results["distances"][0]  # type: ignore
-    print("Ground truth distances: ", ground_truth_distances)
-    print("Retrieved distances: ", retrieved_distances)
 
     # Check that the query results are sorted by distance
     for i in range(1, len(retrieved_distances)):
