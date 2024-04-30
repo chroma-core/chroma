@@ -62,6 +62,12 @@ docker_build(
   target='compaction_service'
 )
 
+k8s_resource(
+  objects=['chroma:Namespace'],
+  new_name='namespace',
+  labels=["infrastructure"],
+)
+
 k8s_yaml(
   helm(
     'k8s/distributed-chroma',
@@ -86,11 +92,6 @@ k8s_yaml([
 
 # Lots of things assume the cluster is in a basic state. Get it into a basic
 # state before deploying anything else.
-k8s_resource(
-  objects=['chroma:Namespace'],
-  new_name='namespace',
-  labels=["infrastructure"],
-)
 k8s_resource(
   objects=[
     'pod-watcher:Role',
