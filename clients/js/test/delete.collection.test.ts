@@ -19,7 +19,7 @@ test("it should delete a collection", async () => {
 
   var remainingEmbeddings = await collection.get();
   expect(["test2", "test3"]).toEqual(
-    expect.arrayContaining(remainingEmbeddings.ids)
+    expect.arrayContaining(remainingEmbeddings.ids),
   );
 });
 

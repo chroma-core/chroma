@@ -46,7 +46,7 @@ logService:
   image:
     repository: 'local'
     tag: 'log-service'
-  env: 
+  env:
     - name: OPTL_TRACING_ENDPOINT
       value: 'value: "http://jaeger:4317"'
   flags:
