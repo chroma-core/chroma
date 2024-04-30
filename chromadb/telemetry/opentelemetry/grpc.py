@@ -4,7 +4,7 @@ import collections
 import grpc
 from opentelemetry.trace import StatusCode, SpanKind
 
-from chromadb.telemetry.opentelemetry import tracer
+
 
 
 class _ClientCallDetails(
@@ -36,6 +36,7 @@ class OtelInterceptor(
     grpc.StreamStreamClientInterceptor,
 ):
     def _intercept_call(self, continuation, client_call_details, request_or_iterator):
+        from chromadb.telemetry.opentelemetry import tracer
         if tracer is None:
             return continuation(client_call_details, request_or_iterator)
         with tracer.start_as_current_span(

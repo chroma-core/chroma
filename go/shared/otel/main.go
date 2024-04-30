@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/pingcap/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelCode "go.opentelemetry.io/otel/codes"
@@ -13,6 +14,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -71,25 +73,26 @@ func ServerGrpcInterceptor(ctx context.Context, req interface{}, info *grpc.Unar
 	var span trace.Span
 	ctx, span = tracer.Start(ctx, "Request "+info.FullMethod)
 	defer span.End()
+	span.SetAttributes(attribute.String("rpc.method", info.FullMethod))
 
 	// Calls the handler
 	h, err := handler(ctx, req)
 	if err != nil {
 		// Handle and log the error.
-		handleError(span, err)
+		handleError(span, info, err)
 		return nil, err
 	}
 
 	// Set the status to OK upon success.
 	span.SetStatus(otelCode.Ok, "ok")
 	span.SetAttributes(attribute.String("rpc.status_code", "ok"))
-	span.SetAttributes(attribute.String("rpc.method", info.FullMethod))
+	log.Info("RPC call", zap.String("method", info.FullMethod), zap.String("status", "ok"))
 
 	return h, nil
 }
 
 // handleError logs and annotates the span with details of the encountered error.
-func handleError(span trace.Span, err error) {
+func handleError(span trace.Span, info *grpc.UnaryServerInfo, err error) {
 	st, _ := status.FromError(err)
 	span.SetStatus(otelCode.Error, "error")
 	span.SetAttributes(
@@ -97,6 +100,8 @@ func handleError(span trace.Span, err error) {
 		attribute.String("rpc.message", st.Message()),
 		attribute.String("rpc.error", st.Err().Error()),
 	)
+	log.Error("RPC call", zap.String("method", info.FullMethod), zap.String("status", st.Code().String()), zap.String("error", st.Err().Error()), zap.String("message", st.Message()))
+
 }
 
 // decodeMetadataValue safely extracts a value from metadata, allowing for missing keys.
