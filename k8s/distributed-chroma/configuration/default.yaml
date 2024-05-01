@@ -1,0 +1,64 @@
+# Default configuration for query and compaction service
+# In the long term, every service should have an entry in this file
+# and this can become the global configuration file for Chroma
+# for now we nest it in the worker directory
+
+query_service:
+    my_ip: "10.244.0.9"
+    my_port: 50051
+    assignment_policy:
+        RendezvousHashing:
+            hasher: Murmur3
+    memberlist_provider:
+        CustomResource:
+            kube_namespace: "chroma"
+            memberlist_name: "query-service-memberlist"
+            queue_size: 100
+    sysdb:
+        Grpc:
+            host: "sysdb.chroma"
+            port: 50051
+    storage:
+        S3:
+            bucket: "chroma-storage"
+            credentials: "Minio"
+    log:
+        Grpc:
+            host: "logservice.chroma"
+            port: 50051
+    dispatcher:
+        num_worker_threads: 4
+        dispatcher_queue_size: 100
+        worker_queue_size: 100
+
+compaction_service:
+    my_ip: "10.244.0.9"
+    my_port: 50051
+    assignment_policy:
+        RendezvousHashing:
+            hasher: Murmur3
+    memberlist_provider:
+        CustomResource:
+            kube_namespace: "chroma"
+            memberlist_name: "compaction-service-memberlist"
+            queue_size: 100
+    sysdb:
+        Grpc:
+            host: "sysdb.chroma"
+            port: 50051
+    storage:
+        S3:
+            bucket: "chroma-storage"
+            credentials: "Minio"
+    log:
+        Grpc:
+            host: "logservice.chroma"
+            port: 50051
+    dispatcher:
+        num_worker_threads: 4
+        dispatcher_queue_size: 100
+        worker_queue_size: 100
+    compactor:
+        compaction_manager_queue_size: 1000
+        max_concurrent_jobs: 100
+        compaction_interval_sec: 60
