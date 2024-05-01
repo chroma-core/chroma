@@ -1,8 +1,6 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 let OpenAIApi: any;
-let openAiVersion = null;
-let openAiMajorVersion = null;
 
 interface OpenAIAPI {
   createEmbedding: (params: {
@@ -48,14 +46,10 @@ class OpenAIAPIv3 implements OpenAIAPI {
 }
 
 class OpenAIAPIv4 implements OpenAIAPI {
-  private readonly apiKey: any;
   private openai: any;
 
-  constructor(apiKey: any) {
-    this.apiKey = apiKey;
-    this.openai = new OpenAIApi({
-      apiKey: this.apiKey,
-    });
+  constructor(configuration: { organization: string; apiKey: string }) {
+    this.openai = new OpenAIApi.OpenAI(configuration);
   }
 
   public async createEmbedding(params: {
@@ -95,38 +89,8 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     this.model = openai_model || "text-embedding-ada-002";
   }
 
-  private async loadClient() {
-    // cache the client
-    if (this.openaiApi) return;
-
-    try {
-      const { openai, version } = await OpenAIEmbeddingFunction.import();
-      OpenAIApi = openai;
-      let versionVar: string = version;
-      openAiVersion = versionVar.replace(/[^0-9.]/g, "");
-      openAiMajorVersion = parseInt(openAiVersion.split(".")[0]);
-    } catch (_a) {
-      // @ts-ignore
-      if (_a.code === "MODULE_NOT_FOUND") {
-        throw new Error(
-          "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
-        );
-      }
-      throw _a; // Re-throw other errors
-    }
-
-    if (openAiMajorVersion > 3) {
-      this.openaiApi = new OpenAIAPIv4(this.api_key);
-    } else {
-      this.openaiApi = new OpenAIAPIv3({
-        organization: this.org_id,
-        apiKey: this.api_key,
-      });
-    }
-  }
-
   public async generate(texts: string[]): Promise<number[][]> {
-    await this.loadClient();
+    await this.initOpenAIClient();
 
     return await this.openaiApi!.createEmbedding({
       model: this.model,
@@ -135,23 +99,44 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       throw error;
     });
   }
-
-  /** @ignore */
-  static async import(): Promise<{
-    // @ts-ignore
-    openai: typeof import("openai");
-    version: string;
-  }> {
+  private async initOpenAIClient() {
+    if (this.openaiApi) return;
     try {
-      // @ts-ignore
-      const { default: openai } = await import("openai");
-      // @ts-ignore
-      const { VERSION } = await import("openai/version");
-      return { openai, version: VERSION };
+      this.openaiApi = await import("openai").then(async (openai) => {
+        OpenAIApi = openai;
+        let LIB_VERSION = "3";
+        try {
+          // @ts-ignore
+          const { VERSION } = await import("openai/version");
+          LIB_VERSION = VERSION;
+        } catch (e) {
+          // @ts-ignore
+          if (e.code === "MODULE_NOT_FOUND") {
+            LIB_VERSION = "3";
+          }
+        }
+        if (LIB_VERSION.startsWith("4")) {
+          return new OpenAIAPIv4({
+            apiKey: this.api_key,
+            organization: this.org_id,
+          });
+        } else if (LIB_VERSION.startsWith("3")) {
+          return new OpenAIAPIv3({
+            organization: this.org_id,
+            apiKey: this.api_key,
+          });
+        } else {
+          throw new Error("Unsupported OpenAI library version");
+        }
+      });
     } catch (e) {
-      throw new Error(
-        "Please install openai as a dependency with, e.g. `yarn add openai`",
-      );
+      // @ts-ignore
+      if (e.code === "MODULE_NOT_FOUND") {
+        throw new Error(
+          "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
+        );
+      }
+      throw e;
     }
   }
 }
