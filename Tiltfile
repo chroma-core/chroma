@@ -122,6 +122,7 @@ k8s_resource(
     'test-memberlist:MemberList',
     'test-memberlist-reader:ClusterRole',
     'test-memberlist-reader-binding:ClusterRoleBinding',
+    'compaction-service-config:configmap',
   ],
   new_name='k8s_setup',
   labels=["infrastructure"],
