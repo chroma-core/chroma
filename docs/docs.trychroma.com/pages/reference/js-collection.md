@@ -32,7 +32,7 @@ Add items to the collection
 
 **`Example`**
 
-```typescript
+```javascript
 const response = await collection.add({
   ids: ["id1", "id2"],
   embeddings: [
@@ -70,7 +70,7 @@ Count the number of items in the collection
 
 **`Example`**
 
-```typescript
+```javascript
 const response = await collection.count();
 ```
 
@@ -94,7 +94,7 @@ If there is an issue deleting items from the collection.
 
 **`Example`**
 
-```typescript
+```javascript
 const results = await collection.delete({
   ids: "some_id",
   where: {"$and": ["name": {"$eq": "John Doe"}, "age": {"$gte": 30}]},
@@ -127,7 +127,7 @@ Get items from the collection
 
 **`Example`**
 
-```typescript
+```javascript
 const response = await collection.get({
   ids: ["id1", "id2"],
   where: { key: "value" },
@@ -166,7 +166,7 @@ Modify the collection name or metadata
 
 **`Example`**
 
-```typescript
+```javascript
 const response = await collection.modify({
   name: "new name",
   metadata: { key: "value" },
@@ -201,7 +201,7 @@ If there is an issue executing the query.
 
 **`Example`**
 
-```typescript
+```javascript
 const results = await collection.peek({
   limit: 10,
 });
@@ -234,7 +234,7 @@ If there is an issue executing the query.
 
 **`Example`**
 
-```ts
+```javascript
 // Query the collection using embeddings
 const results = await collection.query({
   queryEmbeddings: [[0.1, 0.2, ...], ...],
@@ -284,7 +284,7 @@ Update the embeddings, documents, and/or metadatas of existing items
 
 **`Example`**
 
-```typescript
+```javascript
 const response = await collection.update({
   ids: ["id1", "id2"],
   embeddings: [
@@ -322,7 +322,7 @@ Upsert items to the collection
 
 **`Example`**
 
-```typescript
+```javascript
 const response = await collection.upsert({
   ids: ["id1", "id2"],
   embeddings: [

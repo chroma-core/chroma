@@ -24,7 +24,7 @@ export const items = [
         { href: '/deployment/migration', children: '✈️ Migration' },
         // { href: '/deployment/security', children: 'Security' },
         // { href: '/deployment/encryption', children: 'Encryption' },
-        // { href: '/deployment/auth', children: 'Auth' },
+        { href: '/deployment/auth', children: '🔒 Auth' },
         // { href: '/deployment/performance', children: 'Performance' },
       ]
     },

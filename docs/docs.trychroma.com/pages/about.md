@@ -8,7 +8,7 @@ title: "👽 About"
 We are hiring software engineers and applied research scientists.
 {% /note %}
 
-[➡️ View open roles on Notion](https://www.notion.so/trychroma/careers-chroma-9d017c3007c7478ebd85bad854101497?pvs=4)
+[➡️ View open roles](https://careers.trychroma.com/)
 
 Chroma as a project is coordinated by a small team of full-time employees who work at a company also called Chroma.
 

@@ -11,14 +11,13 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 
 |              | Python | JS |
 |--------------|-----------|---------------|
-| [OpenAI](/embeddings/openai) | ✅  | ✅ |
-| [Google Generative AI](/embeddings/google-gemini) | ✅  | ✅ |
-| [Cohere](/embeddings/cohere) | ✅  | ✅ |
-| [Google PaLM](/embeddings/google-palm) | ✅  | ➖ |
-| [Hugging Face](/embeddings/hugging-face) | ✅  | ➖ |
-| [Instructor](/embeddings/instructor) | ✅  | ➖ |
-| [Hugging Face Embedding Server](/embeddings/hugging-face-embedding-server) | ✅  | ✅ |
-| [Jina AI](/embeddings/jinaai) | ✅  | ✅ |
+| [OpenAI](/integrations/openai) | ✅  | ✅ |
+| [Google Generative AI](/integrations/google-gemini) | ✅  | ✅ |
+| [Cohere](/integrations/cohere) | ✅  | ✅ |
+| [Hugging Face](/integrations/hugging-face) | ✅  | ➖ |
+| [Instructor](/integrations/instructor) | ✅  | ➖ |
+| [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
+| [Jina AI](/integrations/jinaai) | ✅  | ✅ |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
