@@ -48,6 +48,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            {{ end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
