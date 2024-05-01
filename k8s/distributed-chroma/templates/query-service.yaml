@@ -43,6 +43,7 @@ spec:
             - name: chroma
               mountPath: /index_data
           env:
+            {{ range .Values.queryService.env }}
             - name: CHROMA_QUERY_SERVICE__MY_IP
               valueFrom:
                 fieldRef:
