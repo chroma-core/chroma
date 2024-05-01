@@ -25,23 +25,24 @@ Supported authentication methods:
 ##### Generate Server-Side Credentials
 
 {% note type="note" title="Security Practices" %}
-A good security practice is to store the password securely. In the example below we use bcrypt (currently the only supported hash in Chroma server side auth) to hash the plaintext password.
+A good security practice is to store the password securely. In the example below we use [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (currently the only supported hash in Chroma server side auth) to hash the plaintext password.
 {% /note %}
 
-To generate the password hash, run the following command. Note that you will need to have `htpasswd` installed on your system.
+To generate the password hash, run the following command:
 
 ```bash
-htpasswd -Bbn admin admin > server.htpasswd
+docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
 ```
+
+This creates the bcrypt password hash for the password `admin` and puts it into `server.htpasswd` alongside the user `admin`. It will look like `admin:<password hash>`.
 
 ##### Running the Server
 
 Set the following environment variables:
 
 ```bash
-export CHROMA_SERVER_AUTH_CREDENTIALS_FILE="server.htpasswd"
-export CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider"
-export CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
+export CHROMA_SERVER_AUTHN_CREDENTIALS_FILE="server.htpasswd"
+export CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
 ```
 
 And run the server as normal:
@@ -60,7 +61,7 @@ import chromadb
 from chromadb.config import Settings
 
 client = chromadb.HttpClient(
-  settings=Settings(chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",chroma_client_auth_credentials="admin:admin"))
+  settings=Settings(chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",chroma_client_auth_credentials="admin:admin"))
 client.heartbeat()  # this should work with or without authentication - it is a public endpoint
 
 client.get_version()  # this should work with or without authentication - it is a public endpoint
@@ -100,22 +101,28 @@ Current implementation of static API token auth supports only ENV based tokens.
 
 ##### Running the Server
 
-Set the following environment variables to use `Authorization: Bearer test-token` to be your authentication header.
+Set the following environment variables to use `Authorization: Bearer test-token` to be your authentication header. All environment variables can also be set as [Settings](https://docs.trychroma.com/deployment#step-5-configure-the-chroma-library).
 
 ```bash
-export CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
-export CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-export CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
+export CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
+export CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 ```
 
-to use `X-Chroma-Token: test-token` type of authentication header you can set an additional environment variable.
+To configure multiple tokens and use them for role-based access control (RBAC), use a file like [this](https://github.com/chroma-core/chroma/blob/main/examples/basic_functionality/authz/authz.yaml) and the following configuration settings:
 
 ```bash
-export CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
-export CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-export CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
-export CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
+export CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=<path_to_authz.yaml>
+export CHROMA_SERVER_AUTHZ_CONFIG_FILE=<path_to_authz.yaml>  # Note: these are the same!
+export CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+export CHROMA_SERVER_AUTHZ_PROVIDER="chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider"
 ```
+
+To use `X-Chroma-Token: test-token` type of authentication header you can set the `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` environment variable or configuration setting.
+
+```bash
+export CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
+export CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+export CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
@@ -127,7 +134,7 @@ import chromadb
 from chromadb.config import Settings
 
 client = chromadb.HttpClient(
-    settings=Settings(chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
+    settings=Settings(chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
                       chroma_client_auth_credentials="test-token"))
 client.heartbeat()  # this should work with or without authentication - it is a public endpoint
 
@@ -154,7 +161,7 @@ const client = new ChromaClient({
   auth: {
     provider: "token",
     credentials: "test-token",
-    providerOptions: { headerType: "AUTHORIZATION" },
+    tokenHeaderType: "AUTHORIZATION",
   },
 });
 ```
@@ -168,7 +175,7 @@ const client = new ChromaClient({
   auth: {
     provider: "token",
     credentials: "test-token",
-    providerOptions: { headerType: "X_CHROMA_TOKEN" },
+    tokenHeaderType: "X_CHROMA_TOKEN",
   },
 });
 ```

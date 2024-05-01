@@ -12,7 +12,7 @@ We are hiring software engineers and applied research scientists.
 
 Chroma as a project is coordinated by a small team of full-time employees who work at a company also called Chroma.
 
-We work in the sunny neighborhood of Potrero Hill in San Francisco.
+We work in the sunny Mission District in San Francisco.
 
 Chroma is co-founded by [Jeff Huber](https://twitter.com/jeffreyhuber) (left) and [Anton Troynikov](https://twitter.com/atroyn) (right).
 

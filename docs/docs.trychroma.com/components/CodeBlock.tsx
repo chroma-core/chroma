@@ -8,6 +8,7 @@ import Prism from 'prismjs';
 require(`prismjs/components/prism-python.min.js`);
 require(`prismjs/components/prism-bash.min.js`);
 require(`prismjs/components/prism-javascript.min.js`);
+require(`prismjs/components/prism-yaml.js`);
 require(`prismjs/components/prism-json.min.js`);
 
 Prism.languages.python = {

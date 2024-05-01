@@ -518,17 +518,17 @@ await collection.get({
 
 When using get or query you can use the include parameter to specify which data you want returned - any of `embeddings`, `documents`, `metadatas`, and for query, `distances`. By default, Chroma will return the `documents`, `metadatas` and in the case of query, the `distances` of the results. `embeddings` are excluded by default for performance and the `ids` are always returned. You can specify which of these you want returned by passing an array of included field names to the includes parameter of the query or get method.
 
-```python
+```javascript
 
 # Only get documents and ids
-collection.get({
-    include: [ "documents" ]
-})
+collection.get(
+    include=["documents"]
+)
 
-collection.query({
-    queryEmbeddings: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
-    include: [ "documents" ]
-})
+collection.query(
+    query_embeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
+    include=["documents"]
+)
 ```
 
 ### Using Where filters

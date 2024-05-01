@@ -9,6 +9,8 @@ export const items = [
         { href: '/integrations/hugging-face', children: 'Hugging Face' },
         { href: '/integrations/instructor', children: 'Instructor' },
         { href: '/integrations/jinaai', children: 'JinaAI' },
+        { href: '/integrations/roboflow', children: 'Roboflow' },
+        { href: '/integrations/ollama', children: 'Ollama Embeddings' },
       ]
     },
     {

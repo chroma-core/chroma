@@ -33,7 +33,7 @@ default_ef = embedding_functions.DefaultEmbeddingFunction()
 ```
 
 {% note type="default" %}
-Embedding functions can linked to a collection, which are used whenever you call `add`, `update`, `upsert` or `query`. You can also be use them directly which can be handy for debugging.
+Embedding functions can be linked to a collection and used whenever you call `add`, `update`, `upsert` or `query`. You can also use them directly which can be handy for debugging.
 ```py
 val = default_ef(["foo"])
 ```

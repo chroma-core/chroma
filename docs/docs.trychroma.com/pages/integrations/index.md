@@ -22,6 +22,8 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Instructor](/integrations/instructor) | ✅  | ➖ |
 | [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
 | [Jina AI](/integrations/jinaai) | ✅  | ✅ |
+| [Roboflow](/integrations/roboflow) | ✅  | ➖ |
+| [Ollama Embeddings](/integrations/ollama) | ✅  | ✅ |
 
 
 ***

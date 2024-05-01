@@ -14,7 +14,7 @@ If you prefer to opt out of telemetry, you can do this in two ways.
 
 ###### In Client Code
 
-Set `anonymized_telemetry` to `false` in your client's settings:
+Set `anonymized_telemetry` to `False` in your client's settings:
 
 ```python
 from chromadb.config import Settings

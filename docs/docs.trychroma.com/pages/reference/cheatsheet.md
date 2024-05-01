@@ -235,9 +235,9 @@ await collection.peek()
 
 // do nearest neighbor search to find similar embeddings or documents, supports filtering
 await collection.query({
-    queryEmbeddings=[[1.1, 2.3, 3.2], [5.1, 4.3, 2.2]],
-    nResults=2,
-    where={"style": "style2"}
+    queryEmbeddings: [[1.1, 2.3, 3.2], [5.1, 4.3, 2.2]],
+    nResults: 2,
+    where: {"style": "style2"}
 })
 
 // delete items
