@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.
@@ -22,7 +22,7 @@ pub(crate) enum S3CredentialsConfig {
     AWS,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 /// The configuration for the s3 storage type
 /// # Fields
 /// - bucket: The name of the bucket to use.
@@ -31,7 +31,7 @@ pub(crate) struct S3StorageConfig {
     pub(crate) credentials: S3CredentialsConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 /// The configuration for the local storage type
 /// # Fields
 /// - root: The root directory to use for storage.
