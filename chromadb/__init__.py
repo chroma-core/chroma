@@ -37,6 +37,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "TokenTransportHeader",
 ]
 
 logger = logging.getLogger(__name__)
