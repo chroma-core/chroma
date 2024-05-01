@@ -1,4 +1,4 @@
-/* Parts of file is copied from https://github.com/qdrant/qdrant/blob/master/lib/segment/src/spaces/simple.rs
+/* Much of this file is copied from https://github.com/qdrant/qdrant/blob/master/lib/segment/src/spaces/simple_neon.rs
 copyright Qdrant, licensed under the Apache 2.0 license.
 
  TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
@@ -200,222 +200,97 @@ copyright Qdrant, licensed under the Apache 2.0 license.
    limitations under the License.
 */
 
-use crate::errors::{ChromaError, ErrorCodes};
-use thiserror::Error;
+#[cfg(target_feature = "neon")]
+use std::arch::aarch64::*;
 
-/// The distance function enum.
-/// # Description
-/// This enum defines the distance functions supported by indices in Chroma.
-/// # Variants
-/// - `Euclidean` - The Euclidean or l2 norm.
-/// - `Cosine` - The cosine distance. Specifically, 1 - cosine.
-/// - `InnerProduct` - The inner product. Specifically, 1 - inner product.
-/// # Notes
-/// See https://docs.trychroma.com/usage-guide#changing-the-distance-function
-#[derive(Clone, Debug, PartialEq)]
-pub enum DistanceFunction {
-    Euclidean,
-    Cosine,
-    InnerProduct,
+#[cfg(target_feature = "neon")]
+pub unsafe fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len();
+    let m = n - (n % 16);
+    let mut ptr1: *const f32 = a.as_ptr();
+    let mut ptr2: *const f32 = b.as_ptr();
+    let mut sum1 = vdupq_n_f32(0.);
+    let mut sum2 = vdupq_n_f32(0.);
+    let mut sum3 = vdupq_n_f32(0.);
+    let mut sum4 = vdupq_n_f32(0.);
+
+    let mut i: usize = 0;
+    while i < m {
+        sum1 = vfmaq_f32(sum1, vld1q_f32(ptr1), vld1q_f32(ptr2));
+        sum2 = vfmaq_f32(sum2, vld1q_f32(ptr1.add(4)), vld1q_f32(ptr2.add(4)));
+        sum3 = vfmaq_f32(sum3, vld1q_f32(ptr1.add(8)), vld1q_f32(ptr2.add(8)));
+        sum4 = vfmaq_f32(sum4, vld1q_f32(ptr1.add(12)), vld1q_f32(ptr2.add(12)));
+        ptr1 = ptr1.add(16);
+        ptr2 = ptr2.add(16);
+        i += 16;
+    }
+    let mut result = vaddvq_f32(sum1) + vaddvq_f32(sum2) + vaddvq_f32(sum3) + vaddvq_f32(sum4);
+    for i in 0..n - m {
+        result += (*ptr1.add(i)) * (*ptr2.add(i));
+    }
+    1.0_f32 - result
 }
 
-impl DistanceFunction {
-    // TOOD: Should we error if mismatched dimensions?
-    pub fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
-        // TODO: Figure out why the compiler is not auto vectorizing these
-        // by default.
-        match self {
-            DistanceFunction::Euclidean => {
-                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-                {
-                    if std::arch::is_aarch64_feature_detected!("neon") {
-                        return unsafe { crate::distance::distance_neon::euclidean_distance(a, b) };
-                    }
-                }
-                #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance::distance_sse::euclidean_distance(a, b) };
-                    }
-                }
-                #[cfg(all(
-                    target_arch = "x86_64",
-                    all(target_feature = "avx", target_feature = "fma")
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("avx")
-                        && std::arch::is_x86_feature_detected!("fma")
-                    {
-                        return unsafe { crate::distance::distance_avx::euclidean_distance(a, b) };
-                    }
-                }
-                let mut sum = 0.0;
-                for i in 0..a.len() {
-                    sum += (a[i] - b[i]).powi(2);
-                }
-                sum
-            }
-            DistanceFunction::Cosine => {
-                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-                {
-                    if std::arch::is_aarch64_feature_detected!("neon") {
-                        return unsafe { crate::distance::distance_neon::cosine_distance(a, b) };
-                    }
-                }
-                #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance::distance_sse::cosine_distance(a, b) };
-                    }
-                }
-                #[cfg(all(
-                    target_arch = "x86_64",
-                    all(target_feature = "avx", target_feature = "fma")
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("avx")
-                        && std::arch::is_x86_feature_detected!("fma")
-                    {
-                        return unsafe { crate::distance::distance_avx::cosine_distance(a, b) };
-                    }
-                }
-                // For cosine we just assume the vectors have been normalized, since that
-                // is what our indices expect.
-                let mut sum = 0.0;
-                for i in 0..a.len() {
-                    sum += a[i] * b[i];
-                }
-                1.0_f32 - sum
-            }
-            DistanceFunction::InnerProduct => {
-                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-                {
-                    if std::arch::is_aarch64_feature_detected!("neon") {
-                        return unsafe { crate::distance::distance_neon::inner_product(a, b) };
-                    }
-                }
-                #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance::distance_sse::inner_product(a, b) };
-                    }
-                }
-                #[cfg(all(
-                    target_arch = "x86_64",
-                    all(target_feature = "avx", target_feature = "fma")
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("avx")
-                        && std::arch::is_x86_feature_detected!("fma")
-                    {
-                        return unsafe { crate::distance::distance_avx::inner_product(a, b) };
-                    }
-                }
-                let mut sum = 0.0;
-                for i in 0..a.len() {
-                    sum += a[i] * b[i];
-                }
-                1.0_f32 - sum
-            }
-        }
+#[cfg(target_feature = "neon")]
+pub unsafe fn inner_product(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len();
+    let m = n - (n % 16);
+    let mut ptr1: *const f32 = a.as_ptr();
+    let mut ptr2: *const f32 = b.as_ptr();
+    let mut sum1 = vdupq_n_f32(0.);
+    let mut sum2 = vdupq_n_f32(0.);
+    let mut sum3 = vdupq_n_f32(0.);
+    let mut sum4 = vdupq_n_f32(0.);
+
+    let mut i: usize = 0;
+    while i < m {
+        sum1 = vfmaq_f32(sum1, vld1q_f32(ptr1), vld1q_f32(ptr2));
+        sum2 = vfmaq_f32(sum2, vld1q_f32(ptr1.add(4)), vld1q_f32(ptr2.add(4)));
+        sum3 = vfmaq_f32(sum3, vld1q_f32(ptr1.add(8)), vld1q_f32(ptr2.add(8)));
+        sum4 = vfmaq_f32(sum4, vld1q_f32(ptr1.add(12)), vld1q_f32(ptr2.add(12)));
+        ptr1 = ptr1.add(16);
+        ptr2 = ptr2.add(16);
+        i += 16;
     }
+    let mut result = vaddvq_f32(sum1) + vaddvq_f32(sum2) + vaddvq_f32(sum3) + vaddvq_f32(sum4);
+    for i in 0..n - m {
+        result += (*ptr1.add(i)) * (*ptr2.add(i));
+    }
+    1.0_f32 - result
 }
 
-#[derive(Error, Debug)]
-pub enum DistanceFunctionError {
-    #[error("Invalid distance function `{0}`")]
-    InvalidDistanceFunction(String),
-}
+#[cfg(target_feature = "neon")]
+pub unsafe fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len();
+    let m = n - (n % 16);
+    let mut ptr1: *const f32 = a.as_ptr();
+    let mut ptr2: *const f32 = b.as_ptr();
+    let mut sum1 = vdupq_n_f32(0.);
+    let mut sum2 = vdupq_n_f32(0.);
+    let mut sum3 = vdupq_n_f32(0.);
+    let mut sum4 = vdupq_n_f32(0.);
 
-impl ChromaError for DistanceFunctionError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            DistanceFunctionError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
-        }
+    let mut i: usize = 0;
+    while i < m {
+        let sub1 = vsubq_f32(vld1q_f32(ptr1), vld1q_f32(ptr2));
+        sum1 = vfmaq_f32(sum1, sub1, sub1);
+
+        let sub2 = vsubq_f32(vld1q_f32(ptr1.add(4)), vld1q_f32(ptr2.add(4)));
+        sum2 = vfmaq_f32(sum2, sub2, sub2);
+
+        let sub3 = vsubq_f32(vld1q_f32(ptr1.add(8)), vld1q_f32(ptr2.add(8)));
+        sum3 = vfmaq_f32(sum3, sub3, sub3);
+
+        let sub4 = vsubq_f32(vld1q_f32(ptr1.add(12)), vld1q_f32(ptr2.add(12)));
+        sum4 = vfmaq_f32(sum4, sub4, sub4);
+
+        ptr1 = ptr1.add(16);
+        ptr2 = ptr2.add(16);
+        i += 16;
     }
-}
-
-impl TryFrom<&str> for DistanceFunction {
-    type Error = DistanceFunctionError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "l2" => Ok(DistanceFunction::Euclidean),
-            "cosine" => Ok(DistanceFunction::Cosine),
-            "ip" => Ok(DistanceFunction::InnerProduct),
-            _ => Err(DistanceFunctionError::InvalidDistanceFunction(
-                value.to_string(),
-            )),
-        }
+    let mut result = vaddvq_f32(sum1) + vaddvq_f32(sum2) + vaddvq_f32(sum3) + vaddvq_f32(sum4);
+    for i in 0..n - m {
+        result += (*ptr1.add(i) - *ptr2.add(i)).powi(2);
     }
-}
-
-impl Into<String> for DistanceFunction {
-    fn into(self) -> String {
-        match self {
-            DistanceFunction::Euclidean => "l2".to_string(),
-            DistanceFunction::Cosine => "cosine".to_string(),
-            DistanceFunction::InnerProduct => "ip".to_string(),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_distance_function_try_from() {
-        let distance_function: DistanceFunction = "l2".try_into().unwrap();
-        assert_eq!(distance_function, DistanceFunction::Euclidean);
-        let distance_function: DistanceFunction = "cosine".try_into().unwrap();
-        assert_eq!(distance_function, DistanceFunction::Cosine);
-        let distance_function: DistanceFunction = "ip".try_into().unwrap();
-        assert_eq!(distance_function, DistanceFunction::InnerProduct);
-    }
-
-    #[test]
-    fn test_distance_function_into() {
-        let distance_function: String = DistanceFunction::Euclidean.into();
-        assert_eq!(distance_function, "l2");
-        let distance_function: String = DistanceFunction::Cosine.into();
-        assert_eq!(distance_function, "cosine");
-        let distance_function: String = DistanceFunction::InnerProduct.into();
-        assert_eq!(distance_function, "ip");
-    }
-
-    #[test]
-    fn test_distance_function_l2sqr() {
-        let a = vec![1.0, 2.0, 3.0];
-        let a_mag = (1.0_f32.powi(2) + 2.0_f32.powi(2) + 3.0_f32.powi(2)).sqrt();
-        let a_norm = vec![1.0 / a_mag, 2.0 / a_mag, 3.0 / a_mag];
-        let b = vec![4.0, 5.0, 6.0];
-        let b_mag = (4.0_f32.powi(2) + 5.0_f32.powi(2) + 6.0_f32.powi(2)).sqrt();
-        let b_norm = vec![4.0 / b_mag, 5.0 / b_mag, 6.0 / b_mag];
-
-        let l2_sqr = (1.0 - 4.0_f32).powi(2) + (2.0 - 5.0_f32).powi(2) + (3.0 - 6.0_f32).powi(2);
-        let inner_product_sim = 1.0_f32
-            - a_norm
-                .iter()
-                .zip(b_norm.iter())
-                .map(|(a, b)| a * b)
-                .sum::<f32>();
-
-        let distance_function: DistanceFunction = "l2".try_into().unwrap();
-        assert_eq!(distance_function.distance(&a, &b), l2_sqr);
-        let distance_function: DistanceFunction = "ip".try_into().unwrap();
-        assert_eq!(
-            distance_function.distance(&a_norm, &b_norm),
-            inner_product_sim
-        );
-    }
+    result
 }
