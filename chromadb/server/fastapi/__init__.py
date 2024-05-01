@@ -80,7 +80,7 @@ async def catch_exceptions_middleware(
     except Exception as e:
         logger.exception(e)
         return JSONResponse(
-            content={"error": str(type(e)), "message": f"{str(e)}"}, status_code=500
+            content={"error": type(e).__name__, "message": f"{str(e)}"}, status_code=500
         )
 
 
