@@ -102,6 +102,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   private async initOpenAIClient() {
     if (this.openaiApi) return;
     try {
+      // @ts-ignore
       this.openaiApi = await import("openai").then(async (openai) => {
         OpenAIApi = openai;
         let LIB_VERSION = "3";
