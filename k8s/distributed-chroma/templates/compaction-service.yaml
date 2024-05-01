@@ -22,7 +22,7 @@ spec:
           ports:
             - containerPort: 50051
           env:
-            {{ range .Values.sysdb.env }}
+            {{ range .Values.compactionService.env }}
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
