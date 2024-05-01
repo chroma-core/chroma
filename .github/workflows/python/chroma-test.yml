@@ -1,0 +1,28 @@
+name: Chroma Python Tests
+
+on:
+  push:
+    branches:
+      - main
+      - team/hypothesis-tests
+  pull_request:
+    branches:
+      - main
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  call-python-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Call Chroma Python Tests
+      uses: ./.github/workflows/python/chroma-python-tests.yml
+      with:
+        python_versions: '["3.8"]'
+  call-stress-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Call Chroma Python Stress Tests
+      uses: ./.github/workflows/python/chroma-stress-tests.yml
+      with:
+        python_versions: '["3.8"]'
