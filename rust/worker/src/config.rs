@@ -64,7 +64,6 @@ impl RootConfig {
             k if k == "my_ip" => k.into(),
             k => k.as_str().replace("__", ".").into(),
         }));
-        println!("ENV FIGMENT: {:?}", f);
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
         }
