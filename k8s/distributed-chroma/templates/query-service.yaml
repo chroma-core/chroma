@@ -43,12 +43,15 @@ spec:
             - name: chroma
               mountPath: /index_data
           env:
-            {{ range .Values.queryService.env }}
+            {{ range .Values.sysdb.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
             - name: CHROMA_QUERY_SERVICE__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            {{ end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
