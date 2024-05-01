@@ -43,7 +43,7 @@ spec:
             - name: chroma
               mountPath: /index_data
           env:
-            - name: CHROMA_query-service__MY_IP
+            - name: CHROMA_QUERY_SERVICE__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP

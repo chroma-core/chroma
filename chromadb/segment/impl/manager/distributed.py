@@ -64,10 +64,11 @@ class DistributedSegmentManager(SegmentManager):
         vector_segment = _segment(
             SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
         )
-        metadata_segment = _segment(
-            SegmentType.SQLITE, SegmentScope.METADATA, collection
-        )
-        return [vector_segment, metadata_segment]
+        # metadata_segment = _segment(
+        #     SegmentType.SQLITE, SegmentScope.METADATA, collection
+        # )
+        record_segment = _segment(SegmentType.RECORD, SegmentScope.RECORD, collection)
+        return [vector_segment, record_segment]
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
@@ -113,37 +114,7 @@ class DistributedSegmentManager(SegmentManager):
     )
     @override
     def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
-        # TODO: this should call load/release on the target node, node should be stored in metadata
-        # for now this is fine, but cache invalidation is a problem btwn sysdb and segment manager
-        types = [MetadataReader, VectorReader]
-        for type in types:
-            self.get_segment(
-                collection_id, type
-            )  # TODO: this is a hack that mirrors local segment manager to force load the relevant instances
-            if type == VectorReader:
-                # Load the remote segment
-                segments = self._sysdb.get_segments(
-                    collection=collection_id, scope=SegmentScope.VECTOR
-                )
-                known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
-                next(filter(lambda s: s["type"] in known_types, segments))  # noqa
-                # grpc_url = self._segment_directory.get_segment_endpoint(segment)
-
-                # if grpc_url not in self._segment_server_stubs:
-                #     channel = grpc.insecure_channel(grpc_url)
-                # self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
-
-                # TODO: this load is not necessary
-                # self._segment_server_stubs[grpc_url].LoadSegment(
-                #     to_proto_segment(segment)
-                # )
-                # if grpc_url not in self._segment_server_stubs:
-                #     channel = grpc.insecure_channel(grpc_url)
-                #     self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
-
-                # self._segment_server_stubs[grpc_url].LoadSegment(
-                #     to_proto_segment(segment)
-                # )
+        pass
 
     # TODO: rethink duplication from local segment manager
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
@@ -163,11 +134,14 @@ class DistributedSegmentManager(SegmentManager):
 # TODO: rethink duplication from local segment manager
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
-    cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
-    collection_metadata = collection.get("metadata", None)
+
     metadata: Optional[Metadata] = None
-    if collection_metadata:
-        metadata = cls.propagate_collection_metadata(collection_metadata)
+    # For the segment types with python implementations, we can propagate metadata
+    if type in SEGMENT_TYPE_IMPLS:
+        cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
+        collection_metadata = collection.get("metadata", None)
+        if collection_metadata:
+            metadata = cls.propagate_collection_metadata(collection_metadata)
 
     return Segment(
         id=uuid4(),

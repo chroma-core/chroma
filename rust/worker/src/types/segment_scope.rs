@@ -9,6 +9,8 @@ use thiserror::Error;
 pub(crate) enum SegmentScope {
     VECTOR,
     METADATA,
+    RECORD,
+    SQLITE,
 }
 
 #[derive(Error, Debug)]
@@ -30,6 +32,8 @@ impl TryFrom<chroma_proto::SegmentScope> for SegmentScope {
         match scope {
             chroma_proto::SegmentScope::Vector => Ok(SegmentScope::VECTOR),
             chroma_proto::SegmentScope::Metadata => Ok(SegmentScope::METADATA),
+            chroma_proto::SegmentScope::Record => Ok(SegmentScope::RECORD),
+            chroma_proto::SegmentScope::Sqlite => Ok(SegmentScope::SQLITE),
             _ => Err(SegmentScopeConversionError::InvalidScope),
         }
     }
@@ -44,6 +48,8 @@ impl TryFrom<i32> for SegmentScope {
             Ok(scope) => match scope {
                 chroma_proto::SegmentScope::Vector => Ok(SegmentScope::VECTOR),
                 chroma_proto::SegmentScope::Metadata => Ok(SegmentScope::METADATA),
+                chroma_proto::SegmentScope::Record => Ok(SegmentScope::RECORD),
+                chroma_proto::SegmentScope::Sqlite => Ok(SegmentScope::SQLITE),
                 _ => Err(SegmentScopeConversionError::InvalidScope),
             },
             Err(_) => Err(SegmentScopeConversionError::DecodeError(
@@ -66,5 +72,13 @@ mod tests {
         let proto_scope = chroma_proto::SegmentScope::Metadata;
         let converted_scope: SegmentScope = proto_scope.try_into().unwrap();
         assert_eq!(converted_scope, SegmentScope::METADATA);
+
+        let proto_scope = chroma_proto::SegmentScope::Sqlite;
+        let converted_scope: SegmentScope = proto_scope.try_into().unwrap();
+        assert_eq!(converted_scope, SegmentScope::SQLITE);
+
+        let proto_scope = chroma_proto::SegmentScope::Record;
+        let converted_scope: SegmentScope = proto_scope.try_into().unwrap();
+        assert_eq!(converted_scope, SegmentScope::RECORD);
     }
 }

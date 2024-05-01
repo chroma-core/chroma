@@ -56,6 +56,6 @@ FROM debian:bookworm-slim as compaction_service
 
 COPY --from=compaction_service_builder /chroma/compaction_service .
 COPY --from=compaction_service_builder /chroma/rust/worker/chroma_config.yaml .
-RUN apt-get update && apt-get install -y libssl-dev
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates
 
 ENTRYPOINT [ "./compaction_service" ]

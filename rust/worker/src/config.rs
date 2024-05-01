@@ -167,6 +167,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -194,6 +195,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -242,6 +244,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -269,6 +272,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -335,6 +339,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -362,6 +367,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -408,6 +414,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -433,6 +440,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"

@@ -21,6 +21,7 @@ query_service:
     storage:
         S3:
             bucket: "chroma-storage"
+            credentials: "Minio"
     log:
         Grpc:
             host: "logservice.chroma"
@@ -48,6 +49,7 @@ compaction_service:
     storage:
         S3:
             bucket: "chroma-storage"
+            credentials: "Minio"
     log:
         Grpc:
             host: "logservice.chroma"

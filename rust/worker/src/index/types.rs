@@ -2,6 +2,7 @@ use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::types::{MetadataValue, Segment};
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub(crate) struct IndexConfig {
@@ -56,6 +57,7 @@ pub(crate) trait Index<C> {
     fn init(
         index_config: &IndexConfig,
         custom_config: Option<&C>,
+        id: Uuid,
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
@@ -75,7 +77,7 @@ pub(crate) trait Index<C> {
 /// TODO: Right now load() takes IndexConfig because we don't implement save/load of the config.
 pub(crate) trait PersistentIndex<C>: Index<C> {
     fn save(&self) -> Result<(), Box<dyn ChromaError>>;
-    fn load(path: &str, index_config: &IndexConfig) -> Result<Self, Box<dyn ChromaError>>
+    fn load(path: &str, index_config: &IndexConfig, id: Uuid) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
 }
