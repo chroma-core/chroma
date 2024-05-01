@@ -58,6 +58,7 @@ queryService:
   env:
 
 compactionService:
+  configFilePath: "configuration/default.yaml"
   image:
     repository: 'local'
     tag: 'compaction-service'
