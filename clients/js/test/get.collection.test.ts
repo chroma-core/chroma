@@ -47,7 +47,7 @@ test("wrong code returns an error", async () => {
     expect(error).toBeDefined();
     expect(error).toBeInstanceOf(ChromaValueError);
     expect(error.message).toMatchInlineSnapshot(
-      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`
+      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
     );
   }
 });
@@ -114,6 +114,6 @@ test("it should throw an error if the collection does not exist", async () => {
   await chroma.reset();
 
   await expect(
-    async () => await chroma.getCollection({ name: "test" })
+    async () => await chroma.getCollection({ name: "test" }),
   ).rejects.toThrow(Error);
 });
