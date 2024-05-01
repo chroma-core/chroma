@@ -125,7 +125,7 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 		otlptracegrpc.NewClient(
 			otlptracegrpc.WithInsecure(),
 			otlptracegrpc.WithEndpoint(config.Endpoint),
-			otlptracegrpc.WithDialOption(grpc.WithBlock()), // Useful for waiting until the connection is up.
+			otlptracegrpc.WithDialOption(),
 		),
 	)
 	if err != nil {
