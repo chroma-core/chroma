@@ -9,11 +9,14 @@ use std::path::Path;
 /// See config.rs in the root of the worker crate for an example of how to use
 /// config files to configure the worker.
 pub(crate) enum StorageConfig {
+    // case-insensitive
+    #[serde(alias = "s3")]
     S3(S3StorageConfig),
+    #[serde(alias = "local")]
     Local(LocalStorageConfig),
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Debug)]
 pub(crate) enum S3CredentialsConfig {
     Minio,
     AWS,
