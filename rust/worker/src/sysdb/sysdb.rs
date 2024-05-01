@@ -153,12 +153,12 @@ impl SysDb for GrpcSysDb {
                 tenant: if tenant.is_some() {
                     tenant.unwrap()
                 } else {
-                    DEFAULT_TENANT.to_string()
+                    "".to_string()
                 },
                 database: if database.is_some() {
                     database.unwrap()
                 } else {
-                    DEFAULT_DATBASE.to_string()
+                    "".to_string()
                 },
             })
             .await;
