@@ -22,10 +22,12 @@ spec:
           ports:
             - containerPort: 50051
           env:
+            {{ range .Values.compactionService.env }}
             - name: CHROMA_COMPACTION_SERVICE__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            {{ end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
