@@ -409,6 +409,7 @@ class SpacyEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = spacy_fn(input)
         """
 
+        return cast(Embeddings, [list(self._nlp(doc).vector.astype("float")) for doc in input])
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
