@@ -111,7 +111,7 @@ impl<T: MetadataIndexValue> MetadataIndex<T> for BlockfileMetadataIndex<T> {
         }
         for (key, rbm) in self.uncommitted_rbms.drain() {
             self.blockfile
-                .set(key.clone(), Value::RoaringBitmapValue(rbm.clone()));
+                .set(key.clone(), &Value::RoaringBitmapValue(rbm.clone()));
         }
         self.blockfile.commit_transaction()?;
         self.in_transaction = false;

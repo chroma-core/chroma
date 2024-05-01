@@ -159,15 +159,14 @@ mod tests {
         let mut log = Box::new(InMemoryLog::new());
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
-            collection_id_1.clone(),
+            collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 1,
+                collection_id: collection_uuid_1.clone(),
+                log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
-                    log_offset: 1,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_1".to_string(),
                         embedding: None,
@@ -179,13 +178,13 @@ mod tests {
             }),
         );
         log.add_log(
-            collection_id_1.clone(),
+            collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 2,
+                collection_id: collection_uuid_1.clone(),
+                log_offset: 1,
                 log_ts: 2,
                 record: LogRecord {
-                    log_offset: 2,
+                    log_offset: 1,
                     record: OperationRecord {
                         id: "embedding_id_2".to_string(),
                         embedding: None,

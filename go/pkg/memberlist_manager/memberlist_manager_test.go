@@ -160,10 +160,12 @@ func TestMemberlistManager(t *testing.T) {
 	memberlistStore := NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
 
 	// Create a memberlist manager
-	memberlist_manager := NewMemberlistManager(nodeWatcher, memberlistStore)
+	memberlistManager := NewMemberlistManager(nodeWatcher, memberlistStore)
+	memberlistManager.SetReconcileInterval(5 * time.Second)
+	memberlistManager.SetReconcileCount(1)
 
 	// Start the memberlist manager
-	err = memberlist_manager.Start()
+	err = memberlistManager.Start()
 	if err != nil {
 		t.Fatalf("Error starting memberlist manager: %v", err)
 	}

@@ -24,11 +24,14 @@ frontendService:
   authCredentialsProvider: 'value: ""'
   authzProvider: 'value: ""'
   authzConfigProvider: 'value: ""'
-  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.MockMemberlistProvider"'
+  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"'
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
-  otherEnvConfig: ''
-
+  otherEnvConfig: |
+      - name: CHROMA_OTEL_COLLECTION_ENDPOINT
+        value: "http://jaeger:4317"
+      - name: CHROMA_OTEL_GRANULARITY
+        value: all
 sysdb:
   image:
     repository: 'local'
@@ -48,11 +51,13 @@ queryService:
   image:
     repository: 'local'
     tag: 'query-service'
+  env:
 
 compactionService:
   image:
     repository: 'local'
     tag: 'compaction-service'
+  env:
 
 sysdbMigration:
   image:

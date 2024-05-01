@@ -89,7 +89,7 @@ class GrpcMetadataSegment(MetadataReader):
             result = self._from_proto(record)
             results.append(result)
 
-        return []
+        return results
 
     def _where_to_proto(self, where: Optional[Where]) -> pb.Where:
         response = pb.Where()
@@ -247,23 +247,9 @@ class GrpcMetadataSegment(MetadataReader):
                                 f"Expected where operand value to be a string, int, or float, got {operand}"
                             )
                     else:
-                        # Our key is a metadata field name and the value is meant
-                        # to be compared for strict equality.
-                        if type(operand) is str:
-                            ssc = pb.SingleStringComparison()
-                            ssc.value = operand
-                            ssc.comparator = pb.GenericComparator.EQ
-                            dc.single_string_operand.CopyFrom(ssc)
-                        elif type(operand) is int:
-                            sic = pb.SingleIntComparison()
-                            sic.value = operand
-                            sic.generic_comparator = pb.GenericComparator.EQ
-                            dc.single_int_operand.CopyFrom(sic)
-                        elif type(operand) is float:
-                            sfc = pb.SingleDoubleComparison()
-                            sfc.value = operand
-                            sfc.generic_comparator = pb.GenericComparator.EQ
-                            dc.double_list_operand.CopyFrom(sfc)
+                        # This case should never happen, as we've already
+                        # handled the case for direct comparisons.
+                        pass
 
             response.direct_comparison.CopyFrom(dc)
         return response

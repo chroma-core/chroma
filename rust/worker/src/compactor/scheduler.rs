@@ -97,7 +97,7 @@ impl Scheduler {
                     };
 
                     collection_records.push(CollectionRecord {
-                        id: collection[0].id.to_string(),
+                        id: collection[0].id,
                         tenant_id: collection[0].tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
@@ -119,7 +119,9 @@ impl Scheduler {
         let members = self.memberlist.as_ref().unwrap();
         self.assignment_policy.set_members(members.clone());
         for collection in collections {
-            let result = self.assignment_policy.assign(collection.id.as_str());
+            let result = self
+                .assignment_policy
+                .assign(collection.id.to_string().as_str());
             match result {
                 Ok(member) => {
                     if member == self.my_ip {
@@ -145,6 +147,8 @@ impl Scheduler {
     }
 
     pub(crate) async fn schedule(&mut self) {
+        // For now, we clear the job queue every time, assuming we will not have any pending jobs running
+        self.job_queue.clear();
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
             // TODO: Log error
             println!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
@@ -186,15 +190,14 @@ mod tests {
         let mut log = Box::new(InMemoryLog::new());
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
-            collection_id_1.clone(),
+            collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 1,
+                collection_id: collection_uuid_1.clone(),
+                log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
-                    log_offset: 1,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_1".to_string(),
                         embedding: None,
@@ -207,15 +210,14 @@ mod tests {
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let collection_id_2 = collection_uuid_2.to_string();
         log.add_log(
-            collection_id_2.clone(),
+            collection_uuid_2.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_2.clone(),
-                log_offset: 2,
+                collection_id: collection_uuid_2.clone(),
+                log_offset: 0,
                 log_ts: 2,
                 record: LogRecord {
-                    log_offset: 2,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_2".to_string(),
                         embedding: None,
@@ -293,7 +295,7 @@ mod tests {
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
         // Scheduler ignores collection that failed to fetch last compaction time
         assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].collection_id, collection_id_1,);
+        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
 
         let last_compaction_time_2 = 1;
         sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
@@ -302,8 +304,8 @@ mod tests {
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
         // Scheduler schedules collections based on last compaction time
         assert_eq!(jobs.len(), 2);
-        assert_eq!(jobs[0].collection_id, collection_id_2,);
-        assert_eq!(jobs[1].collection_id, collection_id_1,);
+        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        assert_eq!(jobs[1].collection_id, collection_uuid_1,);
 
         // Test filter_collections
         let member_1 = "0.0.0.1".to_string();

@@ -1,5 +1,6 @@
 import { expect, test } from "@jest/globals";
 import chroma from "./initClient";
+import { InvalidCollectionError } from "../src/Errors";
 
 test("it should upsert embeddings to a collection", async () => {
   await chroma.reset();
@@ -23,4 +24,18 @@ test("it should upsert embeddings to a collection", async () => {
 
   const count2 = await collection.count();
   expect(count2).toBe(3);
+});
+
+test("should error on non existing collection", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.deleteCollection({ name: "test" });
+  expect(async () => {
+    await collection.upsert({
+      ids: ["test1"],
+      embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
+      metadatas: [{ test: "meta1" }],
+      documents: ["doc1"],
+    });
+  }).rejects.toThrow(InvalidCollectionError);
 });
