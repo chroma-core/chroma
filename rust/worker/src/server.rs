@@ -39,6 +39,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
+                println!("Failed to create sysdb component: {:?}", err);
                 return Err(err);
             }
         };
@@ -46,12 +47,14 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
+                println!("Failed to create log component: {:?}", err);
                 return Err(err);
             }
         };
         let storage = match crate::storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
+                println!("Failed to create storage component: {:?}", err);
                 return Err(err);
             }
         };

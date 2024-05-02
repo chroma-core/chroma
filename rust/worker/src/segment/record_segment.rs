@@ -40,7 +40,7 @@ impl Debug for RecordSegmentWriter {
 }
 
 #[derive(Error, Debug)]
-pub enum RecordSegmentCreationError {
+pub enum RecordSegmentWriterCreationError {
     #[error("Invalid segment type")]
     InvalidSegmentType,
     #[error("Missing file: {0}")]
@@ -57,10 +57,10 @@ impl RecordSegmentWriter {
     pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
-    ) -> Result<Self, RecordSegmentCreationError> {
+    ) -> Result<Self, RecordSegmentWriterCreationError> {
         println!("Creating RecordSegmentWriter from Segment");
         if segment.r#type != SegmentType::Record {
-            return Err(RecordSegmentCreationError::InvalidSegmentType);
+            return Err(RecordSegmentWriterCreationError::InvalidSegmentType);
         }
 
         let (user_id_to_id, id_to_user_id, id_to_data) = match segment.file_path.len() {
@@ -68,15 +68,21 @@ impl RecordSegmentWriter {
                 println!("No files found, creating new blockfiles for record segment");
                 let user_id_to_id = match blockfile_provider.create::<&str, u32>() {
                     Ok(user_id_to_id) => user_id_to_id,
-                    Err(e) => return Err(RecordSegmentCreationError::BlockfileCreateError(e)),
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
                 };
                 let id_to_user_id = match blockfile_provider.create::<u32, &str>() {
                     Ok(id_to_user_id) => id_to_user_id,
-                    Err(e) => return Err(RecordSegmentCreationError::BlockfileCreateError(e)),
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
                 };
                 let id_to_data = match blockfile_provider.create::<u32, &DataRecord>() {
                     Ok(id_to_data) => id_to_data,
-                    Err(e) => return Err(RecordSegmentCreationError::BlockfileCreateError(e)),
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
                 };
                 (user_id_to_id, id_to_user_id, id_to_data)
             }
@@ -86,13 +92,13 @@ impl RecordSegmentWriter {
                     Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.get(0) {
                         Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
                         None => {
-                            return Err(RecordSegmentCreationError::MissingFile(
+                            return Err(RecordSegmentWriterCreationError::MissingFile(
                                 USER_ID_TO_OFFSET_ID.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentCreationError::MissingFile(
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
                             USER_ID_TO_OFFSET_ID.to_string(),
                         ))
                     }
@@ -101,13 +107,13 @@ impl RecordSegmentWriter {
                     Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.get(0) {
                         Some(id_to_user_id_bf_id) => id_to_user_id_bf_id,
                         None => {
-                            return Err(RecordSegmentCreationError::MissingFile(
+                            return Err(RecordSegmentWriterCreationError::MissingFile(
                                 OFFSET_ID_TO_USER_ID.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentCreationError::MissingFile(
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
                             OFFSET_ID_TO_USER_ID.to_string(),
                         ))
                     }
@@ -116,13 +122,13 @@ impl RecordSegmentWriter {
                     Some(id_to_data_bf_id) => match id_to_data_bf_id.get(0) {
                         Some(id_to_data_bf_id) => id_to_data_bf_id,
                         None => {
-                            return Err(RecordSegmentCreationError::MissingFile(
+                            return Err(RecordSegmentWriterCreationError::MissingFile(
                                 OFFSET_ID_TO_DATA.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentCreationError::MissingFile(
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
                             OFFSET_ID_TO_DATA.to_string(),
                         ))
                     }
@@ -131,7 +137,7 @@ impl RecordSegmentWriter {
                 let user_id_to_bf_uuid = match Uuid::parse_str(user_id_to_id_bf_id) {
                     Ok(user_id_to_bf_uuid) => user_id_to_bf_uuid,
                     Err(_) => {
-                        return Err(RecordSegmentCreationError::InvalidUuid(
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
                             USER_ID_TO_OFFSET_ID.to_string(),
                         ))
                     }
@@ -140,7 +146,7 @@ impl RecordSegmentWriter {
                 let id_to_user_id_bf_uuid = match Uuid::parse_str(id_to_user_id_bf_id) {
                     Ok(id_to_user_id_bf_uuid) => id_to_user_id_bf_uuid,
                     Err(_) => {
-                        return Err(RecordSegmentCreationError::InvalidUuid(
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
                             OFFSET_ID_TO_USER_ID.to_string(),
                         ))
                     }
@@ -149,7 +155,7 @@ impl RecordSegmentWriter {
                 let id_to_data_bf_uuid = match Uuid::parse_str(id_to_data_bf_id) {
                     Ok(id_to_data_bf_uuid) => id_to_data_bf_uuid,
                     Err(_) => {
-                        return Err(RecordSegmentCreationError::InvalidUuid(
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
                             OFFSET_ID_TO_DATA.to_string(),
                         ))
                     }
@@ -160,7 +166,9 @@ impl RecordSegmentWriter {
                     .await
                 {
                     Ok(user_id_to_id) => user_id_to_id,
-                    Err(e) => return Err(RecordSegmentCreationError::BlockfileCreateError(e)),
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
                 };
 
                 let id_to_user_id = match blockfile_provider
@@ -168,7 +176,9 @@ impl RecordSegmentWriter {
                     .await
                 {
                     Ok(id_to_user_id) => id_to_user_id,
-                    Err(e) => return Err(RecordSegmentCreationError::BlockfileCreateError(e)),
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
                 };
 
                 let id_to_data = match blockfile_provider
@@ -176,12 +186,14 @@ impl RecordSegmentWriter {
                     .await
                 {
                     Ok(id_to_data) => id_to_data,
-                    Err(e) => return Err(RecordSegmentCreationError::BlockfileCreateError(e)),
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
                 };
 
                 (user_id_to_id, id_to_user_id, id_to_data)
             }
-            _ => return Err(RecordSegmentCreationError::IncorrectNumberOfFiles),
+            _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
         };
 
         Ok(RecordSegmentWriter {
@@ -378,18 +390,21 @@ pub(crate) struct RecordSegmentReader<'me> {
 }
 
 #[derive(Error, Debug)]
-pub enum RecordSegmentReaderError {
+pub enum RecordSegmentReaderCreationError {
+    #[error("Segment uninitialized")]
+    UninitializedSegment,
     #[error("Blockfile Open Error")]
     BlockfileOpenError(#[from] Box<OpenError>),
     #[error("Segment has invalid number of files")]
     InvalidNumberOfFiles,
 }
 
-impl ChromaError for RecordSegmentReaderError {
+impl ChromaError for RecordSegmentReaderCreationError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RecordSegmentReaderError::BlockfileOpenError(e) => e.code(),
-            RecordSegmentReaderError::InvalidNumberOfFiles => ErrorCodes::InvalidArgument,
+            RecordSegmentReaderCreationError::BlockfileOpenError(e) => e.code(),
+            RecordSegmentReaderCreationError::InvalidNumberOfFiles => ErrorCodes::InvalidArgument,
+            RecordSegmentReaderCreationError::UninitializedSegment => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -398,7 +413,7 @@ impl RecordSegmentReader<'_> {
     pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
         let (user_id_to_id, id_to_user_id, id_to_data) = match segment.file_path.len() {
             3 => {
                 let user_id_to_id_bf_id = &segment.file_path.get(USER_ID_TO_OFFSET_ID).unwrap()[0];
@@ -411,7 +426,9 @@ impl RecordSegmentReader<'_> {
                 {
                     Ok(user_id_to_id) => user_id_to_id,
                     Err(e) => {
-                        return Err(Box::new(RecordSegmentReaderError::BlockfileOpenError(e)))
+                        return Err(Box::new(
+                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
+                        ))
                     }
                 };
 
@@ -421,7 +438,9 @@ impl RecordSegmentReader<'_> {
                 {
                     Ok(id_to_user_id) => id_to_user_id,
                     Err(e) => {
-                        return Err(Box::new(RecordSegmentReaderError::BlockfileOpenError(e)))
+                        return Err(Box::new(
+                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
+                        ))
                     }
                 };
 
@@ -431,14 +450,23 @@ impl RecordSegmentReader<'_> {
                 {
                     Ok(id_to_data) => id_to_data,
                     Err(e) => {
-                        return Err(Box::new(RecordSegmentReaderError::BlockfileOpenError(e)))
+                        return Err(Box::new(
+                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
+                        ))
                     }
                 };
 
                 (user_id_to_id, id_to_user_id, id_to_data)
             }
+            0 => {
+                return Err(Box::new(
+                    RecordSegmentReaderCreationError::UninitializedSegment,
+                ));
+            }
             _ => {
-                return Err(Box::new(RecordSegmentReaderError::InvalidNumberOfFiles));
+                return Err(Box::new(
+                    RecordSegmentReaderCreationError::InvalidNumberOfFiles,
+                ));
             }
         };
 

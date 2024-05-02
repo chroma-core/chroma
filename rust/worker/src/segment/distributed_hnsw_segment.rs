@@ -69,6 +69,7 @@ impl DistributedHNSWSegment {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if segment.file_path.len() > 0 {
+            println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
@@ -110,6 +111,7 @@ impl DistributedHNSWSegment {
                 segment.id,
             )?))
         } else {
+            println!("Creating new HNSW index");
             let index = hnsw_index_provider.create(segment, dimensionality as i32)?;
             Ok(Box::new(DistributedHNSWSegment::new(
                 index,
