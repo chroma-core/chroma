@@ -33,3 +33,25 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           test-globs: ${{ matrix.test-globs }}
+
+  test-cluster:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ["16core-64gb-ubuntu-latest"]
+        testfile: ["chromadb/test/db/test_system.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/ingest/test_producer_consumer.py",
+                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
+                   "chromadb/test/test_logservice.py",
+                   "chromadb/test/distributed/test_sanity.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.testfile }}"'

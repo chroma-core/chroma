@@ -1,0 +1,23 @@
+name: Start Tilt services
+description: "This action starts Tilt services"
+runs:
+  using: "composite"
+  steps:
+    - name: Install Tilt
+      shell: bash
+      run: |
+        TILT_VERSION="0.33.3"
+        curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
+          tar -xzv -C /usr/local/bin tilt
+    - name: Install ctlptlc
+      shell: bash
+      run: |
+        CTLPTL_VERSION="0.8.20"
+        curl -fsSL https://github.com/tilt-dev/ctlptl/releases/download/v$CTLPTL_VERSION/ctlptl.$CTLPTL_VERSION.linux.x86_64.tar.gz | \
+          tar -xzv -C /usr/local/bin ctlptl
+    - name: Set up kind
+      shell: bash
+      run: ctlptl create cluster kind --registry=ctlptl-registry
+    - name: Start Tilt
+      shell: bash
+      run: tilt ci
