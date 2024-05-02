@@ -381,12 +381,15 @@ pub(crate) struct RecordSegmentReader<'me> {
 pub enum RecordSegmentReaderError {
     #[error("Blockfile Open Error")]
     BlockfileOpenError(#[from] Box<OpenError>),
+    #[error("Segment has invalid number of files")]
+    InvalidNumberOfFiles,
 }
 
 impl ChromaError for RecordSegmentReaderError {
     fn code(&self) -> ErrorCodes {
         match self {
             RecordSegmentReaderError::BlockfileOpenError(e) => e.code(),
+            RecordSegmentReaderError::InvalidNumberOfFiles => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -435,8 +438,7 @@ impl RecordSegmentReader<'_> {
                 (user_id_to_id, id_to_user_id, id_to_data)
             }
             _ => {
-                // TODO: error
-                panic!("Invalid number of files for RecordSegment");
+                return Err(Box::new(RecordSegmentReaderError::InvalidNumberOfFiles));
             }
         };
 
