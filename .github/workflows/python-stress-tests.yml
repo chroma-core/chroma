@@ -20,7 +20,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
-      - uses: ./actions/python-test
+      - uses: ./.github/actions/python-test
         with:
           python-version: ${{ matrix.python }}
           test-globs: "chromadb/test/stress/"

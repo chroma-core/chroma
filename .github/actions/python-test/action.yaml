@@ -1,5 +1,5 @@
-name: Basic Python tests
-description: This runs most Python tests except for intensive property-based tests.
+name: Run Python tests
+description: This runs Python tests using pytest given file glob(s) to run.
 inputs:
   python-version:
     description: "Python version to test"
@@ -11,8 +11,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout
-      uses: actions/checkout@v3
     - name: Set up Python ${{ inputs.python-version }}
       uses: actions/setup-python@v4
       with:
