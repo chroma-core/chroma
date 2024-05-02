@@ -1,9 +1,14 @@
+import uuid
+
 import pytest
 import logging
 import hypothesis.strategies as st
 from hypothesis import given
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
+import random
+
+from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
 from chromadb.api import ServerAPI
@@ -24,7 +29,6 @@ from hypothesis.stateful import (
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
 import numpy as np
-
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
@@ -58,7 +62,10 @@ class EmbeddingStateMachineStates:
     upsert_embeddings = "upsert_embeddings"
 
 
-collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+collection_st = st.shared(
+    strategies.collections(with_hnsw_params=True, with_persistent_hnsw_params=True),
+    key="coll",
+)
 
 
 class EmbeddingStateMachine(RuleBasedStateMachine):
@@ -73,13 +80,30 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
         self.api.reset()
-        self.collection = self.api.create_collection(
-            name=collection.name,
-            metadata=collection.metadata,
-            embedding_function=collection.embedding_function,
-        )
+        try:
+            self.collection = self.api.create_collection(
+                name=collection.name,
+                metadata=collection.metadata,
+                embedding_function=collection.embedding_function,
+            )
+        except Exception as e:
+            self.api.reset()
+            if "hnsw:batch_size" in str(e):
+                del collection.metadata["hnsw:batch_size"]
+                del collection.metadata["hnsw:sync_threshold"]
+                try:
+                    self.collection = self.api.create_collection(
+                        name=collection.name,
+                        metadata=collection.metadata,
+                        embedding_function=collection.embedding_function,
+                    )
+                except Exception as e:
+                    raise e
+            else:
+                raise e
         self.embedding_function = collection.embedding_function
         trace("init")
+        self._metadata = collection.metadata
         self.on_state_change(EmbeddingStateMachineStates.initialize)
 
         self.record_set_state = strategies.StateMachineRecordSet(
@@ -190,6 +214,26 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return
 
         self.collection.upsert(**record_set)
+        self._upsert_embeddings(record_set)
+
+    @precondition(
+        lambda self: "hnsw:batch_size" in self._metadata
+        and len(self.record_set_state["ids"]) >= self._metadata["hnsw:batch_size"]
+    )
+    @rule()
+    def swap_embeddings(self) -> None:
+        trace("swap embeddings")
+        docs = self.collection.get(include=["embeddings", "documents", "metadatas"])
+        ids_to_swap = random.sample(docs["ids"], min(5, len(docs["ids"])))
+        indices_to_swap = [docs["ids"].index(id) for id in ids_to_swap]
+        record_set = {
+            "ids": [docs["ids"][i] for i in indices_to_swap],
+            "metadatas": [docs["metadatas"][i] for i in indices_to_swap],
+            "documents": [docs["documents"][i] for i in indices_to_swap],
+            "embeddings": [docs["embeddings"][i] for i in indices_to_swap],
+        }
+        self.collection.delete(ids=ids_to_swap)
+        self.collection.add(**record_set)
         self._upsert_embeddings(record_set)
 
     @invariant()
@@ -462,3 +506,63 @@ def test_0dim_embedding_validation() -> None:
     with pytest.raises(ValueError) as e:
         validate_embeddings(embds)
     assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)
+
+
+@dataclass
+class BatchParams:
+    batch_size: int
+    sync_threshold: int
+    item_size: int
+
+
+@st.composite
+def batching_params(draw: st.DrawFn) -> BatchParams:
+    batch_size = draw(st.integers(min_value=3, max_value=100))
+    sync_threshold = draw(st.integers(min_value=batch_size, max_value=batch_size * 2))
+    item_size = draw(
+        st.integers(min_value=batch_size + 1, max_value=(batch_size * 2) + 1)
+    )
+    return BatchParams(
+        batch_size=batch_size, sync_threshold=sync_threshold, item_size=item_size
+    )
+
+
+@given(batching_params=batching_params())
+def test_get_vector(batching_params: BatchParams, api: ServerAPI) -> None:
+    error_distribution = {"IndexError": 0, "TypeError": 0, "NoError": 0}
+    rounds = 100
+    if isinstance(api, FastAPI) or not api.get_settings().is_persistent:
+        pytest.skip("FastAPI does not support this test")
+    for _ in range(
+        rounds
+    ):  # we do a few rounds to ensure that key or lists arrangements (due to UUID randomness) do not affect the test
+        api.reset()
+        collection = api.get_or_create_collection(
+            "test",
+            metadata={
+                "hnsw:batch_size": batching_params.batch_size,
+                "hnsw:sync_threshold": batching_params.sync_threshold,
+            },
+        )
+        items = [
+            (f"{uuid.uuid4()}", i, [0.1] * 2) for i in range(batching_params.item_size)
+        ]  # we want to exceed the batch size by at least 1
+        ids = [item[0] for item in items]
+        embeddings = [item[2] for item in items]
+        collection.add(ids=ids, embeddings=embeddings)
+        collection.delete(ids=[ids[0]])
+        collection.add(ids=[ids[0]], embeddings=[[1] * 2])
+        try:
+            collection.get(include=["embeddings"])
+            error_distribution["NoError"] += 1
+        except IndexError as e:
+            if "list assignment index out of range" in str(e):
+                error_distribution["IndexError"] += 1
+        except TypeError as e:
+            if "'NoneType' object is not subscriptable" in str(e):
+                error_distribution["TypeError"] += 1
+        invariants.segments_len_match(api, collection)
+
+    assert error_distribution["NoError"] == rounds
+    assert error_distribution["IndexError"] == 0
+    assert error_distribution["TypeError"] == 0
