@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - team/hypothesis-tests
+      - hammad/ci_min
   pull_request:
     branches:
       - main
