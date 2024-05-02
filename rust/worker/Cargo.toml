@@ -11,6 +11,11 @@ path = "src/bin/query_service.rs"
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
 
+[[bench]]
+name = "distance_metrics"
+path = "src/benches/distance_metrics.rs"
+harness = false
+
 [dependencies]
 tonic = "0.10"
 prost = "0.12"
@@ -47,6 +52,7 @@ proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
 "rand" = "0.8.5"
 rayon = "1.8.0"
+criterion = "0.3"
 
 [build-dependencies]
 tonic-build = "0.10"

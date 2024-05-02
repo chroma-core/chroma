@@ -57,13 +57,17 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
+    use uuid::Uuid;
 
     #[test]
     fn test_scheduler_policy() {
+        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let scheduler_policy = LasCompactionTimeSchedulerPolicy {};
         let collections = vec![
             CollectionRecord {
-                id: "test1".to_string(),
+                id: collection_uuid_1,
                 tenant_id: "test".to_string(),
                 last_compaction_time: 1,
                 first_record_time: 1,
@@ -71,7 +75,7 @@ mod tests {
                 collection_version: 0,
             },
             CollectionRecord {
-                id: "test2".to_string(),
+                id: collection_uuid_2,
                 tenant_id: "test".to_string(),
                 last_compaction_time: 0,
                 first_record_time: 0,
@@ -81,11 +85,11 @@ mod tests {
         ];
         let jobs = scheduler_policy.determine(collections.clone(), 1);
         assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].collection_id, "test2");
+        assert_eq!(jobs[0].collection_id, collection_uuid_2);
 
         let jobs = scheduler_policy.determine(collections.clone(), 2);
         assert_eq!(jobs.len(), 2);
-        assert_eq!(jobs[0].collection_id, "test2");
-        assert_eq!(jobs[1].collection_id, "test1");
+        assert_eq!(jobs[0].collection_id, collection_uuid_2);
+        assert_eq!(jobs[1].collection_id, collection_uuid_1);
     }
 }

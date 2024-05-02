@@ -167,6 +167,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -194,6 +195,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -242,6 +244,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -269,6 +272,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -335,6 +339,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -362,6 +367,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -389,6 +395,8 @@ mod tests {
             let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_IP", "192.0.0.1");
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
@@ -408,6 +416,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -430,9 +439,6 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
-                    storage:
-                        S3:
-                            bucket: "chroma"
                     log:
                         Grpc:
                             host: "localhost"
@@ -450,6 +456,16 @@ mod tests {
             let config = RootConfig::load();
             assert_eq!(config.query_service.my_ip, "192.0.0.1");
             assert_eq!(config.query_service.my_port, 50051);
+            match &config.compaction_service.storage {
+                crate::storage::config::StorageConfig::S3(s) => {
+                    assert_eq!(s.bucket, "buckets!");
+                    assert_eq!(
+                        s.credentials,
+                        crate::storage::config::S3CredentialsConfig::AWS
+                    );
+                }
+                _ => panic!("Invalid storage config"),
+            }
             Ok(())
         });
     }
