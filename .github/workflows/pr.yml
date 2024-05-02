@@ -9,12 +9,15 @@ on:
 
 jobs:
   python-tests:
+    name: Python tests
     uses: ./.github/workflows/python-tests.yml
 
   python-stress-tests:
+    name: Python stress tests
     uses: ./.github/workflows/python-stress-tests.yml
 
   check-title:
+    name: Check PR Title
     runs-on: ubuntu-latest
     steps:
         - name: Check PR Title
