@@ -179,7 +179,7 @@ impl HnswQueryOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log
-            collection.log_position + 1,
+            collection.log_position,
             100,
             None,
             Some(end_timestamp),
