@@ -1,14 +1,18 @@
 import math
+
+from chromadb.api.fastapi import FastAPI
+from chromadb.segment import MetadataReader, VectorReader
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Sequence
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
-from chromadb.api import types
+from chromadb.api import types, ServerAPI
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
 
+from chromadb.types import MetadataEmbeddingRecord, VectorEmbeddingRecord
 from chromadb.utils import distance_functions
 
 T = TypeVar("T")
@@ -292,3 +296,20 @@ def ann_accuracy(
     # Ensure that the query results are sorted by distance
     for distance_result in query_results["distances"]:
         assert np.allclose(np.sort(distance_result), distance_result)
+
+
+def segments_len_match(api: ServerAPI, collection: Collection) -> None:
+    if isinstance(api, FastAPI):
+        return
+    segment_manager = api._manager
+    metadata_segment: MetadataReader = segment_manager.get_segment(
+        collection.id, MetadataReader
+    )
+    vector_segment: VectorReader = segment_manager.get_segment(
+        collection.id, VectorReader
+    )
+    metadata_records: Sequence[
+        MetadataEmbeddingRecord
+    ] = metadata_segment.get_metadata()
+    vector_records: Sequence[VectorEmbeddingRecord] = vector_segment.get_vectors()
+    assert len(metadata_records) == len(vector_records)
