@@ -2,7 +2,7 @@ mod assignment;
 mod blockstore;
 mod compactor;
 mod config;
-mod distance;
+pub mod distance;
 mod errors;
 mod execution;
 mod index;
@@ -21,12 +21,19 @@ use memberlist::MemberlistProvider;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
 mod chroma_proto {
     tonic::include_proto!("chroma");
 }
 
 pub async fn query_service_entrypoint() {
-    let config = config::RootConfig::load();
+    // Check if the config path is set in the env var
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
+        Err(_) => config::RootConfig::load(),
+    };
+
     let config = config.query_service;
     let system: system::System = system::System::new();
     let dispatcher =
@@ -80,7 +87,12 @@ pub async fn query_service_entrypoint() {
 }
 
 pub async fn compaction_service_entrypoint() {
-    let config = config::RootConfig::load();
+    // Check if the config path is set in the env var
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
+        Err(_) => config::RootConfig::load(),
+    };
+
     let config = config.compaction_service;
     let system: system::System = system::System::new();
 

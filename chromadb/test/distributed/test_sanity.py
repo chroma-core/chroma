@@ -41,6 +41,7 @@ def test_add(
     results = collection.query(
         query_embeddings=[random_query],  # type: ignore
         n_results=10,
+        include=["distances"],
     )
 
     # Check that the distances are correct in l2
