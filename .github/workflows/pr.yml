@@ -10,11 +10,11 @@ on:
 jobs:
   python-tests:
     name: Python tests
-    uses: ./.github/workflows/python-tests.yml
+    uses: ./.github/workflows/_python-tests.yml
 
   python-stress-tests:
     name: Python stress tests
-    uses: ./.github/workflows/python-stress-tests.yml
+    uses: ./.github/workflows/_python-stress-tests.yml
 
   check-title:
     name: Check PR Title
