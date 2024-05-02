@@ -8,7 +8,7 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
 from chromadb.test.conftest import _await_server, _run_server, find_free_port
 
-TOKEN_TRANSPORT_HEADER = TokenTransportHeader.X_CHROMA_TOKEN.name
+TOKEN_TRANSPORT_HEADER = TokenTransportHeader.X_CHROMA_TOKEN
 TEST_CLOUD_HOST = "localhost"
 
 
