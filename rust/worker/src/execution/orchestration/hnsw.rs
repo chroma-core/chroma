@@ -4,7 +4,6 @@ use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::execution::operator;
 use crate::execution::operators::brute_force_knn::{
     BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorResult,
 };
@@ -17,7 +16,6 @@ use crate::execution::operators::merge_knn_results::{
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegment;
-use crate::segment::record_segment::RecordSegmentReader;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, System};
 use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
@@ -179,7 +177,7 @@ impl HnswQueryOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log
-            collection.log_position,
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),

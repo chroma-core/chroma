@@ -263,7 +263,7 @@ impl RecordSegmentWriter {
             id_to_user_id: Some(id_to_user_id),
             id_to_data: Some(id_to_data),
             max_offset_id: Some(max_offset_id),
-            curr_max_offset_id: Arc::new(AtomicU32::new(exising_max_offset_id)),
+            curr_max_offset_id: Arc::new(AtomicU32::new(exising_max_offset_id + 1)),
             id: segment.id,
         })
     }
