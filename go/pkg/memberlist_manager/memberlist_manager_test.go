@@ -46,7 +46,7 @@ func TestNodeWatcher(t *testing.T) {
 	}, metav1.CreateOptions{})
 
 	// Get the status of the node
-	retryUntilCondition(t, func() bool {
+	ok := retryUntilCondition(func() bool {
 		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
@@ -54,6 +54,9 @@ func TestNodeWatcher(t *testing.T) {
 
 		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
+	if !ok {
+		t.Fatalf("Node status did not update after adding a pod")
+	}
 
 	// Add a not ready pod
 	clientset.CoreV1().Pods("chroma").Create(context.TODO(), &v1.Pod{
@@ -75,13 +78,16 @@ func TestNodeWatcher(t *testing.T) {
 		},
 	}, metav1.CreateOptions{})
 
-	retryUntilCondition(t, func() bool {
+	ok = retryUntilCondition(func() bool {
 		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
 		return reflect.DeepEqual(memberlist, Memberlist{"10.0.0.1"})
 	}, 10, 1*time.Second)
+	if !ok {
+		t.Fatalf("Node status did not update after adding a not ready pod")
+	}
 }
 
 func TestMemberlistStore(t *testing.T) {
@@ -174,25 +180,34 @@ func TestMemberlistManager(t *testing.T) {
 	createFakePod("10.0.0.49", clientset)
 
 	// Get the memberlist
-	retryUntilCondition(t, func() bool {
+	ok := retryUntilCondition(func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.49"})
 	}, 10, 1*time.Second)
+	if !ok {
+		t.Fatalf("Memberlist did not update after adding a pod")
+	}
 
 	// Add another ready pod
 	createFakePod("10.0.0.50", clientset)
 
 	// Get the memberlist
-	retryUntilCondition(t, func() bool {
+	ok = retryUntilCondition(func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.49", "10.0.0.50"})
 	}, 10, 1*time.Second)
+	if !ok {
+		t.Fatalf("Memberlist did not update after adding a pod")
+	}
 
 	// Delete a pod
 	deleteFakePod("10.0.0.49", clientset)
 
 	// Get the memberlist
-	retryUntilCondition(t, func() bool {
+	ok = retryUntilCondition(func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.50"})
 	}, 10, 1*time.Second)
+	if !ok {
+		t.Fatalf("Memberlist did not update after deleting a pod")
+	}
 }
 
 func TestMemberlistSame(t *testing.T) {
@@ -220,14 +235,14 @@ func TestMemberlistSame(t *testing.T) {
 	assert.True(t, memberlistSame(newMemberlist, memberlist))
 }
 
-func retryUntilCondition(t *testing.T, f func() bool, retry_count int, retry_interval time.Duration) {
+func retryUntilCondition(f func() bool, retry_count int, retry_interval time.Duration) bool {
 	for i := 0; i < retry_count; i++ {
 		if f() {
-			return
+			return true
 		}
 		time.Sleep(retry_interval)
 	}
-	t.Fatalf("Condition not met after %d retries", retry_count)
+	return false
 }
 
 func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, expected_memberlist Memberlist) bool {
