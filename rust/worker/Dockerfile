@@ -1,4 +1,4 @@
-FROM rust:1.74.1 as builder
+FROM rust:1.77.2 as builder
 ARG CHROMA_KUBERNETES_INTEGRATION=0
 ENV CHROMA_KUBERNETES_INTEGRATION $CHROMA_KUBERNETES_INTEGRATION
 
@@ -56,6 +56,6 @@ FROM debian:bookworm-slim as compaction_service
 
 COPY --from=compaction_service_builder /chroma/compaction_service .
 COPY --from=compaction_service_builder /chroma/rust/worker/chroma_config.yaml .
-RUN apt-get update && apt-get install -y libssl-dev
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates
 
 ENTRYPOINT [ "./compaction_service" ]

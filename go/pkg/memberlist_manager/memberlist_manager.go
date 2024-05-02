@@ -54,52 +54,72 @@ func (m *MemberlistManager) Start() error {
 	return nil
 }
 
+func (m *MemberlistManager) reconcileMemberlist(updates map[string]bool) {
+	memberlist, resourceVersion, err := m.getOldMemberlist()
+	if err != nil {
+		log.Error("Error while getting memberlist", zap.Error(err))
+		return
+	}
+	log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
+	newMemberlist, err := m.nodeWatcher.ListReadyMembers()
+	if err != nil {
+		log.Error("Error while getting ready members", zap.Error(err))
+		return
+	}
+	// do not update memberlist if there's no change
+	if !memberlistSame(memberlist, newMemberlist) {
+		err = m.updateMemberlist(newMemberlist, *resourceVersion)
+		if err != nil {
+			log.Error("Error while updating memberlist", zap.Error(err))
+			return
+		}
+	} else {
+		log.Info("Memberlist has not changed")
+	}
+	for key := range updates {
+		m.workqueue.Done(key)
+	}
+}
+
 func (m *MemberlistManager) run() {
 	count := uint(0)
-	lastUpdate := time.Now()
 	updates := map[string]bool{}
-	for {
-		interface_key, shutdown := m.workqueue.Get()
-		if shutdown {
-			log.Info("Shutting down memberlist manager")
-			break
-		}
-
-		key, ok := interface_key.(string)
-		if !ok {
-			log.Error("Error while asserting workqueue key to string")
-			m.workqueue.Done(key)
-			continue
-		}
-
-		count++
-		updates[key] = true
-		if count >= m.reconcileCount || time.Since(lastUpdate) > m.reconcileInterval {
-			memberlist, resourceVersion, err := m.getOldMemberlist()
-			if err != nil {
-				log.Error("Error while getting memberlist", zap.Error(err))
-				continue
+	shutdownChan := make(chan struct{})
+	eventChan := make(chan string)
+	ticker := time.NewTicker(m.reconcileInterval)
+	go func() {
+		for {
+			interface_key, shutdown := m.workqueue.Get()
+			if shutdown {
+				log.Info("Shutting down memberlist manager")
+				shutdownChan <- struct{}{}
+				break
 			}
-			log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
-			newMemberlist, err := m.nodeWatcher.ListReadyMembers()
-			if err != nil {
-				log.Error("Error while getting ready members", zap.Error(err))
-				continue
-			}
-			// do not update memberlist if there's no change
-			if !memberlistSame(memberlist, newMemberlist) {
-				err = m.updateMemberlist(newMemberlist, *resourceVersion)
-				if err != nil {
-					log.Error("Error while updating memberlist", zap.Error(err))
-					continue
-				}
-			}
-
-			for key := range updates {
+			key, ok := interface_key.(string)
+			log.Info("Reconciling memberlist", zap.String("key", key))
+			if !ok {
+				log.Error("Error while asserting workqueue key to string")
 				m.workqueue.Done(key)
 			}
+			eventChan <- key
+		}
+	}()
+
+	for {
+		select {
+		case key := <-eventChan:
+			count++
+			updates[key] = true
+			if count >= m.reconcileCount {
+				m.reconcileMemberlist(updates)
+				count = uint(0)
+				updates = map[string]bool{}
+			}
+		case <-shutdownChan:
+			return
+		case <-ticker.C:
+			m.reconcileMemberlist(updates)
 			count = uint(0)
-			lastUpdate = time.Now()
 			updates = map[string]bool{}
 		}
 	}

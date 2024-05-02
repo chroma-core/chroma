@@ -157,6 +157,7 @@ class GetResult(TypedDict):
     uris: Optional[URIs]
     data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
+    included: Include
 
 
 class QueryResult(TypedDict):
@@ -167,6 +168,7 @@ class QueryResult(TypedDict):
     data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
+    included: Include
 
 
 class IndexMetadata(TypedDict):
@@ -394,7 +396,7 @@ def validate_where(where: Where) -> Where:
                     or not all(isinstance(x, type(operand[0])) for x in operand)
                 ):
                     raise ValueError(
-                        f"Expected where operand value to be a non-empty list, and all values to obe of the same type "
+                        f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                         f"got {operand}"
                     )
     return where

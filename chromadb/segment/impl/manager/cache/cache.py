@@ -5,6 +5,7 @@ from overrides import override
 from typing import Dict, Optional
 from abc import ABC, abstractmethod
 
+
 class SegmentCache(ABC):
     @abstractmethod
     def get(self, key: uuid.UUID) -> Optional[Segment]:
@@ -25,7 +26,7 @@ class SegmentCache(ABC):
 
 class BasicCache(SegmentCache):
     def __init__(self):
-        self.cache:Dict[uuid.UUID, Segment] = {}
+        self.cache: Dict[uuid.UUID, Segment] = {}
 
     @override
     def get(self, key: uuid.UUID) -> Optional[Segment]:
@@ -48,8 +49,12 @@ class SegmentLRUCache(BasicCache):
     """A simple LRU cache implementation that handles objects with dynamic sizes.
     The size of each object is determined by a user-provided size function."""
 
-    def __init__(self, capacity: int, size_func: Callable[[uuid.UUID], int],
-                 callback: Optional[Callable[[uuid.UUID, Segment], Any]] = None):
+    def __init__(
+        self,
+        capacity: int,
+        size_func: Callable[[uuid.UUID], int],
+        callback: Optional[Callable[[uuid.UUID, Segment], Any]] = None,
+    ):
         self.capacity = capacity
         self.size_func = size_func
         self.cache: Dict[uuid.UUID, Segment] = {}
@@ -76,7 +81,6 @@ class SegmentLRUCache(BasicCache):
         if key in self.history:
             self.history.remove(key)
         return self.cache.pop(key, None)
-
 
     @override
     def set(self, key: uuid.UUID, value: Segment) -> None:

@@ -1,7 +1,5 @@
-import logging
 from typing import Optional
 
-import yaml
 from typing_extensions import Annotated
 import typer
 import uvicorn
@@ -30,17 +28,17 @@ _logo = """
 
 @app.command()  # type: ignore
 def run(
-        path: str = typer.Option(
-            "./chroma_data", help="The path to the file or directory."
-        ),
-        host: Annotated[
-            Optional[str], typer.Option(help="The host to listen to. Default: localhost")
-        ] = "localhost",
-        log_path: Annotated[
-            Optional[str], typer.Option(help="The path to the log file.")
-        ] = "chroma.log",
-        port: int = typer.Option(8000, help="The port to run the server on."),
-        test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
+    path: str = typer.Option(
+        "./chroma_data", help="The path to the file or directory."
+    ),
+    host: Annotated[
+        Optional[str], typer.Option(help="The host to listen to. Default: localhost")
+    ] = "localhost",
+    log_path: Annotated[
+        Optional[str], typer.Option(help="The path to the log file.")
+    ] = "chroma.log",
+    port: int = typer.Option(8000, help="The port to run the server on."),
+    test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
 

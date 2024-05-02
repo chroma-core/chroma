@@ -6,6 +6,8 @@ import { IncludeEnum } from "../src/types";
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
 import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
+import { InvalidCollectionError } from "../src/Errors";
+
 test("it should add single embeddings to a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
@@ -94,6 +96,15 @@ test("add documents", async () => {
   expect(resp).toBe(true);
   const results = await collection.get({ ids: ["test1"] });
   expect(results.documents[0]).toBe("This is a test");
+});
+
+test("should error on non existing collection", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.deleteCollection({ name: "test" });
+  expect(async () => {
+    await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
+  }).rejects.toThrow(InvalidCollectionError);
 });
 
 test("It should return an error when inserting duplicate IDs in the same batch", async () => {

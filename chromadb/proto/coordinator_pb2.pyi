@@ -174,16 +174,20 @@ class DeleteCollectionResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class GetCollectionsRequest(_message.Message):
-    __slots__ = ["id", "name", "tenant", "database"]
+    __slots__ = ["id", "name", "tenant", "database", "limit", "offset"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     tenant: str
     database: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
+    limit: int
+    offset: int
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class GetCollectionsResponse(_message.Message):
     __slots__ = ["collections", "status"]

@@ -121,6 +121,7 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 		Name:       &collectionName,
 		Dimension:  &dimension,
 		DatabaseID: databaseID,
+		CreatedAt:  time.Now(),
 	})
 	if err != nil {
 		return "", err
@@ -138,7 +139,8 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 			return "", err
 		}
 	}
-
+	// Avoid to have the same create time for a collection, postgres have a millisecond precision, in unit test we can have multiple collections created in the same millisecond
+	time.Sleep(10 * time.Millisecond)
 	return collectionId, nil
 }
 

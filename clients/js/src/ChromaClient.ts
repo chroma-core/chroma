@@ -11,10 +11,7 @@ import {
   GetOrCreateCollectionParams,
   ListCollectionsParams,
 } from "./types";
-import {
-  authOptionsToAuthProvider,
-  ClientAuthProvider,
-} from "./auth";
+import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
 import { AdminClient } from "./AdminClient";
 import { chromaFetch } from "./ChromaFetch";
@@ -56,7 +53,7 @@ export class ChromaClient {
     if (path === undefined) path = "http://localhost:8000";
     this.tenant = tenant;
     this.database = database;
-    this.authProvider = undefined
+    this.authProvider = undefined;
 
     const apiConfig: Configuration = new Configuration({
       basePath: path,

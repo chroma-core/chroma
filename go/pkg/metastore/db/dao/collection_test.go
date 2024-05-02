@@ -87,25 +87,29 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test limit and offset
-	collection2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
+	_, err = CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
 	suite.NoError(err)
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+
+	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Len(collections, 2)
+	suite.Len(allCollections, 2)
+
 	limit := int32(1)
 	offset := int32(1)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
-	suite.Equal(collectionID, collections[0].Collection.ID)
+	suite.Equal(allCollections[0].Collection.ID, collections[0].Collection.ID)
+
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
 	suite.NoError(err)
 	suite.Len(collections, 1)
-	suite.Equal(collection2, collections[0].Collection.ID)
+	suite.Equal(allCollections[1].Collection.ID, collections[0].Collection.ID)
+
 	offset = int32(2)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
 	suite.NoError(err)
-	suite.Nil(collections)
+	suite.Equal(len(collections), 0)
 
 	// clean up
 	err = CleanUpTestCollection(suite.db, collectionID)

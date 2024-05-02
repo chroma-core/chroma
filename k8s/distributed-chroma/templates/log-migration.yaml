@@ -11,10 +11,7 @@ spec:
     spec:
       restartPolicy: OnFailure
       containers:
-        - command:
-            - "/bin/sh"
-            - "-c"
-            - "atlas migrate apply --env prod"
+        - args: ['migrate', 'apply', '--env','prod']
           image: "{{ .Values.logServiceMigration.image.repository }}:{{ .Values.logServiceMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: migration

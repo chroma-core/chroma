@@ -232,7 +232,9 @@ def verify_migration_sequence(
     return source_migrations[len(db_migrations) :]
 
 
-def find_migrations(dir: Traversable, scope: str, hash_alg: str = "md5") -> Sequence[Migration]:
+def find_migrations(
+    dir: Traversable, scope: str, hash_alg: str = "md5"
+) -> Sequence[Migration]:
     """Return a list of all migration present in the given directory, in ascending
     order. Filter by scope."""
     files = [
@@ -254,7 +256,11 @@ def _read_migration_file(file: MigrationFile, hash_alg: str) -> Migration:
     sql = file["path"].read_text()
 
     if hash_alg == "md5":
-        hash = hashlib.md5(sql.encode("utf-8"), usedforsecurity=False).hexdigest() if sys.version_info >= (3, 9) else hashlib.md5(sql.encode("utf-8")).hexdigest()
+        hash = (
+            hashlib.md5(sql.encode("utf-8"), usedforsecurity=False).hexdigest()
+            if sys.version_info >= (3, 9)
+            else hashlib.md5(sql.encode("utf-8")).hexdigest()
+        )
     elif hash_alg == "sha256":
         hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
     else:

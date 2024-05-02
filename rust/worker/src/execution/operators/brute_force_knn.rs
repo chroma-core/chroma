@@ -1,8 +1,10 @@
-use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::data::data_chunk::Chunk;
+use crate::types::LogRecord;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use tracing::{debug, trace};
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -19,7 +21,7 @@ pub struct BruteForceKnnOperator {}
 /// * `distance_metric` - The distance metric to use.
 #[derive(Debug)]
 pub struct BruteForceKnnOperatorInput {
-    pub data: DataChunk,
+    pub data: Chunk<LogRecord>,
     pub query: Vec<f32>,
     pub k: usize,
     pub distance_metric: DistanceFunction,
@@ -34,7 +36,7 @@ pub struct BruteForceKnnOperatorInput {
 /// One row for each query vector.
 #[derive(Debug)]
 pub struct BruteForceKnnOperatorOutput {
-    pub data: DataChunk,
+    pub data: Chunk<LogRecord>,
     pub indices: Vec<usize>,
     pub distances: Vec<f32>,
 }
@@ -114,6 +116,12 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         }
         let mut data_chunk = data_chunk.clone();
         data_chunk.set_visibility(visibility);
+        trace!(
+            "Brute force Knn result. data: {:?}, indices: {:?}, distances: {:?}",
+            data_chunk,
+            sorted_indices,
+            sorted_distances
+        );
         Ok(BruteForceKnnOperatorOutput {
             data: data_chunk,
             indices: sorted_indices,
@@ -165,7 +173,7 @@ mod tests {
                 },
             },
         ];
-        let data_chunk = DataChunk::new(data.into());
+        let data_chunk = Chunk::new(data.into());
 
         let input = BruteForceKnnOperatorInput {
             data: data_chunk,
@@ -223,7 +231,7 @@ mod tests {
                 },
             },
         ];
-        let data_chunk = DataChunk::new(data.into());
+        let data_chunk = Chunk::new(data.into());
 
         let input = BruteForceKnnOperatorInput {
             data: data_chunk,
@@ -257,7 +265,7 @@ mod tests {
             },
         }];
 
-        let data_chunk = DataChunk::new(data.into());
+        let data_chunk = Chunk::new(data.into());
 
         let input = BruteForceKnnOperatorInput {
             data: data_chunk,
