@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - '**'
+  # todo: ignore docs folder?
 
 jobs:
   python-tests:
@@ -15,6 +16,14 @@ jobs:
   python-stress-tests:
     name: Python stress tests
     uses: ./.github/workflows/_python-stress-tests.yml
+
+  python-client-tests:
+    name: Python client tests
+    uses: ./.github/workflows/_python-client-tests.yml
+
+  typescript-client-tests:
+    name: TypeScript client tests
+    uses: ./.github/workflows/_typescript-client-tests.yml
 
   check-title:
     name: Check PR Title

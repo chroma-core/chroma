@@ -11,19 +11,10 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set up Python ${{ inputs.python-version }}
-      uses: actions/setup-python@v4
+    - name: Setup
+      uses: ./.github/actions/python
       with:
         python-version: ${{ inputs.python-version }}
-        cache: "pip"
-        cache-dependency-path: "requirements*.txt"
-    - name: Install test dependencies
-      run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
-      shell: bash
-    - name: Upgrade SQLite
-      run: python bin/windows_upgrade_sqlite.py
-      shell: bash
-      if: runner.os == 'Windows'
     - name: Test
       run: python -m pytest ${{ inputs.test-globs }}
       shell: bash
