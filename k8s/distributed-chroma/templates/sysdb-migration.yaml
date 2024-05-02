@@ -8,6 +8,10 @@ spec:
     metadata:
       labels:
         app: sysdb-migration
+      annotations:
+      {{ range .Values.sysdbMigration.annotations }}
+        {{ .name }}: {{ .value }}
+      {{ end }}
     spec:
       restartPolicy: OnFailure
       containers:
