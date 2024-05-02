@@ -124,7 +124,8 @@ k8s_resource(
     'test-memberlist-reader-binding:ClusterRoleBinding',
     'lease-watcher:role',
     'logservice-serviceaccount-rolebinding:rolebinding',
-    'compaction-service-config:configmap'
+    'compaction-service-config:configmap',
+    'query-service-config:configmap'
   ],
   new_name='k8s_setup',
   labels=["infrastructure"],
