@@ -1,0 +1,15 @@
+name: PR checks
+on:
+  # todo: temp to test during PR, remove before merge
+  push:
+  pull_request:
+    branches:
+      - main
+      - '**'
+
+jobs:
+  python-tests:
+    uses: ./.github/workflows/python-tests.yml
+
+  python-stress-tests:
+    uses: ./.github/workflows/python-stress-tests.yml

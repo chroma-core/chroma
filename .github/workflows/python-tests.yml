@@ -17,7 +17,7 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [ubuntu-latest, windows-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
@@ -27,16 +27,8 @@ jobs:
                    "chromadb/test/property/test_persist.py"]
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-    - name: Set up Python ${{ matrix.python }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python }}
-    - name: Install test dependencies
-      run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
-    - name: Upgrade SQLite
-      run: python bin/windows_upgrade_sqlite.py
-      if: runner.os == 'Windows'
-    - name: Test
-      run: python -m pytest ${{ matrix.testfile }}
+      - uses: actions/checkout@v3
+      - uses: ./actions/python-test
+        with:
+          python-version: ${{ matrix.python }}
+          test-globs: ${{ matrix.test-globs }}
