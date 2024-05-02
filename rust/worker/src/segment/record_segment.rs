@@ -1,8 +1,8 @@
 use super::types::{LogMaterializer, MaterializedLogRecord, SegmentWriter};
 use super::{DataRecord, SegmentFlusher};
-use crate::blockstore::provider::{BlockfileProvider, CreateError};
+use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
-use crate::errors::ChromaError;
+use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
     update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
@@ -62,7 +62,6 @@ impl RecordSegmentWriter {
         if segment.r#type != SegmentType::Record {
             return Err(RecordSegmentCreationError::InvalidSegmentType);
         }
-        // RESUME POINT = HANDLE EXISTING FILES AND ALSO PORT HSNW TO FORK() NOT LOAD()
 
         let (user_id_to_id, id_to_user_id, id_to_data) = match segment.file_path.len() {
             0 => {
@@ -131,7 +130,7 @@ impl RecordSegmentWriter {
 
                 let user_id_to_bf_uuid = match Uuid::parse_str(user_id_to_id_bf_id) {
                     Ok(user_id_to_bf_uuid) => user_id_to_bf_uuid,
-                    Err(e) => {
+                    Err(_) => {
                         return Err(RecordSegmentCreationError::InvalidUuid(
                             USER_ID_TO_OFFSET_ID.to_string(),
                         ))
@@ -140,7 +139,7 @@ impl RecordSegmentWriter {
 
                 let id_to_user_id_bf_uuid = match Uuid::parse_str(id_to_user_id_bf_id) {
                     Ok(id_to_user_id_bf_uuid) => id_to_user_id_bf_uuid,
-                    Err(e) => {
+                    Err(_) => {
                         return Err(RecordSegmentCreationError::InvalidUuid(
                             OFFSET_ID_TO_USER_ID.to_string(),
                         ))
@@ -149,7 +148,7 @@ impl RecordSegmentWriter {
 
                 let id_to_data_bf_uuid = match Uuid::parse_str(id_to_data_bf_id) {
                     Ok(id_to_data_bf_uuid) => id_to_data_bf_uuid,
-                    Err(e) => {
+                    Err(_) => {
                         return Err(RecordSegmentCreationError::InvalidUuid(
                             OFFSET_ID_TO_DATA.to_string(),
                         ))
@@ -213,7 +212,6 @@ impl SegmentWriter for RecordSegmentWriter {
         let flusher_user_id_to_id = match flusher_user_id_to_id {
             Ok(f) => f,
             Err(e) => {
-                // TOOD: log and return error
                 return Err(e);
             }
         };
@@ -221,7 +219,6 @@ impl SegmentWriter for RecordSegmentWriter {
         let flusher_id_to_user_id = match flusher_id_to_user_id {
             Ok(f) => f,
             Err(e) => {
-                // TOOD: log and return error
                 return Err(e);
             }
         };
@@ -229,7 +226,6 @@ impl SegmentWriter for RecordSegmentWriter {
         let flusher_id_to_data = match flusher_id_to_data {
             Ok(f) => f,
             Err(e) => {
-                // TOOD: log and return error
                 return Err(e);
             }
         };
@@ -381,6 +377,20 @@ pub(crate) struct RecordSegmentReader<'me> {
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
 }
 
+#[derive(Error, Debug)]
+pub enum RecordSegmentReaderError {
+    #[error("Blockfile Open Error")]
+    BlockfileOpenError(#[from] Box<OpenError>),
+}
+
+impl ChromaError for RecordSegmentReaderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            RecordSegmentReaderError::BlockfileOpenError(e) => e.code(),
+        }
+    }
+}
+
 impl RecordSegmentReader<'_> {
     pub(crate) async fn from_segment(
         segment: &Segment,
@@ -392,19 +402,35 @@ impl RecordSegmentReader<'_> {
                 let id_to_user_id_bf_id = &segment.file_path.get(OFFSET_ID_TO_USER_ID).unwrap()[0];
                 let id_to_data_bf_id = &segment.file_path.get(OFFSET_ID_TO_DATA).unwrap()[0];
 
-                // TODO: don't unwrap here
-                let user_id_to_id = blockfile_provider
+                let user_id_to_id = match blockfile_provider
                     .open::<&str, u32>(&Uuid::parse_str(user_id_to_id_bf_id).unwrap())
                     .await
-                    .unwrap();
-                let id_to_user_id = blockfile_provider
+                {
+                    Ok(user_id_to_id) => user_id_to_id,
+                    Err(e) => {
+                        return Err(Box::new(RecordSegmentReaderError::BlockfileOpenError(e)))
+                    }
+                };
+
+                let id_to_user_id = match blockfile_provider
                     .open::<u32, &str>(&Uuid::parse_str(id_to_user_id_bf_id).unwrap())
                     .await
-                    .unwrap();
-                let id_to_data = blockfile_provider
+                {
+                    Ok(id_to_user_id) => id_to_user_id,
+                    Err(e) => {
+                        return Err(Box::new(RecordSegmentReaderError::BlockfileOpenError(e)))
+                    }
+                };
+
+                let id_to_data = match blockfile_provider
                     .open::<u32, DataRecord>(&Uuid::parse_str(id_to_data_bf_id).unwrap())
                     .await
-                    .unwrap();
+                {
+                    Ok(id_to_data) => id_to_data,
+                    Err(e) => {
+                        return Err(Box::new(RecordSegmentReaderError::BlockfileOpenError(e)))
+                    }
+                };
 
                 (user_id_to_id, id_to_user_id, id_to_data)
             }
