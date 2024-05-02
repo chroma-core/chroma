@@ -13,6 +13,7 @@ mod server;
 mod storage;
 mod sysdb;
 mod system;
+mod tracing;
 mod types;
 
 use config::Configurable;
@@ -33,6 +34,8 @@ pub async fn query_service_entrypoint() {
         Ok(config_path) => config::RootConfig::load_from_path(&config_path),
         Err(_) => config::RootConfig::load(),
     };
+
+    crate::tracing::opentelemetry_config::init_oltp_tracing();
 
     let config = config.query_service;
     let system: system::System = system::System::new();
