@@ -3,13 +3,12 @@ use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace;
 use opentelemetry_otlp::WithExportConfig;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Registry;
+use tracing_subscriber::{EnvFilter, Registry};
 
-pub(crate) fn init_oltp_tracing() {
+pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let resource = opentelemetry::sdk::Resource::new(vec![opentelemetry::KeyValue::new(
         "service.name",
-        "sanket-test",
+        service_name.clone(),
     )]);
     // Prepare trace config.
     let trace_config = trace::config()
@@ -18,7 +17,7 @@ pub(crate) fn init_oltp_tracing() {
     // Prepare exporter. Jaeger only for now.
     let exporter = opentelemetry_otlp::new_exporter()
         .tonic()
-        .with_endpoint("http://jaeger:4317");
+        .with_endpoint(otel_endpoint);
     let otlp_tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(exporter)
@@ -27,7 +26,12 @@ pub(crate) fn init_oltp_tracing() {
         .expect("Error - Failed to create tracer.");
     // Layer for adding our configured tracer.
     let tracing_layer = tracing_opentelemetry::layer().with_tracer(otlp_tracer);
+    // Level filter layer to filter traces based on level (trace, debug, info, warn, error).
+    let level_filter_layer = EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("INFO"));
+    let subscriber = Registry::default()
+        .with(tracing_layer)
+        .with(level_filter_layer);
     global::set_text_map_propagator(TraceContextPropagator::new());
-
-    Registry::default().with(tracing_layer).init();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Set global default subscriber failed");
 }

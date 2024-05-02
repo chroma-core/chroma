@@ -35,9 +35,13 @@ pub async fn query_service_entrypoint() {
         Err(_) => config::RootConfig::load(),
     };
 
-    crate::tracing::opentelemetry_config::init_oltp_tracing();
-
     let config = config.query_service;
+
+    crate::tracing::opentelemetry_config::init_otel_tracing(
+        &config.svc_name,
+        &config.otel_endpoint,
+    );
+
     let system: system::System = system::System::new();
     let dispatcher =
         match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
@@ -97,6 +101,12 @@ pub async fn compaction_service_entrypoint() {
     };
 
     let config = config.compaction_service;
+
+    crate::tracing::opentelemetry_config::init_otel_tracing(
+        &config.svc_name,
+        &config.otel_endpoint,
+    );
+
     let system: system::System = system::System::new();
 
     let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
