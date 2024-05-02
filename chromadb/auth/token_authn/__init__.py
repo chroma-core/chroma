@@ -61,6 +61,20 @@ def _check_token(token: str) -> None:
         )
 
 
+allowed_token_headers = [
+    TokenTransportHeader.AUTHORIZATION.value,
+    TokenTransportHeader.X_CHROMA_TOKEN.value,
+]
+
+
+def _check_allowed_token_headers(token_header: str) -> None:
+    if token_header not in allowed_token_headers:
+        raise ValueError(
+            f"Invalid token transport header: {token_header}. "
+            f"Must be one of {allowed_token_headers}"
+        )
+
+
 class TokenAuthClientProvider(ClientAuthProvider):
     """
     Client auth provider for token-based auth. Header key will be either
@@ -78,16 +92,9 @@ class TokenAuthClientProvider(ClientAuthProvider):
         _check_token(self._token.get_secret_value())
 
         if system.settings.chroma_auth_token_transport_header:
-            allowed_token_headers = [header.value for header in TokenTransportHeader]
-            if (
+            _check_allowed_token_headers(
                 system.settings.chroma_auth_token_transport_header
-                not in allowed_token_headers
-            ):
-                raise ValueError(
-                    f"Invalid token transport header: {system.settings.chroma_auth_token_transport_header}. "
-                    f"Must be one of {allowed_token_headers}"
-                )
-
+            )
             self._token_transport_header = TokenTransportHeader(
                 system.settings.chroma_auth_token_transport_header
             )
@@ -136,16 +143,9 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         super().__init__(system)
         self._settings = system.settings
         if system.settings.chroma_auth_token_transport_header:
-            allowed_token_headers = [header.value for header in TokenTransportHeader]
-            if (
+            _check_allowed_token_headers(
                 system.settings.chroma_auth_token_transport_header
-                not in allowed_token_headers
-            ):
-                raise ValueError(
-                    f"Invalid token transport header: {system.settings.chroma_auth_token_transport_header}. "
-                    f"Must be one of {allowed_token_headers}"
-                )
-
+            )
             self._token_transport_header = TokenTransportHeader(
                 system.settings.chroma_auth_token_transport_header
             )
