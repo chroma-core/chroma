@@ -1,18 +1,7 @@
-name: Chroma Coordinator Tests
+name: Go tests
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
-  pull_request:
-    branches:
-      - main
-      - '**'
-    paths-ignore:
-      - 'docs/**'
-  workflow_dispatch:
+  workflow_call:
 
 jobs:
   test:
@@ -35,11 +24,13 @@ jobs:
         ports:
           - 5432:5432
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-    - uses: ariga/setup-atlas@v0
-    - name: Build and test
-      run: cd go && make test
-      env:
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/go
+      - name: Build and test
+        run: make test
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+        working-directory: go

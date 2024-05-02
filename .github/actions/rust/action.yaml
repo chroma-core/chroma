@@ -1,10 +1,5 @@
 name: Setup Rust
 description: "This action sets up Rust"
-inputs:
-  python-version:
-    description: "Python version to use"
-    required: false
-    default: "3.8"
 runs:
   using: "composite"
   steps:

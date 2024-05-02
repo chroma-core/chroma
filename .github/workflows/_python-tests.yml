@@ -26,6 +26,7 @@ jobs:
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
     runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.test-globs }} (${{ matrix.python }})
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/python-test

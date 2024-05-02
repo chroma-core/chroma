@@ -27,6 +27,10 @@ jobs:
     name: Rust tests
     uses: ./.github/workflows/_rust-tests.yml
 
+  go-tests:
+    name: Go tests
+    uses: ./.github/workflows/_go-tests.yml
+
   check-title:
     name: Check PR Title
     runs-on: ubuntu-latest
