@@ -1,4 +1,4 @@
-name: TypeScript client tests
+name: JavaScript client tests
 
 on:
   workflow_call:

@@ -23,9 +23,9 @@ jobs:
     name: Python vulnerability scan
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
-  typescript-client-tests:
-    name: TypeScript client tests
-    uses: ./.github/workflows/_typescript-client-tests.yml
+  javascript-client-tests:
+    name: JavaScript client tests
+    uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
