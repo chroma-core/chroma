@@ -7,24 +7,48 @@ on:
   # todo: ignore docs folder?
 
 jobs:
+  paths-filter:
+    name: Get changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      outside-docs: ${{ steps.changes.outputs.outside-docs }}
+    steps:
+      - name: Get changed paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            outside-docs:
+              - '!docs/**'
+
   python-tests:
     name: Python tests
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-tests.yml
 
   python-vulnerability-scan:
     name: Python vulnerability scan
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_rust-tests.yml
 
   go-tests:
     name: Go tests
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_go-tests.yml
 
   check-title:
