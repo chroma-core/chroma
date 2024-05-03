@@ -52,6 +52,7 @@ logService:
   flags:
 
 queryService:
+  configFilePath: "configuration/default.yaml"
   image:
     repository: 'local'
     tag: 'query-service'

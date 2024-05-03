@@ -18,14 +18,14 @@ EOF
       ;;
     token)
       cat <<EOF > .chroma_env
-CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
+CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="Authorization"
 CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
 CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 EOF
       ;;
     xtoken)
           cat <<EOF > .chroma_env
-CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
+CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X-Chroma-Token"
 CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
 CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 EOF
