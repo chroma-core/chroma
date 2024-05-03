@@ -3,6 +3,7 @@ use crate::index::types::PersistentIndex;
 use crate::{errors::ChromaError, storage::Storage, types::Segment};
 use parking_lot::RwLock;
 use std::fmt::Debug;
+use std::path::Path;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
@@ -49,20 +50,48 @@ impl HnswIndexProvider {
         cache.get(id).cloned()
     }
 
-    // TODO: THIS SHOULD BE FORK AND SHOULD NOT OVERWITE THE SAME HNSW INDEX EVERYTIME
-    pub(crate) async fn load(
+    fn format_key(&self, id: &Uuid, file: &str) -> String {
+        format!("hnsw/{}/{}", id, file)
+    }
+
+    pub(crate) async fn fork(
         &self,
-        id: &Uuid,
+        source_id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        self.create_dir_all(&index_storage_path)?;
+        let new_id = Uuid::new_v4();
+        let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
+        self.create_dir_all(&new_storage_path)?;
+        self.load_hnsw_segment_into_directory(source_id, &new_storage_path)
+            .await?;
 
+        let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
+        let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path)?;
+        // TODO: don't unwrap path conv here
+        match HnswIndex::load(
+            new_storage_path.to_str().unwrap(),
+            &index_config,
+            *source_id,
+        ) {
+            Ok(index) => {
+                let index = Arc::new(RwLock::new(index));
+                let mut cache = self.cache.write();
+                cache.insert(new_id, index.clone());
+                Ok(index)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn load_hnsw_segment_into_directory(
+        &self,
+        source_id: &Uuid,
+        index_storage_path: &Path,
+    ) -> Result<(), Box<dyn ChromaError>> {
         // Fetch the files from storage and put them in the index storage path
         for file in FILES.iter() {
-            // TOOD: put key formatting as function
-            let key = format!("hnsw/{}/{}", id, file);
+            let key = self.format_key(source_id, file);
             println!("Loading hnsw index file: {}", key);
             let res = self.storage.get(&key).await;
             let mut reader = match res {
@@ -100,6 +129,19 @@ impl HnswIndexProvider {
             // bytes is an AsyncBufRead, so we fil and consume it to a file
             println!("Loaded hnsw index file: {}", file);
         }
+        Ok(())
+    }
+
+    pub(crate) async fn open(
+        &self,
+        id: &Uuid,
+        segment: &Segment,
+        dimensionality: i32,
+    ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
+        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+        self.create_dir_all(&index_storage_path)?;
+        self.load_hnsw_segment_into_directory(id, &index_storage_path)
+            .await?;
 
         let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
         let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
@@ -177,7 +219,7 @@ impl HnswIndexProvider {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
-            let key = format!("hnsw/{}/{}", id, file);
+            let key = self.format_key(id, file);
             let res = self
                 .storage
                 .put_file(&key, file_path.to_str().unwrap())
