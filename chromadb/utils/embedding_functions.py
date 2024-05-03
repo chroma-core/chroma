@@ -193,9 +193,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self._deployment_id = deployment_id
 
     def __call__(self, input: Documents) -> Embeddings:
-        # replace newlines, which can negatively affect performance.
-        input = [t.replace("\n", " ") for t in input]
-
         # Call the OpenAI Embedding API
         if self._v1:
             embeddings = self._client.create(
