@@ -136,6 +136,9 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
     install_version(version)
+    configuration[1].persist_directory = (
+        tempfile.gettempdir() + f"/persistence_test_chromadb_{request.node.name}"
+    )
     yield configuration
     # Cleanup the installed version
     path = get_path_to_version_install(version)
