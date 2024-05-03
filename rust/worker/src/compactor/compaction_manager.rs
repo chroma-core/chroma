@@ -354,7 +354,7 @@ mod tests {
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
-            log_position: 0,
+            log_position: -1,
             version: 0,
         };
 
@@ -366,7 +366,7 @@ mod tests {
             dimension: Some(1),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
-            log_position: 0,
+            log_position: -1,
             version: 0,
         };
         sysdb.add_collection(collection_1);

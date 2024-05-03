@@ -18,6 +18,7 @@ use uuid::Uuid;
 /// - collection_id: the id of the collection that needs to be compacted
 /// - first_log_offset: the offset of the first log entry in the collection that needs to be compacted
 /// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
+#[derive(Debug)]
 pub(crate) struct CollectionInfo {
     pub(crate) collection_id: String,
     pub(crate) first_log_offset: i64,
