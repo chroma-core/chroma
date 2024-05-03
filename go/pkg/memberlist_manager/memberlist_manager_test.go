@@ -160,14 +160,14 @@ func TestMemberlistManager(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), initialCrMemberlist)
 
 	// Create a node watcher
-	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 1*time.Second)
+	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 100*time.Millisecond)
 
 	// Create a memberlist store
 	memberlistStore := NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
 
 	// Create a memberlist manager
 	memberlistManager := NewMemberlistManager(nodeWatcher, memberlistStore)
-	memberlistManager.SetReconcileInterval(5 * time.Second)
+	memberlistManager.SetReconcileInterval(1 * time.Second)
 	memberlistManager.SetReconcileCount(1)
 
 	// Start the memberlist manager
