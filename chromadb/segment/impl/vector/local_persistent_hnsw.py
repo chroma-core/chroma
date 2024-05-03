@@ -242,9 +242,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._max_seq_id = max(self._max_seq_id, record["log_offset"])
                 id = record["operation_record"]["id"]
                 op = record["operation_record"]["operation"]
-                exists_in_index = self._id_to_label.get(
-                    id, None
-                ) is not None or self._brute_force_index.has_id(id)
+                exists_in_index = id not in self._curr_batch._deleted_ids and (
+                    self._brute_force_index.has_id(id) or id in self._id_to_label.keys()
+                )
                 exists_in_bf_index = self._brute_force_index.has_id(id)
 
                 if op == Operation.DELETE:
@@ -252,11 +252,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         self._curr_batch.apply(record)
                         if exists_in_bf_index:
                             self._brute_force_index.delete([record])
-                        else:
-                            _label = self._id_to_label.pop(id)
-                            self._label_to_id.pop(_label)
-                            self._id_to_seq_id.pop(id)
-                            self._index.mark_deleted(_label)
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 

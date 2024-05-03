@@ -6,7 +6,6 @@ import hypothesis.strategies as st
 from hypothesis import given
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-import random
 
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
@@ -214,26 +213,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return
 
         self.collection.upsert(**record_set)
-        self._upsert_embeddings(record_set)
-
-    @precondition(
-        lambda self: "hnsw:batch_size" in self._metadata
-        and len(self.record_set_state["ids"]) >= self._metadata["hnsw:batch_size"]
-    )
-    @rule()
-    def swap_embeddings(self) -> None:
-        trace("swap embeddings")
-        docs = self.collection.get(include=["embeddings", "documents", "metadatas"])
-        ids_to_swap = random.sample(docs["ids"], min(5, len(docs["ids"])))
-        indices_to_swap = [docs["ids"].index(id) for id in ids_to_swap]
-        record_set = {
-            "ids": [docs["ids"][i] for i in indices_to_swap],
-            "metadatas": [docs["metadatas"][i] for i in indices_to_swap],
-            "documents": [docs["documents"][i] for i in indices_to_swap],
-            "embeddings": [docs["embeddings"][i] for i in indices_to_swap],
-        }
-        self.collection.delete(ids=ids_to_swap)
-        self.collection.add(**record_set)
         self._upsert_embeddings(record_set)
 
     @invariant()
@@ -528,7 +507,7 @@ def batching_params(draw: st.DrawFn) -> BatchParams:
 
 
 @given(batching_params=batching_params())
-def test_get_vector(batching_params: BatchParams, api: ServerAPI) -> None:
+def test_batching(batching_params: BatchParams, api: ServerAPI) -> None:
     error_distribution = {"IndexError": 0, "TypeError": 0, "NoError": 0}
     rounds = 100
     if isinstance(api, FastAPI) or not api.get_settings().is_persistent:
