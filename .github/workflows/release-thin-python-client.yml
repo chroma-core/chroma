@@ -1,4 +1,4 @@
-name: Release Python client
+name: 📦 Release thin Python client
 
 on:
   push:
