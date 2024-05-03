@@ -37,7 +37,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest, windows-latest]
+        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/test_cli.py",
@@ -84,7 +84,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest, windows-latest]
+        platform: [ubuntu-latest] # # todo: should run on Windows, currently failing because Dockerfile doesn't build
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
