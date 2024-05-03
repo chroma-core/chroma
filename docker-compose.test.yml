@@ -8,7 +8,8 @@ services:
   test_server:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    platform: ${PLATFORM:-linux/amd64}
     volumes:
       - chroma-data:/chroma/chroma
     command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"

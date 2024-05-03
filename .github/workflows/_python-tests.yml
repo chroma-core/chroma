@@ -37,7 +37,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        platform: [ubuntu-latest, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/test_cli.py",
@@ -47,6 +47,11 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
+        include:
+          - platform: ubuntu-latest
+            env-file: compose-env.linux
+          - platform: windows-latest
+            env-file: compose-env.windows
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -56,6 +61,8 @@ jobs:
     - name: Integration Test
       run: bin/python-integration-test ${{ matrix.test-globs }}
       shell: bash
+      env:
+        ENV_FILE: ${{ matrix.env-file }}
 
   test-cluster-integration:
     strategy:
