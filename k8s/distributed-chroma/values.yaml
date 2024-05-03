@@ -52,14 +52,12 @@ logService:
   flags:
 
 queryService:
-  configFilePath: "configuration/default.yaml"
   image:
     repository: 'local'
     tag: 'query-service'
   env:
 
 compactionService:
-  configFilePath: "configuration/default.yaml"
   image:
     repository: 'local'
     tag: 'compaction-service'
