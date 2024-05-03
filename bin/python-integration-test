@@ -10,10 +10,6 @@ function cleanup {
 
 trap cleanup EXIT
 
-if [ "$RUNNER_OS" == "Windows" ]; then
-  export DOCKER_PLATFORM="windows/amd64"
-fi
-
 docker compose -f docker-compose.test.yml up --build -d
 
 export CHROMA_INTEGRATION_TEST_ONLY=1
