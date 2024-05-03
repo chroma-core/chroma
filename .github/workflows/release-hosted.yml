@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'k8s/**'
   workflow_dispatch:
 
 jobs:
