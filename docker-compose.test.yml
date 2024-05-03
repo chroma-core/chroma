@@ -1,5 +1,3 @@
-version: '3.9'
-
 networks:
   test_net:
     driver: bridge
@@ -9,6 +7,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
     volumes:
       - chroma-data:/chroma/chroma
     command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
