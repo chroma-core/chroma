@@ -28,11 +28,15 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
-      - uses: ./.github/actions/python-test
+      - name: Setup
+        uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-          test-globs: ${{ matrix.test-globs }}
+      - name: Test
+        run: python -m pytest ${{ matrix.test-globs }}
+        shell: bash
 
+  # todo: break out stress integration tests
   test-single-node-integration:
     strategy:
       matrix:
@@ -105,7 +109,24 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
-      - uses: ./.github/actions/python-test
+      - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-          test-globs: "chromadb/test/stress/"
+      - name: Test
+        run: python -m pytest chromadb/test/stress/
+        shell: bash
+
+  test-single-node-integration-stress:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python (${{ matrix.python }})
+      uses: ./.github/actions/python
+    - name: Integration Test
+      run: bin/python-integration-test chromadb/test/stress/
+      shell: bash

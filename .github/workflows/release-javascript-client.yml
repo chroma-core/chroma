@@ -27,7 +27,9 @@ jobs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
-    - uses: ./.github/actions/node
+    - uses: actions/setup-node@v3
+      with:
+        node-version: "16.x"
     - name: Install dependencies
       run: npm install
       working-directory: ./clients/js/
