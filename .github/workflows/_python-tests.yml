@@ -81,7 +81,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest -n auto "${{ matrix.test-globs }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
         shell: bash
 
   test-thin-client:
