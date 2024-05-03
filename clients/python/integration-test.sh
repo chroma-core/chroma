@@ -28,4 +28,4 @@ echo testing: python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb
 # Copy the thin client flag script in place, uvicorn takes a while to startup inside docker
 sleep 5
 cp "$is_thin_client_py" "$is_thin_client_target"
-python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
+python -m pytest -n auto 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'

@@ -19,6 +19,6 @@ export CHROMA_SERVER_HTTP_PORT=8000
 export CHROMA_SERVER_NOFILE=65535
 
 echo testing: python -m pytest "$@"
-python -m pytest "$@"
+python -m pytest -n auto "$@"
 
 docker compose down
