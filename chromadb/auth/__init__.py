@@ -24,6 +24,10 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
+class AuthError(Exception):
+    pass
+
+
 ClientAuthHeaders = Dict[str, SecretStr]
 
 

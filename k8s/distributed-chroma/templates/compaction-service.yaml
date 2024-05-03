@@ -1,4 +1,4 @@
-{{if .Values.compactionService.configFilePath}}
+{{if .Values.compactionService.configuration}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -7,7 +7,7 @@ metadata:
   namespace: {{ .Values.namespace }}
 data:
   config.yaml: |
-{{ (.Files.Get .Values.compactionService.configFilePath) | indent 4 }}
+{{ .Values.compactionService.configuration | indent 4 }}
 ---
 {{ end }}
 
@@ -29,7 +29,7 @@ spec:
         member-type: compaction-service
     spec:
       serviceAccountName: compaction-service-serviceaccount
-      {{if .Values.compactionService.configFilePath}}
+      {{if .Values.compactionService.configuration}}
       volumes:
         - name: compaction-service-config
           configMap:
@@ -39,7 +39,7 @@ spec:
         - name: compaction-service
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          {{if .Values.compactionService.configFilePath}}
+          {{if .Values.compactionService.configuration}}
           volumeMounts:
             - name: compaction-service-config
               mountPath: /config/
@@ -47,7 +47,7 @@ spec:
           ports:
             - containerPort: 50051
           env:
-            {{if .Values.compactionService.configFilePath}}
+            {{if .Values.compactionService.configuration}}
             - name: CONFIG_PATH
               value: /config/config.yaml
             {{ end }}

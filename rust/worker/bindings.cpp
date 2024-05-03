@@ -200,4 +200,9 @@ extern "C"
     {
         index->set_ef(ef);
     }
+
+    int len(Index<float> *index)
+    {
+        return index->appr_alg->getCurrentElementCount() - index->appr_alg->getDeletedCount();
+    }
 }

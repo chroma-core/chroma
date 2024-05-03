@@ -8,17 +8,16 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::{config::StorageConfig, Storage};
+use super::config::StorageConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
 use aws_sdk_s3;
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_smithy_types::byte_stream::ByteStream;
-use bytes::Bytes;
 use std::clone::Clone;
-use std::io::Write;
 use thiserror::Error;
 use tokio::io::AsyncBufRead;
 
@@ -26,6 +25,32 @@ use tokio::io::AsyncBufRead;
 pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
+}
+
+#[derive(Error, Debug)]
+pub enum S3PutError {
+    #[error("S3 PUT error: {0}")]
+    S3PutError(String),
+}
+
+impl ChromaError for S3PutError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        crate::errors::ErrorCodes::Internal
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum S3GetError {
+    #[error("S3 GET error: {0}")]
+    S3GetError(String),
+    #[error("No such key: {0}")]
+    NoSuchKey(String),
+}
+
+impl ChromaError for S3GetError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        crate::errors::ErrorCodes::Internal
+    }
 }
 
 impl S3Storage {
@@ -77,7 +102,7 @@ impl S3Storage {
     pub(crate) async fn get(
         &self,
         key: &str,
-    ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, String> {
+    ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, S3GetError> {
         let res = self
             .client
             .get_object()
@@ -97,47 +122,45 @@ impl S3Storage {
                         match inner {
                             aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
                                 println!("no such key: {}", msg);
-                                return Err::<_, String>(msg.to_string());
+                                return Err(S3GetError::NoSuchKey(msg.to_string()));
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
                                 print!("invalid object state: {}", msg);
-                                return Err::<_, String>(msg.to_string());
+                                return Err(S3GetError::S3GetError(msg.to_string()));
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) =>  {
                                 println!("unhandled error");
-                                return Err::<_, String>("unhandled error".to_string());
+                                return Err(S3GetError::S3GetError("unhandled error".to_string()));
                             }
                             _ => {
                                 println!("error: {}", inner.to_string());
-                                return Err::<_, String>(inner.to_string());
+                                return Err(S3GetError::S3GetError(inner.to_string()));
                             }
                         };
                     }
                     _ => {}
                 }
-                return Err::<_, String>(e.to_string());
+                return Err(S3GetError::S3GetError(e.to_string()));
             }
         }
     }
 
-    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), String> {
+    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let bytestream = ByteStream::from(bytes);
         self.put_bytestream(key, bytestream).await
     }
 
-    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
+    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
         let bytestream = ByteStream::from_path(path).await;
         match bytestream {
-            Ok(bytestream) => {
-                return self.put_bytestream(key, bytestream).await;
-            }
+            Ok(bytestream) => return self.put_bytestream(key, bytestream).await,
             Err(e) => {
-                return Err::<(), String>(e.to_string());
+                return Err(S3PutError::S3PutError(e.to_string()));
             }
         }
     }
 
-    async fn put_bytestream(&self, key: &str, bytestream: ByteStream) -> Result<(), String> {
+    async fn put_bytestream(&self, key: &str, bytestream: ByteStream) -> Result<(), S3PutError> {
         let res = self
             .client
             .put_object()
@@ -151,10 +174,22 @@ impl S3Storage {
                 println!("put object {} to bucket {}", key, self.bucket);
                 return Ok(());
             }
-            Err(e) => {
-                println!("s3 error: {}", e);
-                return Err::<(), String>(e.to_string());
-            }
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner_err = err.into_err();
+                    let err_string = format!(
+                        "S3 service error with code: {:?} and message: {:?}",
+                        inner_err.code(),
+                        inner_err.message()
+                    );
+                    println!("{}", err_string);
+                    return Err(S3PutError::S3PutError(err_string));
+                }
+                _ => {
+                    println!("S3 Put Error: {}", e);
+                    return Err(S3PutError::S3PutError(e.to_string()));
+                }
+            },
         }
     }
 }
@@ -179,7 +214,6 @@ impl ChromaError for StorageConfigError {
 #[async_trait]
 impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
-        println!("Creating storage with config: {:?}", config);
         match &config {
             StorageConfig::S3(s3_config) => {
                 let client = match &s3_config.credentials {

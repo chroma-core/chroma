@@ -39,7 +39,7 @@ sysdb:
   replicaCount: 1
   env:
     - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "http://jaeger:4317"'
+      value: 'value: "jaeger:4317"'
   flags:
 
 logService:
@@ -48,7 +48,7 @@ logService:
     tag: 'log-service'
   env:
     - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "http://jaeger:4317"'
+      value: 'value: "jaeger:4317"'
   flags:
 
 queryService:
@@ -58,7 +58,6 @@ queryService:
   env:
 
 compactionService:
-  configFilePath: "configuration/default.yaml"
   image:
     repository: 'local'
     tag: 'compaction-service'
