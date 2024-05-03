@@ -203,8 +203,9 @@ impl Index<HnswIndexConfig> for HnswIndex {
     }
 
     fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
-        let mut ids = vec![0usize; k];
-        let mut distance = vec![0.0f32; k];
+        let actual_k = std::cmp::min(k, self.len());
+        let mut ids = vec![0usize; actual_k];
+        let mut distance = vec![0.0f32; actual_k];
         unsafe {
             knn_query(
                 self.ffi_ptr,
@@ -271,6 +272,10 @@ impl HnswIndex {
     pub fn get_ef(&self) -> usize {
         unsafe { get_ef(self.ffi_ptr) as usize }
     }
+
+    pub fn len(&self) -> usize {
+        unsafe { len(self.ffi_ptr) as usize }
+    }
 }
 
 #[link(name = "bindings", kind = "static")]
@@ -309,6 +314,7 @@ extern "C" {
 
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
+    fn len(index: *const IndexPtrFFI) -> c_int;
 
 }
 
@@ -357,7 +363,7 @@ pub mod test {
 
     #[test]
     fn it_can_add_parallel() {
-        let n = 10;
+        let n: usize = 100;
         let d: usize = 960;
         let distance_function = DistanceFunction::InnerProduct;
         let tmp_dir = tempdir().unwrap();
@@ -405,6 +411,8 @@ pub mod test {
             let data = &datas[i];
             index.add(ids[i], data);
         });
+
+        assert_eq!(index.len(), n);
 
         // Get the data and check it
         let mut i = 0;
@@ -460,6 +468,9 @@ pub mod test {
             let data = &data[i * d..(i + 1) * d];
             index.add(ids[i], data);
         });
+
+        // Assert length
+        assert_eq!(index.len(), n);
 
         // Get the data and check it
         let mut i = 0;

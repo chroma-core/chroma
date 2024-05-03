@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+
+use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto;
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
@@ -6,6 +9,7 @@ use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::HnswQueryOrchestrator;
+use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{Receiver, System};
@@ -23,6 +27,8 @@ pub struct WorkerServer {
     // Service dependencies
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
+    hnsw_index_provider: HnswIndexProvider,
+    blockfile_provider: BlockfileProvider,
     port: u16,
 }
 
@@ -33,6 +39,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
+                println!("Failed to create sysdb component: {:?}", err);
                 return Err(err);
             }
         };
@@ -40,14 +47,28 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
+                println!("Failed to create log component: {:?}", err);
                 return Err(err);
             }
         };
+        let storage = match crate::storage::from_config(&config.storage).await {
+            Ok(storage) => storage,
+            Err(err) => {
+                println!("Failed to create storage component: {:?}", err);
+                return Err(err);
+            }
+        };
+        // TODO: inject hnsw index provider somehow
+        // TODO: inject blockfile provider somehow
+        // TODO: real path
+        let path = PathBuf::from("~/tmp");
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
             sysdb,
             log,
+            hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
+            blockfile_provider: BlockfileProvider::new_arrow(storage),
             port: config.my_port,
         })
     }
@@ -142,6 +163,8 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
                     segment_uuid,
                     self.log.clone(),
                     self.sysdb.clone(),
+                    self.hnsw_index_provider.clone(),
+                    self.blockfile_provider.clone(),
                     dispatcher.clone(),
                 );
                 orchestrator.run().await

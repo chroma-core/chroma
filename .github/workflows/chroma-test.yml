@@ -5,10 +5,14 @@ on:
     branches:
       - main
       - team/hypothesis-tests
+    paths-ignore:
+      - 'docs/**'
   pull_request:
     branches:
       - main
       - '**'
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
