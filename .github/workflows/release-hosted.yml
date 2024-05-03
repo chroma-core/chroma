@@ -1,4 +1,4 @@
-name: Release hosted
+name: 📦 Release hosted
 
 on:
   push:
