@@ -23,6 +23,7 @@ class SegmentType(Enum):
     HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
     HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
     HNSW_DISTRIBUTED = "urn:chroma:segment/vector/hnsw-distributed"
+    RECORD = "urn:chroma:segment/record"
 
 
 class SegmentImplementation(Component):

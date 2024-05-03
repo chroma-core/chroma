@@ -45,13 +45,13 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.curr_tenant = DEFAULT_TENANT
         self.curr_database = DEFAULT_DATABASE
         self.api.set_tenant(DEFAULT_TENANT, DEFAULT_DATABASE)
-        self.tenant_to_database_to_model[self.curr_tenant] = {}
-        self.tenant_to_database_to_model[self.curr_tenant][self.curr_database] = {}
+        self.set_tenant_model(self.curr_tenant, {})
+        self.set_database_model_for_tenant(self.curr_tenant, self.curr_database, {})
 
     @rule(target=tenants, name=strategies.tenant_database_name)
     def create_tenant(self, name: str) -> MultipleResults[str]:
         # Check if tenant already exists
-        if name in self.tenant_to_database_to_model:
+        if self.has_tenant(name):
             with pytest.raises(Exception):
                 self.admin_client.create_tenant(name)
             return multiple()
@@ -61,20 +61,20 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         # since the state machine could call collection operations before creating a
         # database
         self.admin_client.create_database(DEFAULT_DATABASE, tenant=name)
-        self.tenant_to_database_to_model[name] = {}
-        self.tenant_to_database_to_model[name][DEFAULT_DATABASE] = {}
+        self.set_tenant_model(name, {})
+        self.set_database_model_for_tenant(name, DEFAULT_DATABASE, {})
         return multiple(name)
 
     @rule(target=databases, name=strategies.tenant_database_name)
     def create_database(self, name: str) -> MultipleResults[Tuple[str, str]]:
         # If database already exists in current tenant, raise an error
-        if name in self.tenant_to_database_to_model[self.curr_tenant]:
+        if self.has_database_for_tenant(self.curr_tenant, name):
             with pytest.raises(Exception):
                 self.admin_client.create_database(name, tenant=self.curr_tenant)
             return multiple()
 
         self.admin_client.create_database(name, tenant=self.curr_tenant)
-        self.tenant_to_database_to_model[self.curr_tenant][name] = {}
+        self.set_database_model_for_tenant(self.curr_tenant, name, {})
         return multiple((name, self.curr_tenant))
 
     @rule(database=databases)
@@ -82,15 +82,48 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         # Get a database and switch to the database and the tenant it belongs to
         database_name = database[0]
         tenant_name = database[1]
-        self.api.set_tenant(tenant_name, database_name)
+        self.set_api_tenant_database(tenant_name, database_name)
         self.curr_database = database_name
         self.curr_tenant = tenant_name
 
     @rule(tenant=tenants)
     def set_tenant(self, tenant: str) -> None:
-        self.api.set_tenant(tenant, DEFAULT_DATABASE)
+        self.set_api_tenant_database(tenant, DEFAULT_DATABASE)
         self.curr_tenant = tenant
         self.curr_database = DEFAULT_DATABASE
+
+    # These methods allow other tests, namely
+    # test_collections_with_database_tenant_override.py, to swap out the model
+    # without needing to do a bunch of pythonic cleverness to fake a dict which
+    # preteds to have every key.
+    def set_api_tenant_database(self, tenant: str, database: str) -> None:
+        self.api.set_tenant(tenant, database)
+
+    def has_tenant(self, tenant: str) -> bool:
+        return tenant in self.tenant_to_database_to_model
+
+    def get_tenant_model(
+        self, tenant: str
+    ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
+        return self.tenant_to_database_to_model[tenant]
+
+    def set_tenant_model(
+        self,
+        tenant: str,
+        model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]],
+    ) -> None:
+        self.tenant_to_database_to_model[tenant] = model
+
+    def has_database_for_tenant(self, tenant: str, database: str) -> bool:
+        return database in self.tenant_to_database_to_model[tenant]
+
+    def set_database_model_for_tenant(
+        self,
+        tenant: str,
+        database: str,
+        database_model: Dict[str, Optional[types.CollectionMetadata]],
+    ) -> None:
+        self.tenant_to_database_to_model[tenant][database] = database_model
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:

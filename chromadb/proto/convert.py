@@ -21,8 +21,6 @@ from chromadb.types import (
 
 
 # TODO: Unit tests for this file, handling optional states etc
-
-
 def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
     if encoding == ScalarEncoding.FLOAT32:
         as_bytes = array.array("f", vector).tobytes()
@@ -158,6 +156,8 @@ def from_proto_segment_scope(segment_scope: proto.SegmentScope) -> SegmentScope:
         return SegmentScope.VECTOR
     elif segment_scope == proto.SegmentScope.METADATA:
         return SegmentScope.METADATA
+    elif segment_scope == proto.SegmentScope.RECORD:
+        return SegmentScope.RECORD
     else:
         raise RuntimeError(f"Unknown segment scope {segment_scope}")
 
@@ -167,6 +167,8 @@ def to_proto_segment_scope(segment_scope: SegmentScope) -> proto.SegmentScope:
         return proto.SegmentScope.VECTOR
     elif segment_scope == SegmentScope.METADATA:
         return proto.SegmentScope.METADATA
+    elif segment_scope == SegmentScope.RECORD:
+        return proto.SegmentScope.RECORD
     else:
         raise RuntimeError(f"Unknown segment scope {segment_scope}")
 

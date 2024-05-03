@@ -7,6 +7,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
+use tracing::Span;
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
@@ -97,7 +98,11 @@ impl Dispatcher {
         // If a worker is waiting for a task, send it to the worker in FIFO order
         // Otherwise, add it to the task queue
         match self.waiters.pop() {
-            Some(channel) => match channel.reply_to.send(task).await {
+            Some(channel) => match channel
+                .reply_to
+                .send(task, Some(Span::current().clone()))
+                .await
+            {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error sending task to worker: {:?}", e);
@@ -116,7 +121,11 @@ impl Dispatcher {
     /// when one is available
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
         match self.task_queue.pop() {
-            Some(task) => match request.reply_to.send(task).await {
+            Some(task) => match request
+                .reply_to
+                .send(task, Some(Span::current().clone()))
+                .await
+            {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error sending task to worker: {:?}", e);
@@ -265,7 +274,7 @@ mod tests {
     impl Handler<()> for MockDispatchUser {
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
-            let res = self.dispatcher.send(task).await;
+            let res = self.dispatcher.send(task, None).await;
         }
     }
 

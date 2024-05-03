@@ -2,6 +2,7 @@
 // this should wrap ChromaClient and specify the auth scheme correctly
 
 import { ChromaClient } from "./ChromaClient";
+import { AuthOptions } from "./auth";
 
 interface CloudClientParams {
   apiKey?: string;
@@ -25,10 +26,10 @@ class CloudClient extends ChromaClient {
 
     const path = `${cloudHost}:${cloudPort}`;
 
-    const auth = {
+    const auth: AuthOptions = {
       provider: "token",
       credentials: apiKey,
-      providerOptions: { headerType: "X_CHROMA_TOKEN" },
+      tokenHeaderType: "X_CHROMA_TOKEN",
     };
 
     return new ChromaClient({

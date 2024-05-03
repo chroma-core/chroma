@@ -47,7 +47,11 @@ pub(crate) trait Handler<M>
 where
     Self: Component + Sized + 'static,
 {
-    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ();
+    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ()
+    // The need for this lifetime bound comes from the async_trait macro when we need generic lifetimes in our message type
+    // https://stackoverflow.com/questions/69560112/how-to-use-rust-async-trait-generic-to-a-lifetime-parameter
+    where
+        M: 'async_trait;
 }
 
 /// A stream handler is a component that can process messages of a given type from a stream.
@@ -185,9 +189,9 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let mut handle = system.start_component(component);
-        handle.sender.send(1).await.unwrap();
-        handle.sender.send(2).await.unwrap();
-        handle.sender.send(3).await.unwrap();
+        handle.sender.send(1, None).await.unwrap();
+        handle.sender.send(2, None).await.unwrap();
+        handle.sender.send(3, None).await.unwrap();
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         // With the streaming data and the messages we should have 12
@@ -197,7 +201,7 @@ mod tests {
         tokio::task::yield_now().await;
         // Expect the component to be stopped
         assert_eq!(*handle.state(), ComponentState::Stopped);
-        let res = handle.sender.send(4).await;
+        let res = handle.sender.send(4, None).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());
     }

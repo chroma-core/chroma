@@ -126,8 +126,6 @@ func (_m *IMetaDomain) TenantDb(ctx context.Context) dbmodel.ITenantDb {
 	return r0
 }
 
-
-
 // NewIMetaDomain creates a new instance of IMetaDomain. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewIMetaDomain(t interface {

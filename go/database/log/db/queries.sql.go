@@ -132,6 +132,15 @@ type InsertRecordParams struct {
 	Timestamp    int64
 }
 
+const purgeRecords = `-- name: PurgeRecords :exec
+DELETE FROM record_log r using collection c where r.collection_id = c.id and r.offset < c.record_compaction_offset_position
+`
+
+func (q *Queries) PurgeRecords(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, purgeRecords)
+	return err
+}
+
 const updateCollectionCompactionOffsetPosition = `-- name: UpdateCollectionCompactionOffsetPosition :exec
 UPDATE collection set record_compaction_offset_position = $2 where id = $1
 `

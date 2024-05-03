@@ -15,9 +15,9 @@ services:
     environment:
       - ANONYMIZED_TELEMETRY=False
       - ALLOW_RESET=True
-      - IS_PERSISTENT=TRUE
+      - IS_PERSISTENT=True
     ports:
-      - ${CHROMA_PORT}:8000
+      - 8000:8000
     networks:
       - test_net
 

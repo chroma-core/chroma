@@ -21,6 +21,7 @@ class ScalarEncoding(Enum):
 class SegmentScope(Enum):
     VECTOR = "VECTOR"
     METADATA = "METADATA"
+    RECORD = "RECORD"
 
 
 class Collection(TypedDict):

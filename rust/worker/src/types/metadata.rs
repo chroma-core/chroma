@@ -46,6 +46,43 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
     }
 }
 
+impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
+    fn from(value: UpdateMetadataValue) -> Self {
+        let proto_value = match value {
+            UpdateMetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
+                    value as i64,
+                )),
+            },
+            UpdateMetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
+                    value,
+                )),
+            },
+            UpdateMetadataValue::Str(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringValue(
+                    value,
+                )),
+            },
+            UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
+        };
+        proto_value
+    }
+}
+
+impl TryFrom<&UpdateMetadataValue> for MetadataValue {
+    type Error = MetadataValueConversionError;
+
+    fn try_from(value: &UpdateMetadataValue) -> Result<Self, Self::Error> {
+        match value {
+            UpdateMetadataValue::Int(value) => Ok(MetadataValue::Int(*value)),
+            UpdateMetadataValue::Float(value) => Ok(MetadataValue::Float(*value)),
+            UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
+            UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
 /*
 ===========================================
 MetadataValue
@@ -125,6 +162,29 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
     }
 }
 
+impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
+    fn from(value: MetadataValue) -> Self {
+        let proto_value = match value {
+            MetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
+                    value as i64,
+                )),
+            },
+            MetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
+                    value,
+                )),
+            },
+            MetadataValue::Str(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringValue(
+                    value,
+                )),
+            },
+        };
+        proto_value
+    }
+}
+
 /*
 ===========================================
 UpdateMetadata
@@ -145,6 +205,34 @@ impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
             metadata.insert(key.clone(), value);
         }
         Ok(metadata)
+    }
+}
+
+impl From<UpdateMetadata> for chroma_proto::UpdateMetadata {
+    fn from(metadata: UpdateMetadata) -> Self {
+        let mut metadata = metadata;
+        let mut proto_metadata = chroma_proto::UpdateMetadata {
+            metadata: HashMap::new(),
+        };
+        for (key, value) in metadata.drain() {
+            let proto_value = value.into();
+            proto_metadata.metadata.insert(key.clone(), proto_value);
+        }
+        proto_metadata
+    }
+}
+
+impl From<Metadata> for chroma_proto::UpdateMetadata {
+    fn from(metadata: Metadata) -> Self {
+        let mut metadata = metadata;
+        let mut proto_metadata = chroma_proto::UpdateMetadata {
+            metadata: HashMap::new(),
+        };
+        for (key, value) in metadata.drain() {
+            let proto_value = value.into();
+            proto_metadata.metadata.insert(key.clone(), proto_value);
+        }
+        proto_metadata
     }
 }
 
@@ -171,6 +259,24 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
         }
         Ok(metadata)
     }
+}
+
+pub(crate) fn update_metdata_to_metdata(
+    update_metdata: &UpdateMetadata,
+) -> Result<Metadata, MetadataValueConversionError> {
+    let mut metadata = Metadata::new();
+    for (key, value) in update_metdata {
+        let res = value.try_into();
+        match res {
+            Ok(value) => {
+                metadata.insert(key.clone(), value);
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        }
+    }
+    Ok(metadata)
 }
 
 #[cfg(test)]

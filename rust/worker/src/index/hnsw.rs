@@ -6,6 +6,7 @@ use crate::errors::{ChromaError, ErrorCodes};
 use super::{Index, IndexConfig, PersistentIndex};
 use crate::types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
 use thiserror::Error;
+use uuid::Uuid;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
@@ -120,6 +121,7 @@ impl HnswIndexConfig {
 pub(crate) struct HnswIndex {
     ffi_ptr: *const IndexPtrFFI,
     dimensionality: i32,
+    pub(crate) id: Uuid,
 }
 
 // Make index sync, we should wrap index so that it is sync in the way we expect but for now this implements the trait
@@ -147,6 +149,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
     fn init(
         index_config: &IndexConfig,
         hnsw_config: Option<&HnswIndexConfig>,
+        id: Uuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
         match hnsw_config {
             None => return Err(Box::new(HnswIndexInitError::NoConfigProvided)),
@@ -187,6 +190,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
                 let hnsw_index = HnswIndex {
                     ffi_ptr: ffi_ptr,
                     dimensionality: index_config.dimensionality,
+                    id,
                 };
                 hnsw_index.set_ef(config.ef_search);
                 Ok(hnsw_index)
@@ -199,8 +203,9 @@ impl Index<HnswIndexConfig> for HnswIndex {
     }
 
     fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
-        let mut ids = vec![0usize; k];
-        let mut distance = vec![0.0f32; k];
+        let actual_k = std::cmp::min(k, self.len());
+        let mut ids = vec![0usize; actual_k];
+        let mut distance = vec![0.0f32; actual_k];
         unsafe {
             knn_query(
                 self.ffi_ptr,
@@ -228,7 +233,11 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         Ok(())
     }
 
-    fn load(path: &str, index_config: &IndexConfig) -> Result<Self, Box<dyn ChromaError>> {
+    fn load(
+        path: &str,
+        index_config: &IndexConfig,
+        id: Uuid,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         let distance_function_string: String = index_config.distance_function.clone().into();
         let space_name = match CString::new(distance_function_string) {
             Ok(space_name) => space_name,
@@ -249,6 +258,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         let hnsw_index = HnswIndex {
             ffi_ptr: ffi_ptr,
             dimensionality: index_config.dimensionality,
+            id,
         };
         Ok(hnsw_index)
     }
@@ -261,6 +271,10 @@ impl HnswIndex {
 
     pub fn get_ef(&self) -> usize {
         unsafe { get_ef(self.ffi_ptr) as usize }
+    }
+
+    pub fn len(&self) -> usize {
+        unsafe { len(self.ffi_ptr) as usize }
     }
 }
 
@@ -300,6 +314,7 @@ extern "C" {
 
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
+    fn len(index: *const IndexPtrFFI) -> c_int;
 
 }
 
@@ -334,6 +349,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path: persist_path,
             }),
+            Uuid::new_v4(),
         );
         match index {
             Err(e) => panic!("Error initializing index: {}", e),
@@ -347,7 +363,7 @@ pub mod test {
 
     #[test]
     fn it_can_add_parallel() {
-        let n = 10;
+        let n: usize = 100;
         let d: usize = 960;
         let distance_function = DistanceFunction::InnerProduct;
         let tmp_dir = tempdir().unwrap();
@@ -365,6 +381,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path: persist_path,
             }),
+            Uuid::new_v4(),
         );
 
         let index = match index {
@@ -394,6 +411,8 @@ pub mod test {
             let data = &datas[i];
             index.add(ids[i], data);
         });
+
+        assert_eq!(index.len(), n);
 
         // Get the data and check it
         let mut i = 0;
@@ -433,6 +452,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path: persist_path,
             }),
+            Uuid::new_v4(),
         );
 
         let index = match index {
@@ -448,6 +468,9 @@ pub mod test {
             let data = &data[i * d..(i + 1) * d];
             index.add(ids[i], data);
         });
+
+        // Assert length
+        assert_eq!(index.len(), n);
 
         // Get the data and check it
         let mut i = 0;
@@ -482,6 +505,7 @@ pub mod test {
         let distance_function = DistanceFunction::Euclidean;
         let tmp_dir = tempdir().unwrap();
         let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let id = Uuid::new_v4();
         let index = HnswIndex::init(
             &IndexConfig {
                 dimensionality: d as i32,
@@ -495,6 +519,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path: persist_path.clone(),
             }),
+            id,
         );
 
         let index = match index {
@@ -524,6 +549,7 @@ pub mod test {
                 dimensionality: d as i32,
                 distance_function: distance_function,
             },
+            id,
         );
 
         let index = match index {
@@ -532,6 +558,7 @@ pub mod test {
         };
         // TODO: This should be set by the load
         index.set_ef(100);
+        assert_eq!(index.id, id);
 
         // Query the data
         let query = &data[0..d];

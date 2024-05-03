@@ -1,6 +1,7 @@
 use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
+use crate::types::LogRecord;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -18,7 +19,7 @@ pub struct PartitionOperator {}
 /// * `records` - The records to partition.
 #[derive(Debug)]
 pub struct PartitionInput {
-    pub(crate) records: DataChunk,
+    pub(crate) records: Chunk<LogRecord>,
     pub(crate) max_partition_size: usize,
 }
 
@@ -29,7 +30,7 @@ impl PartitionInput {
     /// * `max_partition_size` - The maximum size of a partition. Since we are trying to
     /// partition the records by id, which can casue the partition size to be larger than this
     /// value.
-    pub fn new(records: DataChunk, max_partition_size: usize) -> Self {
+    pub fn new(records: Chunk<LogRecord>, max_partition_size: usize) -> Self {
         PartitionInput {
             records,
             max_partition_size,
@@ -42,7 +43,7 @@ impl PartitionInput {
 /// * `records` - The partitioned records.
 #[derive(Debug)]
 pub struct PartitionOutput {
-    pub(crate) records: Vec<DataChunk>,
+    pub(crate) records: Vec<Chunk<LogRecord>>,
 }
 
 #[derive(Debug, Error)]
@@ -66,7 +67,11 @@ impl PartitionOperator {
         Box::new(PartitionOperator {})
     }
 
-    pub fn partition(&self, records: &DataChunk, partition_size: usize) -> Vec<DataChunk> {
+    pub fn partition(
+        &self,
+        records: &Chunk<LogRecord>,
+        partition_size: usize,
+    ) -> Vec<Chunk<LogRecord>> {
         let mut map = HashMap::new();
         for data in records.iter() {
             let log_record = data.0;
@@ -174,7 +179,7 @@ mod tests {
         let data: Arc<[LogRecord]> = data.into();
 
         // Test group size is larger than the number of records
-        let chunk = DataChunk::new(data.clone());
+        let chunk = Chunk::new(data.clone());
         let operator = PartitionOperator::new();
         let input = PartitionInput::new(chunk, 4);
         let result = operator.run(&input).await.unwrap();
@@ -182,7 +187,7 @@ mod tests {
         assert_eq!(result.records[0].len(), 3);
 
         // Test group size is the same as the number of records
-        let chunk = DataChunk::new(data.clone());
+        let chunk = Chunk::new(data.clone());
         let operator = PartitionOperator::new();
         let input = PartitionInput::new(chunk, 3);
         let result = operator.run(&input).await.unwrap();
@@ -190,7 +195,7 @@ mod tests {
         assert_eq!(result.records[0].len(), 3);
 
         // Test group size is smaller than the number of records
-        let chunk = DataChunk::new(data.clone());
+        let chunk = Chunk::new(data.clone());
         let operator = PartitionOperator::new();
         let input = PartitionInput::new(chunk, 2);
         let mut result = operator.run(&input).await.unwrap();
@@ -206,7 +211,7 @@ mod tests {
         }
 
         // Test group size is smaller than the number of records
-        let chunk = DataChunk::new(data.clone());
+        let chunk = Chunk::new(data.clone());
         let operator = PartitionOperator::new();
         let input = PartitionInput::new(chunk, 1);
         let mut result = operator.run(&input).await.unwrap();

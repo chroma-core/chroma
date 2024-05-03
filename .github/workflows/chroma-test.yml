@@ -5,10 +5,14 @@ on:
     branches:
       - main
       - team/hypothesis-tests
+    paths-ignore:
+      - 'docs/**'
   pull_request:
     branches:
       - main
       - '**'
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +22,7 @@ jobs:
       matrix:
         python: ['3.8', '3.9', '3.10', '3.11', '3.12']
         platform: [ubuntu-latest, windows-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",

@@ -39,14 +39,10 @@ spec:
               {{ .Values.frontendService.serverGrpcPort }}
             - name: CHROMA_COORDINATOR_HOST
               {{ .Values.frontendService.coordinatorHost }}
-            - name: CHROMA_SERVER_AUTH_PROVIDER
-              {{ .Values.frontendService.authProvider }}
-            - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
-              {{ .Values.frontendService.authCredentialsProvider }}
+            - name: CHROMA_SERVER_AUTHN_PROVIDER
+              {{ .Values.frontendService.authnProvider }}
             - name: CHROMA_SERVER_AUTHZ_PROVIDER
               {{ .Values.frontendService.authzProvider }}
-            - name: CHROMA_SERVER_AUTHZ_CONFIG_PROVIDER
-              {{ .Values.frontendService.authzConfigProvider }}
             - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
               {{ .Values.frontendService.memberlistProviderImpl }}
             - name: CHROMA_LOGSERVICE_HOST

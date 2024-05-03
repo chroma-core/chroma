@@ -543,7 +543,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	// results are returned
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Nil(result)
+	suite.Equal(0, len(result))
 
 	// clean up
 	err = dao.CleanUpTestTenant(suite.db, newTenantName)
