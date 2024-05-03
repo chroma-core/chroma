@@ -1,33 +1,22 @@
 FROM python:3.11 AS builder
 ARG REBUILD_HNSWLIB
-RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
-  build-essential \
-  gcc \
-  g++ \
-  cmake \
-  autoconf && \
-  rm -rf /var/lib/apt/lists/* && \
-  mkdir /install
 
-WORKDIR /install
+SHELL ["powershell", "-Command"]
+
+WORKDIR C:\\install
 
 COPY ./requirements.txt requirements.txt
 
-RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
-RUN if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="/install" chroma-hnswlib; fi
+RUN pip install --no-cache-dir --upgrade --prefix="C:\\install" -r requirements.txt
+RUN if ($env:REBUILD_HNSWLIB -eq 'true') { pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="C:\\install" chroma-hnswlib }
 
 FROM python:3.11 AS final
 
-RUN mkdir /chroma
-WORKDIR /chroma
+WORKDIR C:\\chroma
 
-COPY --from=builder /install /usr/local
-COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
-COPY ./ /chroma
-
-RUN apt-get update --fix-missing && apt-get install -y curl && \
-  chmod +x /docker_entrypoint.sh && \
-  rm -rf /var/lib/apt/lists/*
+COPY --from=builder ["C:\\\\install", "C:\\\\Program Files\\Python"]
+COPY ./bin/docker_entrypoint.ps1 C:\\docker_entrypoint.ps1
+COPY ./ C:\\chroma
 
 ENV CHROMA_HOST_ADDR "0.0.0.0"
 ENV CHROMA_HOST_PORT 8000
@@ -37,5 +26,5 @@ ENV CHROMA_TIMEOUT_KEEP_ALIVE 30
 
 EXPOSE 8000
 
-ENTRYPOINT ["/docker_entrypoint.sh"]
+ENTRYPOINT ["C:\\docker_entrypoint.ps1"]
 CMD [ "--workers ${CHROMA_WORKERS} --host ${CHROMA_HOST_ADDR} --port ${CHROMA_HOST_PORT} --proxy-headers --log-config ${CHROMA_LOG_CONFIG} --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE}"]
