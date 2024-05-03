@@ -178,6 +178,8 @@ impl CompactOrchestrator {
         };
         let input = PullLogsInput::new(
             collection_id,
+            // Here we do not need to be inclusive since the compaction job
+            // offset is the one after the last compaction offset
             self.compaction_job.offset,
             100,
             None,

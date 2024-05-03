@@ -179,7 +179,6 @@ impl ChromaError for StorageConfigError {
 #[async_trait]
 impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
-        println!("Creating storage with config: {:?}", config);
         match &config {
             StorageConfig::S3(s3_config) => {
                 let client = match &s3_config.credentials {
