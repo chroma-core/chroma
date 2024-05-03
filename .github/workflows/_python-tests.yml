@@ -12,6 +12,7 @@ on:
 
 jobs:
   test:
+    name: ${{ matrix.test-globs }} (${{ matrix.python }})
     timeout-minutes: 90
     strategy:
       matrix:
@@ -26,7 +27,6 @@ jobs:
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
     runs-on: ${{ matrix.platform }}
-    name: ${{ matrix.test-globs }} (${{ matrix.python }})
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/python-test
@@ -34,12 +34,37 @@ jobs:
           python-version: ${{ matrix.python }}
           test-globs: ${{ matrix.test-globs }}
 
-  test-cluster:
+  test-single-node-integration:
+    name: ${{ matrix.test-globs }} (${{ matrix.python }})
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest, windows-latest]
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/test_cli.py",
+                   "chromadb/test/auth/test_simple_rbac_authz.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_cross_version_persist.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_persist.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python (${{ matrix.python }})
+      uses: ./.github/actions/python
+    - name: Integration Test
+      run: bin/python-integration-test ${{ matrix.test-globs }}
+
+  test-cluster-integration:
+    name: ${{ matrix.test-globs }} (${{ matrix.python }})
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["16core-64gb-ubuntu-latest"]
-        testfile: ["chromadb/test/db/test_system.py",
+        test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
@@ -54,4 +79,4 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.testfile }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
