@@ -15,6 +15,11 @@ function cleanup {
 
 trap cleanup EXIT
 
+export PYTHON_IMAGE_VERSION="3.11-slim-bookworm"
+if [ "$RUNNER_OS" == "Windows" ]; then
+  export PYTHON_IMAGE_VERSION="3.11"
+fi
+
 docker compose -f docker-compose.test.yml up --build -d
 
 export CHROMA_INTEGRATION_TEST_ONLY=1

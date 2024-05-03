@@ -1,4 +1,6 @@
-FROM python:3.11-slim-bookworm AS builder
+ARG PYTHON_IMAGE_VERSION=3.11-slim-bookworm
+
+FROM python:${PYTHON_IMAGE_VERSION} AS builder
 ARG REBUILD_HNSWLIB
 RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     build-essential \
@@ -16,7 +18,7 @@ COPY ./requirements.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
 RUN if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="/install" chroma-hnswlib; fi
 
-FROM python:3.11-slim-bookworm AS final
+FROM python:${PYTHON_IMAGE_VERSION} AS final
 
 RUN mkdir /chroma
 WORKDIR /chroma
