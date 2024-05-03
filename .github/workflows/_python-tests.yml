@@ -80,3 +80,32 @@ jobs:
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+
+  test-thin-client:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: clients/python/integration-test.sh
+
+  test-stress:
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/python-test
+        with:
+          python-version: ${{ matrix.python }}
+          test-globs: "chromadb/test/stress/"

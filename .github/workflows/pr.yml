@@ -11,14 +11,6 @@ jobs:
     name: Python tests
     uses: ./.github/workflows/_python-tests.yml
 
-  python-stress-tests:
-    name: Python stress tests
-    uses: ./.github/workflows/_python-stress-tests.yml
-
-  python-client-tests:
-    name: Python client tests
-    uses: ./.github/workflows/_python-client-tests.yml
-
   python-vulnerability-scan:
     name: Python vulnerability scan
     uses: ./.github/workflows/_python-vulnerability-scan.yml
