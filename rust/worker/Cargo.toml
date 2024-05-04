@@ -45,6 +45,7 @@ arrow = "50.0.0"
 roaring = "0.10.3"
 tantivy = "0.21.1"
 tracing = "0.1"
+tracing-bunyan-formatter = "0.3.3"
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 opentelemetry = { version = "0.19.0", default-features = false, features = ["trace", "rt-tokio"] }

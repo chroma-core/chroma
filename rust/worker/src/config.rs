@@ -93,7 +93,7 @@ impl RootConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub(crate) struct QueryServiceConfig {
-    pub(crate) svc_name: String,
+    pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
     pub(crate) my_ip: String,
     pub(crate) my_port: u16,
@@ -117,7 +117,7 @@ pub(crate) struct QueryServiceConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub(crate) struct CompactionServiceConfig {
-    pub(crate) svc_name: String,
+    pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
     pub(crate) my_ip: String,
     pub(crate) my_port: u16,

@@ -38,7 +38,7 @@ pub async fn query_service_entrypoint() {
     let config = config.query_service;
 
     crate::tracing::opentelemetry_config::init_otel_tracing(
-        &config.svc_name,
+        &config.service_name,
         &config.otel_endpoint,
     );
 
@@ -103,7 +103,7 @@ pub async fn compaction_service_entrypoint() {
     let config = config.compaction_service;
 
     crate::tracing::opentelemetry_config::init_otel_tracing(
-        &config.svc_name,
+        &config.service_name,
         &config.otel_endpoint,
     );
 
