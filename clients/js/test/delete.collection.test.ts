@@ -27,7 +27,7 @@ test("should error on non existing collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
-  expect(async () => {
-    await collection.delete({ where: { test: "test1" } });
-  }).rejects.toThrow(InvalidCollectionError);
+  await expect(collection.delete({ where: { test: "test1" } })).rejects.toThrow(
+    InvalidCollectionError,
+  );
 });

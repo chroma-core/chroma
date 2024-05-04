@@ -192,16 +192,15 @@ test("wrong code returns an error", async () => {
   ];
   const metadatas = [{ test: "test1" }, { test: "test2" }, { test: "test3" }];
   await collection.add({ ids, embeddings, metadatas });
-  try {
-    await collection.get({
+
+  await expect(
+    collection.get({
       // @ts-ignore - supposed to fail
       where: { test: { $contains: "hello" } },
-    });
-  } catch (e: any) {
-    expect(e).toBeDefined();
-    expect(e).toBeInstanceOf(ChromaValueError);
-    expect(e.message).toMatchInlineSnapshot(
-      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
-    );
-  }
+    }),
+  ).rejects.toThrow(
+    new ChromaValueError(
+      "Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains",
+    ),
+  );
 });
