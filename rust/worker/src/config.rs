@@ -231,6 +231,8 @@ mod tests {
                 "random_path.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -259,6 +261,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
