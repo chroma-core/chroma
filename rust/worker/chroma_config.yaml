@@ -4,6 +4,8 @@
 # for now we nest it in the worker directory
 
 query_service:
+    service_name: "query-service"
+    otel_endpoint: "http://jaeger:4317"
     my_ip: "10.244.0.9"
     my_port: 50051
     assignment_policy:
@@ -32,6 +34,8 @@ query_service:
         worker_queue_size: 100
 
 compaction_service:
+    service_name: "compaction-service"
+    otel_endpoint: "http://jaeger:4317"
     my_ip: "10.244.0.9"
     my_port: 50051
     assignment_policy:

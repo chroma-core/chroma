@@ -93,6 +93,8 @@ impl RootConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub(crate) struct QueryServiceConfig {
+    pub(crate) service_name: String,
+    pub(crate) otel_endpoint: String,
     pub(crate) my_ip: String,
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
@@ -115,6 +117,8 @@ pub(crate) struct QueryServiceConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub(crate) struct CompactionServiceConfig {
+    pub(crate) service_name: String,
+    pub(crate) otel_endpoint: String,
     pub(crate) my_ip: String,
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
@@ -150,6 +154,8 @@ mod tests {
                 "chroma_config.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -178,6 +184,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -227,6 +235,8 @@ mod tests {
                 "random_path.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -255,6 +265,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -322,6 +334,8 @@ mod tests {
                 "chroma_config.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -350,6 +364,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -401,6 +417,8 @@ mod tests {
                 "chroma_config.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
@@ -427,6 +445,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
