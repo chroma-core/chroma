@@ -79,7 +79,7 @@
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
-    "openai": "^4.40.2"
+    "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {
