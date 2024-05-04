@@ -104,7 +104,9 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   private async getOpenAIClient(): Promise<OpenAIAPI> {
     if (this.openaiApi) return this.openaiApi;
     try {
+      // @ts-ignore - we need to dynamically import the openai package without TS errors
       OpenAIApi = await import("openai");
+      // @ts-ignore - we need to dynamically import the openai package without TS errors
       this.openaiApi = await import("openai/version")
         .catch(() => ({ VERSION: "3" }))
         .then(({ VERSION }) => {
