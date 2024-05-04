@@ -171,13 +171,6 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
     async fn try_from_config(
         config: &crate::config::CompactionServiceConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb_config = &config.sysdb;
-        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
-            Ok(sysdb) => sysdb,
-            Err(err) => {
-                return Err(err);
-            }
-        };
         let log_config = &config.log;
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
