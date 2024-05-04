@@ -92,33 +92,37 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   public async generate(texts: string[]): Promise<number[][]> {
     const openaiApi = await this.getOpenAIClient();
 
-    return await openaiApi.createEmbedding({
-      model: this.model,
-      input: texts,
-    }).catch((error: any) => {
-      throw error;
-    });
+    return await openaiApi
+      .createEmbedding({
+        model: this.model,
+        input: texts,
+      })
+      .catch((error: any) => {
+        throw error;
+      });
   }
-  private async getOpenAIClient(): Promise<OpenAIAPI>{
+  private async getOpenAIClient(): Promise<OpenAIAPI> {
     if (this.openaiApi) return this.openaiApi;
     try {
       OpenAIApi = await import("openai");
-      this.openaiApi = await import("openai/version").catch(()=>({VERSION: "3"})).then(({VERSION})=>{
-        if (VERSION.startsWith("4")) {
-          return new OpenAIAPIv4({
-            apiKey: this.api_key,
-            organization: this.org_id,
-          });
-        } else if (VERSION.startsWith("3")) {
-          return new OpenAIAPIv3({
-            organization: this.org_id,
-            apiKey: this.api_key,
-          });
-        } else {
-          throw new Error("Unsupported OpenAI library version");
-        }
-      })
-        return this.openaiApi;
+      this.openaiApi = await import("openai/version")
+        .catch(() => ({ VERSION: "3" }))
+        .then(({ VERSION }) => {
+          if (VERSION.startsWith("4")) {
+            return new OpenAIAPIv4({
+              apiKey: this.api_key,
+              organization: this.org_id,
+            });
+          } else if (VERSION.startsWith("3")) {
+            return new OpenAIAPIv3({
+              organization: this.org_id,
+              apiKey: this.api_key,
+            });
+          } else {
+            throw new Error("Unsupported OpenAI library version");
+          }
+        });
+      return this.openaiApi;
     } catch (e) {
       // @ts-ignore
       if (e.code === "MODULE_NOT_FOUND") {
