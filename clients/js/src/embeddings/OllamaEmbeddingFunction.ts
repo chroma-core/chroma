@@ -12,8 +12,8 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
   }
 
   public async generate(texts: string[]) {
-    let embeddings: number[][] = [];
-    for (let text of texts) {
+    const embeddings: number[][] = [];
+    for (const text of texts) {
       const response = await fetch(this.url, {
         method: "POST",
         headers: {
@@ -27,7 +27,7 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
           `Failed to generate embeddings: ${response.status} (${response.statusText})`,
         );
       }
-      let finalResponse = await response.json();
+      const finalResponse = await response.json();
       embeddings.push(finalResponse["embedding"]);
     }
     return embeddings;
