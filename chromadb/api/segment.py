@@ -371,7 +371,7 @@ class SegmentAPI(ServerAPI):
     ) -> bool:
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
-        self._manager.hint_use_collection(collection_id, t.Operation.ADD)
+        # self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
