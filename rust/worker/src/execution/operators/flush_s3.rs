@@ -6,8 +6,8 @@ use crate::types::SegmentFlushInfo;
 use crate::{
     execution::operator::Operator,
     segment::{
-        distributed_hnsw_segment::DistributedHNSWSegment, record_segment::RecordSegmentWriter,
-        SegmentWriter,
+        distributed_hnsw_segment::DistributedHNSWSegmentWriter,
+        record_segment::RecordSegmentWriter, SegmentWriter,
     },
 };
 use async_trait::async_trait;
@@ -24,13 +24,13 @@ impl FlushS3Operator {
 #[derive(Debug)]
 pub struct FlushS3Input {
     record_segment_writer: RecordSegmentWriter,
-    hnsw_segment_writer: Box<DistributedHNSWSegment>,
+    hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
 }
 
 impl FlushS3Input {
     pub fn new(
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegment>,
+        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
     ) -> Self {
         Self {
             record_segment_writer,

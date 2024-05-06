@@ -35,6 +35,8 @@ pub(crate) struct HnswIndexConfig {
 pub(crate) enum HnswIndexFromSegmentError {
     #[error("Missing config `{0}`")]
     MissingConfig(String),
+    #[error("Invalid metadata value")]
+    MetadataValueError(#[from] MetadataValueConversionError),
 }
 
 impl ChromaError for HnswIndexFromSegmentError {
@@ -47,7 +49,7 @@ impl HnswIndexConfig {
     pub(crate) fn from_segment(
         segment: &Segment,
         persist_path: &std::path::Path,
-    ) -> Result<HnswIndexConfig, Box<dyn ChromaError>> {
+    ) -> Result<HnswIndexConfig, Box<HnswIndexFromSegmentError>> {
         let persist_path = match persist_path.to_str() {
             Some(persist_path) => persist_path,
             None => {
@@ -78,7 +80,7 @@ impl HnswIndexConfig {
         fn get_metadata_value_as<'a, T>(
             metadata: &'a Metadata,
             key: &str,
-        ) -> Result<T, Box<dyn ChromaError>>
+        ) -> Result<T, Box<HnswIndexFromSegmentError>>
         where
             T: TryFrom<&'a MetadataValue, Error = MetadataValueConversionError>,
         {
@@ -92,7 +94,7 @@ impl HnswIndexConfig {
             };
             match res {
                 Ok(value) => Ok(value),
-                Err(e) => Err(Box::new(e)),
+                Err(e) => Err(Box::new(HnswIndexFromSegmentError::MetadataValueError(e))),
             }
         }
 

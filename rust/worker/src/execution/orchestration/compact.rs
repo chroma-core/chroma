@@ -21,7 +21,7 @@ use crate::execution::operators::write_segments::WriteSegmentsOperator;
 use crate::execution::operators::write_segments::WriteSegmentsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
-use crate::segment::distributed_hnsw_segment::DistributedHNSWSegment;
+use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::record_segment::RecordSegmentWriter;
 use crate::segment::LogMaterializer;
 use crate::segment::SegmentFlusher;
@@ -250,7 +250,7 @@ impl CompactOrchestrator {
     async fn flush_s3(
         &mut self,
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegment>,
+        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
         self_address: Box<dyn Receiver<FlushS3Result>>,
     ) {
         self.state = ExecutionState::Flush;
@@ -296,7 +296,8 @@ impl CompactOrchestrator {
 
     async fn get_segment_writers(
         &mut self,
-    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegment>), Box<dyn ChromaError>> {
+    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegmentWriter>), Box<dyn ChromaError>>
+    {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -376,7 +377,7 @@ impl CompactOrchestrator {
             .dimension
             .expect("Dimension is required in the compactor");
 
-        let hnsw_segment_writer = match DistributedHNSWSegment::from_segment(
+        let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
             hnsw_segment,
             dimension as usize,
             self.hnsw_index_provider.clone(),
