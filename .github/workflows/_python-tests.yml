@@ -28,6 +28,8 @@ jobs:
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
+          - test-globs: "chromadb/test/property/test_persist.py"
+            parallelized: true
 
     runs-on: ${{ matrix.platform }}
     steps:
