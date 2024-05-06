@@ -127,7 +127,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: "built-chromadb-package"
-          path: "dist/chroma-${{needs.get-version.outputs.version}}.tar.gz"
+          path: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
       - name: Publish to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -224,7 +224,7 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chroma-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           prerelease: true
           generateReleaseNotes: true
       - name: Update Tag
