@@ -1,7 +1,13 @@
 use super::{SegmentFlusher, SegmentWriter};
 use crate::errors::{ChromaError, ErrorCodes};
-use crate::index::hnsw_provider::HnswIndexProvider;
-use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
+use crate::index::hnsw_provider::{
+    HnswIndexProvider, HnswIndexProviderCommitError, HnswIndexProviderCreateError,
+    HnswIndexProviderForkError, HnswIndexProviderOpenError,
+};
+use crate::index::{
+    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
+    IndexConfigFromSegmentError,
+};
 use crate::types::{LogRecord, Operation, Segment};
 use async_trait::async_trait;
 use parking_lot::RwLock;
@@ -28,14 +34,22 @@ impl Debug for DistributedHNSWSegmentWriter {
 
 #[derive(Error, Debug)]
 pub enum DistributedHNSWSegmentFromSegmentError {
-    #[error("No hnsw file found for segment")]
+    #[error("No HNSW file found for segment")]
     NoHnswFileFound,
-    #[error("Hnsw file id not a valid uuid")]
+    #[error("HNSW file id not a valid uuid")]
     InvalidUUID,
-    #[error("Hnsw segment uninitialized")]
+    #[error("HNSW segment uninitialized")]
     Uninitialized,
     #[error("Index configuration error")]
-    IndexConfigError(#[from] crate::index::IndexConfigFromSegmentError),
+    IndexConfigError(#[from] IndexConfigFromSegmentError),
+    #[error("HNSW index configuration error")]
+    HnswIndexConfigError(#[from] HnswIndexFromSegmentError),
+    #[error("HNSW index provider open error")]
+    HnswIndexProviderOpenError(#[from] HnswIndexProviderOpenError),
+    #[error("HNSW index provider fork error")]
+    HnswIndexProviderForkError(#[from] HnswIndexProviderForkError),
+    #[error("HNSW index provider create error")]
+    HnswIndexProviderCreateError(#[from] HnswIndexProviderCreateError),
 }
 
 impl ChromaError for DistributedHNSWSegmentFromSegmentError {
@@ -44,6 +58,11 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
             DistributedHNSWSegmentFromSegmentError::NoHnswFileFound => ErrorCodes::NotFound,
             DistributedHNSWSegmentFromSegmentError::InvalidUUID => ErrorCodes::InvalidArgument,
             DistributedHNSWSegmentFromSegmentError::Uninitialized => ErrorCodes::InvalidArgument,
+            DistributedHNSWSegmentFromSegmentError::IndexConfigError(e) => e.code(),
+            DistributedHNSWSegmentFromSegmentError::HnswIndexConfigError(e) => e.code(),
+            DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(e) => e.code(),
+            DistributedHNSWSegmentFromSegmentError::HnswIndexProviderForkError(e) => e.code(),
+            DistributedHNSWSegmentFromSegmentError::HnswIndexProviderCreateError(e) => e.code(),
         }
     }
 }
@@ -53,22 +72,38 @@ impl DistributedHNSWSegmentWriter {
         index: Arc<RwLock<HnswIndex>>,
         hnsw_index_provider: HnswIndexProvider,
         id: Uuid,
-    ) -> Result<Self, Box<dyn ChromaError>> {
-        return Ok(DistributedHNSWSegmentWriter {
+    ) -> Self {
+        return DistributedHNSWSegmentWriter {
             index,
             hnsw_index_provider,
             id,
-        });
+        };
     }
 
     pub(crate) async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
-    ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<dyn ChromaError>> {
-        let index_config = IndexConfig::from_segment(&segment, dimensionality as i32)?;
+    ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
+    {
+        let index_config = match IndexConfig::from_segment(&segment, dimensionality as i32) {
+            Ok(ic) => ic,
+            Err(e) => {
+                return Err(Box::new(
+                    DistributedHNSWSegmentFromSegmentError::IndexConfigError(*e),
+                ));
+            }
+        };
         let persist_path = &hnsw_index_provider.temporary_storage_path;
-        let hnsw_config = HnswIndexConfig::from_segment(segment, persist_path)?;
+
+        let hnsw_config = match HnswIndexConfig::from_segment(segment, persist_path) {
+            Ok(hc) => hc,
+            Err(e) => {
+                return Err(Box::new(
+                    DistributedHNSWSegmentFromSegmentError::HnswIndexConfigError(*e),
+                ));
+            }
+        };
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
@@ -107,21 +142,32 @@ impl DistributedHNSWSegmentWriter {
                 .await
             {
                 Ok(index) => index,
-                Err(e) => return Err(e),
+                Err(e) => {
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderForkError(*e),
+                    ))
+                }
             };
 
             Ok(Box::new(DistributedHNSWSegmentWriter::new(
                 index,
                 hnsw_index_provider,
                 segment.id,
-            )?))
+            )))
         } else {
-            let index = hnsw_index_provider.create(segment, dimensionality as i32)?;
+            let index = match hnsw_index_provider.create(segment, dimensionality as i32) {
+                Ok(index) => index,
+                Err(e) => {
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderCreateError(*e),
+                    ))
+                }
+            };
             Ok(Box::new(DistributedHNSWSegmentWriter::new(
                 index,
                 hnsw_index_provider,
                 segment.id,
-            )?))
+            )))
         }
     }
 
@@ -191,16 +237,16 @@ impl Debug for DistributedHNSWSegmentReader {
 }
 
 impl DistributedHNSWSegmentReader {
-    pub(crate) fn new(
+    fn new(
         index: Arc<RwLock<HnswIndex>>,
         hnsw_index_provider: HnswIndexProvider,
         id: Uuid,
-    ) -> Result<Self, Box<dyn ChromaError>> {
-        return Ok(DistributedHNSWSegmentReader {
+    ) -> Self {
+        return DistributedHNSWSegmentReader {
             index,
             hnsw_index_provider,
             id,
-        });
+        };
     }
 
     pub(crate) async fn from_segment(
@@ -257,14 +303,18 @@ impl DistributedHNSWSegmentReader {
                 .await
             {
                 Ok(index) => index,
-                Err(e) => return Err(e),
+                Err(e) => {
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(*e),
+                    ))
+                }
             };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index,
                 hnsw_index_provider,
                 segment.id,
-            )?))
+            )))
         } else {
             return Err(Box::new(
                 DistributedHNSWSegmentFromSegmentError::Uninitialized,

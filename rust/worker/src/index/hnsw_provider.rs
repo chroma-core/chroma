@@ -1,4 +1,7 @@
-use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexConfigFromSegmentError};
+use super::{
+    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
+    IndexConfigFromSegmentError,
+};
 use crate::errors::ErrorCodes;
 use crate::index::types::PersistentIndex;
 use crate::{errors::ChromaError, storage::Storage, types::Segment};
@@ -60,36 +63,60 @@ impl HnswIndexProvider {
         source_id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
+    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderForkError>> {
         let new_id = Uuid::new_v4();
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
-        self.create_dir_all(&new_storage_path)?;
-        self.load_hnsw_segment_into_directory(source_id, &new_storage_path)
-            .await?;
+        match self.create_dir_all(&new_storage_path) {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderForkError::FileError(*e)));
+            }
+        }
+
+        match self
+            .load_hnsw_segment_into_directory(source_id, &new_storage_path)
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderForkError::FileError(*e)));
+            }
+        }
 
         let index_config = IndexConfig::from_segment(&segment, dimensionality);
 
         let index_config = match index_config {
             Ok(index_config) => index_config,
             Err(e) => {
-                return Err(e);
+                return Err(Box::new(HnswIndexProviderForkError::IndexConfigError(*e)));
             }
         };
 
-        let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path)?;
-        // TODO: don't unwrap path conv here
-        match HnswIndex::load(
-            new_storage_path.to_str().unwrap(),
-            &index_config,
-            *source_id,
-        ) {
+        let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path);
+        let hnsw_config = match hnsw_config {
+            Ok(hnsw_config) => hnsw_config,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderForkError::HnswConfigError(*e)));
+            }
+        };
+
+        let storage_path_str = match new_storage_path.to_str() {
+            Some(storage_path_str) => storage_path_str,
+            None => {
+                return Err(Box::new(HnswIndexProviderForkError::PathToStringError(
+                    new_storage_path,
+                )));
+            }
+        };
+
+        match HnswIndex::load(storage_path_str, &index_config, *source_id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
                 let mut cache = self.cache.write();
                 cache.insert(new_id, index.clone());
                 Ok(index)
             }
-            Err(e) => Err(e),
+            Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
         }
     }
 
@@ -97,7 +124,7 @@ impl HnswIndexProvider {
         &self,
         source_id: &Uuid,
         index_storage_path: &Path,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), Box<HnswIndexProviderFileError>> {
         // Fetch the files from storage and put them in the index storage path
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
@@ -106,8 +133,8 @@ impl HnswIndexProvider {
             let mut reader = match res {
                 Ok(reader) => reader,
                 Err(e) => {
-                    // TODO: return Err(e);
-                    panic!("Failed to load hnsw index file from storage: {}", e);
+                    println!("Failed to load hnsw index file from storage: {}", e);
+                    return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
                 }
             };
 
@@ -117,8 +144,8 @@ impl HnswIndexProvider {
             let mut file_handle = match file_handle {
                 Ok(file) => file,
                 Err(e) => {
-                    // TODO: cleanup created files if this fails
-                    panic!("Failed to create file: {}", e);
+                    println!("Failed to create file: {}", e);
+                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
             let copy_res = tokio::io::copy(&mut reader, &mut file_handle).await;
@@ -131,8 +158,8 @@ impl HnswIndexProvider {
                     );
                 }
                 Err(e) => {
-                    // TODO: cleanup created files if this fails and error handle
-                    panic!("Failed to copy file: {}", e);
+                    println!("Failed to copy file: {}", e);
+                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             }
             // bytes is an AsyncBufRead, so we fil and consume it to a file
@@ -152,22 +179,36 @@ impl HnswIndexProvider {
         match self.create_dir_all(&index_storage_path) {
             Ok(_) => {}
             Err(e) => {
-                return Err(Box::new(HnswIndexProviderOpenError::FileError(e)));
+                return Err(Box::new(HnswIndexProviderOpenError::FileError(*e)));
             }
         }
 
-        self.load_hnsw_segment_into_directory(id, &index_storage_path)
-            .await?;
+        match self
+            .load_hnsw_segment_into_directory(id, &index_storage_path)
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderOpenError::FileError(*e)));
+            }
+        }
 
-        let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
+        let index_config = IndexConfig::from_segment(&segment, dimensionality);
         let index_config = match index_config {
             Ok(index_config) => index_config,
             Err(e) => {
-                return Err(e);
+                return Err(Box::new(HnswIndexProviderOpenError::IndexConfigError(*e)));
             }
         };
 
-        let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
+        let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path);
+        let hnsw_config = match hnsw_config {
+            Ok(hnsw_config) => hnsw_config,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderOpenError::HnswConfigError(*e)));
+            }
+        };
+
         // TODO: don't unwrap path conv here
         match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
             Ok(index) => {
@@ -176,7 +217,7 @@ impl HnswIndexProvider {
                 cache.insert(*id, index.clone());
                 Ok(index)
             }
-            Err(e) => Err(e),
+            Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
         }
     }
 
@@ -196,32 +237,59 @@ impl HnswIndexProvider {
         // TODO: This should not take Segment. The index layer should not know about the segment concept
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
+    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderCreateError>> {
         let id = Uuid::new_v4();
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        self.create_dir_all(&index_storage_path)?;
-        let index_config = IndexConfig::from_segment(&segment, dimensionality);
-        let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
+
+        match self.create_dir_all(&index_storage_path) {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCreateError::FileError(*e)));
+            }
+        }
+
+        let index_config = match IndexConfig::from_segment(&segment, dimensionality) {
+            Ok(index_config) => index_config,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCreateError::IndexConfigError(*e)));
+            }
+        };
+
+        let hnsw_config = match HnswIndexConfig::from_segment(segment, &index_storage_path) {
+            Ok(hnsw_config) => hnsw_config,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
+            }
+        };
+
         let mut cache = self.cache.write();
-        let index = Arc::new(RwLock::new(HnswIndex::init(
-            &index_config,
-            Some(&hnsw_config),
-            id,
-        )?));
+        let index = match HnswIndex::init(&index_config, Some(&hnsw_config), id) {
+            Ok(index) => index,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCreateError::IndexInitError(e)));
+            }
+        };
+        let index = Arc::new(RwLock::new(index));
         cache.insert(id, index.clone());
         Ok(index)
     }
 
-    pub(crate) fn commit(&self, id: &Uuid) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderCommitError>> {
         let cache = self.cache.read();
         let index = match cache.get(id) {
             Some(index) => index,
             None => {
-                // TODO: error
-                panic!("Trying to commit index that doesn't exist");
+                return Err(Box::new(HnswIndexProviderCommitError::NoIndexFound(*id)));
             }
         };
-        index.write().save()?;
+
+        match index.write().save() {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCommitError::HnswSaveError(e)));
+            }
+        }
+
         Ok(())
     }
 
@@ -274,6 +342,10 @@ pub(crate) enum HnswIndexProviderOpenError {
     IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
+    #[error("Hnsw config error")]
+    HnswConfigError(#[from] HnswIndexFromSegmentError),
+    #[error("Index load error")]
+    IndexLoadError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for HnswIndexProviderOpenError {
@@ -281,6 +353,74 @@ impl ChromaError for HnswIndexProviderOpenError {
         match self {
             HnswIndexProviderOpenError::IndexConfigError(e) => e.code(),
             HnswIndexProviderOpenError::FileError(_) => ErrorCodes::Internal,
+            HnswIndexProviderOpenError::HnswConfigError(e) => e.code(),
+            HnswIndexProviderOpenError::IndexLoadError(e) => e.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexProviderForkError {
+    #[error("Index configuration error")]
+    IndexConfigError(#[from] IndexConfigFromSegmentError),
+    #[error("Hnsw index file error")]
+    FileError(#[from] HnswIndexProviderFileError),
+    #[error("Hnsw config error")]
+    HnswConfigError(#[from] HnswIndexFromSegmentError),
+    #[error("Index load error")]
+    IndexLoadError(#[from] Box<dyn ChromaError>),
+    #[error("Path: {0} could not be converted to string")]
+    PathToStringError(PathBuf),
+}
+
+impl ChromaError for HnswIndexProviderForkError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            HnswIndexProviderForkError::IndexConfigError(e) => e.code(),
+            HnswIndexProviderForkError::FileError(_) => ErrorCodes::Internal,
+            HnswIndexProviderForkError::HnswConfigError(e) => e.code(),
+            HnswIndexProviderForkError::IndexLoadError(e) => e.code(),
+            HnswIndexProviderForkError::PathToStringError(_) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexProviderCreateError {
+    #[error("Index configuration error")]
+    IndexConfigError(#[from] IndexConfigFromSegmentError),
+    #[error("Hnsw index file error")]
+    FileError(#[from] HnswIndexProviderFileError),
+    #[error("Hnsw config error")]
+    HnswConfigError(#[from] HnswIndexFromSegmentError),
+    #[error("Index init error")]
+    IndexInitError(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for HnswIndexProviderCreateError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            HnswIndexProviderCreateError::IndexConfigError(e) => e.code(),
+            HnswIndexProviderCreateError::FileError(_) => ErrorCodes::Internal,
+            HnswIndexProviderCreateError::HnswConfigError(e) => e.code(),
+            HnswIndexProviderCreateError::IndexInitError(e) => e.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexProviderCommitError {
+    #[error("No index found for id: {0}")]
+    NoIndexFound(Uuid),
+    #[error("HNSW Save Error")]
+    HnswSaveError(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for HnswIndexProviderCommitError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            HnswIndexProviderCommitError::NoIndexFound(_) => ErrorCodes::NotFound,
+            HnswIndexProviderCommitError::HnswSaveError(e) => e.code(),
         }
     }
 }
@@ -289,4 +429,8 @@ impl ChromaError for HnswIndexProviderOpenError {
 pub(crate) enum HnswIndexProviderFileError {
     #[error("IO Error")]
     IOError(#[from] std::io::Error),
+    #[error("Storage Get Error")]
+    StorageGetError(#[from] crate::storage::GetError),
+    #[error("Storage Put Error")]
+    StoragePutError(#[from] crate::storage::PutError),
 }

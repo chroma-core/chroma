@@ -16,7 +16,8 @@ use crate::execution::operators::merge_knn_results::{
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::segment::distributed_hnsw_segment::{
-    DistributedHNSWSegmentReader, DistributedHNSWSegmentWriter,
+    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+    DistributedHNSWSegmentWriter,
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, System};
@@ -244,10 +245,19 @@ impl HnswQueryOrchestrator {
         .await
         {
             Ok(reader) => reader,
-            Err(e) => {
-                self.terminate_with_error(e, ctx);
-                return;
-            }
+            Err(e) => match *e {
+                DistributedHNSWSegmentFromSegmentError::Uninitialized => {
+                    // no task, decrement the merge dependency count and return
+                    self.hnsw_result_distances = Some(Vec::new());
+                    self.hnsw_result_offset_ids = Some(Vec::new());
+                    self.merge_dependency_count -= 1;
+                    return;
+                }
+                _ => {
+                    self.terminate_with_error(e, ctx);
+                    return;
+                }
+            },
         };
 
         println!("Created HNSW Segment Reader: {:?}", hnsw_segment_reader);
