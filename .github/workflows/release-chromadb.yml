@@ -156,6 +156,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - check-tag
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Login to AWS
         uses: aws-actions/configure-aws-credentials@v1
