@@ -44,10 +44,22 @@ jobs:
         id: version
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
 
-  test:
+  python-tests:
     uses: ./.github/workflows/_python-tests.yml
     with:
       python_versions: '["3.8", "3.9", "3.10", "3.11", "3.12"]'
+
+  javascript-client-tests:
+    name: JavaScript client tests
+    uses: ./.github/workflows/_javascript-client-tests.yml
+
+  rust-tests:
+    name: Rust tests
+    uses: ./.github/workflows/_rust-tests.yml
+
+  go-tests:
+    name: Go tests
+    uses: ./.github/workflows/_go-tests.yml
 
   release-docker:
     name: Publish to DockerHub and GHCR
@@ -55,7 +67,10 @@ jobs:
     needs:
       - check-tag
       - get-version
-      - test
+      - python-tests
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -91,7 +106,10 @@ jobs:
     needs:
       - check-tag
       - get-version
-      - test
+      - python-tests
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -109,7 +127,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: "built-chromadb-package"
-          path: "dist/chroma-${{needs.get-version.outputs.version}}.tar.gz"
+          path: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
       - name: Publish to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -126,7 +144,10 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - check-tag
-      - test
+      - python-tests
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -156,6 +177,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - check-tag
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Login to AWS
         uses: aws-actions/configure-aws-credentials@v1
@@ -200,7 +224,7 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chroma-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           prerelease: true
           generateReleaseNotes: true
       - name: Update Tag
