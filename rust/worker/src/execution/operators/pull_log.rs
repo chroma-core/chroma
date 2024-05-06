@@ -4,7 +4,6 @@ use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::types::LogRecord;
 use async_trait::async_trait;
-use tracing::debug;
 use tracing::trace;
 use uuid::Uuid;
 

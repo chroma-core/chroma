@@ -1,5 +1,3 @@
-use std::f64::consts::E;
-
 use crate::{
     blockstore::provider::BlockfileProvider,
     errors::ChromaError,
