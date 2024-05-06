@@ -37,6 +37,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "TokenTransportHeader",
 ]
 
 logger = logging.getLogger(__name__)
@@ -250,9 +251,7 @@ def CloudClient(
         "chromadb.auth.token_authn.TokenAuthClientProvider"
     )
     settings.chroma_client_auth_credentials = api_key
-    settings.chroma_auth_token_transport_header = (
-        TokenTransportHeader.X_CHROMA_TOKEN.name
-    )
+    settings.chroma_auth_token_transport_header = TokenTransportHeader.X_CHROMA_TOKEN
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 

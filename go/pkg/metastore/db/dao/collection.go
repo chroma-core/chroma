@@ -3,6 +3,7 @@ package dao
 import (
 	"database/sql"
 	"errors"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
@@ -173,7 +174,9 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
 	log.Info("update log position and version", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion))
 	var collection dbmodel.Collection
-	err := s.db.Where("id = ?", collectionID).First(&collection).Error
+	// We use select for update to ensure no lost update happens even for isolation level read committed or below
+	// https://patrick.engineering/posts/postgres-internals/
+	err := s.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", collectionID).First(&collection).Error
 	if err != nil {
 		return 0, err
 	}

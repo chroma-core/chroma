@@ -13,6 +13,7 @@ mod server;
 mod storage;
 mod sysdb;
 mod system;
+mod tracing;
 mod types;
 
 use config::Configurable;
@@ -35,6 +36,12 @@ pub async fn query_service_entrypoint() {
     };
 
     let config = config.query_service;
+
+    crate::tracing::opentelemetry_config::init_otel_tracing(
+        &config.service_name,
+        &config.otel_endpoint,
+    );
+
     let system: system::System = system::System::new();
     let dispatcher =
         match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
@@ -94,6 +101,12 @@ pub async fn compaction_service_entrypoint() {
     };
 
     let config = config.compaction_service;
+
+    crate::tracing::opentelemetry_config::init_otel_tracing(
+        &config.service_name,
+        &config.otel_endpoint,
+    );
+
     let system: system::System = system::System::new();
 
     let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(

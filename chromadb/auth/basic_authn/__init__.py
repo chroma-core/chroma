@@ -1,4 +1,9 @@
 import base64
+import random
+import re
+import time
+import traceback
+
 import bcrypt
 import logging
 
@@ -11,6 +16,7 @@ from chromadb.auth import (
     ServerAuthenticationProvider,
     ClientAuthProvider,
     ClientAuthHeaders,
+    AuthError,
 )
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
@@ -23,6 +29,8 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 __all__ = ["BasicAuthenticationServerProvider", "BasicAuthClientProvider"]
+
+AUTHORIZATION_HEADER = "Authorization"
 
 
 class BasicAuthClientProvider(ClientAuthProvider):
@@ -43,7 +51,7 @@ class BasicAuthClientProvider(ClientAuthProvider):
             f"{self._creds.get_secret_value()}".encode("utf-8")
         ).decode("utf-8")
         return {
-            "Authorization": SecretStr(f"Basic {encoded}"),
+            AUTHORIZATION_HEADER: SecretStr(f"Basic {encoded}"),
         }
 
 
@@ -94,25 +102,43 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
     @override
     def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
         try:
-            _auth_header = headers["Authorization"]
-            _auth_header = _auth_header.replace("Basic ", "")
+            if AUTHORIZATION_HEADER not in headers:
+                raise AuthError(AUTHORIZATION_HEADER + " header not found")
+            _auth_header = headers[AUTHORIZATION_HEADER]
+            _auth_header = re.sub(r"^Basic ", "", _auth_header)
             _auth_header = _auth_header.strip()
 
             base64_decoded = base64.b64decode(_auth_header).decode("utf-8")
-            username, password = base64_decoded.split(":")
-            if not username or not password:
-                raise HTTPException(status_code=401, detail="Unauthorized")
+            if ":" not in base64_decoded:
+                raise AuthError("Invalid Authorization header format")
+            username, password = base64_decoded.split(":", 1)
+            username = str(username)  # convert to string to prevent header injection
+            password = str(password)  # convert to string to prevent header injection
+            if username not in self._creds:
+                raise AuthError("Invalid username or password")
 
-            _usr_check = username in self._creds
             _pwd_check = bcrypt.checkpw(
                 password.encode("utf-8"),
                 self._creds[username].get_secret_value().encode("utf-8"),
             )
-            if _usr_check and _pwd_check:
-                return UserIdentity(user_id=username)
-
-        except Exception as e:
+            if not _pwd_check:
+                raise AuthError("Invalid username or password")
+            return UserIdentity(user_id=username)
+        except AuthError as e:
             logger.error(
-                "BasicAuthenticationServerProvider.authenticate " f"failed: {repr(e)}"
+                f"BasicAuthenticationServerProvider.authenticate failed: {repr(e)}"
             )
+        except Exception as e:
+            tb = traceback.extract_tb(e.__traceback__)
+            # Get the last call stack
+            last_call_stack = tb[-1]
+            line_number = last_call_stack.lineno
+            filename = last_call_stack.filename
+            logger.error(
+                "BasicAuthenticationServerProvider.authenticate failed: "
+                f"Failed to authenticate {type(e).__name__} at {filename}:{line_number}"
+            )
+        time.sleep(
+            random.uniform(0.001, 0.005)
+        )  # add some jitter to avoid timing attacks
         raise HTTPException(status_code=403, detail="Forbidden")

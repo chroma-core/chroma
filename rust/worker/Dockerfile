@@ -36,7 +36,7 @@ FROM debian:bookworm-slim as query_service
 
 COPY --from=query_service_builder /chroma/query_service .
 COPY --from=query_service_builder /chroma/rust/worker/chroma_config.yaml .
-RUN apt-get update && apt-get install -y libssl-dev
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates
 
 ENTRYPOINT [ "./query_service" ]
 
