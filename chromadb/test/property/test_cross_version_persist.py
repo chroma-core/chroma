@@ -132,14 +132,10 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
 @pytest.fixture(scope="module", params=configurations(test_old_versions))  # type: ignore
-def version_settings(request, worker_id) -> Generator[Tuple[str, Settings], None, None]:
+def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
     install_version(version)
-    configuration[1].persist_directory = (
-        tempfile.gettempdir()
-        + f"/persistence_test_chromadb_{request.node.name}_{worker_id}"
-    )
     yield configuration
     # Cleanup the installed version
     path = get_path_to_version_install(version)
