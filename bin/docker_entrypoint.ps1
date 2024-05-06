@@ -20,7 +20,7 @@ if ($args -join ' ' -match '^uvicorn.*') {
     Write-Host "WARNING: Please remove 'uvicorn chromadb.app:app' from your command line arguments. This is now handled by the entrypoint script." -ForegroundColor Red
     Start-Server -commandLine ($args -join ' ')
 } else {
-    $newArgs = 'uvicorn chromadb.app:app ' + ($args -join ' ')
-    Write-Host "Starting 'uvicorn chromadb.app:app' with args: $newArgs"
+    $newArgs = 'python -m uvicorn chromadb.app:app ' + ($args -join ' ')
+    Write-Host "Starting 'python -m uvicorn chromadb.app:app' with args: $newArgs"
     Start-Server -commandLine $newArgs
 }
