@@ -2,7 +2,7 @@ use super::{SegmentFlusher, SegmentWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCommitError, HnswIndexProviderCreateError,
-    HnswIndexProviderForkError, HnswIndexProviderOpenError,
+    HnswIndexProviderFlushError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
 };
 use crate::index::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
@@ -216,7 +216,10 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
 impl SegmentFlusher for DistributedHNSWSegmentWriter {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.read().id;
-        self.hnsw_index_provider.flush(&hnsw_index_id).await?;
+        match self.hnsw_index_provider.flush(&hnsw_index_id).await {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
         let mut flushed_files = HashMap::new();
         flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
         Ok(flushed_files)

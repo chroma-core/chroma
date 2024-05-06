@@ -293,7 +293,7 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    pub(crate) async fn flush(&self, id: &Uuid) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) async fn flush(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
         // Scope to drop the cache lock before we await to write to s3
         // TODO: since we commit(), we don't need to save the index here
         {
@@ -301,12 +301,17 @@ impl HnswIndexProvider {
             let index = match cache.get(id) {
                 Some(index) => index,
                 None => {
-                    // TODO: error
-                    panic!("Trying to flush index that doesn't exist");
+                    return Err(Box::new(HnswIndexProviderFlushError::NoIndexFound(*id)));
                 }
             };
-            index.write().save()?;
+            match index.write().save() {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Box::new(HnswIndexProviderFlushError::HnswSaveError(e)));
+                }
+            };
         }
+
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
@@ -320,8 +325,7 @@ impl HnswIndexProvider {
                     println!("Flushed hnsw index file: {}", file);
                 }
                 Err(e) => {
-                    println!("Failed to flush index: {}", e);
-                    return Err(Box::new(e));
+                    return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));
                 }
             }
         }
@@ -421,6 +425,26 @@ impl ChromaError for HnswIndexProviderCommitError {
         match self {
             HnswIndexProviderCommitError::NoIndexFound(_) => ErrorCodes::NotFound,
             HnswIndexProviderCommitError::HnswSaveError(e) => e.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexProviderFlushError {
+    #[error("No index found for id: {0}")]
+    NoIndexFound(Uuid),
+    #[error("HNSW Save Error")]
+    HnswSaveError(#[from] Box<dyn ChromaError>),
+    #[error("Storage Put Error")]
+    StoragePutError(#[from] crate::storage::PutError),
+}
+
+impl ChromaError for HnswIndexProviderFlushError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            HnswIndexProviderFlushError::NoIndexFound(_) => ErrorCodes::NotFound,
+            HnswIndexProviderFlushError::HnswSaveError(e) => e.code(),
+            HnswIndexProviderFlushError::StoragePutError(e) => e.code(),
         }
     }
 }
