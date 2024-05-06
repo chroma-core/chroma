@@ -32,6 +32,10 @@ pub enum DistributedHNSWSegmentFromSegmentError {
     NoHnswFileFound,
     #[error("Hnsw file id not a valid uuid")]
     InvalidUUID,
+    #[error("Hnsw segment uninitialized")]
+    Uninitialized,
+    #[error("Index configuration error")]
+    IndexConfigError(#[from] crate::index::IndexConfigFromSegmentError),
 }
 
 impl ChromaError for DistributedHNSWSegmentFromSegmentError {
@@ -39,6 +43,7 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
         match self {
             DistributedHNSWSegmentFromSegmentError::NoHnswFileFound => ErrorCodes::NotFound,
             DistributedHNSWSegmentFromSegmentError::InvalidUUID => ErrorCodes::InvalidArgument,
+            DistributedHNSWSegmentFromSegmentError::Uninitialized => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -75,7 +80,7 @@ impl DistributedHNSWSegmentWriter {
                 None => {
                     return Err(Box::new(
                         DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
-                    ))
+                    ));
                 }
                 Some(files) => {
                     if files.is_empty() {
@@ -111,7 +116,6 @@ impl DistributedHNSWSegmentWriter {
                 segment.id,
             )?))
         } else {
-            println!("Creating new HNSW index");
             let index = hnsw_index_provider.create(segment, dimensionality as i32)?;
             Ok(Box::new(DistributedHNSWSegmentWriter::new(
                 index,
@@ -203,10 +207,18 @@ impl DistributedHNSWSegmentReader {
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
-    ) -> Result<Box<DistributedHNSWSegmentReader>, Box<dyn ChromaError>> {
-        let index_config = IndexConfig::from_segment(&segment, dimensionality as i32)?;
+    ) -> Result<Box<DistributedHNSWSegmentReader>, Box<DistributedHNSWSegmentFromSegmentError>>
+    {
+        let index_config = IndexConfig::from_segment(&segment, dimensionality as i32);
+        let index_config = match index_config {
+            Ok(ic) => ic,
+            Err(e) => {
+                return Err(Box::new(
+                    DistributedHNSWSegmentFromSegmentError::IndexConfigError(*e),
+                ));
+            }
+        };
         let persist_path = &hnsw_index_provider.temporary_storage_path;
-        let hnsw_config = HnswIndexConfig::from_segment(segment, persist_path)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
@@ -218,7 +230,7 @@ impl DistributedHNSWSegmentReader {
                 None => {
                     return Err(Box::new(
                         DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
-                    ))
+                    ));
                 }
                 Some(files) => {
                     if files.is_empty() {
@@ -255,7 +267,7 @@ impl DistributedHNSWSegmentReader {
             )?))
         } else {
             return Err(Box::new(
-                DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
+                DistributedHNSWSegmentFromSegmentError::Uninitialized,
             ));
         }
     }

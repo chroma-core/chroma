@@ -1,11 +1,12 @@
-use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
+use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexConfigFromSegmentError};
+use crate::errors::ErrorCodes;
 use crate::index::types::PersistentIndex;
 use crate::{errors::ChromaError, storage::Storage, types::Segment};
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
-use tokio::io::AsyncBufReadExt;
+use thiserror::Error;
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -66,7 +67,15 @@ impl HnswIndexProvider {
         self.load_hnsw_segment_into_directory(source_id, &new_storage_path)
             .await?;
 
-        let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
+        let index_config = IndexConfig::from_segment(&segment, dimensionality);
+
+        let index_config = match index_config {
+            Ok(index_config) => index_config,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
         let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path)?;
         // TODO: don't unwrap path conv here
         match HnswIndex::load(
@@ -137,13 +146,27 @@ impl HnswIndexProvider {
         id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<dyn ChromaError>> {
+    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        self.create_dir_all(&index_storage_path)?;
+
+        match self.create_dir_all(&index_storage_path) {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderOpenError::FileError(e)));
+            }
+        }
+
         self.load_hnsw_segment_into_directory(id, &index_storage_path)
             .await?;
 
         let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
+        let index_config = match index_config {
+            Ok(index_config) => index_config,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
         let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
         // TODO: don't unwrap path conv here
         match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
@@ -177,7 +200,7 @@ impl HnswIndexProvider {
         let id = Uuid::new_v4();
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         self.create_dir_all(&index_storage_path)?;
-        let index_config = IndexConfig::from_segment(&segment, dimensionality)?;
+        let index_config = IndexConfig::from_segment(&segment, dimensionality);
         let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)?;
         let mut cache = self.cache.write();
         let index = Arc::new(RwLock::new(HnswIndex::init(
@@ -237,13 +260,33 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<dyn ChromaError>> {
+    fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
         match std::fs::create_dir_all(path) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                // TODO: return error
-                panic!("Failed to create directory: {}", e);
-            }
+            Err(e) => return Err(Box::new(HnswIndexProviderFileError::IOError(e))),
         }
     }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexProviderOpenError {
+    #[error("Index configuration error")]
+    IndexConfigError(#[from] IndexConfigFromSegmentError),
+    #[error("Hnsw index file error")]
+    FileError(#[from] HnswIndexProviderFileError),
+}
+
+impl ChromaError for HnswIndexProviderOpenError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            HnswIndexProviderOpenError::IndexConfigError(e) => e.code(),
+            HnswIndexProviderOpenError::FileError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexProviderFileError {
+    #[error("IO Error")]
+    IOError(#[from] std::io::Error),
 }
