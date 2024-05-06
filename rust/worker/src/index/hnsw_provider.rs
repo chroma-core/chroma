@@ -252,8 +252,8 @@ impl HnswIndexProvider {
                     println!("Flushed hnsw index file: {}", file);
                 }
                 Err(e) => {
-                    // TODO: return err
-                    panic!("Failed to flush index: {}", e);
+                    println!("Failed to flush index: {}", e);
+                    return Err(Box::new(e));
                 }
             }
         }

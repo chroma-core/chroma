@@ -4,7 +4,6 @@ use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::types::LogRecord;
 use async_trait::async_trait;
-use tracing::debug;
 use tracing::trace;
 use uuid::Uuid;
 
@@ -117,7 +116,8 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
             }
 
             num_records_read += logs.len();
-            offset += batch_size as i64;
+            // unwrap here is safe because we just checked if empty
+            offset = logs.last().unwrap().log_offset + 1;
             result.append(&mut logs);
 
             // We used a a timestamp and we didn't get a full batch, so we have retrieved

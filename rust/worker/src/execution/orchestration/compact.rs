@@ -162,7 +162,6 @@ impl CompactOrchestrator {
     // TODO: It is possible that the offset_id from the compaction job is wrong since the log service
     // can have an outdated view of the offset. We should filter out entries from the log based on the start offset
     // of the segment, and not fully respect the offset_id from the compaction job
-
     async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -268,7 +267,7 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn flush_sysdb(
+    async fn register(
         &mut self,
         log_position: i64,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -523,7 +522,7 @@ impl Handler<FlushS3Result> for CompactOrchestrator {
         match message {
             Ok(msg) => {
                 // Unwrap should be safe here as we are guaranteed to have a value by construction
-                self.flush_sysdb(
+                self.register(
                     self.pulled_log_offset.unwrap(),
                     msg.segment_flush_info,
                     _ctx.sender.as_receiver(),

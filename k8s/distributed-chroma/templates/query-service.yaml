@@ -1,4 +1,4 @@
-{{if .Values.queryService.configFilePath}}
+{{if .Values.queryService.configuration}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -7,7 +7,7 @@ metadata:
   namespace: {{ .Values.namespace }}
 data:
   config.yaml: |
-{{ (.Files.Get .Values.queryService.configFilePath) | indent 4 }}
+{{  .Values.queryService.configuration | indent 4 }}
 ---
 {{ end }}
 
@@ -46,7 +46,7 @@ spec:
         member-type: query-service
     spec:
       serviceAccountName: query-service-serviceaccount
-      {{if .Values.queryService.configFilePath}}
+      {{if .Values.queryService.configuration}}
       volumes:
         - name: query-service-config
           configMap:
@@ -56,7 +56,7 @@ spec:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          {{if .Values.queryService.configFilePath}}
+          {{if .Values.queryService.configuration}}
           volumeMounts:
             - name: query-service-config
               mountPath: /config/
@@ -64,7 +64,7 @@ spec:
           ports:
             - containerPort: 50051
           env:
-            {{if .Values.queryService.configFilePath}}
+            {{if .Values.queryService.configuration}}
             - name: CONFIG_PATH
               value: /config/config.yaml
             {{ end }}

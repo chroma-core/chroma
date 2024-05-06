@@ -1,4 +1,4 @@
-name: PR Review Checklist
+name: 📋 PR Review Checklist
 
 on:
   pull_request_target:
