@@ -1,5 +1,9 @@
+import pickle
+
 import pytest
-from typing import Generator, List, Callable, Iterator, Type, cast
+from typing import Generator, List, Callable, Iterator, Type, cast, Any, Dict, Optional
+
+
 from chromadb.config import System, Settings
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
@@ -23,6 +27,7 @@ from chromadb.segment.impl.vector.local_hnsw import (
 
 from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
+    PersistentData,
 )
 
 from chromadb.test.property.strategies import test_hnsw_config
@@ -106,13 +111,18 @@ def vector_reader(request: FixtureRequest) -> Generator[Type[VectorReader], None
     yield request.param
 
 
-def create_random_segment_definition() -> Segment:
+def create_random_segment_definition(
+    extra_hnsw_config: Optional[Dict[str, Any]] = None
+) -> Segment:
+    _hnsw_config = test_hnsw_config.copy()
+    if extra_hnsw_config:
+        _hnsw_config.update(extra_hnsw_config)
     return Segment(
         id=uuid.uuid4(),
         type="test_type",
         scope=SegmentScope.VECTOR,
         collection=uuid.UUID(int=0),
-        metadata=test_hnsw_config,
+        metadata=_hnsw_config,
     )
 
 
@@ -163,6 +173,148 @@ def test_insert_and_count(
 
     sync(segment, max_id)
     assert segment.count() == 6
+
+
+def test_insert_with_protobuf_persist(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+
+    system.reset_state()
+    segment_definition = create_random_segment_definition(
+        extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
+    )
+    collection_id = segment_definition["collection"]
+    # We know that the segment definition has a collection_id
+    collection_id = cast(uuid.UUID, collection_id)
+    max_id = produce_fns(
+        collection_id=collection_id,
+        producer=producer,
+        n=5,
+        embeddings=sample_embeddings,
+    )[1][-1]
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    sync(segment, max_id)
+
+    assert segment.count() == 5
+    if isinstance(segment, PersistentLocalHnswSegment):
+        _pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        assert _pd.max_seq_id == 5
+        assert _pd.total_elements_added == 5
+        assert _pd.dimensionality == 2
+        assert len(_pd.id_to_label) == 5
+
+
+def test_migrate_metadatafile(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+
+    system.reset_state()
+    segment_definition = create_random_segment_definition(
+        extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
+    )
+    collection_id = segment_definition["collection"]
+    # We know that the segment definition has a collection_id
+    collection_id = cast(uuid.UUID, collection_id)
+    max_id = produce_fns(
+        collection_id=collection_id,
+        producer=producer,
+        n=5,
+        embeddings=sample_embeddings,
+    )[1][-1]
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    sync(segment, max_id)
+
+    assert segment.count() == 5
+    if isinstance(segment, PersistentLocalHnswSegment):
+        _pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        with open(segment._get_legacy_metadata_file(), "wb") as metadata_file:
+            pickle.dump(segment._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+        assert os.path.exists(segment._get_legacy_metadata_file())
+        assert _pd.max_seq_id == 5
+        assert _pd.total_elements_added == 5
+        assert _pd.dimensionality == 2
+        assert len(_pd.id_to_label) == 5
+        os.unlink(segment._get_metadata_file())
+        assert not os.path.exists(segment._get_metadata_file())
+        segment.stop()
+        segment.start()
+        segment = cast(
+            PersistentLocalHnswSegment, vector_reader(system, segment_definition)
+        )
+        assert os.path.exists(segment._get_metadata_file())
+        assert not os.path.exists(segment._get_legacy_metadata_file())
+        _migrated_pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        assert _migrated_pd.max_seq_id == 5
+        assert _migrated_pd.total_elements_added == 5
+        assert _migrated_pd.dimensionality == 2
+        assert len(_migrated_pd.id_to_label) == 5
+
+
+def test_metadata_corruption_with_backup(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+
+    system.reset_state()
+    segment_definition = create_random_segment_definition(
+        extra_hnsw_config={"hnsw:batch_size": 1, "hnsw:sync_threshold": 5}
+    )
+    collection_id = segment_definition["collection"]
+    # We know that the segment definition has a collection_id
+    collection_id = cast(uuid.UUID, collection_id)
+    max_id = produce_fns(
+        collection_id=collection_id,
+        producer=producer,
+        n=5,
+        embeddings=sample_embeddings,
+    )[1][-1]
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    sync(segment, max_id)
+
+    assert segment.count() == 5
+    if isinstance(segment, PersistentLocalHnswSegment):
+        _pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        _pd.store_to_proto(segment._get_metadata_file() + ".new")
+        assert os.path.exists(segment._get_metadata_file() + ".new")
+        assert _pd.max_seq_id == 5
+        assert _pd.total_elements_added == 5
+        assert _pd.dimensionality == 2
+        assert len(_pd.id_to_label) == 5
+        os.unlink(segment._get_metadata_file())
+        assert not os.path.exists(segment._get_metadata_file())
+        with open(segment._get_metadata_file(), "wb") as metadata_file:
+            metadata_file.write(b"corrupted")
+        segment.stop()
+        segment.start()
+        segment = cast(
+            PersistentLocalHnswSegment, vector_reader(system, segment_definition)
+        )
+        assert os.path.exists(segment._get_metadata_file())
+        _migrated_pd = PersistentData.load_from_proto(segment._get_metadata_file())
+        assert _migrated_pd.max_seq_id == 5
+        assert _migrated_pd.total_elements_added == 5
+        assert _migrated_pd.dimensionality == 2
+        assert len(_migrated_pd.id_to_label) == 5
 
 
 def approx_equal(a: float, b: float, epsilon: float = 0.0001) -> bool:

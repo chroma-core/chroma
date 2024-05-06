@@ -1,9 +1,17 @@
 import os
 import shutil
+
+from google.protobuf import message
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
+
+from pypika import Table
+
 from chromadb.config import System
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.proto.chroma_pb2 import LocalSegmentMetadataTuple, LocalSegmentMetadata
+from chromadb.segment.impl.metadata.sqlite import _encode_seq_id, _decode_seq_id
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
@@ -70,9 +78,69 @@ class PersistentData:
             ret = cast(PersistentData, pickle.load(f))
             return ret
 
+    def store_to_proto(self, metadata_file: str) -> None:
+        result = LocalSegmentMetadata(
+            tuples=[
+                LocalSegmentMetadataTuple(
+                    embedding_id=_id,
+                    hnsw_label=self.id_to_label[_id],
+                    seq_id=self.id_to_seq_id[_id],
+                )
+                for _id in self.id_to_label
+            ],
+            max_seq_id=self.max_seq_id,
+            total_elements_added=self.total_elements_added,
+            dimensionality=self.dimensionality,
+        )
+        with open(metadata_file + ".new", "wb") as f:
+            f.write(result.SerializeToString())
+        # we copy only when the new file is written successfully
+        shutil.copy(metadata_file + ".new", metadata_file)
+        os.unlink(metadata_file + ".new")
+
+    @staticmethod
+    def load_from_proto(metadata_file: str) -> "PersistentData":
+        """Load persistent data from a protobuf file"""
+
+        def _load_from_file(metadata_file_to_load: str) -> LocalSegmentMetadata:
+            _result = LocalSegmentMetadata()
+            with open(metadata_file_to_load, "rb") as f:
+                _result.ParseFromString(f.read())
+            return _result
+
+        _new_metadata_file = metadata_file + ".new"
+        if os.path.exists(_new_metadata_file):
+            logger.warning(
+                f"Found new metadata file {metadata_file}.new, using it instead of {metadata_file}"
+            )
+            try:
+                result = _load_from_file(_new_metadata_file)
+            except message.DecodeError:
+                logger.warning(
+                    f"Failed to load metadata file {_new_metadata_file}, "
+                    f"falling back to original file {metadata_file}"
+                )
+                result = _load_from_file(metadata_file)
+        else:
+            result = _load_from_file(metadata_file)
+
+        id_to_label = {r.embedding_id: r.hnsw_label for r in result.tuples}
+        id_to_seq_id = {r.embedding_id: r.seq_id for r in result.tuples}
+        label_to_id = {r.hnsw_label: r.embedding_id for r in result.tuples}
+
+        return PersistentData(
+            dimensionality=result.dimensionality,
+            total_elements_added=result.total_elements_added,
+            max_seq_id=result.max_seq_id,
+            id_to_label=id_to_label,
+            label_to_id=label_to_id,
+            id_to_seq_id=id_to_seq_id,
+        )
+
 
 class PersistentLocalHnswSegment(LocalHnswSegment):
-    METADATA_FILE: str = "index_metadata.pickle"
+    LEGACY_METADATA_FILE: str = "index_metadata.pickle"  # TODO remove in 0.5+
+    METADATA_FILE: str = "index_metadata.bin"
     # How many records to add to index at once, we do this because crossing the python/c++ boundary is expensive (for add())
     # When records are not added to the c++ index, they are buffered in memory and served
     # via brute force search.
@@ -104,9 +172,19 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             os.makedirs(self._get_storage_folder(), exist_ok=True)
         # Load persist data if it exists already, otherwise create it
         if self._index_exists():
-            self._persist_data = PersistentData.load_from_file(
+            # migration from pickle file to protobufs
+            _migrated = False  # TODO remove in 0.5+
+            if os.path.exists(self._get_legacy_metadata_file()):
+                tmp_persist_data = PersistentData.load_from_file(
+                    self._get_legacy_metadata_file()
+                )
+                tmp_persist_data.store_to_proto(self._get_metadata_file())
+                _migrated = True
+            self._persist_data = PersistentData.load_from_proto(
                 self._get_metadata_file()
             )
+            if _migrated:  # TODO remove in 0.5+
+                os.remove(self._get_legacy_metadata_file())
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
             self._max_seq_id = self._persist_data.max_seq_id
@@ -136,11 +214,17 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
     def _index_exists(self) -> bool:
         """Check if the index exists via the metadata file"""
-        return os.path.exists(self._get_metadata_file())
+        return os.path.exists(self._get_metadata_file()) or os.path.exists(
+            self._get_legacy_metadata_file()
+        )
 
     def _get_metadata_file(self) -> str:
         """Get the metadata file path"""
         return os.path.join(self._get_storage_folder(), self.METADATA_FILE)
+
+    def _get_legacy_metadata_file(self) -> str:
+        """Get the metadata file path"""
+        return os.path.join(self._get_storage_folder(), self.LEGACY_METADATA_FILE)
 
     def _get_storage_folder(self) -> str:
         """Get the storage folder path"""
@@ -203,8 +287,37 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._persist_data.label_to_id = self._label_to_id
         self._persist_data.id_to_seq_id = self._id_to_seq_id
 
-        with open(self._get_metadata_file(), "wb") as metadata_file:
-            pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+        with self._db.tx() as cur:
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(_encode_seq_id(self._max_seq_id)),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
+            self._persist_data.store_to_proto(self._get_metadata_file())
+
+    @override
+    def max_seqid(self) -> SeqId:
+        t = Table("max_seq_id")
+        q = (
+            self._db.querybuilder()
+            .from_(t)
+            .select(t.seq_id)
+            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+        )
+        sql, params = get_sql(q)
+        with self._db.tx() as cur:
+            result = cur.execute(sql, params).fetchone()
+            if result is None:
+                return self._max_seq_id
+            else:
+                return _decode_seq_id(result[0])
 
     @trace_method(
         "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
@@ -226,6 +339,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
+
         with WriteRWLock(self._lock):
             for record in records:
                 if record["operation_record"]["embedding"] is not None:
