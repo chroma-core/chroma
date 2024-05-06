@@ -247,6 +247,6 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chroma-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           allowUpdates: true
           prerelease: true
