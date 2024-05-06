@@ -24,7 +24,7 @@ server.htpasswd
 server.authz
 server.authn
 
-.venv
+.venv*
 venv
 .env
 .chroma
