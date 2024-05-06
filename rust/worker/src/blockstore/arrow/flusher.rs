@@ -1,11 +1,10 @@
-use crate::errors::ChromaError;
-
 use super::{
     provider::{BlockManager, SparseIndexManager},
     sparse_index::SparseIndex,
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
-use std::collections::{HashMap, HashSet};
+use crate::errors::ChromaError;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 pub(crate) struct ArrowBlockfileFlusher {
@@ -37,14 +36,13 @@ impl ArrowBlockfileFlusher {
     pub(crate) async fn flush<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<(), Box<dyn ChromaError>> {
+        // TODO: We could flush in parallel
         for delta_id in self.modified_delta_ids {
-            self.block_manager.flush(&delta_id).await;
+            self.block_manager.flush(&delta_id).await?
         }
-        // TODO: catch errors from the flush
-        let res = self
-            .sparse_index_manager
+        self.sparse_index_manager
             .flush::<K>(&self.sparse_index.id)
-            .await;
+            .await?;
         Ok(())
     }
 
