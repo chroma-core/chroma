@@ -21,7 +21,7 @@ use crate::execution::operators::write_segments::WriteSegmentsOperator;
 use crate::execution::operators::write_segments::WriteSegmentsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
-use crate::segment::distributed_hnsw_segment::DistributedHNSWSegment;
+use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::record_segment::RecordSegmentWriter;
 use crate::segment::LogMaterializer;
 use crate::segment::SegmentFlusher;
@@ -162,7 +162,6 @@ impl CompactOrchestrator {
     // TODO: It is possible that the offset_id from the compaction job is wrong since the log service
     // can have an outdated view of the offset. We should filter out entries from the log based on the start offset
     // of the segment, and not fully respect the offset_id from the compaction job
-
     async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -251,7 +250,7 @@ impl CompactOrchestrator {
     async fn flush_s3(
         &mut self,
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegment>,
+        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
         self_address: Box<dyn Receiver<FlushS3Result>>,
     ) {
         self.state = ExecutionState::Flush;
@@ -268,7 +267,7 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn flush_sysdb(
+    async fn register(
         &mut self,
         log_position: i64,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -297,7 +296,8 @@ impl CompactOrchestrator {
 
     async fn get_segment_writers(
         &mut self,
-    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegment>), Box<dyn ChromaError>> {
+    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegmentWriter>), Box<dyn ChromaError>>
+    {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -377,7 +377,7 @@ impl CompactOrchestrator {
             .dimension
             .expect("Dimension is required in the compactor");
 
-        let hnsw_segment_writer = match DistributedHNSWSegment::from_segment(
+        let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
             hnsw_segment,
             dimension as usize,
             self.hnsw_index_provider.clone(),
@@ -522,7 +522,7 @@ impl Handler<FlushS3Result> for CompactOrchestrator {
         match message {
             Ok(msg) => {
                 // Unwrap should be safe here as we are guaranteed to have a value by construction
-                self.flush_sysdb(
+                self.register(
                     self.pulled_log_offset.unwrap(),
                     msg.segment_flush_info,
                     _ctx.sender.as_receiver(),

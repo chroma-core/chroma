@@ -1,4 +1,4 @@
-use crate::distance::DistanceFunction;
+use crate::distance::{DistanceFunction, DistanceFunctionError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::types::{MetadataValue, Segment};
 use thiserror::Error;
@@ -12,14 +12,14 @@ pub(crate) struct IndexConfig {
 
 #[derive(Error, Debug)]
 pub(crate) enum IndexConfigFromSegmentError {
-    #[error("No space defined")]
-    NoSpaceDefined,
+    #[error("Invalid distance function")]
+    InvalidDistanceFunction(#[from] DistanceFunctionError),
 }
 
 impl ChromaError for IndexConfigFromSegmentError {
     fn code(&self) -> ErrorCodes {
         match self {
-            IndexConfigFromSegmentError::NoSpaceDefined => ErrorCodes::InvalidArgument,
+            IndexConfigFromSegmentError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -28,7 +28,7 @@ impl IndexConfig {
     pub(crate) fn from_segment(
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<Self, Box<IndexConfigFromSegmentError>> {
         let space = match segment.metadata {
             Some(ref metadata) => match metadata.get("hnsw:space") {
                 Some(MetadataValue::Str(space)) => space,
@@ -38,10 +38,12 @@ impl IndexConfig {
         };
         match DistanceFunction::try_from(space) {
             Ok(distance_function) => Ok(IndexConfig {
-                dimensionality: dimensionality,
-                distance_function: distance_function,
+                dimensionality,
+                distance_function,
             }),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(Box::new(
+                IndexConfigFromSegmentError::InvalidDistanceFunction(e),
+            )),
         }
     }
 }

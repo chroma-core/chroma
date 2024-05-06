@@ -4,7 +4,7 @@ use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
