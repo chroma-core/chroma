@@ -32,6 +32,7 @@ pub(crate) enum ComponentRuntime {
 /// - on_start: Called when the component is started
 #[async_trait]
 pub(crate) trait Component: Send + Sized + Debug + 'static {
+    fn get_name() -> &'static str;
     fn queue_size(&self) -> usize;
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
@@ -173,6 +174,10 @@ mod tests {
 
     #[async_trait]
     impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
         fn queue_size(&self) -> usize {
             self.queue_size
         }

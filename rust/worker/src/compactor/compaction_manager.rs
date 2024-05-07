@@ -236,6 +236,10 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
 // ============== Component Implementation ==============
 #[async_trait]
 impl Component for CompactionManager {
+    fn get_name() -> &'static str {
+        "Compaction manager"
+    }
+
     fn queue_size(&self) -> usize {
         self.compaction_manager_queue_size
     }
