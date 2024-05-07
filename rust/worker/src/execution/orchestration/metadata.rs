@@ -424,7 +424,6 @@ impl Handler<PullLogsResult> for MetadataQueryOrchestrator {
         match message {
             Ok(logs) => {
                 let logs = logs.logs();
-                println!("Logs pulled: {:?}", logs);
                 self.filter(logs, ctx).await;
             }
             Err(e) => {

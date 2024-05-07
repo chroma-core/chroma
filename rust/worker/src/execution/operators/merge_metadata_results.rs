@@ -190,8 +190,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                 }
             };
             metadata.push(output_metadata);
-            // TODO: document
-            documents.push(Some("log_placeholder".to_string()));
+            documents.push(log_entry.record.document.clone());
         }
 
         Ok(MergeMetadataResultsOperatorOutput {
