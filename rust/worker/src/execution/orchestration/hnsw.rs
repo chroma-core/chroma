@@ -21,13 +21,14 @@ use crate::segment::distributed_hnsw_segment::{
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, System};
-use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
+use crate::types::{Collection, LogRecord, Operation, Segment, SegmentType, VectorQueryResult};
 use crate::{
     log::log::Log,
     system::{Component, Handler, Receiver},
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, trace_span, Instrument, Span};
@@ -98,6 +99,7 @@ pub(crate) struct HnswQueryOrchestrator {
     // Query state
     query_vectors: Vec<Vec<f32>>,
     k: i32,
+    allowed_ids: Arc<[String]>,
     include_embeddings: bool,
     hnsw_segment_id: Uuid,
     // State fetched or created for query execution
@@ -127,6 +129,7 @@ impl HnswQueryOrchestrator {
         system: System,
         query_vectors: Vec<Vec<f32>>,
         k: i32,
+        allowed_ids: Vec<String>,
         include_embeddings: bool,
         segment_id: Uuid,
         log: Box<dyn Log>,
@@ -141,6 +144,7 @@ impl HnswQueryOrchestrator {
             merge_dependency_count: 2,
             query_vectors,
             k,
+            allowed_ids: allowed_ids.into(),
             include_embeddings,
             hnsw_segment_id: segment_id,
             hnsw_segment: None,
@@ -221,7 +225,21 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn hnsw_segment_query(&mut self, ctx: &ComponentContext<Self>) {
+    fn get_disallowed_ids(&self, logs: Chunk<LogRecord>) -> Vec<String> {
+        let mut disallowed_ids = Vec::new();
+        for item in logs.iter() {
+            let log = item.0;
+            let operation_record = &log.record;
+            if operation_record.operation == Operation::Delete
+                || operation_record.operation == Operation::Update
+            {
+                disallowed_ids.push(operation_record.id.clone());
+            }
+        }
+        disallowed_ids
+    }
+
+    async fn hnsw_segment_query(&mut self, logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
         self.state = ExecutionState::QueryKnn;
 
         let hnsw_segment = self
@@ -264,10 +282,13 @@ impl HnswQueryOrchestrator {
 
         // Dispatch a query task
         let operator = Box::new(HnswKnnOperator {});
+        let disallowed_ids = self.get_disallowed_ids(logs);
         let input = HnswKnnOperatorInput {
             segment: hnsw_segment_reader,
             query: self.query_vectors[0].clone(),
             k: self.k as usize,
+            allowed_ids: self.allowed_ids.clone(),
+            disallowed_ids: disallowed_ids.into(),
         };
         let task = wrap(operator, input, ctx.sender.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
@@ -536,9 +557,10 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
 
         match message {
             Ok(pull_logs_output) => {
-                self.brute_force_query(pull_logs_output.logs(), ctx.sender.as_receiver())
+                let logs = pull_logs_output.logs();
+                self.brute_force_query(logs.clone(), ctx.sender.as_receiver())
                     .await;
-                self.hnsw_segment_query(ctx).await;
+                self.hnsw_segment_query(logs, ctx).await;
             }
             Err(e) => {
                 self.terminate_with_error(Box::new(e), ctx);
