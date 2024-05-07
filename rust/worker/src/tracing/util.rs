@@ -8,6 +8,9 @@ use tonic::{
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
+const SPAN_ID_HEADER_KEY: &str = "chroma-spanid";
+
 pub(crate) fn client_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
     // If span is disabled then nothing to append in the header.
     if Span::current().is_disabled() {
@@ -36,13 +39,13 @@ pub(crate) fn client_interceptor(request: Request<()>) -> Result<Request<()>, St
     // Errors are not fatal.
     match trace_id {
         Ok(id) => {
-            metadata.append("chroma-traceid", id);
+            metadata.append(TRACE_ID_HEADER_KEY, id);
         }
         Err(_) => (),
     }
     match span_id {
         Ok(id) => {
-            metadata.append("chroma-spanid", id);
+            metadata.append(SPAN_ID_HEADER_KEY, id);
         }
         Err(_) => (),
     }
@@ -52,8 +55,8 @@ pub(crate) fn client_interceptor(request: Request<()>) -> Result<Request<()>, St
 pub(crate) fn try_parse_tracecontext(metadata: &MetadataMap) -> (Option<TraceId>, Option<SpanId>) {
     let mut traceid: Option<TraceId> = None;
     let mut spanid: Option<SpanId> = None;
-    if metadata.contains_key("chroma-traceid") {
-        let id_res = metadata.get("chroma-traceid").unwrap().to_str();
+    if metadata.contains_key(TRACE_ID_HEADER_KEY) {
+        let id_res = metadata.get(TRACE_ID_HEADER_KEY).unwrap().to_str();
         // Failure is not fatal.
         match id_res {
             Ok(id) => {
@@ -66,8 +69,8 @@ pub(crate) fn try_parse_tracecontext(metadata: &MetadataMap) -> (Option<TraceId>
             Err(_) => traceid = None,
         }
     }
-    if metadata.contains_key("chroma-spanid") {
-        let id_res = metadata.get("chroma-spanid").unwrap().to_str();
+    if metadata.contains_key(SPAN_ID_HEADER_KEY) {
+        let id_res = metadata.get(SPAN_ID_HEADER_KEY).unwrap().to_str();
         // Failure is not fatal.
         match id_res {
             Ok(id) => {
