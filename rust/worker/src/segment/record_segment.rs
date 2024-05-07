@@ -427,13 +427,19 @@ impl LogMaterializer for RecordSegmentWriter {
                         },
                         None => None,
                     };
+
+                    let document = match &log_entry.record.document {
+                        Some(document) => Some(document.as_str()),
+                        None => None,
+                    };
+
                     let data_record = DataRecord {
                         id: &log_entry.record.id,
                         // TODO: don't unwrap here, it should never happen as Adds always have embeddings
                         // but we should handle this gracefully
                         embedding: log_entry.record.embedding.as_ref().unwrap(),
-                        document: None, // TODO: document
-                        metadata: metadata,
+                        document,
+                        metadata,
                     };
                     let materialized =
                         MaterializedLogRecord::new(next_offset_id, log_entry, data_record);
@@ -442,7 +448,7 @@ impl LogMaterializer for RecordSegmentWriter {
                         .id_to_data
                         .as_ref()
                         .unwrap()
-                        .set("", index as u32, &materialized.materialized_record)
+                        .set("", next_offset_id, &materialized.materialized_record)
                         .await;
                     println!("Writing to user_id_to_id");
                     let res = self
