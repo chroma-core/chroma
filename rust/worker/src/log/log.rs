@@ -7,9 +7,19 @@ use crate::log::config::LogConfig;
 use crate::types::LogRecord;
 use crate::types::RecordConversionError;
 use async_trait::async_trait;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TraceContextExt;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::str::FromStr;
 use thiserror::Error;
+use tonic::metadata::MetadataMap;
+use tonic::metadata::MetadataValue;
+use tonic::service::interceptor;
+use tonic::transport::Endpoint;
+use tonic::{Request, Status};
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 /// CollectionInfo is a struct that contains information about a collection for the
@@ -81,6 +91,36 @@ pub(crate) struct GrpcLog {
 }
 
 impl GrpcLog {
+    pub(crate) fn try_wrap_request_with_trace_context<T>(
+        &self,
+        request: &mut Request<T>,
+        spn: &tracing::Span,
+    ) {
+        // If span is disabled then nothing to append in the header.
+        if spn.is_disabled() {
+            return;
+        }
+        let metadata: &mut MetadataMap = request.metadata_mut();
+        let span_id = spn.context().span().span_context().span_id().to_string();
+        let trace_id = spn.context().span().span_context().trace_id().to_string();
+        println!("Span id {}, trace id {}", span_id, trace_id);
+        let ascii_traceid = MetadataValue::from_str(trace_id.as_str());
+        let ascii_spanid = MetadataValue::from_str(span_id.as_str());
+        // Errors are not fatal.
+        match ascii_traceid {
+            Ok(id) => {
+                metadata.append("chroma-traceid", id);
+            }
+            Err(_) => (),
+        }
+        match ascii_spanid {
+            Ok(ascii_id) => {
+                metadata.append("chroma-spanid", ascii_id);
+            }
+            Err(_) => (),
+        }
+    }
+
     pub(crate) fn new(client: LogServiceClient<tonic::transport::Channel>) -> Self {
         Self { client }
     }
@@ -137,12 +177,16 @@ impl Log for GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => -1,
         };
-        let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
+        let tonic_request = tonic::Request::new(chroma_proto::PullLogsRequest {
             collection_id: collection_id.to_string(),
             start_from_offset: offset,
             batch_size,
             end_timestamp,
         });
+        let mut mut_tonic_request = tonic_request;
+        self.try_wrap_request_with_trace_context(&mut mut_tonic_request, &Span::current());
+        println!("Request {:?}", mut_tonic_request);
+        let request = self.client.pull_logs(mut_tonic_request);
         let response = request.await;
         match response {
             Ok(response) => {
