@@ -34,7 +34,7 @@ jobs:
       run: npm install
       working-directory: ./clients/js/
     - name: Test & publish
-      run: npm run db:run && PORT=8000 npm run $NPM_SCRIPT
+      run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
       working-directory: ./clients/js/
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
