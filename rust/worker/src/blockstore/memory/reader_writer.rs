@@ -49,8 +49,11 @@ pub(crate) struct HashMapBlockfileReader<K: Key, V: Value> {
     marker: std::marker::PhantomData<(K, V)>,
 }
 
-impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
-    HashMapBlockfileReader<K, V>
+impl<
+        'storage,
+        K: Key + Into<KeyWrapper> + From<&'storage KeyWrapper>,
+        V: Value + Readable<'storage>,
+    > HashMapBlockfileReader<K, V>
 {
     pub(crate) fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
         // TODO: don't unwrap
@@ -72,42 +75,86 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
     }
 
     pub(crate) fn get_by_prefix(
-        &self,
-        prefix: String,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+        &'storage self,
+        prefix: &'storage str,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let values = V::get_by_prefix_from_storage(prefix, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_gt(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &'storage str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_gt_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_lt(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &'storage str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_lt_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_gte(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &'storage str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_gte_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_lte(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &'storage str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_lte_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn id(&self) -> uuid::Uuid {

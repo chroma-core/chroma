@@ -43,7 +43,7 @@ impl BlockfileProvider {
 
     pub(crate) async fn open<
         'new,
-        K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
+        K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,

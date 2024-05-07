@@ -5,7 +5,7 @@ use super::{
 use crate::blockstore::{
     arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::KeyWrapper,
-    provider::{BlockfileProvider, CreateError, OpenError},
+    provider::{CreateError, OpenError},
     BlockfileReader, BlockfileWriter, Key, Value,
 };
 
@@ -27,7 +27,7 @@ impl HashMapBlockfileProvider {
 
     pub(crate) fn open<
         'new,
-        K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
+        K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,
