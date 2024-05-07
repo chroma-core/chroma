@@ -126,10 +126,13 @@ impl Configurable<LogConfig> for GrpcLog {
                 // TODO: switch to logging when logging is implemented
                 println!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
-                let client = Endpoint::from_shared(connection_string)
-                    .expect("Connection string parsing failed")
-                    .connect()
-                    .await;
+                let endpoint_res = Endpoint::from_shared(connection_string);
+                if endpoint_res.is_err() {
+                    return Err(Box::new(GrpcLogError::FailedToConnect(
+                        endpoint_res.err().unwrap(),
+                    )));
+                }
+                let client = endpoint_res.ok().unwrap().connect().await;
                 match client {
                     Ok(client) => {
                         let channel: LogServiceClient<
