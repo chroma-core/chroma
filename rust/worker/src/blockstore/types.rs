@@ -260,7 +260,10 @@ pub(crate) enum BlockfileReader<
 
 impl<
         'referred_data,
-        K: Key + Into<KeyWrapper> + ArrowReadableKey<'referred_data>,
+        K: Key
+            + Into<KeyWrapper>
+            + From<&'referred_data KeyWrapper>
+            + ArrowReadableKey<'referred_data>,
         V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
     > BlockfileReader<'referred_data, K, V>
 {
@@ -277,9 +280,9 @@ impl<
 
     // TODO: make prefix &str
     pub(crate) fn get_by_prefix(
-        &self,
-        prefix: String,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
+        &'referred_data self,
+        prefix: &str,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
             BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
@@ -287,10 +290,10 @@ impl<
     }
 
     pub(crate) fn get_gt(
-        &self,
-        prefix: String,
+        &'referred_data self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
@@ -298,10 +301,10 @@ impl<
     }
 
     pub(crate) fn get_lt(
-        &self,
-        prefix: String,
+        &'referred_data self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
@@ -309,10 +312,10 @@ impl<
     }
 
     pub(crate) fn get_gte(
-        &self,
-        prefix: String,
+        &'referred_data self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
@@ -320,10 +323,10 @@ impl<
     }
 
     pub(crate) fn get_lte(
-        &self,
-        prefix: String,
+        &'referred_data self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
