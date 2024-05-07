@@ -171,6 +171,10 @@ impl TaskRequestMessage {
 
 #[async_trait]
 impl Component for Dispatcher {
+    fn get_name() -> &'static str {
+        "Dispatcher"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }
@@ -238,6 +242,10 @@ mod tests {
     }
     #[async_trait]
     impl Component for MockDispatchUser {
+        fn get_name() -> &'static str {
+            "Mock dispatcher"
+        }
+
         fn queue_size(&self) -> usize {
             1000
         }

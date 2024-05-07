@@ -13,10 +13,16 @@ use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{Receiver, System};
+use crate::tracing::util::{try_parse_tracecontext, wrap_span_with_parent_context};
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
-use tonic::{transport::Server, Request, Response, Status};
-use tracing::{debug, trace, trace_span};
+use opentelemetry::trace::{
+    FutureExt, SpanContext, SpanId, SpanRef, TraceContextExt, TraceFlags, TraceId, TraceState,
+};
+use opentelemetry::Context;
+use tonic::{metadata::MetadataMap, transport::Server, Request, Response, Status};
+use tracing::{debug, trace, trace_span, Instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 pub struct WorkerServer {
@@ -96,27 +102,8 @@ impl WorkerServer {
     pub(crate) fn set_system(&mut self, system: System) {
         self.system = Some(system);
     }
-}
 
-#[tonic::async_trait]
-impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
-    async fn get_vectors(
-        &self,
-        request: Request<GetVectorsRequest>,
-    ) -> Result<Response<GetVectorsResponse>, Status> {
-        let request = request.into_inner();
-        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid UUID"));
-            }
-        };
-
-        Err(Status::unimplemented("Not yet implemented"))
-    }
-
-    #[tracing::instrument(skip(self, request), fields(request_metadata = ?request.metadata(), k = request.get_ref().k, segment_id = request.get_ref().segment_id, include_embeddings = request.get_ref().include_embeddings, allowed_ids = ?request.get_ref().allowed_ids))]
-    async fn query_vectors(
+    pub(crate) async fn query_vectors_instrumented(
         &self,
         request: Request<QueryVectorsRequest>,
     ) -> Result<Response<QueryVectorsResponse>, Status> {
@@ -130,8 +117,9 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
 
         let mut proto_results_for_all = Vec::new();
 
+        let parse_vectors_span = trace_span!("Input vectors parsing");
         let mut query_vectors = Vec::new();
-        trace_span!("Input vectors parsing").in_scope(|| {
+        let _ = parse_vectors_span.in_scope(|| {
             for proto_query_vector in request.vectors {
                 let (query_vector, _encoding) = match proto_query_vector.try_into() {
                     Ok((vector, encoding)) => (vector, encoding),
@@ -219,5 +207,42 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         };
 
         return Ok(Response::new(resp));
+    }
+}
+
+#[tonic::async_trait]
+impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
+    async fn get_vectors(
+        &self,
+        request: Request<GetVectorsRequest>,
+    ) -> Result<Response<GetVectorsResponse>, Status> {
+        let request = request.into_inner();
+        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid UUID"));
+            }
+        };
+
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn query_vectors(
+        &self,
+        request: Request<QueryVectorsRequest>,
+    ) -> Result<Response<QueryVectorsResponse>, Status> {
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let query_span = trace_span!(
+            "Query vectors",
+            k = request.get_ref().k,
+            segment_id = request.get_ref().segment_id,
+            include_embeddings = request.get_ref().include_embeddings,
+            allowed_ids = ?request.get_ref().allowed_ids
+        );
+        let instrumented_span = wrap_span_with_parent_context(query_span, request.metadata());
+        self.query_vectors_instrumented(request)
+            .instrument(instrumented_span)
+            .await
     }
 }

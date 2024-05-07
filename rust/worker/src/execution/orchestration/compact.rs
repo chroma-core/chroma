@@ -409,6 +409,10 @@ impl CompactOrchestrator {
 
 #[async_trait]
 impl Component for CompactOrchestrator {
+    fn get_name() -> &'static str {
+        "Compaction orchestrator"
+    }
+
     fn queue_size(&self) -> usize {
         1000 // TODO: make configurable
     }
