@@ -76,7 +76,7 @@ impl<
 
     pub(crate) fn get_by_prefix(
         &'storage self,
-        prefix: &'storage str,
+        prefix: &str,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         let values = V::get_by_prefix_from_storage(prefix, &self.storage);
         if values.is_empty() {
@@ -84,14 +84,14 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
             .collect();
         Ok(values)
     }
 
     pub(crate) fn get_gt(
         &'storage self,
-        prefix: &'storage str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
@@ -101,14 +101,14 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
             .collect();
         Ok(values)
     }
 
     pub(crate) fn get_lt(
         &'storage self,
-        prefix: &'storage str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
@@ -118,14 +118,14 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
             .collect();
         Ok(values)
     }
 
     pub(crate) fn get_gte(
         &'storage self,
-        prefix: &'storage str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
@@ -135,14 +135,14 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
             .collect();
         Ok(values)
     }
 
     pub(crate) fn get_lte(
         &'storage self,
-        prefix: &'storage str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
@@ -152,7 +152,7 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (prefix, K::from(&key.key), value.clone()))
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
             .collect();
         Ok(values)
     }
@@ -253,53 +253,18 @@ mod tests {
         assert_eq!(record.embedding, vec![1.0, 2.0, 3.0]);
     }
 
-    // #[test]
-    // fn test_blockfile_set_get() {
-    //     let mut blockfile_writer = HashMapBlockfileWriter::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: "key1".to_string(),
-    //     };
-    //     let _res = blockfile_writer
-    //         .set(key.clone(), &Int32Array::from(vec![1, 2, 3]))
-    //         .unwrap();
+    #[test]
+    fn test_bool_key() {
+        let storage_manager = StorageManager::new();
+        let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", true, "value1");
+        let _ = writer.commit();
 
-    //     let blockfile_reader = blockfile_writer.to_reader();
-    //     let value = blockfile_reader.get(key).unwrap();
-    //     assert_eq!(value, Int32Array::from(vec![1, 2, 3]));
-    // }
-
-    // #[test]
-    // fn test_data_record_key() {
-    //     let mut blockfile_writer = HashMapBlockfileWriter::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: "key1".to_string(),
-    //     };
-    //     let id = "id1".to_string();
-    //     let embedding = vec![1.0, 2.0, 3.0];
-    //     let mut metadata = HashMap::new();
-    //     metadata.insert("key".to_string(), MetadataValue::Str("value".to_string()));
-    //     let record = DataRecord {
-    //         id: &id,
-    //         embedding: &embedding,
-    //         metadata: &Some(metadata),
-    //         document: &None,
-    //         serialized_metadata: None,
-    //     };
-    //     let _res = blockfile_writer.set(key.clone(), &record).unwrap();
-
-    //     let blockfile_reader = blockfile_writer.to_reader();
-    //     let value = blockfile_reader.get(key).unwrap();
-    //     assert_eq!(value.id, "id1");
-    //     assert_eq!(value.embedding, vec![1.0, 2.0, 3.0]);
-    //     assert_eq!(value.metadata.as_ref().unwrap().len(), 1);
-    //     assert_eq!(
-    //         *value.metadata.as_ref().unwrap().get("key").unwrap(),
-    //         MetadataValue::Str("value".to_string())
-    //     );
-    //     assert!(value.document.is_none());
-    // }
+        let reader: HashMapBlockfileReader<bool, &str> =
+            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let value = reader.get("prefix", true).unwrap();
+        assert_eq!(value, "value1");
+    }
 
     // #[test]
     // fn test_blockfile_get_by_prefix() {

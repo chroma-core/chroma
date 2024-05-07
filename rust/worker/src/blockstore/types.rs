@@ -281,7 +281,7 @@ impl<
     // TODO: make prefix &str
     pub(crate) fn get_by_prefix(
         &'referred_data self,
-        prefix: &'referred_data str,
+        prefix: &str,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
@@ -291,7 +291,7 @@ impl<
 
     pub(crate) fn get_gt(
         &'referred_data self,
-        prefix: &'referred_data str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
@@ -302,7 +302,7 @@ impl<
 
     pub(crate) fn get_lt(
         &'referred_data self,
-        prefix: &'referred_data str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
@@ -313,7 +313,7 @@ impl<
 
     pub(crate) fn get_gte(
         &'referred_data self,
-        prefix: &'referred_data str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
@@ -324,7 +324,7 @@ impl<
 
     pub(crate) fn get_lte(
         &'referred_data self,
-        prefix: &'referred_data str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
