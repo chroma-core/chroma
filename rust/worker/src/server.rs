@@ -13,6 +13,7 @@ use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{Receiver, System};
+use crate::tracing::util::{try_parse_tracecontext, wrap_span_with_parent_context};
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
 use opentelemetry::trace::{
@@ -100,43 +101,6 @@ impl WorkerServer {
 
     pub(crate) fn set_system(&mut self, system: System) {
         self.system = Some(system);
-    }
-
-    pub(crate) fn try_parse_tracecontext(
-        &self,
-        metadata: &MetadataMap,
-    ) -> (Option<TraceId>, Option<SpanId>) {
-        let mut traceid: Option<TraceId> = None;
-        let mut spanid: Option<SpanId> = None;
-        if metadata.contains_key("chroma-traceid") {
-            let id_res = metadata.get("chroma-traceid").unwrap().to_str();
-            // Failure is not fatal.
-            match id_res {
-                Ok(id) => {
-                    let trace_id = TraceId::from_hex(id);
-                    match trace_id {
-                        Ok(id) => traceid = Some(id),
-                        Err(_) => traceid = None,
-                    }
-                }
-                Err(_) => traceid = None,
-            }
-        }
-        if metadata.contains_key("chroma-spanid") {
-            let id_res = metadata.get("chroma-spanid").unwrap().to_str();
-            // Failure is not fatal.
-            match id_res {
-                Ok(id) => {
-                    let span_id = SpanId::from_hex(id);
-                    match span_id {
-                        Ok(id) => spanid = Some(id),
-                        Err(_) => spanid = None,
-                    }
-                }
-                Err(_) => spanid = None,
-            }
-        }
-        (traceid, spanid)
     }
 
     pub(crate) async fn query_vectors_instrumented(
@@ -267,7 +231,8 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         &self,
         request: Request<QueryVectorsRequest>,
     ) -> Result<Response<QueryVectorsResponse>, Status> {
-        let (traceid, spanid) = self.try_parse_tracecontext(request.metadata());
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let query_span = trace_span!(
             "Query vectors",
             k = request.get_ref().k,
@@ -275,23 +240,9 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
             include_embeddings = request.get_ref().include_embeddings,
             allowed_ids = ?request.get_ref().allowed_ids
         );
-        // Attach context passed by FE as parent.
-        if traceid.is_some() && spanid.is_some() {
-            let span_context = SpanContext::new(
-                traceid.unwrap(),
-                spanid.unwrap(),
-                TraceFlags::new(1),
-                true,
-                TraceState::default(),
-            );
-            let context = query_span
-                .context()
-                .with_remote_span_context(span_context)
-                .clone();
-            query_span.set_parent(context);
-        }
+        let instrumented_span = wrap_span_with_parent_context(query_span, request.metadata());
         self.query_vectors_instrumented(request)
-            .instrument(query_span)
+            .instrument(instrumented_span)
             .await
     }
 }
