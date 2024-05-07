@@ -30,6 +30,7 @@ from collections import defaultdict
 SEGMENT_TYPE_IMPLS = {
     SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_DISTRIBUTED: "chromadb.segment.impl.vector.grpc_segment.GrpcVectorSegment",
+    SegmentType.BLOCKFILE_METADATA: "chromadb.segment.impl.metadata.grpc_segment.GrpcMetadataSegment",
 }
 
 
@@ -64,11 +65,11 @@ class DistributedSegmentManager(SegmentManager):
         vector_segment = _segment(
             SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
         )
-        # metadata_segment = _segment(
-        #     SegmentType.SQLITE, SegmentScope.METADATA, collection
-        # )
+        metadata_segment = _segment(
+            SegmentType.BLOCKFILE_METADATA, SegmentScope.METADATA, collection
+        )
         record_segment = _segment(SegmentType.RECORD, SegmentScope.RECORD, collection)
-        return [vector_segment, record_segment]
+        return [vector_segment, record_segment, metadata_segment]
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
