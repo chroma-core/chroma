@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SegmentType {
     HnswDistributed,
+    BlockfileMetadata,
     Record,
     Sqlite,
 }
@@ -22,6 +23,7 @@ impl From<SegmentType> for String {
             }
             SegmentType::Record => "urn:chroma:segment/record".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
+            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
         }
     }
 }

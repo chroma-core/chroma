@@ -578,4 +578,18 @@ impl RecordSegmentReader<'_> {
     ) -> Result<&str, Box<dyn ChromaError>> {
         self.id_to_user_id.get("", offset_id).await
     }
+
+    pub(crate) async fn get_offset_id_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<u32, Box<dyn ChromaError>> {
+        self.user_id_to_id.get("", user_id).await
+    }
+
+    pub(crate) async fn get_data_for_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<DataRecord, Box<dyn ChromaError>> {
+        self.id_to_data.get("", offset_id).await
+    }
 }

@@ -1,7 +1,4 @@
-use crate::{blockstore::key::CompositeKey, errors::ChromaError};
-// use super::super::types::{Blockfile, BlockfileKey, Key, Value};
-// use super::block::{BlockError, BlockState};
-// use super::provider::ArrowBlockProvider;
+use super::{block::delta::BlockDelta, provider::BlockManager};
 use super::{
     block::Block,
     flusher::ArrowBlockfileFlusher,
@@ -9,13 +6,10 @@ use super::{
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
-use std::{collections::HashSet, mem::transmute};
-// use crate::blockstore::arrow::block::delta::BlockDelta;
-// use crate::blockstore::BlockfileError;
+use crate::{blockstore::key::CompositeKey, errors::ChromaError};
 use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
-// use thiserror::Error;
-use super::{block::delta::BlockDelta, provider::BlockManager};
+use std::{collections::HashSet, mem::transmute};
 use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;

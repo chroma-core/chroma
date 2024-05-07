@@ -31,7 +31,7 @@ pub struct BruteForceKnnOperatorInput {
 /// The output of the brute force k-nearest neighbors operator.
 /// # Parameters
 /// * `data` - The vectors to query against. Only the vectors that are nearest neighbors are visible.
-/// * `indices` - The indices of the nearest neighbors. This is a mask against the `query_vecs` input.
+/// * `indices` - The indices of the nearest neighbors. This is a mask against the `data` input.
 /// One row for each query vector.
 /// * `distances` - The distances of the nearest neighbors.
 /// One row for each query vector.
@@ -96,6 +96,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             let embedding = match &log_record.record.embedding {
                 Some(embedding) => embedding,
                 None => {
+                    // implies that the record is a delete or update of irrelevant field
                     continue;
                 }
             };

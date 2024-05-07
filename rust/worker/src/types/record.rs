@@ -223,6 +223,27 @@ pub(crate) struct VectorQueryResult {
     pub(crate) vector: Option<Vec<f32>>,
 }
 
+/*
+===========================================
+Metadata Embedding Record
+===========================================
+*/
+
+#[derive(Debug)]
+pub(crate) struct MetadataEmbeddingRecord {
+    pub(crate) id: String,
+    pub(crate) metadata: UpdateMetadata,
+}
+
+impl From<MetadataEmbeddingRecord> for chroma_proto::MetadataEmbeddingRecord {
+    fn from(record: MetadataEmbeddingRecord) -> Self {
+        chroma_proto::MetadataEmbeddingRecord {
+            id: record.id,
+            metadata: Some(record.metadata.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
