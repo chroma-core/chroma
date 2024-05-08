@@ -204,6 +204,10 @@ impl Index<HnswIndexConfig> for HnswIndex {
         unsafe { add_item(self.ffi_ptr, vector.as_ptr(), id, false) }
     }
 
+    fn delete(&self, id: usize) {
+        unsafe { mark_deleted(self.ffi_ptr, id) }
+    }
+
     fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
         let actual_k = std::cmp::min(k, self.len());
         let mut ids = vec![0usize; actual_k];
@@ -305,6 +309,7 @@ extern "C" {
     fn persist_dirty(index: *const IndexPtrFFI);
 
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
+    fn mark_deleted(index: *const IndexPtrFFI, id: usize);
     fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
     fn knn_query(
         index: *const IndexPtrFFI,
@@ -326,6 +331,7 @@ pub mod test {
 
     use crate::distance::DistanceFunction;
     use crate::index::utils;
+    use rand::seq::IteratorRandom;
     use rand::Rng;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
@@ -498,6 +504,61 @@ pub mod test {
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
         assert_eq!(distances[0], 0.0);
+    }
+
+    #[test]
+    fn it_can_add_and_delete() {
+        let n = 1000;
+        let d = 960;
+
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+            Uuid::new_v4(),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(n, d);
+        let ids: Vec<usize> = (0..n).collect();
+
+        (0..n).into_iter().for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data);
+        });
+
+        // Delete some of the data
+        let mut rng = rand::thread_rng();
+        let delete_ids: Vec<usize> = (0..n).choose_multiple(&mut rng, n / 20);
+
+        for id in &delete_ids {
+            index.delete(*id);
+        }
+
+        // Query for the deleted ids and ensure they are not found
+        for deleted_id in &delete_ids {
+            let target_vector = &data[*deleted_id * d..(*deleted_id + 1) * d];
+            let (ids, _) = index.query(target_vector, 10);
+            for check_deleted_id in &delete_ids {
+                assert!(!ids.contains(check_deleted_id));
+            }
+        }
     }
 
     #[test]

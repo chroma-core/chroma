@@ -54,6 +54,7 @@ impl IndexConfig {
 /// # Methods
 /// - `init` - Initialize the index with a given dimension and distance function.
 /// - `add` - Add a vector to the index.
+/// - `delete` - Delete a vector from the index.
 /// - `query` - Query the index for the K nearest neighbors of a given vector.
 pub(crate) trait Index<C> {
     fn init(
@@ -64,6 +65,7 @@ pub(crate) trait Index<C> {
     where
         Self: Sized;
     fn add(&self, id: usize, vector: &[f32]);
+    fn delete(&self, id: usize);
     fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>);
     fn get(&self, id: usize) -> Option<Vec<f32>>;
 }
