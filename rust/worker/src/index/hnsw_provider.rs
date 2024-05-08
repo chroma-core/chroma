@@ -109,7 +109,7 @@ impl HnswIndexProvider {
             }
         };
 
-        match HnswIndex::load(storage_path_str, &index_config, *source_id) {
+        match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
                 let mut cache = self.cache.write();
