@@ -191,9 +191,37 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
                         .read()
                         .add(segment_offset_id as usize, &embedding);
                 }
-                Operation::Upsert => {}
-                Operation::Update => {}
-                Operation::Delete => {}
+                Operation::Upsert => {
+                    // hnsw index behavior is to treat add() as upsert
+                    let segment_offset_id = record.0.segment_offset_id;
+                    // Assumption: Upserts must have embedding set
+                    let embedding = record.0.log_record.record.embedding.as_ref().unwrap();
+                    self.index
+                        .read()
+                        .add(segment_offset_id as usize, &embedding);
+                }
+                Operation::Update => {
+                    // hnsw index behvaior is to treat add() as upsert so this
+                    // will update the embedding
+                    // The assumption is that materialized log records only contain
+                    // valid updates.
+                    let segment_offset_id = record.0.segment_offset_id;
+                    match record.0.log_record.record.embedding.as_ref() {
+                        Some(e) => {
+                            self.index.read().add(segment_offset_id as usize, &e);
+                        }
+                        None => {
+                            // An update may not necessarily update the embedding
+                            continue;
+                        }
+                    };
+                }
+                Operation::Delete => {
+                    // The assumption is that materialized log records only contain
+                    // valid deletes
+                    let segment_offset_id = record.0.segment_offset_id;
+                    self.index.read().delete(segment_offset_id as usize);
+                }
             }
         }
     }
