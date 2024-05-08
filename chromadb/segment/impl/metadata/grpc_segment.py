@@ -40,7 +40,9 @@ class GrpcMetadataSegment(MetadataReader):
 
     @override
     def count(self) -> int:
-        raise NotImplementedError()
+        request: pb.CountRecordsRequest = pb.CountRecordsRequest(segment_id=self._segment["id"].hex)
+        response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(request)
+        return response.count
 
     @override
     def delete(self, where: Optional[Where] = None) -> None:

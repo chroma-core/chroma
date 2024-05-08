@@ -167,6 +167,10 @@ impl<
         Ok(values)
     }
 
+    pub(crate) fn count(&'storage self) -> Result<usize, Box<dyn ChromaError>> {
+        V::count(&self.storage)
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.storage.id
     }

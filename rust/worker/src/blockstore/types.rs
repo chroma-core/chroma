@@ -294,6 +294,13 @@ impl<
         }
     }
 
+    pub(crate) async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.count().await,
+        }
+    }
+
     // TODO: make prefix &str
     pub(crate) fn get_by_prefix(
         &'referred_data self,

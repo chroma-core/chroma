@@ -1,5 +1,6 @@
 use crate::{
     blockstore::key::{CompositeKey, KeyWrapper},
+    errors::ChromaError,
     segment::DataRecord,
 };
 use arrow::array::Int32Array;
@@ -47,6 +48,8 @@ pub(crate) trait Readable<'referred_data>: Sized {
         key: KeyWrapper,
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)>;
+
+    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>>;
 }
 
 impl Writeable for &str {
@@ -156,6 +159,10 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .map(|(k, v)| (k, v.as_str()))
             .collect()
     }
+
+    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.string_value_storage.iter().len())
+    }
 }
 
 // TODO: remove this and make this all use a unified storage so we don't have two impls
@@ -262,6 +269,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
             .map(|(k, v)| (k, v.clone()))
             .collect()
     }
+
+    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.int32_array_storage.iter().len())
+    }
 }
 
 impl Writeable for &RoaringBitmap {
@@ -367,6 +378,10 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .map(|(k, v)| (k, v.clone()))
             .collect()
     }
+
+    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.roaring_bitmap_storage.iter().len())
+    }
 }
 
 impl Writeable for u32 {
@@ -466,6 +481,10 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
             .map(|(k, v)| (k, v.clone()))
             .collect()
+    }
+
+    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.u32_storage.iter().len())
     }
 }
 
@@ -664,6 +683,10 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
                 )
             })
             .collect()
+    }
+
+    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.data_record_id_storage.iter().len())
     }
 }
 
