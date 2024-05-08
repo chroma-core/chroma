@@ -6,10 +6,13 @@ use super::{
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
+use crate::blockstore::BlockfileError;
+use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
 use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
+use thiserror::Error;
 use uuid::Uuid;
 
 pub(super) const MAX_BLOCK_SIZE: usize = 16384;
@@ -24,8 +27,21 @@ pub(crate) struct ArrowBlockfileWriter {
 }
 // TODO: method visibility should not be pub(crate)
 
+#[derive(Error, Debug)]
+pub enum ArrowBlockfileError {
+    #[error("Block not found")]
+    BlockNotFound,
+}
+
+impl ChromaError for ArrowBlockfileError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
+        }
+    }
+}
+
 impl ArrowBlockfileWriter {
-    /// Create a new blockfile and writer for it
     pub(super) fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         id: Uuid,
         block_manager: BlockManager,
@@ -152,7 +168,7 @@ impl ArrowBlockfileWriter {
         Ok(())
     }
 
-    pub(crate) async fn delete<K: ArrowWriteableKey>(
+    pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
@@ -161,7 +177,38 @@ impl ArrowBlockfileWriter {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
 
-        // RESUME
+        // TODO: clean this up as its redudant with the set method
+        let delta = {
+            let deltas = self.block_deltas.lock();
+            let delta = match deltas.get(&target_block_id) {
+                None => None,
+                Some(delta) => Some(delta.clone()),
+            };
+            delta
+        };
+
+        let delta = match delta {
+            None => {
+                let block = self.block_manager.get(&target_block_id).await.unwrap();
+                let new_delta = self.block_manager.fork::<K, V>(&block.id);
+                let new_id = new_delta.id;
+                self.sparse_index.replace_block(
+                    target_block_id,
+                    new_delta.id,
+                    new_delta
+                        .get_min_key()
+                        .expect("Block should never be empty when forked"),
+                );
+                {
+                    let mut deltas = self.block_deltas.lock();
+                    deltas.insert(new_id, new_delta.clone());
+                }
+                new_delta
+            }
+            Some(delta) => delta,
+        };
+        delta.delete::<K, V>(prefix, key);
+        Ok(())
     }
 
     pub(crate) fn id(&self) -> Uuid {
@@ -217,15 +264,13 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         let res = match block {
             Some(block) => block.get(prefix, key),
             None => {
-                // TODO: return a proper error
-                panic!("Block not found");
+                return Err(Box::new(ArrowBlockfileError::BlockNotFound));
             }
         };
         match res {
             Some(value) => Ok(value),
             None => {
-                // TODO: return a proper error
-                panic!("Key not found");
+                return Err(Box::new(BlockfileError::NotFoundError));
             }
         }
     }
@@ -247,6 +292,7 @@ mod tests {
         types::MetadataValue,
     };
     use arrow::array::Int32Array;
+    use rand::seq::IteratorRandom;
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -552,6 +598,62 @@ mod tests {
                 metadata.get("key").unwrap(),
                 &MetadataValue::Str("value".to_string())
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let id = writer.id();
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = format!("{:04}", i);
+            writer
+                .set("key", key.as_str(), value.as_str())
+                .await
+                .unwrap();
+        }
+        writer.commit::<&str, &str>().unwrap();
+
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value, format!("{:04}", i));
+        }
+
+        let writer = blockfile_provider.fork::<&str, &str>(&id).await.unwrap();
+        let id = writer.id();
+
+        // Delete some keys
+        let mut rng = rand::thread_rng();
+        let deleted_keys = (0..n).choose_multiple(&mut rng, n / 2);
+        for i in &deleted_keys {
+            let key = format!("{:04}", *i);
+            writer
+                .delete::<&str, &str>("key", key.as_str())
+                .await
+                .unwrap();
+        }
+        writer.commit::<&str, &str>().unwrap();
+
+        // Check that the deleted keys are gone
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            if deleted_keys.contains(&i) {
+                assert!(reader.get("key", &key).await.is_err());
+            } else {
+                let value = reader.get("key", &key).await.unwrap();
+                assert_eq!(value, format!("{:04}", i));
+            }
         }
     }
 }
