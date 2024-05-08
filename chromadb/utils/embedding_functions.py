@@ -248,6 +248,28 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         ]
 
 
+class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(self, api_key: str, model_name: str = "voyage-large-2"):
+        try:
+            import voyageai
+        except ImportError:
+            raise ValueError(
+                "The VoyageAI python package is not installed. Please install it with `pip install voyageai`"
+            )
+
+        self._client = voyageai.Client(api_key)
+        self._model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        # Call VoyageAI Embedding API for each document.
+        return [
+            embeddings
+            for embeddings in self._client.embed(
+                texts=input, model=self._model_name, input_type="document"
+            )
+        ]
+
+
 class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to get embeddings for a list of texts using the HuggingFace API.
