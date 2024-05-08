@@ -17,19 +17,16 @@ use crate::execution::operators::pull_log::PullLogsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
-    DistributedHNSWSegmentWriter,
 };
-use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, System};
-use crate::types::{Collection, LogRecord, Operation, Segment, SegmentType, VectorQueryResult};
+use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
 use crate::{
     log::log::Log,
     system::{Component, Handler, Receiver},
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -227,32 +224,6 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn get_disallowed_ids(
-        &self,
-        logs: Chunk<LogRecord>,
-        record_segment_reader: &RecordSegmentReader<'_>,
-    ) -> Result<Vec<u32>, Box<dyn ChromaError>> {
-        let mut disallowed_ids = Vec::new();
-        for item in logs.iter() {
-            let log = item.0;
-            let operation_record = &log.record;
-            if operation_record.operation == Operation::Delete
-                || operation_record.operation == Operation::Update
-            {
-                let offset_id = record_segment_reader
-                    .get_offset_id_for_user_id(&operation_record.id)
-                    .await;
-                match offset_id {
-                    Ok(offset_id) => disallowed_ids.push(offset_id),
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-        Ok(disallowed_ids)
-    }
-
     async fn hnsw_segment_query(&mut self, logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
         self.state = ExecutionState::QueryKnn;
 
@@ -298,60 +269,16 @@ impl HnswQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Record Segment is not set");
 
-        let record_segment_reader = match RecordSegmentReader::from_segment(
-            &record_segment,
-            &self.blockfile_provider,
-        )
-        .await
-        {
-            Ok(reader) => {
-                println!("Record Segment Reader created successfully");
-                reader
-            }
-            Err(e) => match *e {
-                RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
-                    self.terminate_with_error(e, ctx);
-                    return;
-                }
-                RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                    self.terminate_with_error(e, ctx);
-                    return;
-                }
-                RecordSegmentReaderCreationError::UninitializedSegment => {
-                    self.terminate_with_error(e, ctx);
-                    return;
-                }
-            },
-        };
-        let mut allowed_offset_ids = Vec::new();
-        for user_id in self.allowed_ids.into_iter() {
-            let offset_id = record_segment_reader
-                .get_offset_id_for_user_id(&user_id)
-                .await;
-            match offset_id {
-                Ok(offset_id) => allowed_offset_ids.push(offset_id),
-                Err(e) => {
-                    self.terminate_with_error(e, ctx);
-                    return;
-                }
-            }
-        }
-        let disallowed_offset_ids =
-            match self.get_disallowed_ids(logs, &record_segment_reader).await {
-                Ok(disallowed_offset_ids) => disallowed_offset_ids,
-                Err(e) => {
-                    self.terminate_with_error(e, ctx);
-                    return;
-                }
-            };
         // Dispatch a query task
         let operator = Box::new(HnswKnnOperator {});
         let input = HnswKnnOperatorInput {
             segment: hnsw_segment_reader,
             query: self.query_vectors[0].clone(),
             k: self.k as usize,
-            allowed_offset_ids: allowed_offset_ids.into(),
-            disallowed_offset_ids: disallowed_offset_ids.into(),
+            record_segment: record_segment.clone(),
+            blockfile_provider: self.blockfile_provider.clone(),
+            allowed_ids: self.allowed_ids.clone(),
+            logs: logs.clone(),
         };
         let task = wrap(operator, input, ctx.sender.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
