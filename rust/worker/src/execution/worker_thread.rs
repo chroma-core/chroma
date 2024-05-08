@@ -32,6 +32,10 @@ impl Debug for WorkerThread {
 
 #[async_trait]
 impl Component for WorkerThread {
+    fn get_name() -> &'static str {
+        "Worker thread"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }

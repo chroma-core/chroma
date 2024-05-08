@@ -236,6 +236,10 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
 // ============== Component Implementation ==============
 #[async_trait]
 impl Component for CompactionManager {
+    fn get_name() -> &'static str {
+        "Compaction manager"
+    }
+
     fn queue_size(&self) -> usize {
         self.compaction_manager_queue_size
     }
@@ -318,6 +322,7 @@ mod tests {
                         embedding: Some(vec![1.0, 2.0, 3.0]),
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
@@ -338,6 +343,7 @@ mod tests {
                         embedding: Some(vec![4.0, 5.0, 6.0]),
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },

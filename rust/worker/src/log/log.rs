@@ -4,12 +4,16 @@ use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
+use crate::tracing::util::client_interceptor;
 use crate::types::LogRecord;
 use crate::types::RecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
+use tonic::service::interceptor;
+use tonic::transport::Endpoint;
+use tonic::{Request, Status};
 use uuid::Uuid;
 
 /// CollectionInfo is a struct that contains information about a collection for the
@@ -77,11 +81,23 @@ impl Clone for Box<dyn Log> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct GrpcLog {
-    client: LogServiceClient<tonic::transport::Channel>,
+    client: LogServiceClient<
+        interceptor::InterceptedService<
+            tonic::transport::Channel,
+            fn(Request<()>) -> Result<Request<()>, Status>,
+        >,
+    >,
 }
 
 impl GrpcLog {
-    pub(crate) fn new(client: LogServiceClient<tonic::transport::Channel>) -> Self {
+    pub(crate) fn new(
+        client: LogServiceClient<
+            interceptor::InterceptedService<
+                tonic::transport::Channel,
+                fn(Request<()>) -> Result<Request<()>, Status>,
+            >,
+        >,
+    ) -> Self {
         Self { client }
     }
 }
@@ -110,10 +126,22 @@ impl Configurable<LogConfig> for GrpcLog {
                 // TODO: switch to logging when logging is implemented
                 println!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
-                let client = LogServiceClient::connect(connection_string).await;
+                let endpoint_res = Endpoint::from_shared(connection_string);
+                if endpoint_res.is_err() {
+                    return Err(Box::new(GrpcLogError::FailedToConnect(
+                        endpoint_res.err().unwrap(),
+                    )));
+                }
+                let client = endpoint_res.ok().unwrap().connect().await;
                 match client {
                     Ok(client) => {
-                        return Ok(GrpcLog::new(client));
+                        let channel: LogServiceClient<
+                            interceptor::InterceptedService<
+                                tonic::transport::Channel,
+                                fn(Request<()>) -> Result<Request<()>, Status>,
+                            >,
+                        > = LogServiceClient::with_interceptor(client, client_interceptor);
+                        return Ok(GrpcLog::new(channel));
                     }
                     Err(e) => {
                         return Err(Box::new(GrpcLogError::FailedToConnect(e)));

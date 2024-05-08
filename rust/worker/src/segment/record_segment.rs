@@ -427,13 +427,19 @@ impl LogMaterializer for RecordSegmentWriter {
                         },
                         None => None,
                     };
+
+                    let document = match &log_entry.record.document {
+                        Some(document) => Some(document.as_str()),
+                        None => None,
+                    };
+
                     let data_record = DataRecord {
                         id: &log_entry.record.id,
                         // TODO: don't unwrap here, it should never happen as Adds always have embeddings
                         // but we should handle this gracefully
                         embedding: log_entry.record.embedding.as_ref().unwrap(),
-                        document: None, // TODO: document
-                        metadata: metadata,
+                        document,
+                        metadata,
                     };
                     let materialized =
                         MaterializedLogRecord::new(next_offset_id, log_entry, data_record);
@@ -442,7 +448,7 @@ impl LogMaterializer for RecordSegmentWriter {
                         .id_to_data
                         .as_ref()
                         .unwrap()
-                        .set("", index as u32, &materialized.materialized_record)
+                        .set("", next_offset_id, &materialized.materialized_record)
                         .await;
                     println!("Writing to user_id_to_id");
                     let res = self
@@ -577,5 +583,19 @@ impl RecordSegmentReader<'_> {
         offset_id: u32,
     ) -> Result<&str, Box<dyn ChromaError>> {
         self.id_to_user_id.get("", offset_id).await
+    }
+
+    pub(crate) async fn get_offset_id_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<u32, Box<dyn ChromaError>> {
+        self.user_id_to_id.get("", user_id).await
+    }
+
+    pub(crate) async fn get_data_for_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<DataRecord, Box<dyn ChromaError>> {
+        self.id_to_data.get("", offset_id).await
     }
 }

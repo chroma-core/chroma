@@ -356,7 +356,7 @@ impl HnswQueryOrchestrator {
         collection_id: &Uuid,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let child_span: tracing::Span =
-            trace_span!(parent: Span::current(), "get collection id for segment id");
+            trace_span!(parent: Span::current(), "get collection for collection id");
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
             .instrument(child_span.clone())
@@ -454,6 +454,10 @@ impl HnswQueryOrchestrator {
 
 #[async_trait]
 impl Component for HnswQueryOrchestrator {
+    fn get_name() -> &'static str {
+        "HNSW Query orchestrator"
+    }
+
     fn queue_size(&self) -> usize {
         1000 // TODO: make configurable
     }

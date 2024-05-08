@@ -24,6 +24,7 @@ class SegmentType(Enum):
     HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
     HNSW_DISTRIBUTED = "urn:chroma:segment/vector/hnsw-distributed"
     RECORD = "urn:chroma:segment/record"
+    BLOCKFILE_METADATA = "urn:chroma:segment/metadata/blockfile"
 
 
 class SegmentImplementation(Component):

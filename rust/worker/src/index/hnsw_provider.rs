@@ -109,7 +109,7 @@ impl HnswIndexProvider {
             }
         };
 
-        match HnswIndex::load(storage_path_str, &index_config, *source_id) {
+        match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
                 let mut cache = self.cache.write();
@@ -457,4 +457,48 @@ pub(crate) enum HnswIndexProviderFileError {
     StorageGetError(#[from] crate::storage::GetError),
     #[error("Storage Put Error")]
     StoragePutError(#[from] crate::storage::PutError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        storage::{local::LocalStorage, Storage},
+        types::SegmentType,
+    };
+
+    #[tokio::test]
+    async fn test_fork() {
+        let storage_dir = tempfile::tempdir().unwrap().path().to_path_buf();
+        let hnsw_tmp_path = storage_dir.join("hnsw");
+
+        // Create the directories needed
+        std::fs::create_dir_all(&hnsw_tmp_path).unwrap();
+
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            storage_dir.to_str().unwrap(),
+        )));
+
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path);
+        let segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: SegmentType::HnswDistributed,
+            scope: crate::types::SegmentScope::VECTOR,
+            collection: Some(Uuid::new_v4()),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let dimensionality = 128;
+        let created_index = provider.create(&segment, dimensionality).unwrap();
+        let created_index_id = created_index.read().id;
+
+        let forked_index = provider
+            .fork(&created_index_id, &segment, dimensionality)
+            .await
+            .unwrap();
+        let forked_index_id = forked_index.read().id;
+
+        assert_ne!(created_index_id, forked_index_id);
+    }
 }
