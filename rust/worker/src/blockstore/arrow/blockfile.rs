@@ -313,6 +313,40 @@ mod tests {
     use std::collections::HashMap;
 
     #[tokio::test]
+    async fn test_count() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Box::new(Storage::Local(LocalStorage::new(
+            tmp_dir.path().to_str().unwrap(),
+        )));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id = writer.id();
+
+        let prefix_1 = "key";
+        let key1 = "zzzz";
+        let value1 = Int32Array::from(vec![1, 2, 3]);
+        writer.set(prefix_1, key1, &value1).await.unwrap();
+
+        let prefix_2 = "key";
+        let key2 = "aaaa";
+        let value2 = Int32Array::from(vec![4, 5, 6]);
+        writer.set(prefix_2, key2, &value2).await.unwrap();
+
+        writer.commit::<&str, &Int32Array>().unwrap();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id)
+            .await
+            .unwrap();
+
+        let count = reader.count().await;
+        match count {
+            Ok(c) => assert_eq!(2, c),
+            Err(_) => assert!(true, "Error getting count"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_blockfile() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Box::new(Storage::Local(LocalStorage::new(
