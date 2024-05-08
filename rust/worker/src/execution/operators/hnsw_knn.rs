@@ -13,8 +13,8 @@ pub struct HnswKnnOperatorInput {
     pub segment: Box<DistributedHNSWSegmentReader>,
     pub query: Vec<f32>,
     pub k: usize,
-    pub allowed_ids: Arc<[String]>,
-    pub disallowed_ids: Arc<[String]>,
+    pub allowed_offset_ids: Arc<[u32]>,
+    pub disallowed_offset_ids: Arc<[u32]>,
 }
 
 #[derive(Debug)]
