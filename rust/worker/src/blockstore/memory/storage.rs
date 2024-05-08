@@ -49,7 +49,7 @@ pub(crate) trait Readable<'referred_data>: Sized {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)>;
 
-    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>>;
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 }
 
 impl Writeable for &str {
@@ -160,7 +160,7 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .collect()
     }
 
-    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.string_value_storage.iter().len())
     }
 }
@@ -270,7 +270,7 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
             .collect()
     }
 
-    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.int32_array_storage.iter().len())
     }
 }
@@ -379,7 +379,7 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .collect()
     }
 
-    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
 }
@@ -483,7 +483,7 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .collect()
     }
 
-    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.u32_storage.iter().len())
     }
 }
@@ -685,7 +685,7 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             .collect()
     }
 
-    fn count(storage: &'referred_data Storage) -> Result<usize, Box<dyn ChromaError>> {
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.data_record_id_storage.iter().len())
     }
 }
