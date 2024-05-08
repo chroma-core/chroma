@@ -25,7 +25,7 @@ jobs:
               echo "tag_matches=true" >> $GITHUB_OUTPUT
           else
             echo "Tag does not match the release tag pattern ([0-9]+\.[0-9]+\.[0-9]+), exiting workflow"
-            exit 1
+            echo "tag_matches=false" >> $GITHUB_OUTPUT
           fi
 
   get-version:
