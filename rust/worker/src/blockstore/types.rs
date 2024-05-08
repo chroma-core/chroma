@@ -4,7 +4,7 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::key::KeyWrapper;
-use super::memory::reader_writer::{HashMapBlockfileReader, MemoryBlockfileWriter};
+use super::memory::reader_writer::{MemoryBlockfileReader, MemoryBlockfileWriter};
 use super::memory::storage::{Readable, Writeable};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
@@ -214,6 +214,20 @@ impl BlockfileWriter {
         }
     }
 
+    pub(crate) async fn delete<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.delete::<K, V>(prefix, key),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => todo!(),
+        }
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
@@ -254,7 +268,7 @@ pub(crate) enum BlockfileReader<
     K: Key + ArrowReadableKey<'me>,
     V: Value + ArrowReadableValue<'me>,
 > {
-    MemoryBlockfileReader(HashMapBlockfileReader<K, V>),
+    MemoryBlockfileReader(MemoryBlockfileReader<K, V>),
     ArrowBlockfileReader(ArrowBlockfileReader<'me, K, V>),
 }
 

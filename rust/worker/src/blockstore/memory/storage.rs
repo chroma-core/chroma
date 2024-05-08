@@ -9,6 +9,7 @@ use std::{collections::HashMap, sync::Arc};
 
 pub(crate) trait Writeable {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder);
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder);
 }
 
 pub(crate) trait Readable<'referred_data>: Sized {
@@ -62,6 +63,18 @@ impl Writeable for &str {
                 },
                 value.to_string(),
             );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .string_value_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -161,6 +174,18 @@ impl Writeable for &Int32Array {
                 value.clone(),
             );
     }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .int32_array_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
+    }
 }
 
 impl<'referred_data> Readable<'referred_data> for Int32Array {
@@ -254,6 +279,18 @@ impl Writeable for &RoaringBitmap {
                 value.clone(),
             );
     }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .roaring_bitmap_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
+    }
 }
 
 impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
@@ -341,6 +378,18 @@ impl Writeable for u32 {
             },
             value,
         );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .u32_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -446,6 +495,27 @@ impl Writeable for &DataRecord<'_> {
                 },
                 value.embedding.to_vec(),
             );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .data_record_id_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key: key.clone(),
+            });
+        storage
+            .data_record_embedding_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -596,22 +666,6 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             .collect()
     }
 }
-
-// Int32ArrayValue(Int32Array),
-// PositionalPostingListValue(PositionalPostingList),
-// StringValue(String),
-// IntValue(i32),
-// UintValue(u32),
-// RoaringBitmapValue(RoaringBitmap),
-
-// pub(crate) struct DataRecord<'a> {
-//     pub(crate) id: &'a str,
-//     pub(crate) embedding: &'a [f32],
-//     pub(crate) metadata: &'a Option<Metadata>,
-//     pub(crate) document: &'a Option<String>,
-//     // Optional staged serialized version of the metadata
-//     pub(crate) serialized_metadata: Option<Vec<u8>>,
-// }
 
 #[derive(Clone)]
 pub(crate) struct StorageBuilder {

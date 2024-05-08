@@ -1,5 +1,5 @@
 use super::{
-    reader_writer::{HashMapBlockfileReader, MemoryBlockfileWriter},
+    reader_writer::{MemoryBlockfileReader, MemoryBlockfileWriter},
     storage::{Readable, StorageManager, Writeable},
 };
 use crate::blockstore::{
@@ -33,7 +33,7 @@ impl HashMapBlockfileProvider {
         &self,
         id: &uuid::Uuid,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
-        let reader = HashMapBlockfileReader::open(*id, self.storage_manager.clone());
+        let reader = MemoryBlockfileReader::open(*id, self.storage_manager.clone());
         Ok(BlockfileReader::<K, V>::MemoryBlockfileReader(reader))
     }
 
