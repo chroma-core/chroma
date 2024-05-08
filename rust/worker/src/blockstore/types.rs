@@ -223,7 +223,7 @@ impl BlockfileWriter {
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            BlockfileWriter::MemoryBlockfileWriter(writer) => todo!(),
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.delete::<K, V>(prefix, key),
             BlockfileWriter::ArrowBlockfileWriter(writer) => todo!(),
         }
     }
