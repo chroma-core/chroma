@@ -138,29 +138,6 @@ impl ArrowBlockfileWriter {
             Some(delta) => delta,
         };
 
-        // let delta = match deltas.get(&target_block_id) {
-        //     None => match self.block_manager.get(&target_block_id).await {
-        //         None => {
-        //             // this should never happen
-        //             unreachable!("Block not found")
-        //         }
-        //         Some(block) => {
-        //             let new_delta = self.block_manager.fork::<K, V>(&block.id);
-        //             let new_id = new_delta.id;
-        //             self.sparse_index.replace_block(
-        //                 target_block_id,
-        //                 new_delta.id,
-        //                 new_delta
-        //                     .get_min_key()
-        //                     .expect("Block should never be empty when forked"),
-        //             );
-        //             deltas.insert(new_id, new_delta);
-        //             deltas.get(&new_id).unwrap()
-        //         }
-        //     },
-        //     Some(delta) => delta,
-        // };
-
         // Check if we can add to the the delta without pushing the block over the max size.
         // If we can't, we need to split the block and create a new delta
         if delta.can_add(prefix, &key, &value) {
@@ -169,11 +146,22 @@ impl ArrowBlockfileWriter {
             let (split_key, new_delta) = delta.split::<K, V>();
             self.sparse_index.add_block(split_key, new_delta.id);
             new_delta.add(prefix, key, value);
-            // deltas.insert(new_delta.id, new_delta);
             let mut deltas = self.block_deltas.lock();
             deltas.insert(new_delta.id, new_delta);
         }
         Ok(())
+    }
+
+    pub(crate) async fn delete<K: ArrowWriteableKey>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        // Get the target block id for the key
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.sparse_index.get_target_block_id(&search_key);
+
+        // RESUME
     }
 
     pub(crate) fn id(&self) -> Uuid {
