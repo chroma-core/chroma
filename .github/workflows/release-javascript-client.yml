@@ -3,11 +3,16 @@ name: 📦 Release JavaScript client
 on:
   push:
     tags:
-      - 'js_release_*.*.*'  # Match tags in the form js_release_X.Y.Z
-      - 'js_release_alpha_*.*.*'  # Match tags in the form js_release_alpha_X.Y.Z
+      - 'js_release_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_X.Y.Z
+      - 'js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_alpha_X.Y.Z
+    branches:
+      - main
 
 jobs:
   release:
+    strategy:
+      matrix:
+        registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
@@ -30,7 +35,7 @@ jobs:
     - uses: actions/setup-node@v3
       with:
         node-version: "16.x"
-        registry-url: "https://registry.npmjs.org"
+        registry-url: ${{ matrix.registry }}
     - name: Install dependencies
       run: npm install
       working-directory: ./clients/js/
@@ -38,4 +43,55 @@ jobs:
       run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
       working-directory: ./clients/js/
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+  release-dev:
+    strategy:
+      matrix:
+        registry: [ "https://npm.pkg.github.com" ]
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    permissions: write-all
+    steps:
+      - name: Check if tag matches the pattern
+        id: check-tag
+        run: |
+          # we don't necessarily need this
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "Push to main branch, releasing dev version to GH packages"
+            echo "NPM_SCRIPT=release_dev" >> "$GITHUB_ENV"
+          else
+            echo "The ref does not point to main, exiting workflow"
+            exit 1
+          fi
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: "16.x"
+          registry-url: ${{ matrix.registry }}
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./clients/js/
+      - name: Dev Version
+        id: dev-version
+        run: |
+          set -e
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          # Generate a beta tag using commit short sha and run id
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          DEV_TAG="dev.${COMMIT_SHA}-${GITHUB_RUN_ID}"
+          # Create full version with beta tag
+          BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
+          PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
+          # bump patch version
+          NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+          NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
+          echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+      - name: Test & publish
+        run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
+        working-directory: ./clients/js/
+        env:
+          NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
