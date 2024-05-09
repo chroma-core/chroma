@@ -285,7 +285,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
             match block {
                 Some(b) => result = result + b.len(),
                 None => {
-                    // TODO: Ignore for now but should return an error?
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             }
         }
