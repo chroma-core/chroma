@@ -146,6 +146,7 @@ impl WorkerServer {
                     system.clone(),
                     query_vectors.clone(),
                     request.k,
+                    request.allowed_ids,
                     request.include_embeddings,
                     segment_uuid,
                     self.log.clone(),
