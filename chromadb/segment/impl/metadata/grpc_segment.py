@@ -40,7 +40,13 @@ class GrpcMetadataSegment(MetadataReader):
 
     @override
     def count(self) -> int:
-        raise NotImplementedError()
+        request: pb.CountRecordsRequest = pb.CountRecordsRequest(
+            segment_id=self._segment["id"].hex
+        )
+        response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
+            request
+        )
+        return response.count
 
     @override
     def delete(self, where: Optional[Where] = None) -> None:
@@ -65,12 +71,14 @@ class GrpcMetadataSegment(MetadataReader):
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
-        where_pb = self._where_to_proto(where)
-        where_document_pb = self._where_document_to_proto(where_document)
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,
-            where=where_pb,
-            where_document=where_document_pb,
+            where=self._where_to_proto(where) if where is not None else None,
+            where_document=(
+                self._where_document_to_proto(where_document)
+                if where_document is not None
+                else None
+            ),
             ids=ids,
             limit=limit,
             offset=offset,

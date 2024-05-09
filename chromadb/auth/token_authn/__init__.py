@@ -1,6 +1,9 @@
 import logging
+import random
+import re
 import string
-
+import time
+import traceback
 from enum import Enum
 from starlette.datastructures import Headers
 from typing import cast, Dict, List, Optional, TypedDict, TypeVar
@@ -15,6 +18,7 @@ from chromadb.auth import (
     ClientAuthProvider,
     ClientAuthHeaders,
     UserIdentity,
+    AuthError,
 )
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
@@ -26,10 +30,14 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TokenAuthenticationServerProvider", "TokenAuthClientProvider"]
+__all__ = [
+    "TokenAuthenticationServerProvider",
+    "TokenAuthClientProvider",
+    "TokenTransportHeader",
+]
 
 
-class TokenTransportHeader(Enum):
+class TokenTransportHeader(str, Enum):
     """
     Accceptable token transport headers.
     """
@@ -42,15 +50,28 @@ class TokenTransportHeader(Enum):
     X_CHROMA_TOKEN = "X-Chroma-Token"
 
 
+valid_token_chars = set(string.digits + string.ascii_letters + string.punctuation)
+
+
 def _check_token(token: str) -> None:
     token_str = str(token)
-    if not all(
-        c in string.digits + string.ascii_letters + string.punctuation
-        for c in token_str
-    ):
+    if not all(c in valid_token_chars for c in token_str):
         raise ValueError(
-            "Invalid token. Must contain \
-                         only ASCII letters and digits."
+            "Invalid token. Must contain only ASCII letters, digits, and punctuation."
+        )
+
+
+allowed_token_headers = [
+    TokenTransportHeader.AUTHORIZATION.value,
+    TokenTransportHeader.X_CHROMA_TOKEN.value,
+]
+
+
+def _check_allowed_token_headers(token_header: str) -> None:
+    if token_header not in allowed_token_headers:
+        raise ValueError(
+            f"Invalid token transport header: {token_header}. "
+            f"Must be one of {allowed_token_headers}"
         )
 
 
@@ -71,9 +92,12 @@ class TokenAuthClientProvider(ClientAuthProvider):
         _check_token(self._token.get_secret_value())
 
         if system.settings.chroma_auth_token_transport_header:
-            self._token_transport_header = TokenTransportHeader[
-                str(system.settings.chroma_auth_token_transport_header)
-            ]
+            _check_allowed_token_headers(
+                system.settings.chroma_auth_token_transport_header
+            )
+            self._token_transport_header = TokenTransportHeader(
+                system.settings.chroma_auth_token_transport_header
+            )
         else:
             self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
@@ -119,9 +143,12 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         super().__init__(system)
         self._settings = system.settings
         if system.settings.chroma_auth_token_transport_header:
-            self._token_transport_header = TokenTransportHeader[
-                str(system.settings.chroma_auth_token_transport_header)
-            ]
+            _check_allowed_token_headers(
+                system.settings.chroma_auth_token_transport_header
+            )
+            self._token_transport_header = TokenTransportHeader(
+                system.settings.chroma_auth_token_transport_header
+            )
         else:
             self._token_transport_header = TokenTransportHeader.AUTHORIZATION
 
@@ -166,17 +193,21 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     @override
     def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
         try:
+            if self._token_transport_header.value not in headers:
+                raise AuthError(
+                    f"Authorization header '{self._token_transport_header.value}' not found"
+                )
             token = headers[self._token_transport_header.value]
             if self._token_transport_header == TokenTransportHeader.AUTHORIZATION:
                 if not token.startswith("Bearer "):
-                    raise HTTPException(status_code=401, detail="Unauthorized")
-                token = token.replace("Bearer ", "")
+                    raise AuthError("Bearer not found in Authorization header")
+                token = re.sub(r"^Bearer ", "", token)
 
             token = token.strip()
             _check_token(token)
 
             if token not in self._token_user_mapping:
-                raise HTTPException(status_code=401, detail="Unauthorized")
+                raise AuthError("Invalid credentials: Token not found}")
 
             user_identity = UserIdentity(
                 user_id=self._token_user_mapping[token]["id"],
@@ -184,8 +215,21 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                 databases=self._token_user_mapping[token]["databases"],
             )
             return user_identity
-        except Exception as e:
+        except AuthError as e:
             logger.debug(
-                "TokenAuthenticationServerProvider.authenticate " f"failed: {repr(e)}"
+                f"TokenAuthenticationServerProvider.authenticate failed: {repr(e)}"
             )
-            raise HTTPException(status_code=403, detail="Forbidden")
+        except Exception as e:
+            tb = traceback.extract_tb(e.__traceback__)
+            # Get the last call stack
+            last_call_stack = tb[-1]
+            line_number = last_call_stack.lineno
+            filename = last_call_stack.filename
+            logger.debug(
+                "TokenAuthenticationServerProvider.authenticate failed: "
+                f"Failed to authenticate {type(e).__name__} at {filename}:{line_number}"
+            )
+        time.sleep(
+            random.uniform(0.001, 0.005)
+        )  # add some jitter to avoid timing attacks
+        raise HTTPException(status_code=403, detail="Forbidden")

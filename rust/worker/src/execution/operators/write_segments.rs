@@ -3,7 +3,7 @@ use crate::segment::SegmentWriter;
 use crate::{
     execution::{data::data_chunk::Chunk, operator::Operator},
     segment::{
-        distributed_hnsw_segment::DistributedHNSWSegment, record_segment::RecordSegmentWriter,
+        distributed_hnsw_segment::DistributedHNSWSegmentWriter, record_segment::RecordSegmentWriter,
     },
     types::LogRecord,
 };
@@ -21,14 +21,14 @@ impl WriteSegmentsOperator {
 #[derive(Debug)]
 pub struct WriteSegmentsInput {
     record_segment_writer: RecordSegmentWriter,
-    hnsw_segment_writer: Box<DistributedHNSWSegment>,
+    hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
     chunk: Chunk<LogRecord>,
 }
 
 impl<'me> WriteSegmentsInput {
     pub fn new(
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegment>,
+        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
         chunk: Chunk<LogRecord>,
     ) -> Self {
         WriteSegmentsInput {
@@ -42,7 +42,7 @@ impl<'me> WriteSegmentsInput {
 #[derive(Debug)]
 pub struct WriteSegmentsOutput {
     pub(crate) record_segment_writer: RecordSegmentWriter,
-    pub(crate) hnsw_segment_writer: Box<DistributedHNSWSegment>,
+    pub(crate) hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
 }
 
 pub type WriteSegmentsResult = Result<WriteSegmentsOutput, ()>;

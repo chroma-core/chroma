@@ -28,9 +28,27 @@ impl Into<KeyWrapper> for &str {
     }
 }
 
+impl<'referred_data> From<&'referred_data KeyWrapper> for &'referred_data str {
+    fn from(key: &'referred_data KeyWrapper) -> Self {
+        match key {
+            KeyWrapper::String(s) => s,
+            _ => panic!("Invalid conversion"),
+        }
+    }
+}
+
 impl Into<KeyWrapper> for f32 {
     fn into(self) -> KeyWrapper {
         KeyWrapper::Float32(self)
+    }
+}
+
+impl From<&KeyWrapper> for f32 {
+    fn from(key: &KeyWrapper) -> Self {
+        match key {
+            KeyWrapper::Float32(f) => f.clone(),
+            _ => panic!("Invalid conversion"),
+        }
     }
 }
 
@@ -40,14 +58,32 @@ impl Into<KeyWrapper> for bool {
     }
 }
 
+impl From<&KeyWrapper> for bool {
+    fn from(key: &KeyWrapper) -> Self {
+        match key {
+            KeyWrapper::Bool(b) => b.clone(),
+            _ => panic!("Invalid conversion"),
+        }
+    }
+}
+
 impl Into<KeyWrapper> for u32 {
     fn into(self) -> KeyWrapper {
         KeyWrapper::Uint32(self)
     }
 }
 
+impl From<&KeyWrapper> for u32 {
+    fn from(key: &KeyWrapper) -> Self {
+        match key {
+            KeyWrapper::Uint32(u) => u.clone(),
+            _ => panic!("Invalid conversion"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
-pub(super) struct CompositeKey {
+pub(crate) struct CompositeKey {
     pub(super) prefix: String,
     pub(super) key: KeyWrapper,
 }

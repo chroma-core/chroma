@@ -1,23 +1,24 @@
 use super::{
-    block::{self, delta::BlockDelta, Block},
-    blockfile::{self, ArrowBlockfileReader, ArrowBlockfileWriter},
-    sparse_index::{self, SparseIndex},
+    block::{delta::BlockDelta, Block},
+    blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
+    sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
 use crate::{
     blockstore::{
         key::KeyWrapper,
         memory::storage::Readable,
-        provider::{BlockfileProvider, CreateError, OpenError},
+        provider::{CreateError, OpenError},
         BlockfileReader, BlockfileWriter, Key, Value,
     },
-    errors::ChromaError,
+    errors::{ChromaError, ErrorCodes},
     storage::Storage,
 };
 use core::panic;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
-use tokio::{io::AsyncReadExt, pin};
+use thiserror::Error;
+use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
@@ -192,35 +193,9 @@ impl BlockManager {
                 }
             }
         }
-
-        // match cache.get(id) {
-        //     Some(block) => Some(block.clone()),
-        //     None => {
-        //         let key = format!("block/{}", id);
-        //         let bytes = self.storage.get(&key).await;
-        //         match bytes {
-        //             Ok(mut bytes) => {
-        //                 let mut buf: Vec<u8> = Vec::new();
-        //                 bytes.read_to_end(&mut buf);
-        //                 let block = Block::from_bytes(&buf);
-        //                 match block {
-        //                     Ok(block) => {
-        //                         self.read_cache.write().insert(*id, block.clone());
-        //                         Some(block)
-        //                     }
-        //                     Err(_) => {
-        //                         // TODO: log error
-        //                         None
-        //                     }
-        //                 }
-        //             }
-        //             Err(_) => None,
-        //         }
-        //     }
-        // }
     }
 
-    pub(super) async fn flush(&self, id: &Uuid) {
+    pub(super) async fn flush(&self, id: &Uuid) -> Result<(), Box<dyn ChromaError>> {
         let block = self.get(id).await;
 
         match block {
@@ -230,15 +205,32 @@ impl BlockManager {
                 let res = self.storage.put_bytes(&key, bytes).await;
                 match res {
                     Ok(_) => {
-                        println!("Block written to storage")
+                        println!("Block: {} written to storage", id);
+                        Ok(())
                     }
                     Err(e) => {
                         println!("Error writing block to storage {}", e);
+                        Err(Box::new(e))
                     }
                 }
-                // TODO: error handling
             }
-            None => {}
+            None => {
+                return Err(Box::new(BlockFlushError::NotFound));
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BlockFlushError {
+    #[error("Not found")]
+    NotFound,
+}
+
+impl ChromaError for BlockFlushError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BlockFlushError::NotFound => ErrorCodes::NotFound,
         }
     }
 }
@@ -332,7 +324,10 @@ impl SparseIndexManager {
         self.cache.write().insert(index.id, index);
     }
 
-    pub async fn flush<'read, K: ArrowWriteableKey + 'read>(&self, id: &Uuid) {
+    pub async fn flush<'read, K: ArrowWriteableKey + 'read>(
+        &self,
+        id: &Uuid,
+    ) -> Result<(), Box<dyn ChromaError>> {
         let index = self.get::<K::ReadableKey<'read>>(id).await;
         match index {
             Some(index) => {
@@ -344,22 +339,24 @@ impl SparseIndexManager {
                         let res = self.storage.put_bytes(&key, bytes).await;
                         match res {
                             Ok(_) => {
-                                println!("Sparse index written to storage")
+                                println!("Sparse index written to storage");
+                                Ok(())
                             }
-                            Err(_) => {
+                            Err(e) => {
                                 println!("Error writing sparse index to storage");
+                                Err(Box::new(e))
                             }
                         }
                     }
-                    Err(_) => {
-                        // TODO: error
-                        panic!("Failed to convert sparse index to block");
+                    Err(e) => {
+                        println!("Failed to convert sparse index to block");
+                        Err(e)
                     }
                 }
             }
             None => {
-                // TODO: error
-                panic!("Tried to flush a sparse index that doesn't exist");
+                println!("Tried to flush a sparse index that doesn't exist");
+                return Err(Box::new(SparseIndexFlushError::NotFound));
             }
         }
     }
@@ -375,5 +372,19 @@ impl SparseIndexManager {
         let forked = original.fork(new_id);
         self.cache.write().insert(new_id, forked.clone());
         forked
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SparseIndexFlushError {
+    #[error("Not found")]
+    NotFound,
+}
+
+impl ChromaError for SparseIndexFlushError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SparseIndexFlushError::NotFound => ErrorCodes::NotFound,
+        }
     }
 }

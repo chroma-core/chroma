@@ -122,6 +122,8 @@ k8s_resource(
     'test-memberlist:MemberList',
     'test-memberlist-reader:ClusterRole',
     'test-memberlist-reader-binding:ClusterRoleBinding',
+    'lease-watcher:role',
+    'logservice-serviceaccount-rolebinding:rolebinding',
   ],
   new_name='k8s_setup',
   labels=["infrastructure"],

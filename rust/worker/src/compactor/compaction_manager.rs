@@ -171,13 +171,6 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
     async fn try_from_config(
         config: &crate::config::CompactionServiceConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb_config = &config.sysdb;
-        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
-            Ok(sysdb) => sysdb,
-            Err(err) => {
-                return Err(err);
-            }
-        };
         let log_config = &config.log;
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
@@ -243,6 +236,10 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
 // ============== Component Implementation ==============
 #[async_trait]
 impl Component for CompactionManager {
+    fn get_name() -> &'static str {
+        "Compaction manager"
+    }
+
     fn queue_size(&self) -> usize {
         self.compaction_manager_queue_size
     }
@@ -325,6 +322,7 @@ mod tests {
                         embedding: Some(vec![1.0, 2.0, 3.0]),
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
@@ -345,6 +343,7 @@ mod tests {
                         embedding: Some(vec![4.0, 5.0, 6.0]),
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
@@ -361,7 +360,7 @@ mod tests {
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
-            log_position: 0,
+            log_position: -1,
             version: 0,
         };
 
@@ -373,7 +372,7 @@ mod tests {
             dimension: Some(1),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
-            log_position: 0,
+            log_position: -1,
             version: 0,
         };
         sysdb.add_collection(collection_1);

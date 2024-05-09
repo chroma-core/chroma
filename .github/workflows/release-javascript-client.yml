@@ -1,4 +1,4 @@
-name: Chroma Release JS Client
+name: 📦 Release JavaScript client
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
       - 'js_release_alpha_*.*.*'  # Match tags in the form js_release_alpha_X.Y.Z
 
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
@@ -27,15 +27,14 @@ jobs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
-    - name: Set up JS
-      uses: actions/setup-node@v3
+    - uses: actions/setup-node@v3
       with:
-        node-version: '16.x'
-        registry-url: 'https://registry.npmjs.org'
-    - name: Install Client Dev Dependencies
+        node-version: "16.x"
+        registry-url: "https://registry.npmjs.org"
+    - name: Install dependencies
       run: npm install
       working-directory: ./clients/js/
-    - name: npm Test & Publish
+    - name: Test & publish
       run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
       working-directory: ./clients/js/
       env:
