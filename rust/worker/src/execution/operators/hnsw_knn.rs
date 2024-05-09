@@ -118,8 +118,20 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
             }
         };
 
-        // TODO: pass in the updated + deleted ids from log and the result from the metadata filtering
-        let (offset_ids, distances) = input.segment.query(&input.query, input.k);
+        // Convert to usize
+        let allowed_offset_ids: Vec<usize> =
+            allowed_offset_ids.iter().map(|&x| x as usize).collect();
+        let disallowed_offset_ids: Vec<usize> =
+            disallowed_offset_ids.iter().map(|&x| x as usize).collect();
+
+        let (offset_ids, distances) = input.segment.query(
+            &input.query,
+            input.k,
+            &allowed_offset_ids,
+            allowed_offset_ids.len(),
+            &disallowed_offset_ids,
+            disallowed_offset_ids.len(),
+        );
         Ok(HnswKnnOperatorOutput {
             offset_ids,
             distances,

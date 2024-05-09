@@ -170,11 +170,6 @@ impl DistributedHNSWSegmentWriter {
             )))
         }
     }
-
-    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
-        let index = self.index.read();
-        index.query(vector, k)
-    }
 }
 
 impl SegmentWriter for DistributedHNSWSegmentWriter {
@@ -353,8 +348,23 @@ impl DistributedHNSWSegmentReader {
         }
     }
 
-    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+    pub(crate) fn query(
+        &self,
+        vector: &[f32],
+        k: usize,
+        allowed_ids: &[usize],
+        allowed_ids_length: usize,
+        disallowd_ids: &[usize],
+        disallowd_ids_length: usize,
+    ) -> (Vec<usize>, Vec<f32>) {
         let index = self.index.read();
-        index.query(vector, k)
+        index.query(
+            vector,
+            k,
+            allowed_ids,
+            allowed_ids_length,
+            disallowd_ids,
+            disallowd_ids_length,
+        )
     }
 }
