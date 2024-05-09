@@ -14,9 +14,11 @@ def test_spacyembeddingfunction_isnotnone_wheninputisnotnone():
 
 
 def test_spacyembddingfunction_throwserror_whenmodel_notfound():
-    with pytest.raises(ValueError,
-                       match=r"""spacy models are not downloaded yet, please download them using `spacy download model_name`, Please checkout
-                for the list of models from: https://spacy.io/usage/models."""):
+    with pytest.raises(
+        ValueError,
+        match=r"""spacy models are not downloaded yet, please download them using `spacy download model_name`, Please checkout
+                for the list of models from: https://spacy.io/usage/models.""",
+    ):
         SpacyEmbeddingFunction(unknown_model)
 
 
