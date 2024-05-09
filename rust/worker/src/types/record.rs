@@ -1,6 +1,7 @@
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
-    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValueConversionError,
+    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
+    UpdateMetadataValueConversionError,
 };
 use crate::{
     chroma_proto,
@@ -14,6 +15,10 @@ pub(crate) struct OperationRecord {
     pub(crate) embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now so this ignores the encoding
     pub(crate) encoding: Option<ScalarEncoding>,
     pub(crate) metadata: Option<UpdateMetadata>,
+    // Document is implemented in the python code as a special key "chroma:document" in the metadata
+    // This is ugly and clunky. In the rust code we choose to make it a separate field and
+    // only let that concept live in the transport layer
+    pub(crate) document: Option<String>,
     pub(crate) operation: Operation,
 }
 
@@ -67,12 +72,20 @@ impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
             None => (None, None),
         };
 
-        let metadata: Option<UpdateMetadata> = match operation_record_proto.metadata {
-            Some(proto_metadata) => match proto_metadata.try_into() {
-                Ok(metadata) => Some(metadata),
+        let (metadata, document) = match operation_record_proto.metadata {
+            Some(proto_metadata) => match UpdateMetadata::try_from(proto_metadata) {
+                Ok(mut metadata) => {
+                    let document = metadata.remove("chroma:document");
+                    match document {
+                        Some(UpdateMetadataValue::Str(document)) => {
+                            (Some(metadata), Some(document))
+                        }
+                        _ => (Some(metadata), None),
+                    }
+                }
                 Err(e) => return Err(RecordConversionError::UpdateMetadataValueConversionError(e)),
             },
-            None => None,
+            None => (None, None),
         };
 
         Ok(OperationRecord {
@@ -80,6 +93,7 @@ impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
             embedding,
             encoding,
             metadata,
+            document,
             operation,
         })
     }
@@ -223,6 +237,27 @@ pub(crate) struct VectorQueryResult {
     pub(crate) vector: Option<Vec<f32>>,
 }
 
+/*
+===========================================
+Metadata Embedding Record
+===========================================
+*/
+
+#[derive(Debug)]
+pub(crate) struct MetadataEmbeddingRecord {
+    pub(crate) id: String,
+    pub(crate) metadata: UpdateMetadata,
+}
+
+impl From<MetadataEmbeddingRecord> for chroma_proto::MetadataEmbeddingRecord {
+    fn from(record: MetadataEmbeddingRecord) -> Self {
+        chroma_proto::MetadataEmbeddingRecord {
+            id: record.id,
+            metadata: Some(record.metadata.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +286,17 @@ mod tests {
                 value: Some(chroma_proto::update_metadata_value::Value::IntValue(42)),
             },
         );
+
+        // Insert a chroma:document field
+        metadata.metadata.insert(
+            "chroma:document".to_string(),
+            chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringValue(
+                    "document_contents".to_string(),
+                )),
+            },
+        );
+
         let proto_vector = chroma_proto::Vector {
             vector: as_byte_view(&[1.0, 2.0, 3.0]),
             encoding: chroma_proto::ScalarEncoding::Float32 as i32,
@@ -272,10 +318,17 @@ mod tests {
             converted_operation_record.encoding,
             Some(ScalarEncoding::FLOAT32)
         );
+        assert_eq!(
+            converted_operation_record.document,
+            Some("document_contents".to_string())
+        );
         let metadata = converted_operation_record.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &UpdateMetadataValue::Int(42));
         assert_eq!(converted_operation_record.operation, Operation::Add);
+
+        // Ensure metadata no longer has the document field
+        assert_eq!(metadata.get("chroma:document"), None);
     }
 
     #[test]

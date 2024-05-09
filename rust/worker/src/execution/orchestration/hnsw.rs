@@ -15,7 +15,10 @@ use crate::execution::operators::merge_knn_results::{
 };
 use crate::execution::operators::pull_log::PullLogsResult;
 use crate::index::hnsw_provider::HnswIndexProvider;
-use crate::segment::distributed_hnsw_segment::DistributedHNSWSegment;
+use crate::segment::distributed_hnsw_segment::{
+    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+    DistributedHNSWSegmentWriter,
+};
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, System};
 use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
@@ -233,7 +236,7 @@ impl HnswQueryOrchestrator {
             .expect("Invariant violation. Collection dimension is not set");
 
         // Fetch the data needed for the duration of the query - The HNSW Segment, The record Segment and the Collection
-        let hnsw_segment_reader = match DistributedHNSWSegment::from_segment(
+        let hnsw_segment_reader = match DistributedHNSWSegmentReader::from_segment(
             // These unwraps are safe because we have already checked that the segments are set in the orchestrator on_start
             hnsw_segment,
             dimensionality as usize,
@@ -242,10 +245,19 @@ impl HnswQueryOrchestrator {
         .await
         {
             Ok(reader) => reader,
-            Err(e) => {
-                self.terminate_with_error(e, ctx);
-                return;
-            }
+            Err(e) => match *e {
+                DistributedHNSWSegmentFromSegmentError::Uninitialized => {
+                    // no task, decrement the merge dependency count and return
+                    self.hnsw_result_distances = Some(Vec::new());
+                    self.hnsw_result_offset_ids = Some(Vec::new());
+                    self.merge_dependency_count -= 1;
+                    return;
+                }
+                _ => {
+                    self.terminate_with_error(e, ctx);
+                    return;
+                }
+            },
         };
 
         println!("Created HNSW Segment Reader: {:?}", hnsw_segment_reader);
@@ -344,7 +356,7 @@ impl HnswQueryOrchestrator {
         collection_id: &Uuid,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let child_span: tracing::Span =
-            trace_span!(parent: Span::current(), "get collection id for segment id");
+            trace_span!(parent: Span::current(), "get collection for collection id");
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
             .instrument(child_span.clone())
@@ -442,6 +454,10 @@ impl HnswQueryOrchestrator {
 
 #[async_trait]
 impl Component for HnswQueryOrchestrator {
+    fn get_name() -> &'static str {
+        "HNSW Query orchestrator"
+    }
+
     fn queue_size(&self) -> usize {
         1000 // TODO: make configurable
     }

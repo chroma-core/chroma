@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SegmentType {
     HnswDistributed,
+    BlockfileMetadata,
     Record,
     Sqlite,
 }
@@ -22,6 +23,7 @@ impl From<SegmentType> for String {
             }
             SegmentType::Record => "urn:chroma:segment/record".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
+            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
         }
     }
 }
@@ -93,6 +95,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             "urn:chroma:segment/vector/hnsw-distributed" => SegmentType::HnswDistributed,
             "urn:chroma:segment/record" => SegmentType::Record,
             "urn:chroma:segment/metadata/sqlite" => SegmentType::Sqlite,
+            "urn:chroma:segment/metadata/blockfile" => SegmentType::BlockfileMetadata,
             _ => {
                 println!("Invalid segment type: {}", proto_segment.r#type);
                 return Err(SegmentConversionError::InvalidSegmentType);

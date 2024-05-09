@@ -1,6 +1,6 @@
 use crate::{
     errors::ChromaError, execution::operator::Operator,
-    segment::distributed_hnsw_segment::DistributedHNSWSegment,
+    segment::distributed_hnsw_segment::DistributedHNSWSegmentReader,
 };
 use async_trait::async_trait;
 
@@ -9,7 +9,7 @@ pub struct HnswKnnOperator {}
 
 #[derive(Debug)]
 pub struct HnswKnnOperatorInput {
-    pub segment: Box<DistributedHNSWSegment>,
+    pub segment: Box<DistributedHNSWSegmentReader>,
     pub query: Vec<f32>,
     pub k: usize,
 }
