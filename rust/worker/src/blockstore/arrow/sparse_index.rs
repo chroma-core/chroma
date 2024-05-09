@@ -18,7 +18,7 @@ use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
 /// it easier to handle the case where the first block is split into two and also makes
 /// determining the target block for a given key easier
 #[derive(Clone, Debug)]
-enum SparseIndexDelimiter {
+pub(super) enum SparseIndexDelimiter {
     Start,
     Key(CompositeKey),
 }
@@ -76,7 +76,7 @@ impl Ord for SparseIndexDelimiter {
 /// - `is_valid` - Check if the sparse index is valid, useful for debugging and testing
 #[derive(Clone)]
 pub(super) struct SparseIndex {
-    forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
+    pub(super) forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
     reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
     pub(super) id: Uuid,
 }

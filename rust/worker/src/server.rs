@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
-use crate::chroma_proto::{self, QueryMetadataRequest, QueryMetadataResponse};
+use crate::chroma_proto::{
+    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+};
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
@@ -249,6 +251,23 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
 
 #[tonic::async_trait]
 impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
+    async fn count_records(
+        &self,
+        request: Request<CountRecordsRequest>,
+    ) -> Result<Response<CountRecordsResponse>, Status> {
+        let request = request.into_inner();
+        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+        println!("Querying count for segment {}", segment_uuid);
+        // TODO: Add logic here to count.
+        let response = CountRecordsResponse { count: 0 };
+        Ok(Response::new(response))
+    }
+
     async fn query_metadata(
         &self,
         request: Request<QueryMetadataRequest>,
