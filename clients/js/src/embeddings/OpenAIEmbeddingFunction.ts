@@ -88,14 +88,10 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   public async generate(texts: string[]): Promise<number[][]> {
     const openaiApi = await this.getOpenAIClient();
 
-    return await openaiApi
-      .createEmbedding({
-        model: this.model,
-        input: texts,
-      })
-      .catch((error: any) => {
-        throw error;
-      });
+    return await openaiApi.createEmbedding({
+      model: this.model,
+      input: texts,
+    });
   }
   private async getOpenAIClient(): Promise<OpenAIAPI> {
     if (this.openaiApi) return this.openaiApi;
