@@ -19,7 +19,7 @@ repos:
 
   - repo: https://github.com/psf/black
     # https://github.com/psf/black/issues/2493
-    rev: "refs/tags/23.3.0:refs/tags/23.3.0"
+    rev: "refs/tags/24.4.2:refs/tags/24.4.2"
     hooks:
       - id: black
 
