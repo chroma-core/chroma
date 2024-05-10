@@ -47,7 +47,7 @@ dependencies = [
 
 [tool.black]
 line-length = 88
-required-version = "24.4.2" # Black will refuse to run if it's not this version.
+required-version = "23.3.0" # Black will refuse to run if it's not this version.
 target-version = ['py38', 'py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
