@@ -124,7 +124,7 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
     filePath = 'index'
   }
 
-  // if inGroup but .slice(2) is empty, then index.md
+  // if inGroup but .slice(2) is empty, then add index.md
   if (inGroup && router.asPath.split('/').slice(1)[1] === undefined) {
     filePath = filePath + '/index'
   }
