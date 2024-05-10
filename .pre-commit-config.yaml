@@ -6,7 +6,7 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
       - id: end-of-file-fixer
-        exclude: "go/migrations"
+        exclude: "go/migrations|.vscode"
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
