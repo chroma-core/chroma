@@ -1,4 +1,4 @@
-black==23.3.0 # match what's in pyproject.toml
+black==24.4.2 # match what's in pyproject.toml
 build
 grpcio-tools
 httpx
