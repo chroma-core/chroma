@@ -10,7 +10,7 @@ Here are some ways you can help:
 - Add missing information
 
 Great sections to contribute to you include:
-- [💡 Examples](/examples)
+<!-- - [💡 Examples](/examples) -->
 - [🔌 Integrations](/integrations)
 - [☁️ Deployment options and Administration guides](/deployment)
 

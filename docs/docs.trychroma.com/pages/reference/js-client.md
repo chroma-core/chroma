@@ -14,7 +14,7 @@ Creates a new ChromaClient instance.
 
 **`Example`**
 
-```typescript
+```javascript
 const client = new ChromaClient({
   path: "http://localhost:8000"
 });
@@ -41,7 +41,7 @@ If there is an issue creating the collection.
 
 **`Example`**
 
-```typescript
+```javascript
 const collection = await client.createCollection({
   name: "my_collection",
   metadata: {
@@ -79,7 +79,7 @@ If there is an issue deleting the collection.
 
 **`Example`**
 
-```typescript
+```javascript
 await client.deleteCollection({
  name: "my_collection"
 });
@@ -112,7 +112,7 @@ If there is an issue getting the collection.
 
 **`Example`**
 
-```typescript
+```javascript
 const collection = await client.getCollection({
   name: "my_collection"
 });
@@ -146,7 +146,7 @@ If there is an issue getting or creating the collection.
 
 **`Example`**
 
-```typescript
+```javascript
 const collection = await client.getOrCreateCollection({
   name: "my_collection",
   metadata: {
@@ -180,7 +180,7 @@ Returns a heartbeat from the Chroma API.
 
 **`Example`**
 
-```typescript
+```javascript
 const heartbeat = await client.heartbeat();
 ```
 
@@ -204,7 +204,7 @@ If there is an issue listing the collections.
 
 **`Example`**
 
-```typescript
+```javascript
 const collections = await client.listCollections();
 ```
 
@@ -228,7 +228,7 @@ If there is an issue resetting the state.
 
 **`Example`**
 
-```typescript
+```javascript
 await client.reset();
 ```
 
@@ -248,7 +248,7 @@ Returns the version of the Chroma API.
 
 **`Example`**
 
-```typescript
+```javascript
 const version = await client.version();
 ```
 

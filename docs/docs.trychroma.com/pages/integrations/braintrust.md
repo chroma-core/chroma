@@ -2,7 +2,7 @@
 title: Braintrust
 ---
 
-[Braintrust](braintrustdata.com) is an enterprise-grade stack for building AI products including: evaluations, prompt playground, dataset management, tracing, etc.
+[Braintrust](https://www.braintrustdata.com) is an enterprise-grade stack for building AI products including: evaluations, prompt playground, dataset management, tracing, etc.
 
 Braintrust provides a Typescript and Python library to run and log evaluations and integrates well with Chroma.
 
