@@ -282,7 +282,6 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
             let lock_guard = self.sparse_index.forward.lock();
             let mut curr_iter = lock_guard.iter();
             while let Some((_, block_id)) = curr_iter.next() {
-                println!("Block id {}", block_id);
                 block_ids.push(block_id.clone());
             }
         }
