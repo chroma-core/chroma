@@ -44,7 +44,6 @@ impl MemoryBlockfileWriter {
 }
 
 pub(crate) struct HashMapBlockfileReader<K: Key, V: Value> {
-    storage_manager: StorageManager,
     storage: Storage,
     marker: std::marker::PhantomData<(K, V)>,
 }
@@ -59,7 +58,6 @@ impl<
         // TODO: don't unwrap
         let storage = storage_manager.get(id).unwrap();
         Self {
-            storage_manager,
             storage,
             marker: std::marker::PhantomData,
         }

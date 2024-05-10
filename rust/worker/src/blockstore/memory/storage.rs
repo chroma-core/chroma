@@ -597,22 +597,6 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
     }
 }
 
-// Int32ArrayValue(Int32Array),
-// PositionalPostingListValue(PositionalPostingList),
-// StringValue(String),
-// IntValue(i32),
-// UintValue(u32),
-// RoaringBitmapValue(RoaringBitmap),
-
-// pub(crate) struct DataRecord<'a> {
-//     pub(crate) id: &'a str,
-//     pub(crate) embedding: &'a [f32],
-//     pub(crate) metadata: &'a Option<Metadata>,
-//     pub(crate) document: &'a Option<String>,
-//     // Optional staged serialized version of the metadata
-//     pub(crate) serialized_metadata: Option<Vec<u8>>,
-// }
-
 #[derive(Clone)]
 pub(crate) struct StorageBuilder {
     // String Value
