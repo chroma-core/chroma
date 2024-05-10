@@ -11,7 +11,9 @@ use crate::chroma_proto::{
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
-use crate::execution::orchestration::{HnswQueryOrchestrator, MetadataQueryOrchestrator};
+use crate::execution::orchestration::{
+    CountQueryOrchestrator, HnswQueryOrchestrator, MetadataQueryOrchestrator,
+};
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
@@ -263,8 +265,41 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
             }
         };
         println!("Querying count for segment {}", segment_uuid);
-        // TODO: Add logic here to count.
-        let response = CountRecordsResponse { count: 0 };
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher,
+            None => {
+                return Err(Status::internal("No dispatcher found"));
+            }
+        };
+
+        let system = match self.system {
+            Some(ref system) => system,
+            None => {
+                return Err(Status::internal("No system found"));
+            }
+        };
+
+        let orchestrator = CountQueryOrchestrator::new(
+            system.clone(),
+            &segment_uuid,
+            self.log.clone(),
+            self.sysdb.clone(),
+            dispatcher.clone(),
+            self.blockfile_provider.clone(),
+        );
+
+        let result = orchestrator.run().await;
+        let c = match result {
+            Ok(r) => {
+                println!("(Sanket-temp) Count value {}", r);
+                r
+            }
+            Err(_) => {
+                println!("Error!");
+                0
+            }
+        };
+        let response = CountRecordsResponse { count: c as u32 };
         Ok(Response::new(response))
     }
 
