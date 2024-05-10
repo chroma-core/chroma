@@ -666,6 +666,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
     ):
+        if not api_key:
+            raise ValueError(f'Something went wrong -- API Key is invalid or empty. API Key: {api_key}')
+        if not project_id:
+            raise ValueError(f'Something went wrong -- Project ID is invalid to correspoding project in your GCloud project. Project ID: {project_id}')
+
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
@@ -678,16 +683,21 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             ).json()
 
             predictions = response.get('predictions')
-            if predictions:
+            if predictions: # This means that `predictions` of response is not None and empty. When `predictions` of response is not satisfied with these conditions, the else branch will be hit.
                 for prediction in predictions:
                     embeddings.append(prediction["embeddings"]["values"])
+            elif isinstance(predictions, List) and not len(predictions):
+                    raise IndexError(f'Something went wrong -- the `predictions` of the response from Vertex Embedding API is empty. Response: {response}')
             else:
-                if predictions is None:
-                    raise KeyError(f'Key `predictions` of the response from Vertex Embedding API is not existed!! Please confirm the response. \n{response}')
-                elif not isinstance(predictions, Iterable):
-                    raise TypeError(f'The response from Vertex Embedding API is not iterable!! Please confirm the response. \n{response}')
-                elif not len(predictions):
-                    raise IndexError(f'The response from Vertex Embedding API is empty!! Please confirm the retrieved result. \n{response}')
+                error = response.get('error')
+                if error:
+                    error_code = error.get('code')
+                    # There are more clear and specific errors to add below in the future.
+                    auth_error = error_types['AuthorizationError']
+                    if error_code == auth_error.code:
+                        raise auth_error(f'Something went wrong -- API Token authorization is invalid. Response: {response}')
+
+                raise KeyError(f'Something went wrong -- `predictions` of the response from Vertex Embedding API does not exist. Response: {response}')
 
         return embeddings
 
