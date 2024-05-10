@@ -666,10 +666,8 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
     ):
-        if not api_key:
-            raise ValueError(f'Something went wrong -- API Key is invalid or empty. API Key: {api_key}')
-        if not project_id:
-            raise ValueError(f'Something went wrong -- Project ID is invalid to correspoding project in your GCloud project. Project ID: {project_id}')
+        if not api_key or len(api_key) != 218:
+            raise ValueError(f'Something went wrong -- API Key is invalid, not set or empty. API Key: {api_key}')
 
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
         self._session = requests.Session()
@@ -692,10 +690,10 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 error = response.get('error')
                 if error:
                     error_code = error.get('code')
-                    # There are more clear and specific errors to add below in the future.
-                    auth_error = error_types['AuthorizationError']
-                    if error_code == auth_error.code:
-                        raise auth_error(f'Something went wrong -- API Token authorization is invalid. Response: {response}')
+                    # More specific error codes corresponded to errors will be added below in the future.
+                    auth_error = error_types['AuthorizationError'](f'Something went wrong -- API Key authorization is invalid. Response: {response}')
+                    if error_code == auth_error.code():
+                        raise auth_error
 
                 raise KeyError(f'Something went wrong -- `predictions` of the response from Vertex Embedding API does not exist. Response: {response}')
 
