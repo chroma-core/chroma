@@ -213,9 +213,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
         vector: &[f32],
         k: usize,
         allowed_ids: &[usize],
-        allowed_ids_length: usize,
         disallowed_ids: &[usize],
-        disallowed_ids_length: usize,
     ) -> (Vec<usize>, Vec<f32>) {
         let actual_k = std::cmp::min(k, self.len());
         let mut ids = vec![0usize; actual_k];
@@ -229,9 +227,9 @@ impl Index<HnswIndexConfig> for HnswIndex {
                 ids.as_mut_ptr(),
                 distance.as_mut_ptr(),
                 allowed_ids.as_ptr(),
-                allowed_ids_length,
+                allowed_ids.len(),
                 disallowed_ids.as_ptr(),
-                disallowed_ids_length,
+                disallowed_ids.len(),
             ) as usize;
         }
         if total_result < actual_k {
@@ -522,7 +520,7 @@ pub mod test {
         let query = &data[0..d];
         let allow_ids = &[];
         let disallow_ids = &[];
-        let (ids, distances) = index.query(query, 1, allow_ids, 0, disallow_ids, 0);
+        let (ids, distances) = index.query(query, 1, allow_ids, disallow_ids);
         assert_eq!(ids.len(), 1);
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
@@ -579,7 +577,7 @@ pub mod test {
         // Query for the deleted ids and ensure they are not found
         for deleted_id in &delete_ids {
             let target_vector = &data[*deleted_id * d..(*deleted_id + 1) * d];
-            let (ids, _) = index.query(target_vector, 10, allow_ids, 0, disallow_ids, 0);
+            let (ids, _) = index.query(target_vector, 10, allow_ids, disallow_ids);
             for check_deleted_id in &delete_ids {
                 assert!(!ids.contains(check_deleted_id));
             }
@@ -652,7 +650,7 @@ pub mod test {
         let query = &data[0..d];
         let allow_ids = &[];
         let disallow_ids = &[];
-        let (ids, distances) = index.query(query, 1, allow_ids, 0, disallow_ids, 0);
+        let (ids, distances) = index.query(query, 1, allow_ids, disallow_ids);
         assert_eq!(ids.len(), 1);
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
@@ -713,11 +711,10 @@ pub mod test {
 
         // Query the data
         let query = &data[0..d];
-        let allow_ids = &[0, 2, 3];
-        let disallow_ids = &[];
-        let (ids, distances) = index.query(query, 10, allow_ids, 3, disallow_ids, 0);
-        assert_eq!(ids.len(), 1);
-        assert_eq!(distances.len(), 1);
-        println!("{:?}", ids);
+        let allow_ids = &[0, 2];
+        let disallow_ids = &[3];
+        let (ids, distances) = index.query(query, 10, allow_ids, disallow_ids);
+        assert_eq!(ids.len(), 2);
+        assert_eq!(distances.len(), 2);
     }
 }

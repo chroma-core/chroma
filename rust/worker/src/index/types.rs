@@ -71,9 +71,7 @@ pub(crate) trait Index<C> {
         vector: &[f32],
         k: usize,
         allowed_ids: &[usize],
-        allowed_ids_length: usize,
         disallow_ids: &[usize],
-        disallow_ids_length: usize,
     ) -> (Vec<usize>, Vec<f32>);
     fn get(&self, id: usize) -> Option<Vec<f32>>;
 }
