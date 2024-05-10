@@ -28,14 +28,10 @@ class OpenAIAPIv3 implements OpenAIAPI {
     user?: string;
   }): Promise<number[][]> {
     const embeddings: number[][] = [];
-    const response = await this.openai
-      .createEmbedding({
-        model: params.model,
-        input: params.input,
-      })
-      .catch((error: any) => {
-        throw error;
-      });
+    const response = await this.openai.createEmbedding({
+      model: params.model,
+      input: params.input,
+    });
     // @ts-ignore
     const data = response.data["data"];
     for (let i = 0; i < data.length; i += 1) {
