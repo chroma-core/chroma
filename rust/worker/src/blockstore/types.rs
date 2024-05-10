@@ -27,6 +27,8 @@ pub(crate) enum BlockfileError {
     TransactionInProgress,
     #[error("Transaction not in progress")]
     TransactionNotInProgress,
+    #[error("Block not found")]
+    BlockNotFound,
 }
 
 impl ChromaError for BlockfileError {
@@ -38,6 +40,7 @@ impl ChromaError for BlockfileError {
             BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
                 ErrorCodes::FailedPrecondition
             }
+            BlockfileError::BlockNotFound => ErrorCodes::Internal,
         }
     }
 }
@@ -297,7 +300,17 @@ impl<
     pub(crate) async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.count().await,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                let count = reader.count().await;
+                match count {
+                    Ok(c) => {
+                        return Ok(c);
+                    }
+                    Err(_) => {
+                        return Err(Box::new(BlockfileError::BlockNotFound));
+                    }
+                }
+            }
         }
     }
 

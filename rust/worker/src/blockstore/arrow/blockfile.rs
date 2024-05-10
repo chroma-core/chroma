@@ -277,11 +277,17 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
 
     // Count the total number of records.
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+        let mut block_ids: Vec<Uuid> = vec![];
+        {
+            let lock_guard = self.sparse_index.forward.lock();
+            let mut curr_iter = lock_guard.iter();
+            while let Some((_, block_id)) = curr_iter.next() {
+                block_ids.push(block_id.clone());
+            }
+        }
         let mut result: usize = 0;
-        let lock_guard = self.sparse_index.forward.lock();
-        let mut curr_iter = lock_guard.iter();
-        while let Some((_, block_id)) = curr_iter.next() {
-            let block = self.get_block(*block_id).await;
+        for block_id in block_ids {
+            let block = self.get_block(block_id).await;
             match block {
                 Some(b) => result = result + b.len(),
                 None => {
