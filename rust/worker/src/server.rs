@@ -291,11 +291,12 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         let result = orchestrator.run().await;
         let c = match result {
             Ok(r) => {
-                println!("(Sanket-temp) Count value {}", r);
+                println!("Count value {}", r);
                 r
             }
-            Err(_) => {
-                println!("Error!");
+            Err(e) => {
+                println!("Error! {:?}", e);
+                // TODO: Return 0 for now but should return an error at some point.
                 0
             }
         };

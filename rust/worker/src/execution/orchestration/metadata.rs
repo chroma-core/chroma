@@ -2,7 +2,7 @@ use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::wrap;
 use crate::execution::operators::count_records::{
-    CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
+    CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
 };
 use crate::execution::operators::merge_metadata_results::{
     MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
@@ -374,8 +374,6 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
         match message {
             Ok(logs) => {
                 let logs = logs.logs();
-                println!("Got logs {}", logs.total_len());
-                println!("Logs {:?}", logs);
                 self.log_record_count = logs.total_len();
                 // TODO: Add logic for merging logs with count from record segment.
                 let operator = CountRecordsOperator::new();
@@ -404,12 +402,10 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<Result<CountRecordsOutput, MergeMetadataResultsOperatorError>>
-    for CountQueryOrchestrator
-{
+impl Handler<Result<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
     async fn handle(
         &mut self,
-        message: Result<CountRecordsOutput, MergeMetadataResultsOperatorError>,
+        message: Result<CountRecordsOutput, CountRecordsError>,
         ctx: &ComponentContext<Self>,
     ) {
         let msg = match message {
