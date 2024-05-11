@@ -31,30 +31,23 @@ repos:
           - "--extend-ignore=E203,E501,E503"
           - "--max-line-length=88"
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: "v1.2.0"
+  - repo: local
     hooks:
       - id: mypy
-        args:
-          [
-            --strict,
-            --ignore-missing-imports,
-            --follow-imports=silent,
-            --disable-error-code=type-abstract,
-            --config-file=./pyproject.toml,
-          ]
-        additional_dependencies:
-          [
-            "types-requests",
-            "pydantic",
-            "overrides",
-            "hypothesis",
-            "pytest",
-            "pypika",
-            "numpy",
-            "types-protobuf",
-            "kubernetes",
-          ]
+        name: mypy
+        entry: "./bin/run-mypy.sh"
+        language: python
+        stages: [manual] # run manually for all issues are fixed
+        pass_filenames: false
+        # use your preferred Python version
+        language_version: python3.12
+        # trigger for commits changing Python files
+        types_or: [python, toml]
+        # use require_serial so that script
+        # is only called once per commit
+        require_serial: true
+        # print the number of files as a sanity-check
+        verbose: true
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.1.0"

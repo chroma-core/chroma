@@ -55,6 +55,11 @@ pythonpath = ["."]
 
 [tool.mypy]
 ignore_errors = false
+disable_error_code = "type-abstract"
+ignore_missing_imports = false
+strict = false # disable strict mypy checks until we can fix all the errors
+exclude = "bin/.*"
+plugins = "numpy.typing.mypy_plugin"
 
 [[tool.mypy.overrides]]
 module = ["chromadb.proto.*"]

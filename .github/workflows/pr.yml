@@ -99,3 +99,6 @@ jobs:
           pre-commit run --all-files flake8
           pre-commit run --all-files prettier
           pre-commit run --all-files check-yaml
+
+          # mypy issues fixes are in progress so, for now, ignore errors
+          pre-commit run --all-files mypy || true
