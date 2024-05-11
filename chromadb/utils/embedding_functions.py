@@ -1017,6 +1017,58 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         )
 
 
+class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
+    """
+    This class is used to generate embeddings for a list of texts using the Nomic Embedding API (https://docs.nomic.ai/reference/endpoints/nomic-embed-text).
+    """
+
+    def __init__(self, api_key: str, model_name: str) -> None:
+        """
+        Initialize the Nomic Embedding Function.
+
+        Args:
+            model_name (str): The name of the model to use for text embeddings. E.g. "nomic-embed-text-v1.5" (see https://docs.nomic.ai/atlas/models/text-embedding for available models).
+        """
+        try:
+            import requests
+        except ImportError:
+            raise ValueError(
+                "The requests python package is not installed. Please install it with `pip install requests`"
+            )
+        self._api_url = "https://api-atlas.nomic.ai/v1/embedding/text"
+        self._api_key = api_key
+        self._model_name = model_name
+        self._session = requests.Session()
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            input (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> nomic_ef = NomicEmbeddingFunction(model_name="nomic-embed-text-v1.5")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = nomic_ef(texts)
+        """
+        texts = input if isinstance(input, list) else [input]
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._api_key}",
+        }
+        embeddings = self._session.post(
+            self._api_url,
+            headers=headers,
+            json={"model": self._model_name, "texts": texts},
+        ).json()
+
+        return cast(Embeddings, embeddings["embeddings"])
+
+
 # List of all classes in this module
 _classes = [
     name
