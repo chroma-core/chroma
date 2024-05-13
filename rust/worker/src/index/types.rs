@@ -66,7 +66,13 @@ pub(crate) trait Index<C> {
         Self: Sized;
     fn add(&self, id: usize, vector: &[f32]);
     fn delete(&self, id: usize);
-    fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>);
+    fn query(
+        &self,
+        vector: &[f32],
+        k: usize,
+        allowed_ids: &[usize],
+        disallow_ids: &[usize],
+    ) -> (Vec<usize>, Vec<f32>);
     fn get(&self, id: usize) -> Option<Vec<f32>>;
 }
 
