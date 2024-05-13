@@ -78,6 +78,20 @@ impl HnswKnnOperator {
         }
         Ok(disallowed_ids)
     }
+
+    // Validate that the allowed ids are not in the disallowed ids
+    fn validate_allowed_and_disallowed_ids(
+        &self,
+        allowed_ids: &[u32],
+        disallowed_ids: &[u32],
+    ) -> Result<(), Box<dyn ChromaError>> {
+        for allowed_id in allowed_ids {
+            if disallowed_ids.contains(allowed_id) {
+                return Err(Box::new(HnswKnnOperatorError::RecordSegmentError));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -118,8 +132,26 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
             }
         };
 
-        // TODO: pass in the updated + deleted ids from log and the result from the metadata filtering
-        let (offset_ids, distances) = input.segment.query(&input.query, input.k);
+        match self.validate_allowed_and_disallowed_ids(&allowed_offset_ids, &disallowed_offset_ids)
+        {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        // Convert to usize
+        let allowed_offset_ids: Vec<usize> =
+            allowed_offset_ids.iter().map(|&x| x as usize).collect();
+        let disallowed_offset_ids: Vec<usize> =
+            disallowed_offset_ids.iter().map(|&x| x as usize).collect();
+
+        let (offset_ids, distances) = input.segment.query(
+            &input.query,
+            input.k,
+            &allowed_offset_ids,
+            &disallowed_offset_ids,
+        );
         Ok(HnswKnnOperatorOutput {
             offset_ids,
             distances,

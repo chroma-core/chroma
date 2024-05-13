@@ -203,17 +203,17 @@ impl SparseIndex {
                 }
                 SparseIndexDelimiter::Key(k) => match &k.key {
                     KeyWrapper::String(s) => {
-                        delta.add("KEY", s.as_str(), block_id.to_string().as_str());
+                        delta.add(&k.prefix, s.as_str(), block_id.to_string().as_str());
                     }
                     KeyWrapper::Float32(f) => {
-                        delta.add("KEY", *f, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *f, block_id.to_string().as_str());
                     }
                     KeyWrapper::Bool(b) => {
                         unimplemented!();
                         // delta.add("KEY", b, block_id.to_string().as_str());
                     }
                     KeyWrapper::Uint32(u) => {
-                        delta.add("KEY", *u, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *u, block_id.to_string().as_str());
                     }
                 },
             }
@@ -239,7 +239,7 @@ impl SparseIndex {
                         Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
                     }
                 }
-                "KEY" => {
+                _ => {
                     let block_id = Uuid::parse_str(value);
                     match block_id {
                         Ok(block_id) => (
@@ -249,7 +249,6 @@ impl SparseIndex {
                         Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
                     }
                 }
-                _ => panic!("Invalid key"), // TODO: error here
             };
             forward.insert(delimiter.clone(), block_id);
             reverse.insert(block_id, delimiter);
@@ -315,5 +314,45 @@ mod tests {
         // b should fall into the first block
         blockfile_key = CompositeKey::new("prefix".to_string(), "b");
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
+    }
+
+    #[test]
+    fn test_to_from_block() {
+        let file_id = uuid::Uuid::new_v4();
+        let block_id_0 = uuid::Uuid::new_v4();
+
+        // Add an initial block to the sparse index
+        let sparse_index = SparseIndex::new(file_id);
+        sparse_index.add_initial_block(block_id_0);
+
+        // Add some more blocks
+        let blockfile_key = CompositeKey::new("prefix".to_string(), "a");
+        let block_id_1 = uuid::Uuid::new_v4();
+        sparse_index.add_block(blockfile_key.clone(), block_id_1);
+
+        let blockfile_key = CompositeKey::new("prefix".to_string(), "c");
+        let block_id_2 = uuid::Uuid::new_v4();
+        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+
+        let block = sparse_index.to_block::<&str>().unwrap();
+        let new_sparse_index = SparseIndex::from_block::<&str>(&block).unwrap();
+
+        let old_forward = sparse_index.forward.lock();
+        let new_forward = new_sparse_index.forward.lock();
+
+        assert_eq!(old_forward.len(), new_forward.len());
+        for (old_key, old_block_id) in old_forward.iter() {
+            let new_block_id = new_forward.get(old_key).unwrap();
+            assert_eq!(old_block_id, new_block_id);
+        }
+
+        let old_reverse = sparse_index.reverse.lock();
+        let new_reverse = new_sparse_index.reverse.lock();
+
+        assert_eq!(old_reverse.len(), new_reverse.len());
+        for (old_block_id, old_key) in old_reverse.iter() {
+            let new_key = new_reverse.get(old_block_id).unwrap();
+            assert_eq!(old_key, new_key);
+        }
     }
 }
