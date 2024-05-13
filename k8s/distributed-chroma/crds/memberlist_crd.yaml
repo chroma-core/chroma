@@ -27,7 +27,6 @@ spec:
                     properties:
                       url: # Rename to ip
                         type: string
-                        pattern: '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$'
   scope: Namespaced
   names:
     plural: memberlists

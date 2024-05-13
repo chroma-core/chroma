@@ -193,7 +193,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             }
         };
 
-        let my_ip = config.my_ip.clone();
+        let my_ip = config.my_member_id.clone();
         let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
@@ -424,17 +424,17 @@ mod tests {
         let last_compaction_time_2 = 1;
         sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
 
-        let my_ip = "127.0.0.1".to_string();
+        let my_member_id = "1".to_string();
         let compaction_manager_queue_size = 1000;
         let max_concurrent_jobs = 10;
         let compaction_interval = Duration::from_secs(1);
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
-        assignment_policy.set_members(vec![my_ip.clone()]);
+        assignment_policy.set_members(vec![my_member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_ip.clone(),
+            my_member_id.clone(),
             log.clone(),
             sysdb.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
@@ -442,7 +442,7 @@ mod tests {
             assignment_policy,
         );
         // Set memberlist
-        scheduler.set_memberlist(vec![my_ip.clone()]);
+        scheduler.set_memberlist(vec![my_member_id.clone()]);
 
         let mut manager = CompactionManager::new(
             scheduler,

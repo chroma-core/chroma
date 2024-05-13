@@ -75,9 +75,9 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Added", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
-				ip := objPod.Status.PodIP
-				w.notify(ip)
+				log.Info("Kubernetes Pod Added", zap.String("key", key), zap.Any("pod name", objPod.Name))
+				name := objPod.Name
+				w.notify(name)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
 			}
@@ -89,9 +89,9 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("ip", objPod.Status.PodIP))
-				ip := objPod.Status.PodIP
-				w.notify(ip)
+				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("pod name", objPod.Name))
+				name := objPod.Name
+				w.notify(name)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
 			}
@@ -103,10 +103,10 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Deleted", zap.String("ip", objPod.Status.PodIP))
-				ip := objPod.Status.PodIP
+				log.Info("Kubernetes Pod Deleted", zap.String("pod name", objPod.Name))
+				name := objPod.Name
 				// The contract for GetStatus is that if the ip is not in this map, then it returns NotReady
-				w.notify(ip)
+				w.notify(name)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
 			}
@@ -165,7 +165,7 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 		conditions := pod.Status.Conditions
 		for _, condition := range conditions {
 			if condition.Type == v1.PodReady && condition.Status == v1.ConditionTrue {
-				memberlist = append(memberlist, pod.Status.PodIP)
+				memberlist = append(memberlist, pod.Name)
 			}
 		}
 	}
