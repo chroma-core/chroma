@@ -6,13 +6,12 @@ use super::arrow::types::{
 use super::key::KeyWrapper;
 use super::memory::reader_writer::{MemoryBlockfileReader, MemoryBlockfileWriter};
 use super::memory::storage::{Readable, Writeable};
+use super::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
 use roaring::RoaringBitmap;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -162,6 +161,12 @@ impl Value for RoaringBitmap {
 impl Value for &RoaringBitmap {
     fn get_size(&self) -> usize {
         self.serialized_size()
+    }
+}
+
+impl Value for PositionalPostingList {
+    fn get_size(&self) -> usize {
+        return self.size_in_bytes();
     }
 }
 
