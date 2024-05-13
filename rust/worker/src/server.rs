@@ -2,14 +2,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
-use crate::chroma_proto::{self, QueryMetadataRequest, QueryMetadataResponse};
+use crate::chroma_proto::{
+    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+};
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
-use crate::execution::orchestration::{HnswQueryOrchestrator, MetadataQueryOrchestrator};
+use crate::execution::orchestration::{
+    CountQueryOrchestrator, HnswQueryOrchestrator, MetadataQueryOrchestrator,
+};
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
@@ -146,6 +150,7 @@ impl WorkerServer {
                     system.clone(),
                     query_vectors.clone(),
                     request.k,
+                    request.allowed_ids,
                     request.include_embeddings,
                     segment_uuid,
                     self.log.clone(),
@@ -248,6 +253,57 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
 
 #[tonic::async_trait]
 impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
+    async fn count_records(
+        &self,
+        request: Request<CountRecordsRequest>,
+    ) -> Result<Response<CountRecordsResponse>, Status> {
+        let request = request.into_inner();
+        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+        println!("Querying count for segment {}", segment_uuid);
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher,
+            None => {
+                return Err(Status::internal("No dispatcher found"));
+            }
+        };
+
+        let system = match self.system {
+            Some(ref system) => system,
+            None => {
+                return Err(Status::internal("No system found"));
+            }
+        };
+
+        let orchestrator = CountQueryOrchestrator::new(
+            system.clone(),
+            &segment_uuid,
+            self.log.clone(),
+            self.sysdb.clone(),
+            dispatcher.clone(),
+            self.blockfile_provider.clone(),
+        );
+
+        let result = orchestrator.run().await;
+        let c = match result {
+            Ok(r) => {
+                println!("Count value {}", r);
+                r
+            }
+            Err(e) => {
+                println!("Error! {:?}", e);
+                // TODO: Return 0 for now but should return an error at some point.
+                0
+            }
+        };
+        let response = CountRecordsResponse { count: c as u32 };
+        Ok(Response::new(response))
+    }
+
     async fn query_metadata(
         &self,
         request: Request<QueryMetadataRequest>,

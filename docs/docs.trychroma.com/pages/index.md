@@ -34,7 +34,7 @@ Chroma runs as a server and provides 1st party `Python` and `JavaScript/TypeScri
 Chroma is licensed under [Apache 2.0](https://github.com/chroma-core/chroma/blob/main/LICENSE)
 
 ### Python
-In Python, Chroma can run `in a python script` or as a server.
+In Python, Chroma can run in a python script or as a server.
 
 ```bash
 pip install chromadb

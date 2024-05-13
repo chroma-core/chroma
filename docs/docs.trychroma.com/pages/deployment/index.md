@@ -29,4 +29,5 @@ Running a server in production requires a few additional steps to ensure the ser
 |--------------|
 | [👀 Observability](/deployment/observability) |
 | [✈️ Migration](/deployment/migration) |
+| [🔒 Auth](/deployment/auth) |
 | 🚧 *More Coming Soon* |

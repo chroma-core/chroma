@@ -20,8 +20,10 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Cohere](/integrations/cohere) | ✅  | ✅ |
 | [Hugging Face](/integrations/hugging-face) | ✅  | ➖ |
 | [Instructor](/integrations/instructor) | ✅  | ➖ |
-| [Hugging Face Embedding Server](/integrations/hugging-face-embedding-server) | ✅  | ✅ |
+| [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
 | [Jina AI](/integrations/jinaai) | ✅  | ✅ |
+| [Roboflow](/integrations/roboflow) | ✅  | ➖ |
+| [Ollama Embeddings](/integrations/ollama) | ✅  | ✅ |
 
 
 ***
@@ -38,7 +40,7 @@ We welcome pull requests to add new Integrations to the community.
 |              | Python | JS |
 |--------------|-----------|---------------|
 | [🦜️🔗 Langchain](/integrations/langchain) | ✅  | ✅ |
-| [🦙 LlamaIndex](/integrations/llama-index) | ✅  | ✅ |
+| [🦙 LlamaIndex](/integrations/llamaindex) | ✅  | ✅ |
 | [Braintrust](/integrations/braintrust) | ✅  | ✅ |
 | [🔭 OpenLLMetry](/integrations/openllmetry) | ✅     | 🔜 |
 | [🎈 Streamlit](/integrations/streamlit) | ✅     | ➖ |

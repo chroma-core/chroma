@@ -115,6 +115,22 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
 
   const pageTitle = `${title}${title !== "Chroma" ? " | Chroma Docs": " Docs" }`
 
+
+  // generate the github edit link
+  let filePath = router.asPath.split('/').slice(1).join('/')
+
+  // if root, then index.md
+  if (filePath === '') {
+    filePath = 'index'
+  }
+
+  // if inGroup but .slice(2) is empty, then add index.md
+  if (inGroup && router.asPath.split('/').slice(1)[1] === undefined) {
+    filePath = filePath + '/index'
+  }
+
+  let githubEditLink = `https://github.com/chroma-core/chroma/blob/main/docs/docs.trychroma.com/pages/` + filePath + '.md'
+
   return (
     <ThemeProvider>
     <main className={`${inter.variable} font-sans ${ibmPlexMono.variable}`} style={{paddingBottom: '200px'}}>
@@ -183,9 +199,9 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
 
             <div className='text-3xl mb-6 font-semibold'>{title}</div>
             <Component {...pageProps} />
-            {/* <div className="mt-20">
+            <div className="mt-20">
               <a
-                href={``}
+                href={githubEditLink}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline font-semibold"
@@ -194,7 +210,7 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
                 <Icons.gitHub className="inline-block w-6 h-6 mr-2" />
                 Edit this page on GitHub
               </a>
-            </div> */}
+            </div>
           </main>
 
           <div className="block mt-[calc(var(--ifm-navbar-height)*-1)] transition-width  w-[var(--doc-sidebar-width)] will-change-width clip-path-[inset(0)]"
