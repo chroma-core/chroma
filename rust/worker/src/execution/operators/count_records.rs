@@ -1,14 +1,12 @@
-use thiserror::Error;
-
-use tonic::async_trait;
-
 use crate::{
-    blockstore::provider::BlockfileProvider,
+    blockstore::provider::{BlockfileProvider, OpenError},
     errors::{ChromaError, ErrorCodes},
     execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
     types::Segment,
 };
+use thiserror::Error;
+use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct CountRecordsOperator {}
@@ -45,16 +43,19 @@ pub(crate) struct CountRecordsOutput {
 #[derive(Error, Debug)]
 pub(crate) enum CountRecordsError {
     #[error("Error reading record segment reader")]
-    RecordSegmentReadError,
+    RecordSegmentOpenError(#[from] OpenError),
     #[error("Error creating record segment reader")]
     RecordSegmentError(#[from] RecordSegmentReaderCreationError),
+    #[error("Error reading record segment")]
+    RecordSegmentReadError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CountRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             CountRecordsError::RecordSegmentError(_) => ErrorCodes::Internal,
-            CountRecordsError::RecordSegmentReadError => ErrorCodes::Internal,
+            CountRecordsError::RecordSegmentReadError(e) => e.code(),
+            CountRecordsError::RecordSegmentOpenError(e) => e.code(),
         }
     }
 }
@@ -66,25 +67,36 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
-        let segment_reader = RecordSegmentReader::from_segment(
+        let segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
         )
-        .await;
-        match segment_reader {
-            Ok(reader) => match reader.count().await {
-                Ok(val) => {
-                    return Ok(CountRecordsOutput { count: val });
-                }
-                Err(_) => {
-                    println!("Error reading record segment");
-                    return Err(CountRecordsError::RecordSegmentReadError);
-                }
-            },
+        .await
+        {
+            Ok(reader) => reader,
             Err(e) => {
-                println!("Error opening record segment");
-                return Err(CountRecordsError::RecordSegmentError(*e));
+                match *e {
+                    RecordSegmentReaderCreationError::UninitializedSegment => {
+                        // This means no compaction has occured.
+                        return Ok(CountRecordsOutput { count: 0 });
+                    }
+                    RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
+                        return Err(CountRecordsError::RecordSegmentOpenError(*e));
+                    }
+                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        return Err(CountRecordsError::RecordSegmentError(*e));
+                    }
+                }
             }
-        }
+        };
+
+        let count = match segment_reader.count().await {
+            Ok(val) => val,
+            Err(e) => {
+                return Err(CountRecordsError::RecordSegmentReadError(e));
+            }
+        };
+
+        Ok(CountRecordsOutput { count })
     }
 }
