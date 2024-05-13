@@ -907,7 +907,8 @@ def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
         )
 
     class ChromaLangchainEmbeddingFunction(
-        LangchainEmbeddings, EmbeddingFunction[Union[Documents, Images]]  # type: ignore
+        LangchainEmbeddings,
+        EmbeddingFunction[Union[Documents, Images]],  # type: ignore
     ):
         """
         This class is used as bridge between langchain embedding functions and custom chroma embedding functions.
@@ -1035,6 +1036,12 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The requests python package is not installed. Please install it with `pip install requests`"
             )
+
+        if not api_key:
+            raise ValueError("No Nomic API key provided")
+        if not model_name:
+            raise ValueError("No Nomic embedding model provided")
+
         self._api_url = "https://api-atlas.nomic.ai/v1/embedding/text"
         self._api_key = api_key
         self._model_name = model_name
@@ -1060,13 +1067,17 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self._api_key}",
         }
-        embeddings = self._session.post(
+        response = self._session.post(
             self._api_url,
             headers=headers,
             json={"model": self._model_name, "texts": texts},
-        ).json()
+        )
+        response.raise_for_status()
+        response_json = response.json()
+        if "embeddings" not in response_json:
+            raise RuntimeError("Nomic API did not return embeddings")
 
-        return cast(Embeddings, embeddings["embeddings"])
+        return cast(Embeddings, response_json["embeddings"])
 
 
 # List of all classes in this module
