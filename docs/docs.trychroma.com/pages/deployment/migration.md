@@ -22,7 +22,7 @@ We will aim to provide:
 
 ### Auth overhaul - April 20, 2024
 
-**If you are not using Chroma's [built-in auth system](https://docs.trychroma.com/usage-guide#authentication), you do not need to take any action.**
+**If you are not using Chroma's [built-in auth system](https://docs.trychroma.com/deployment/auth), you do not need to take any action.**
 
 This release overhauls and simplifies our authentication and authorization systems.
 If you are you using Chroma's built-in auth system, you will need to update your configuration and
@@ -254,7 +254,7 @@ This version of Chroma drops `duckdb` and `clickhouse` in favor of `sqlite` for 
 If you upgrade to `0.4.0` and try to access data stored in the old way, you will see this error message
 
 
-> You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!
+> You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!
 
 Here is how to install and use the CLI:
 

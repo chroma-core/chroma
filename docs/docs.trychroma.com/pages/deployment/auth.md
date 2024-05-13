@@ -101,7 +101,7 @@ Current implementation of static API token auth supports only ENV based tokens.
 
 ##### Running the Server
 
-Set the following environment variables to use `Authorization: Bearer test-token` to be your authentication header. All environment variables can also be set as [Settings](https://docs.trychroma.com/deployment#step-5-configure-the-chroma-library).
+Set the following environment variables to use `Authorization: Bearer test-token` to be your authentication header. All environment variables can also be set as [Settings](https://docs.trychroma.com/deployment/aws#step-5:-configure-the-chroma-library).
 
 ```bash
 export CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
