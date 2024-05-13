@@ -297,6 +297,13 @@ impl<
         }
     }
 
+    pub(crate) async fn key_exists(&'referred_data self, prefix: &str, key: K) -> bool {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.key_exists(prefix, key).await,
+            BlockfileReader::MemoryBlockfileReader(reader) => todo!(),
+        }
+    }
+
     pub(crate) async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),

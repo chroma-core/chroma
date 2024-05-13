@@ -171,6 +171,10 @@ impl<
         V::count(&self.storage)
     }
 
+    pub(crate) fn key_exists(&'storage self, prefix: &str, key: K) -> bool {
+        V::key_exists(prefix, key.into(), &self.storage)
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.storage.id
     }
