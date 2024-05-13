@@ -38,12 +38,23 @@ impl MemoryBlockfileWriter {
         Ok(())
     }
 
+    pub(crate) fn delete<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let key = key.into();
+        V::remove_from_storage(prefix, key, &self.builder);
+        Ok(())
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.id
     }
 }
 
-pub(crate) struct HashMapBlockfileReader<K: Key, V: Value> {
+pub(crate) struct MemoryBlockfileReader<K: Key, V: Value> {
+    storage_manager: StorageManager,
     storage: Storage,
     marker: std::marker::PhantomData<(K, V)>,
 }
@@ -52,12 +63,13 @@ impl<
         'storage,
         K: Key + Into<KeyWrapper> + From<&'storage KeyWrapper>,
         V: Value + Readable<'storage>,
-    > HashMapBlockfileReader<K, V>
+    > MemoryBlockfileReader<K, V>
 {
     pub(crate) fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
         // TODO: don't unwrap
         let storage = storage_manager.get(id).unwrap();
         Self {
+            storage_manager,
             storage,
             marker: std::marker::PhantomData,
         }
@@ -155,6 +167,10 @@ impl<
         Ok(values)
     }
 
+    pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+        V::count(&self.storage)
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.storage.id
     }
@@ -174,8 +190,8 @@ mod tests {
         let _ = writer.set("prefix", "key1", "value1");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<&str, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", "key1").unwrap();
         assert_eq!(value, "value1");
     }
@@ -191,8 +207,8 @@ mod tests {
         let _ = writer.set("prefix", "bitmap1", &bitmap);
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<&str, roaring::RoaringBitmap> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<&str, roaring::RoaringBitmap> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", "bitmap1").unwrap();
         assert!(value.contains(1));
         assert!(value.contains(2));
@@ -266,8 +282,8 @@ mod tests {
 
         writer.commit().unwrap();
 
-        let reader: HashMapBlockfileReader<&str, DataRecord> =
-            HashMapBlockfileReader::open(id, storage_manager);
+        let reader: MemoryBlockfileReader<&str, DataRecord> =
+            MemoryBlockfileReader::open(id, storage_manager);
         let record = reader.get("prefix", "embedding_id_1").unwrap();
         assert_eq!(record.id, "embedding_id_1");
         assert_eq!(record.embedding, vec![1.0, 2.0, 3.0]);
@@ -280,8 +296,8 @@ mod tests {
         let _ = writer.set("prefix", true, "value1");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<bool, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<bool, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", true).unwrap();
         assert_eq!(value, "value1");
     }
@@ -293,8 +309,8 @@ mod tests {
         let _ = writer.set("prefix", 1, "value1");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", 1).unwrap();
         assert_eq!(value, "value1");
     }
@@ -306,8 +322,8 @@ mod tests {
         let _ = writer.set("prefix", 1.0, "value1");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", 1.0).unwrap();
         assert_eq!(value, "value1");
     }
@@ -321,8 +337,8 @@ mod tests {
         let _ = writer.set("different_prefix", "key3", "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<&str, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_by_prefix("prefix").unwrap();
         assert_eq!(values.len(), 2);
         assert!(values.iter().any(|(prefix, key, value)| *prefix == "prefix"
@@ -342,8 +358,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gt("prefix", 3);
         assert!(values.is_err());
     }
@@ -357,8 +373,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gt("prefix", 0).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -381,8 +397,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gt("prefix", 1).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -402,8 +418,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gt("prefix", 3.0);
         assert!(values.is_err());
     }
@@ -417,8 +433,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gt("prefix", 0.0).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -441,8 +457,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gt("prefix", 1.0).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -462,8 +478,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gte("prefix", 4);
         assert!(values.is_err());
     }
@@ -477,8 +493,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gte("prefix", 1).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -501,8 +517,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gte("prefix", 2).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -522,8 +538,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gte("prefix", 3.5);
         assert!(values.is_err());
     }
@@ -537,8 +553,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gte("prefix", 0.5).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -561,8 +577,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_gte("prefix", 1.5).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -582,8 +598,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lt("prefix", 1);
         assert!(values.is_err());
     }
@@ -597,8 +613,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lt("prefix", 4).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -621,8 +637,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lt("prefix", 3).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -642,8 +658,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lt("prefix", 0.5);
         assert!(values.is_err());
     }
@@ -657,8 +673,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lt("prefix", 3.5).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -681,8 +697,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lt("prefix", 2.5).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -702,8 +718,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lte("prefix", 0);
         assert!(values.is_err());
     }
@@ -717,8 +733,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lte("prefix", 3).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -741,8 +757,8 @@ mod tests {
         let _ = writer.set("prefix", 3, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<u32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lte("prefix", 2).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -762,8 +778,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lte("prefix", 0.5);
         assert!(values.is_err());
     }
@@ -777,8 +793,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lte("prefix", 3.0).unwrap();
         assert_eq!(values.len(), 3);
         assert!(values
@@ -801,8 +817,8 @@ mod tests {
         let _ = writer.set("prefix", 3.0, "value3");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<f32, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_lte("prefix", 2.0).unwrap();
         assert_eq!(values.len(), 2);
         assert!(values
@@ -811,5 +827,28 @@ mod tests {
         assert!(values
             .iter()
             .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+    }
+
+    #[test]
+    fn test_delete() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+        let _ = writer.set("prefix", "key1", "value1");
+        let _ = writer.set("prefix", "key2", "value2");
+        let _ = writer.set("different_prefix", "key3", "value3");
+        // delete
+        let _ = writer.delete::<&str, &str>("prefix", "key1");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        let key_2 = reader.get("prefix", "key2").unwrap();
+        assert_eq!(key_2, "value2");
+        let key_3 = reader.get("different_prefix", "key3").unwrap();
+        assert_eq!(key_3, "value3");
+
+        let key_1 = reader.get("prefix", "key1");
+        assert!(key_1.is_err());
     }
 }

@@ -598,4 +598,8 @@ impl RecordSegmentReader<'_> {
     ) -> Result<DataRecord, Box<dyn ChromaError>> {
         self.id_to_data.get("", offset_id).await
     }
+
+    pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+        self.id_to_data.count().await
+    }
 }

@@ -204,18 +204,37 @@ impl Index<HnswIndexConfig> for HnswIndex {
         unsafe { add_item(self.ffi_ptr, vector.as_ptr(), id, false) }
     }
 
-    fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+    fn delete(&self, id: usize) {
+        unsafe { mark_deleted(self.ffi_ptr, id) }
+    }
+
+    fn query(
+        &self,
+        vector: &[f32],
+        k: usize,
+        allowed_ids: &[usize],
+        disallowed_ids: &[usize],
+    ) -> (Vec<usize>, Vec<f32>) {
         let actual_k = std::cmp::min(k, self.len());
         let mut ids = vec![0usize; actual_k];
         let mut distance = vec![0.0f32; actual_k];
+        let mut total_result = actual_k;
         unsafe {
-            knn_query(
+            total_result = knn_query(
                 self.ffi_ptr,
                 vector.as_ptr(),
                 k,
                 ids.as_mut_ptr(),
                 distance.as_mut_ptr(),
-            );
+                allowed_ids.as_ptr(),
+                allowed_ids.len(),
+                disallowed_ids.as_ptr(),
+                disallowed_ids.len(),
+            ) as usize;
+        }
+        if total_result < actual_k {
+            ids.truncate(total_result);
+            distance.truncate(total_result);
         }
         return (ids, distance);
     }
@@ -305,6 +324,7 @@ extern "C" {
     fn persist_dirty(index: *const IndexPtrFFI);
 
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
+    fn mark_deleted(index: *const IndexPtrFFI, id: usize);
     fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
     fn knn_query(
         index: *const IndexPtrFFI,
@@ -312,7 +332,11 @@ extern "C" {
         k: usize,
         ids: *mut usize,
         distance: *mut f32,
-    );
+        allowed_ids: *const usize,
+        allowed_ids_length: usize,
+        disallowed_ids: *const usize,
+        disallowed_ids_length: usize,
+    ) -> c_int;
 
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
@@ -326,6 +350,7 @@ pub mod test {
 
     use crate::distance::DistanceFunction;
     use crate::index::utils;
+    use rand::seq::IteratorRandom;
     use rand::Rng;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
@@ -493,11 +518,70 @@ pub mod test {
 
         // Query the data
         let query = &data[0..d];
-        let (ids, distances) = index.query(query, 1);
+        let allow_ids = &[];
+        let disallow_ids = &[];
+        let (ids, distances) = index.query(query, 1, allow_ids, disallow_ids);
         assert_eq!(ids.len(), 1);
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
         assert_eq!(distances[0], 0.0);
+    }
+
+    #[test]
+    fn it_can_add_and_delete() {
+        let n = 1000;
+        let d = 960;
+
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+            Uuid::new_v4(),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(n, d);
+        let ids: Vec<usize> = (0..n).collect();
+
+        (0..n).into_iter().for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data);
+        });
+
+        // Delete some of the data
+        let mut rng = rand::thread_rng();
+        let delete_ids: Vec<usize> = (0..n).choose_multiple(&mut rng, n / 20);
+
+        for id in &delete_ids {
+            index.delete(*id);
+        }
+
+        let allow_ids = &[];
+        let disallow_ids = &[];
+        // Query for the deleted ids and ensure they are not found
+        for deleted_id in &delete_ids {
+            let target_vector = &data[*deleted_id * d..(*deleted_id + 1) * d];
+            let (ids, _) = index.query(target_vector, 10, allow_ids, disallow_ids);
+            for check_deleted_id in &delete_ids {
+                assert!(!ids.contains(check_deleted_id));
+            }
+        }
     }
 
     #[test]
@@ -564,7 +648,9 @@ pub mod test {
 
         // Query the data
         let query = &data[0..d];
-        let (ids, distances) = index.query(query, 1);
+        let allow_ids = &[];
+        let disallow_ids = &[];
+        let (ids, distances) = index.query(query, 1, allow_ids, disallow_ids);
         assert_eq!(ids.len(), 1);
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
@@ -585,5 +671,50 @@ pub mod test {
             }
             i += 1;
         }
+    }
+
+    #[test]
+    fn it_can_add_and_query_with_allowed_and_disallowed_ids() {
+        let n = 1000;
+        let d: usize = 960;
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+            Uuid::new_v4(),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(n, d);
+        let ids: Vec<usize> = (0..n).collect();
+
+        (0..n).into_iter().for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data);
+        });
+
+        // Query the data
+        let query = &data[0..d];
+        let allow_ids = &[0, 2];
+        let disallow_ids = &[3];
+        let (ids, distances) = index.query(query, 10, allow_ids, disallow_ids);
+        assert_eq!(ids.len(), 2);
+        assert_eq!(distances.len(), 2);
     }
 }

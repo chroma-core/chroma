@@ -1,5 +1,6 @@
 use crate::{
     blockstore::key::{CompositeKey, KeyWrapper},
+    errors::ChromaError,
     segment::DataRecord,
 };
 use arrow::array::Int32Array;
@@ -9,6 +10,7 @@ use std::{collections::HashMap, sync::Arc};
 
 pub(crate) trait Writeable {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder);
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder);
 }
 
 pub(crate) trait Readable<'referred_data>: Sized {
@@ -46,6 +48,8 @@ pub(crate) trait Readable<'referred_data>: Sized {
         key: KeyWrapper,
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)>;
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 }
 
 impl Writeable for &str {
@@ -62,6 +66,18 @@ impl Writeable for &str {
                 },
                 value.to_string(),
             );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .string_value_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -143,6 +159,10 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .map(|(k, v)| (k, v.as_str()))
             .collect()
     }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.string_value_storage.iter().len())
+    }
 }
 
 // TODO: remove this and make this all use a unified storage so we don't have two impls
@@ -160,6 +180,18 @@ impl Writeable for &Int32Array {
                 },
                 value.clone(),
             );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .int32_array_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -237,6 +269,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
             .map(|(k, v)| (k, v.clone()))
             .collect()
     }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.int32_array_storage.iter().len())
+    }
 }
 
 impl Writeable for &RoaringBitmap {
@@ -253,6 +289,18 @@ impl Writeable for &RoaringBitmap {
                 },
                 value.clone(),
             );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .roaring_bitmap_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -330,6 +378,10 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .map(|(k, v)| (k, v.clone()))
             .collect()
     }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.roaring_bitmap_storage.iter().len())
+    }
 }
 
 impl Writeable for u32 {
@@ -341,6 +393,18 @@ impl Writeable for u32 {
             },
             value,
         );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .u32_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -418,6 +482,10 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .map(|(k, v)| (k, v.clone()))
             .collect()
     }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.u32_storage.iter().len())
+    }
 }
 
 impl Writeable for &DataRecord<'_> {
@@ -446,6 +514,27 @@ impl Writeable for &DataRecord<'_> {
                 },
                 value.embedding.to_vec(),
             );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .data_record_id_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key: key.clone(),
+            });
+        storage
+            .data_record_embedding_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
     }
 }
 
@@ -594,6 +683,10 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
                 )
             })
             .collect()
+    }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.data_record_id_storage.iter().len())
     }
 }
 

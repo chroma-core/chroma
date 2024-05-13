@@ -1,4 +1,5 @@
 pub(super) mod brute_force_knn;
+pub(super) mod count_records;
 pub(super) mod flush_s3;
 pub(super) mod hnsw_knn;
 pub(super) mod merge_knn_results;

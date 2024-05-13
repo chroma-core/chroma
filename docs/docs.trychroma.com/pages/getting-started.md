@@ -16,7 +16,7 @@ title: "🔑 Getting Started"
 
 {% /tabs %}
 
-Chroma is a database for building AI applications with embeddings. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://airtable.com/shrOAiDUtS2ILy5vZ) is coming soon!
+Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://airtable.com/shrOAiDUtS2ILy5vZ) is coming soon!
 
 ### 1. Install
 
@@ -141,7 +141,10 @@ Chroma will store your text and handle embedding and indexing automatically. You
 
 ```python
 collection.add(
-    documents=["This is a document about pineapple", "This is a document about oranges"],
+    documents=[
+        "This is a document about pineapple",
+        "This is a document about oranges"
+    ],
     ids=["id1", "id2"]
 )
 ```
@@ -151,7 +154,10 @@ collection.add(
 
 ```js
 await collection.add({
-    documents: ["This is a document about pineapple", "This is a document about oranges"],
+    documents: [
+        "This is a document about pineapple",
+        "This is a document about oranges"
+    ],
     ids: ["id1", "id2"],
 });
 ```
@@ -197,7 +203,10 @@ From the above query - you can see that our query about `hawaii` is the semantic
 
 ```js
 {
-  'documents': [['This is a document about pineapple', 'This is a document about oranges']],
+  'documents': [[
+      'This is a document about pineapple',
+      'This is a document about oranges'
+  ]],
   'ids': [['id1', 'id2']],
   'distances': [[1.0404009819030762, 1.243080496788025]],
   'uris': None,
@@ -223,7 +232,10 @@ collection = chroma_client.get_or_create_collection(name="my_collection")
 
 # switch `add` to `upsert` to avoid adding the same documents every time
 collection.upsert(
-    documents=["This is a document about pineapple", "This is a document about oranges"],
+    documents=[
+        "This is a document about pineapple",
+        "This is a document about oranges"
+    ],
     ids=["id1", "id2"]
 )
 
@@ -249,7 +261,10 @@ const collection = await client.getOrCreateCollection({
 
 // switch `add` to `upsert` to avoid adding the same documents every time
 await collection.upsert({
-    documents: ["This is a document about pineapple", "This is a document about oranges"],
+    documents: [
+        "This is a document about pineapple",
+        "This is a document about oranges"
+    ],
     ids: ["id1", "id2"],
 });
 
@@ -267,7 +282,7 @@ console.log(results)
 
 ## 📚 Next steps
 
-- Check out [💡 Examples](/examples) of what you can build with Chroma
+<!-- - Check out [💡 Examples](/examples) of what you can build with Chroma -->
 - Read the [🧪 Usage Guide](/guides) to learn more about the API
 - Learn how to [☁️ Deploy Chroma](/deployment) to a server
 - Join Chroma's [Discord Community](https://discord.gg/Fk2pH7k6) to ask questions and get help

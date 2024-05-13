@@ -4,7 +4,7 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::key::KeyWrapper;
-use super::memory::reader_writer::{HashMapBlockfileReader, MemoryBlockfileWriter};
+use super::memory::reader_writer::{MemoryBlockfileReader, MemoryBlockfileWriter};
 use super::memory::storage::{Readable, Writeable};
 use super::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
@@ -26,6 +26,8 @@ pub(crate) enum BlockfileError {
     TransactionInProgress,
     #[error("Transaction not in progress")]
     TransactionNotInProgress,
+    #[error("Block not found")]
+    BlockNotFound,
 }
 
 impl ChromaError for BlockfileError {
@@ -37,6 +39,7 @@ impl ChromaError for BlockfileError {
             BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
                 ErrorCodes::FailedPrecondition
             }
+            BlockfileError::BlockNotFound => ErrorCodes::Internal,
         }
     }
 }
@@ -219,6 +222,22 @@ impl BlockfileWriter {
         }
     }
 
+    pub(crate) async fn delete<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.delete::<K, V>(prefix, key),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => {
+                writer.delete::<K, V>(prefix, key).await
+            }
+        }
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
@@ -259,7 +278,7 @@ pub(crate) enum BlockfileReader<
     K: Key + ArrowReadableKey<'me>,
     V: Value + ArrowReadableValue<'me>,
 > {
-    MemoryBlockfileReader(HashMapBlockfileReader<K, V>),
+    MemoryBlockfileReader(MemoryBlockfileReader<K, V>),
     ArrowBlockfileReader(ArrowBlockfileReader<'me, K, V>),
 }
 
@@ -280,6 +299,23 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
+        }
+    }
+
+    pub(crate) async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                let count = reader.count().await;
+                match count {
+                    Ok(c) => {
+                        return Ok(c);
+                    }
+                    Err(_) => {
+                        return Err(Box::new(BlockfileError::BlockNotFound));
+                    }
+                }
+            }
         }
     }
 
