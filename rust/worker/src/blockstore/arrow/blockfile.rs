@@ -24,7 +24,7 @@ pub(crate) struct ArrowBlockfileWriter {
     block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
     sparse_index: SparseIndex,
     id: Uuid,
-    write_mutex: Arc<Mutex<()>>,
+    write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -63,7 +63,7 @@ impl ArrowBlockfileWriter {
             block_deltas: block_deltas,
             sparse_index: sparse_index,
             id,
-            write_mutex: Arc::new(Mutex::new(())),
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -80,7 +80,7 @@ impl ArrowBlockfileWriter {
             block_deltas: block_deltas,
             sparse_index: new_sparse_index,
             id,
-            write_mutex: Arc::new(Mutex::new(())),
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -114,7 +114,7 @@ impl ArrowBlockfileWriter {
         value: V,
     ) -> Result<(), Box<dyn ChromaError>> {
         // TODO: for now the BF writer locks the entire write operation
-        let _guard = self.write_mutex.lock();
+        let _guard = self.write_mutex.lock().await;
 
         // TODO: value must be smaller than the block size except for position lists, which are a special case
         //         // where we split the value across multiple blocks
@@ -179,7 +179,7 @@ impl ArrowBlockfileWriter {
         prefix: &str,
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let _guard = self.write_mutex.lock();
+        let _guard = self.write_mutex.lock().await;
         // Get the target block id for the key
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
