@@ -15,14 +15,13 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
-from chromadb.errors import error_types
 
 from io import BytesIO
 from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union, cast
 import numpy as np
 import numpy.typing as npt
 import importlib
@@ -662,13 +661,10 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         api_key: str,
+        project_id: str,
         model_name: str = "textembedding-gecko",
-        project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
     ):
-        if not api_key or len(api_key) != 218:
-            raise ValueError(f'Something went wrong -- API Key is invalid, not set or empty. API Key: {api_key}')
-
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
@@ -681,21 +677,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             ).json()
 
             predictions = response.get('predictions')
-            if predictions: # This means that `predictions` of response is not None and empty. When `predictions` of response is not satisfied with these conditions, the else branch will be hit.
+            if isinstance(predictions, List) and predictions:
                 for prediction in predictions:
                     embeddings.append(prediction["embeddings"]["values"])
-            elif isinstance(predictions, List) and not len(predictions):
-                    raise IndexError(f'Something went wrong -- the `predictions` of the response from Vertex Embedding API is empty. Response: {response}')
             else:
-                error = response.get('error')
-                if error:
-                    error_code = error.get('code')
-                    # More specific error codes corresponded to errors will be added below in the future.
-                    auth_error = error_types['AuthorizationError'](f'Something went wrong -- API Key authorization is invalid. Response: {response}')
-                    if error_code == auth_error.code():
-                        raise auth_error
-
-                raise KeyError(f'Something went wrong -- `predictions` of the response from Vertex Embedding API does not exist. Response: {response}')
+                raise KeyError(f'Something went wrong -- Response: {response}')
 
         return embeddings
 

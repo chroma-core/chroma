@@ -5,10 +5,11 @@ from chromadb.utils.embedding_functions import GoogleVertexEmbeddingFunction
 
 
 def test_api_key() -> None:
-    api_token = getenv('GVAI_API_KEY')
-    assert api_token is not None
-    assert len(api_token) > 0
-    assert len(api_token) == 218 # according to access token, its length is 218.
+    with pytest.raises(KeyError, match="Request had invalid authentication credentials."):
+        vertex_ef = GoogleVertexEmbeddingFunction(None,
+                                                  'textembedding-gecko-multilingual',
+                                                  getenv('PROJECT_ID'))
+        embeddingsclear = vertex_ef(['Open source is awsome.'])
 
 
 @pytest.mark.skipif(
