@@ -7,6 +7,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
+from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Where,
     WhereDocument,
@@ -36,6 +37,8 @@ class GrpcMetadataSegment(MetadataReader):
             raise Exception("Missing grpc_url in segment metadata")
 
         channel = grpc.insecure_channel(self._segment["metadata"]["grpc_url"])
+        interceptors = [OtelInterceptor()]
+        channel = grpc.intercept_channel(channel, *interceptors)
         self._metadata_reader_stub = MetadataReaderStub(channel)  # type: ignore
 
     @override
