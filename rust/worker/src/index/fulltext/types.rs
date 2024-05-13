@@ -1,10 +1,25 @@
 use crate::blockstore::{
     BlockfileFlusher, BlockfileReader, BlockfileWriter, PositionalPostingListBuilder,
 };
-use crate::errors::ChromaError;
+use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
 use arrow::array::Int32Array;
 use std::collections::HashMap;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum FullTextIndexError {
+    #[error("Multiple tokens found in frequencies blockfile")]
+    MultipleTokenFrequencies,
+    #[error("Empty value in positional posting list")]
+    EmptyValueInPositionalPostingList,
+}
+
+impl ChromaError for FullTextIndexError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
 
 pub(crate) struct FullTextIndexWriter {
     posting_lists_blockfile_writer: BlockfileWriter,
@@ -101,16 +116,41 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    async fn commit_and_flush(self) -> Result<(), Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
-        self.posting_lists_blockfile_writer
-            .commit::<u32, &Int32Array>()?
+        let posting_lists_blockfile_flusher = self
+            .posting_lists_blockfile_writer
+            .commit::<u32, &Int32Array>()?;
+        let frequencies_blockfile_flusher =
+            self.frequencies_blockfile_writer.commit::<u32, &str>()?;
+        Ok(FullTextIndexFlusher {
+            posting_lists_blockfile_flusher,
+            frequencies_blockfile_flusher,
+        })
+    }
+}
+
+pub(crate) struct FullTextIndexFlusher {
+    posting_lists_blockfile_flusher: BlockfileFlusher,
+    frequencies_blockfile_flusher: BlockfileFlusher,
+}
+
+impl FullTextIndexFlusher {
+    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+        let res = self
+            .posting_lists_blockfile_flusher
             .flush::<u32, &Int32Array>()
-            .await?;
-        self.frequencies_blockfile_writer
-            .commit::<u32, &str>()?
-            .flush::<u32, u32>()
-            .await?;
+            .await;
+        if res.is_err() {
+            return res;
+        }
+        let res = self
+            .frequencies_blockfile_flusher
+            .flush::<u32, &str>()
+            .await;
+        if res.is_err() {
+            return res;
+        }
         Ok(())
     }
 }
@@ -149,7 +189,7 @@ impl<'me> FullTextIndexReader<'me> {
                 return Ok(vec![]);
             }
             if res.len() > 1 {
-                panic!("Multiple tokens found in frequencies blockfile");
+                return Err(Box::new(FullTextIndexError::MultipleTokenFrequencies));
             }
             let res = res[0];
             // Throw away the "value" since we store frequencies in the keys.
@@ -207,8 +247,19 @@ impl<'me> FullTextIndexReader<'me> {
                             .map(|x| &x.2)
                     {
                         for pos in positions.iter() {
-                            if pos.unwrap() == position + token_offset {
-                                new_positions.push(*position);
+                            match pos {
+                                None => {
+                                    // This should never happen since we only store positions for the doc_id
+                                    // in the positional posting list.
+                                    return Err(Box::new(
+                                        FullTextIndexError::EmptyValueInPositionalPostingList,
+                                    ));
+                                }
+                                Some(pos) => {
+                                    if pos == position + token_offset {
+                                        new_positions.push(*position);
+                                    }
+                                }
                             }
                         }
                     }
@@ -264,7 +315,8 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -292,7 +344,8 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -330,7 +383,8 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("helo", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -363,7 +417,8 @@ mod tests {
         index_writer.add_document("aaa", 1).unwrap();
         index_writer.add_document("aaaaa", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -395,7 +450,8 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -427,7 +483,8 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -460,7 +517,8 @@ mod tests {
         index_writer.add_document("hello world hello", 1).unwrap();
         index_writer.add_document("    hello ", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -497,7 +555,8 @@ mod tests {
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.add_document("hello", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -536,7 +595,8 @@ mod tests {
         index_writer.add_document("world", 3).unwrap();
         index_writer.add_document("world hello", 4).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -585,7 +645,8 @@ mod tests {
         index_writer.add_document("aaabbb", 4).unwrap();
         index_writer.add_document("aabbbbaaaaabbb", 5).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
@@ -628,7 +689,8 @@ mod tests {
         index_writer.add_document("hello world!!!", 2).unwrap();
         index_writer.add_document(".!.!.!", 3).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        index_writer.commit_and_flush().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
