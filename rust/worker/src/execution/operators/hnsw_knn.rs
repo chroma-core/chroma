@@ -39,6 +39,8 @@ pub enum HnswKnnOperatorError {
     RecordSegmentError,
     #[error("Error reading Record Segment")]
     RecordSegmentReadError,
+    #[error("Invalid allowed and disallowed ids")]
+    InvalidAllowedAndDisallowedIds,
 }
 
 impl ChromaError for HnswKnnOperatorError {
@@ -46,6 +48,7 @@ impl ChromaError for HnswKnnOperatorError {
         match self {
             HnswKnnOperatorError::RecordSegmentError => ErrorCodes::Internal,
             HnswKnnOperatorError::RecordSegmentReadError => ErrorCodes::Internal,
+            HnswKnnOperatorError::InvalidAllowedAndDisallowedIds => ErrorCodes::Internal,
         }
     }
 }
@@ -87,7 +90,9 @@ impl HnswKnnOperator {
     ) -> Result<(), Box<dyn ChromaError>> {
         for allowed_id in allowed_ids {
             if disallowed_ids.contains(allowed_id) {
-                return Err(Box::new(HnswKnnOperatorError::RecordSegmentError));
+                return Err(Box::new(
+                    HnswKnnOperatorError::InvalidAllowedAndDisallowedIds,
+                ));
             }
         }
         Ok(())
