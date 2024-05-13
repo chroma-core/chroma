@@ -31,6 +31,8 @@ message Vector {
 enum SegmentScope {
     VECTOR = 0;
     METADATA = 1;
+    RECORD = 2;
+    SQLITE = 3;
 }
 
 message FilePaths {
@@ -91,6 +93,16 @@ message OperationRecord {
 
 service MetadataReader {
     rpc QueryMetadata(QueryMetadataRequest) returns (QueryMetadataResponse) {}
+    rpc CountRecords(CountRecordsRequest) returns (CountRecordsResponse) {}
+}
+
+message CountRecordsRequest {
+    string segment_id = 1;
+}
+
+// TODO: Add error propagation in the response.
+message CountRecordsResponse {
+    uint32 count = 1;
 }
 
 message QueryMetadataRequest {

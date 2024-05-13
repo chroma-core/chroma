@@ -80,13 +80,13 @@ impl FullTextIndex for BlockfileFullTextIndex {
             let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
             self.posting_lists_blockfile.set(
                 blockfilekey,
-                Value::PositionalPostingListValue(positional_posting_list),
+                &Value::PositionalPostingListValue(positional_posting_list),
             );
         }
         for (key, value) in self.uncommitted_frequencies.drain() {
             let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
             self.frequencies_blockfile
-                .set(blockfilekey, Value::IntValue(value));
+                .set(blockfilekey, &Value::IntValue(value));
         }
         self.posting_lists_blockfile.commit_transaction()?;
         self.frequencies_blockfile.commit_transaction()?;

@@ -93,6 +93,8 @@ impl RootConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub(crate) struct QueryServiceConfig {
+    pub(crate) service_name: String,
+    pub(crate) otel_endpoint: String,
     pub(crate) my_ip: String,
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
@@ -115,6 +117,8 @@ pub(crate) struct QueryServiceConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub(crate) struct CompactionServiceConfig {
+    pub(crate) service_name: String,
+    pub(crate) otel_endpoint: String,
     pub(crate) my_ip: String,
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
@@ -150,6 +154,8 @@ mod tests {
                 "chroma_config.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -167,6 +173,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -177,6 +184,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -194,6 +203,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -225,6 +235,8 @@ mod tests {
                 "random_path.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -242,6 +254,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -252,6 +265,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -269,6 +284,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -318,6 +334,8 @@ mod tests {
                 "chroma_config.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -335,6 +353,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -345,6 +364,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     my_ip: "192.0.0.1"
                     my_port: 50051
                     assignment_policy:
@@ -362,6 +383,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -389,10 +411,14 @@ mod tests {
             let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_IP", "192.0.0.1");
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
                 query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
@@ -408,6 +434,7 @@ mod tests {
                     storage:
                         S3:
                             bucket: "chroma"
+                            credentials: Minio
                     log:
                         Grpc:
                             host: "localhost"
@@ -418,6 +445,8 @@ mod tests {
                         worker_queue_size: 100
 
                 compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
@@ -430,9 +459,6 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
-                    storage:
-                        S3:
-                            bucket: "chroma"
                     log:
                         Grpc:
                             host: "localhost"
@@ -450,6 +476,16 @@ mod tests {
             let config = RootConfig::load();
             assert_eq!(config.query_service.my_ip, "192.0.0.1");
             assert_eq!(config.query_service.my_port, 50051);
+            match &config.compaction_service.storage {
+                crate::storage::config::StorageConfig::S3(s) => {
+                    assert_eq!(s.bucket, "buckets!");
+                    assert_eq!(
+                        s.credentials,
+                        crate::storage::config::S3CredentialsConfig::AWS
+                    );
+                }
+                _ => panic!("Invalid storage config"),
+            }
             Ok(())
         });
     }

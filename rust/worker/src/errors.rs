@@ -44,3 +44,5 @@ pub(crate) enum ErrorCodes {
 pub(crate) trait ChromaError: Error + Send {
     fn code(&self) -> ErrorCodes;
 }
+
+impl Error for Box<dyn ChromaError> {}

@@ -182,6 +182,10 @@ impl CustomResourceMemberlistProvider {
 
 #[async_trait]
 impl Component for CustomResourceMemberlistProvider {
+    fn get_name() -> &'static str {
+        "Custom resource member list provider"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }

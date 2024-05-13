@@ -1,4 +1,4 @@
-exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2)\.(py|pyi|py_grpc\.py)' # Generated files
+exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2|chroma_pb2_grpc|coordinator_pb2_grpc|logservice_pb2_grpc)\.(py|pyi)' # Generated files
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -10,6 +10,8 @@ repos:
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
+        # Exclude Helm templates from YAML linting as they are not valid YAML
+        exclude: "k8s/distributed-chroma/templates/"
       - id: check-xml
       - id: check-merge-conflict
       - id: check-case-conflict

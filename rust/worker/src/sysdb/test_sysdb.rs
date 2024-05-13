@@ -185,15 +185,13 @@ impl SysDb for TestSysDb {
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: String,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let mut inner = self.inner.lock();
-        let collection = inner
-            .collections
-            .get(&Uuid::parse_str(&collection_id).unwrap());
+        let collection = inner.collections.get(&collection_id);
         if collection.is_none() {
             return Err(FlushCompactionError::CollectionNotFound);
         }

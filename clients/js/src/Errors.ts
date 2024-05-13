@@ -88,3 +88,22 @@ export class ChromaValueError extends Error {
     super(message);
   }
 }
+
+export class InvalidCollectionError extends Error {
+  name = "InvalidCollectionError";
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+export function createErrorByType(type: string, message: string) {
+  switch (type) {
+    case "InvalidCollection":
+      return new InvalidCollectionError(message);
+    default:
+      return undefined;
+  }
+}

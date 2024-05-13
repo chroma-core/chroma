@@ -40,7 +40,13 @@ class GrpcMetadataSegment(MetadataReader):
 
     @override
     def count(self) -> int:
-        raise NotImplementedError()
+        request: pb.CountRecordsRequest = pb.CountRecordsRequest(
+            segment_id=self._segment["id"].hex
+        )
+        response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
+            request
+        )
+        return response.count
 
     @override
     def delete(self, where: Optional[Where] = None) -> None:
@@ -65,12 +71,14 @@ class GrpcMetadataSegment(MetadataReader):
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
-        where_pb = self._where_to_proto(where)
-        where_document_pb = self._where_document_to_proto(where_document)
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,
-            where=where_pb,
-            where_document=where_document_pb,
+            where=self._where_to_proto(where) if where is not None else None,
+            where_document=(
+                self._where_document_to_proto(where_document)
+                if where_document is not None
+                else None
+            ),
             ids=ids,
             limit=limit,
             offset=offset,
@@ -89,7 +97,7 @@ class GrpcMetadataSegment(MetadataReader):
             result = self._from_proto(record)
             results.append(result)
 
-        return []
+        return results
 
     def _where_to_proto(self, where: Optional[Where]) -> pb.Where:
         response = pb.Where()
@@ -247,23 +255,9 @@ class GrpcMetadataSegment(MetadataReader):
                                 f"Expected where operand value to be a string, int, or float, got {operand}"
                             )
                     else:
-                        # Our key is a metadata field name and the value is meant
-                        # to be compared for strict equality.
-                        if type(operand) is str:
-                            ssc = pb.SingleStringComparison()
-                            ssc.value = operand
-                            ssc.comparator = pb.GenericComparator.EQ
-                            dc.single_string_operand.CopyFrom(ssc)
-                        elif type(operand) is int:
-                            sic = pb.SingleIntComparison()
-                            sic.value = operand
-                            sic.generic_comparator = pb.GenericComparator.EQ
-                            dc.single_int_operand.CopyFrom(sic)
-                        elif type(operand) is float:
-                            sfc = pb.SingleDoubleComparison()
-                            sfc.value = operand
-                            sfc.generic_comparator = pb.GenericComparator.EQ
-                            dc.double_list_operand.CopyFrom(sfc)
+                        # This case should never happen, as we've already
+                        # handled the case for direct comparisons.
+                        pass
 
             response.direct_comparison.CopyFrom(dc)
         return response

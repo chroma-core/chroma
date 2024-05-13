@@ -22,6 +22,8 @@ class SegmentScope(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     VECTOR: _ClassVar[SegmentScope]
     METADATA: _ClassVar[SegmentScope]
+    RECORD: _ClassVar[SegmentScope]
+    SQLITE: _ClassVar[SegmentScope]
 
 class WhereDocumentOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -57,6 +59,8 @@ FLOAT32: ScalarEncoding
 INT32: ScalarEncoding
 VECTOR: SegmentScope
 METADATA: SegmentScope
+RECORD: SegmentScope
+SQLITE: SegmentScope
 CONTAINS: WhereDocumentOperator
 NOT_CONTAINS: WhereDocumentOperator
 AND: BooleanOperator
@@ -187,6 +191,18 @@ class OperationRecord(_message.Message):
     metadata: UpdateMetadata
     operation: Operation
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
+
+class CountRecordsRequest(_message.Message):
+    __slots__ = ("segment_id",)
+    SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    segment_id: str
+    def __init__(self, segment_id: _Optional[str] = ...) -> None: ...
+
+class CountRecordsResponse(_message.Message):
+    __slots__ = ("count",)
+    COUNT_FIELD_NUMBER: _ClassVar[int]
+    count: int
+    def __init__(self, count: _Optional[int] = ...) -> None: ...
 
 class QueryMetadataRequest(_message.Message):
     __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset")

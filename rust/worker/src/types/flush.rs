@@ -2,6 +2,7 @@ use super::ConversionError;
 use crate::chroma_proto::FilePaths;
 use crate::chroma_proto::FlushCollectionCompactionResponse;
 use crate::chroma_proto::FlushSegmentCompactionInfo;
+use crate::errors::ChromaError;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
@@ -38,14 +39,14 @@ pub(crate) enum SegmentFlushInfoConversionError {
 
 #[derive(Debug)]
 pub(crate) struct FlushCompactionResponse {
-    pub(crate) collection_id: String,
+    pub(crate) collection_id: Uuid,
     pub(crate) collection_version: i32,
     pub(crate) last_compaction_time: i64,
 }
 
 impl FlushCompactionResponse {
     pub(crate) fn new(
-        collection_id: String,
+        collection_id: Uuid,
         collection_version: i32,
         last_compaction_time: i64,
     ) -> Self {
@@ -61,8 +62,10 @@ impl TryFrom<FlushCollectionCompactionResponse> for FlushCompactionResponse {
     type Error = FlushCompactionResponseConversionError;
 
     fn try_from(value: FlushCollectionCompactionResponse) -> Result<Self, Self::Error> {
+        let id = Uuid::parse_str(&value.collection_id)
+            .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
         Ok(FlushCompactionResponse {
-            collection_id: value.collection_id,
+            collection_id: id,
             collection_version: value.collection_version,
             last_compaction_time: value.last_compaction_time,
         })
@@ -73,4 +76,17 @@ impl TryFrom<FlushCollectionCompactionResponse> for FlushCompactionResponse {
 pub(crate) enum FlushCompactionResponseConversionError {
     #[error(transparent)]
     DecodeError(#[from] ConversionError),
+    #[error("Invalid collection id, valid UUID required")]
+    InvalidUuid,
+}
+
+impl ChromaError for FlushCompactionResponseConversionError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        match self {
+            FlushCompactionResponseConversionError::InvalidUuid => {
+                crate::errors::ErrorCodes::InvalidArgument
+            }
+            FlushCompactionResponseConversionError::DecodeError(e) => e.code(),
+        }
+    }
 }

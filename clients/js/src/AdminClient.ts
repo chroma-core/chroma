@@ -6,6 +6,7 @@ import {
   authOptionsToAuthProvider,
   ClientAuthProvider,
 } from "./auth";
+import { chromaFetch } from "./ChromaFetch";
 
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -64,7 +65,7 @@ export class AdminClient {
       basePath: path,
     });
 
-    this.api = new DefaultApi(apiConfig);
+    this.api = new DefaultApi(apiConfig, undefined, chromaFetch);
     this.api.options = fetchOptions ?? {};
 
     if (auth !== undefined) {

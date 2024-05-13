@@ -9,7 +9,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	libs2 "github.com/chroma-core/chroma/go/shared/libs"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"pgregory.net/rapid"
@@ -37,7 +37,7 @@ func (suite *LogServerTestSuite) SetupSuite() {
 	connectionString, err := libs2.StartPgContainer(ctx)
 	config.DATABASE_URL = connectionString
 	assert.NoError(suite.t, err, "Failed to start pg container")
-	var conn *pgx.Conn
+	var conn *pgxpool.Pool
 	conn, err = libs2.NewPgConnection(ctx, config)
 	assert.NoError(suite.t, err, "Failed to create new pg connection")
 	err = libs2.RunMigration(ctx, connectionString)

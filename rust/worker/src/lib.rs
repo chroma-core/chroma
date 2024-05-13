@@ -2,7 +2,7 @@ mod assignment;
 mod blockstore;
 mod compactor;
 mod config;
-mod distance;
+pub mod distance;
 mod errors;
 mod execution;
 mod index;
@@ -13,6 +13,7 @@ mod server;
 mod storage;
 mod sysdb;
 mod system;
+mod tracing;
 mod types;
 
 use config::Configurable;
@@ -21,13 +22,26 @@ use memberlist::MemberlistProvider;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
 mod chroma_proto {
     tonic::include_proto!("chroma");
 }
 
 pub async fn query_service_entrypoint() {
-    let config = config::RootConfig::load();
+    // Check if the config path is set in the env var
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
+        Err(_) => config::RootConfig::load(),
+    };
+
     let config = config.query_service;
+
+    crate::tracing::opentelemetry_config::init_otel_tracing(
+        &config.service_name,
+        &config.otel_endpoint,
+    );
+
     let system: system::System = system::System::new();
     let dispatcher =
         match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
@@ -80,8 +94,19 @@ pub async fn query_service_entrypoint() {
 }
 
 pub async fn compaction_service_entrypoint() {
-    let config = config::RootConfig::load();
+    // Check if the config path is set in the env var
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
+        Err(_) => config::RootConfig::load(),
+    };
+
     let config = config.compaction_service;
+
+    crate::tracing::opentelemetry_config::init_otel_tracing(
+        &config.service_name,
+        &config.otel_endpoint,
+    );
+
     let system: system::System = system::System::new();
 
     let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(

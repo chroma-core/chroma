@@ -4,6 +4,7 @@ import { IncludeEnum } from "../src/types";
 import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 
 import { IEmbeddingFunction } from "../src/embeddings/IEmbeddingFunction";
+import { InvalidCollectionError } from "../src/Errors";
 
 export class TestEmbeddingFunction implements IEmbeddingFunction {
   constructor() {}
@@ -29,6 +30,9 @@ test("it should query a collection", async () => {
   expect(results).toBeInstanceOf(Object);
   expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids[0]));
   expect(["test3"]).not.toEqual(expect.arrayContaining(results.ids[0]));
+  expect(results.included).toEqual(
+    expect.arrayContaining(["metadatas", "documents"]),
+  );
 });
 
 // test where_document
@@ -68,6 +72,7 @@ test("it should get embedding with matching documents", async () => {
   // expect(results2.embeddings[0][0]).toBeInstanceOf(Array);
   expect(results2.embeddings![0].length).toBe(1);
   expect(results2.embeddings![0][0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  expect(results2.included).toEqual(expect.arrayContaining(["embeddings"]));
 });
 
 test("it should exclude documents matching - not_contains", async () => {
@@ -212,4 +217,13 @@ test("it should query a collection with text and where nin", async () => {
   expect(["This is a third test"]).toEqual(
     expect.arrayContaining(results.documents[0]),
   );
+});
+
+test("should error on non existing collection", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.deleteCollection({ name: "test" });
+  expect(async () => {
+    await collection.query({ queryEmbeddings: [1, 2, 3] });
+  }).rejects.toThrow(InvalidCollectionError);
 });

@@ -5,6 +5,7 @@ import yaml
 
 import string
 
+from chromadb import TokenTransportHeader
 from chromadb.test.property.strategies import collection_name
 
 
@@ -41,7 +42,15 @@ def random_token(draw: st.DrawFn) -> str:
 
 @st.composite
 def random_token_transport_header(draw: st.DrawFn) -> Optional[str]:
-    return draw(st.sampled_from(["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
+    return draw(
+        st.sampled_from(
+            [
+                TokenTransportHeader.AUTHORIZATION,
+                TokenTransportHeader.X_CHROMA_TOKEN,
+                None,
+            ]
+        )
+    )
 
 
 @st.composite

@@ -32,6 +32,7 @@ pub(crate) enum ComponentRuntime {
 /// - on_start: Called when the component is started
 #[async_trait]
 pub(crate) trait Component: Send + Sized + Debug + 'static {
+    fn get_name() -> &'static str;
     fn queue_size(&self) -> usize;
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
@@ -47,7 +48,11 @@ pub(crate) trait Handler<M>
 where
     Self: Component + Sized + 'static,
 {
-    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ();
+    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ()
+    // The need for this lifetime bound comes from the async_trait macro when we need generic lifetimes in our message type
+    // https://stackoverflow.com/questions/69560112/how-to-use-rust-async-trait-generic-to-a-lifetime-parameter
+    where
+        M: 'async_trait;
 }
 
 /// A stream handler is a component that can process messages of a given type from a stream.
@@ -169,6 +174,10 @@ mod tests {
 
     #[async_trait]
     impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
         fn queue_size(&self) -> usize {
             self.queue_size
         }
