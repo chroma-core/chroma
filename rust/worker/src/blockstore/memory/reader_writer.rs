@@ -11,6 +11,16 @@ pub(crate) struct MemoryBlockfileWriter {
     id: uuid::Uuid,
 }
 
+pub(crate) struct MemoryBlockfileFlusher {
+    id: uuid::Uuid,
+}
+
+impl MemoryBlockfileFlusher {
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        self.id
+    }
+}
+
 impl MemoryBlockfileWriter {
     pub(super) fn new(storage_manager: StorageManager) -> Self {
         let builder = storage_manager.create();
@@ -22,9 +32,9 @@ impl MemoryBlockfileWriter {
         }
     }
 
-    pub(crate) fn commit(&self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(&self) -> Result<MemoryBlockfileFlusher, Box<dyn ChromaError>> {
         self.storage_manager.commit(self.builder.id);
-        Ok(())
+        Ok(MemoryBlockfileFlusher { id: self.id })
     }
 
     pub(crate) fn set<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
@@ -169,6 +179,10 @@ impl<
 
     pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         V::count(&self.storage)
+    }
+
+    pub(crate) fn contains(&'storage self, prefix: &str, key: K) -> bool {
+        V::contains(prefix, key.into(), &self.storage)
     }
 
     pub(crate) fn id(&self) -> uuid::Uuid {
