@@ -181,7 +181,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     ) -> Memberlist:
         if "members" not in api_response_spec:
             return []
-        return [m["url"] for m in api_response_spec["members"]]
+        return [m["member_id"] for m in api_response_spec["members"]]
 
     def _notify(self, memberlist: Memberlist) -> None:
         for callback in self.callbacks:
@@ -222,7 +222,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher)
-        assignment = f"{assignment}:50051"  # TODO: make port configurable
+        assignment = f"{assignment}.query-service.chroma.svc.cluster.local:50051"  # TODO: make port configurable
         return assignment
 
     @override

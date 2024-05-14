@@ -23,8 +23,9 @@ spec:
     - name: query-service-server-port
       port: 50051
       targetPort: 50051
+  clusterIP: None
   selector:
-    app: query-service-server
+    app: query-service
   type: ClusterIP
 
 ---
@@ -35,6 +36,7 @@ metadata:
   name: query-service
   namespace: {{ .Values.namespace }}
 spec:
+  serviceName: query-service
   replicas: 2
   selector:
     matchLabels:

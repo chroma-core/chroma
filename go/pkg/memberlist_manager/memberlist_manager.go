@@ -132,10 +132,10 @@ func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
 	// use a map to check if the new memberlist contains all the old members
 	newMemberlistMap := make(map[string]bool)
 	for _, member := range newMemberlist {
-		newMemberlistMap[member] = true
+		newMemberlistMap[member.id] = true
 	}
 	for _, member := range oldMemberlist {
-		if _, ok := newMemberlistMap[member]; !ok {
+		if _, ok := newMemberlistMap[member.id]; !ok {
 			return false
 		}
 	}

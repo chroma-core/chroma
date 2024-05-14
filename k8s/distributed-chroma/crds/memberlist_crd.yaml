@@ -25,7 +25,7 @@ spec:
                   items:
                     type: object
                     properties:
-                      url: # Rename to ip
+                      member_id:
                         type: string
   scope: Namespaced
   names:
