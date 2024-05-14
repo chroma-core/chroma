@@ -48,7 +48,7 @@ impl ChromaError for HnswKnnOperatorError {
         match self {
             HnswKnnOperatorError::RecordSegmentError => ErrorCodes::Internal,
             HnswKnnOperatorError::RecordSegmentReadError => ErrorCodes::Internal,
-            HnswKnnOperatorError::InvalidAllowedAndDisallowedIds => ErrorCodes::Internal,
+            HnswKnnOperatorError::InvalidAllowedAndDisallowedIds => ErrorCodes::InvalidArgument,
         }
     }
 }
