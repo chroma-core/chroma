@@ -212,7 +212,8 @@ impl CountQueryOrchestrator {
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
             collection.id,
-            collection.log_position,
+            // The collection log position is inclusive, and we want to start from the next log.
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),
@@ -527,7 +528,8 @@ impl MetadataQueryOrchestrator {
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
             collection.id,
-            collection.log_position,
+            // The collection log position is inclusive, and we want to start from the next log.
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),
