@@ -1,14 +1,11 @@
 import os
-
 import pytest
-
 import requests
 from requests import HTTPError
 from requests.exceptions import ConnectionError
 from pytest_httpserver import HTTPServer
 import json
 from unittest.mock import patch
-
 from chromadb.utils.embedding_functions import NomicEmbeddingFunction
 
 
@@ -49,29 +46,22 @@ def test_nomic_no_api_key() -> None:
         )
 
 
-@pytest.mark.skipif(
-    "NOMIC_API_KEY" not in os.environ,
-    reason="NOMIC_API_KEY environment variable not set, skipping test.",
-)
 def test_nomic_no_model() -> None:
     """
     To learn more about the Nomic API: https://docs.nomic.ai/reference/endpoints/nomic-embed-text
-    Test intentionaly excludes the NOMIC_MODEL.
+    Test intentionally excludes the NOMIC_MODEL. api_key does not matter since we expect an error before hitting API.
     """
     with pytest.raises(ValueError, match="No Nomic embedding model provided"):
         NomicEmbeddingFunction(
-            api_key=os.environ.get("NOMIC_API_KEY") or "",
+            api_key="does-not-matter",
             model_name="",
         )
 
 
-@pytest.mark.skipif(
-    "NOMIC_API_KEY" not in os.environ,
-    reason="NOMIC_API_KEY environment variable not set, skipping test.",
-)
 def test_handle_nomic_api_returns_error() -> None:
     """
     To learn more about the Nomic API: https://docs.nomic.ai/reference/endpoints/nomic-embed-text
+    Mocks an error from the Nomic API, so model and api key don't matter.
     """
     with HTTPServer() as httpserver:
         httpserver.expect_oneshot_request(
@@ -81,8 +71,8 @@ def test_handle_nomic_api_returns_error() -> None:
             status=400,
         )
         nomic_ef = NomicEmbeddingFunction(
-            api_key=os.environ.get("NOMIC_API_KEY") or "",
-            model_name=os.environ.get("NOMIC_MODEL") or "nomic-embed-text-v1.5",
+            api_key="does-not-matter",
+            model_name="does-not-matter",
         )
         with patch.object(
             nomic_ef,
