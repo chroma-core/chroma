@@ -32,7 +32,7 @@ pub(crate) struct FullTextIndexWriter {
 }
 
 impl FullTextIndexWriter {
-    fn new(
+    pub fn new(
         posting_lists_blockfile_writer: BlockfileWriter,
         frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: Box<dyn ChromaTokenizer>,
@@ -46,7 +46,11 @@ impl FullTextIndexWriter {
         }
     }
 
-    fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
+    pub fn add_document(
+        &mut self,
+        document: &str,
+        offset_id: i32,
+    ) -> Result<(), Box<dyn ChromaError>> {
         let tokens = self.tokenizer.encode(document);
         for token in tokens.get_tokens() {
             self.uncommitted_frequencies
@@ -81,7 +85,7 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
         for (key, mut value) in self.uncommitted.drain() {
             let built_list = value.build();
             for doc_id in built_list.doc_ids.iter() {
@@ -116,7 +120,7 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
@@ -136,7 +140,7 @@ pub(crate) struct FullTextIndexFlusher {
 }
 
 impl FullTextIndexFlusher {
-    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
         let res = self
             .posting_lists_blockfile_flusher
             .flush::<u32, &Int32Array>()
