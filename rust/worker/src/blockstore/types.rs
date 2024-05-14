@@ -4,7 +4,9 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::key::KeyWrapper;
-use super::memory::reader_writer::{MemoryBlockfileReader, MemoryBlockfileWriter};
+use super::memory::reader_writer::{
+    MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
+};
 use super::memory::storage::{Readable, Writeable};
 use super::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
@@ -197,7 +199,7 @@ impl BlockfileWriter {
     ) -> Result<BlockfileFlusher, Box<dyn ChromaError>> {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => match writer.commit() {
-                Ok(_) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(())),
+                Ok(flusher) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(flusher)),
                 Err(e) => Err(e),
             },
             BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit::<K, V>() {
@@ -247,7 +249,7 @@ impl BlockfileWriter {
 }
 
 pub(crate) enum BlockfileFlusher {
-    MemoryBlockfileFlusher(()),
+    MemoryBlockfileFlusher(MemoryBlockfileFlusher),
     ArrowBlockfileFlusher(ArrowBlockfileFlusher),
 }
 
@@ -266,8 +268,7 @@ impl BlockfileFlusher {
 
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
-            // TODO: should memory blockfiles have ids?
-            BlockfileFlusher::MemoryBlockfileFlusher(_) => uuid::Uuid::nil(),
+            BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.id(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
         }
     }
@@ -299,6 +300,13 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
+        }
+    }
+
+    pub(crate) async fn contains(&'referred_data self, prefix: &str, key: K) -> bool {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.contains(prefix, key),
         }
     }
 
