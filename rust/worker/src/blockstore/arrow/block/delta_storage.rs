@@ -5,8 +5,9 @@ use crate::blockstore::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryBuilder, FixedSizeListBuilder, Float32Builder, Int32Array,
-        Int32Builder, ListBuilder, RecordBatch, StringBuilder, StructArray, UInt32Builder,
+        Array, ArrayRef, BinaryBuilder, BooleanBuilder, FixedSizeListBuilder, Float32Builder,
+        Int32Array, Int32Builder, ListBuilder, RecordBatch, StringBuilder, StructArray,
+        UInt32Builder,
     },
     datatypes::{Field, Fields},
     util::bit_util,
@@ -41,6 +42,7 @@ impl Debug for BlockStorage {
 }
 
 pub enum BlockKeyArrowBuilder {
+    Boolean((StringBuilder, BooleanBuilder)),
     String((StringBuilder, StringBuilder)),
     Float32((StringBuilder, Float32Builder)),
     UInt32((StringBuilder, UInt32Builder)),
@@ -70,7 +72,14 @@ impl BlockKeyArrowBuilder {
                 builder.1.append_value(value);
             }
             KeyWrapper::Bool(value) => {
-                todo!()
+                let builder = match self {
+                    BlockKeyArrowBuilder::Boolean(builder) => builder,
+                    _ => {
+                        unreachable!("Invariant violation. BlockKeyArrowBuilder should be Boolean.")
+                    }
+                };
+                builder.0.append_value(key.prefix);
+                builder.1.append_value(value);
             }
             KeyWrapper::Uint32(value) => {
                 let builder = match self {
@@ -102,6 +111,18 @@ impl BlockKeyArrowBuilder {
             BlockKeyArrowBuilder::Float32((ref mut prefix_builder, ref mut key_builder)) => {
                 let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
                 let key_field = Field::new("key", arrow::datatypes::DataType::Float32, false);
+                let prefix_arr = prefix_builder.finish();
+                let key_arr = key_builder.finish();
+                (
+                    prefix_field,
+                    (&prefix_arr as &dyn Array).slice(0, prefix_arr.len()),
+                    key_field,
+                    (&key_arr as &dyn Array).slice(0, key_arr.len()),
+                )
+            }
+            BlockKeyArrowBuilder::Boolean((ref mut prefix_builder, ref mut key_builder)) => {
+                let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
+                let key_field = Field::new("key", arrow::datatypes::DataType::Boolean, false);
                 let prefix_arr = prefix_builder.finish();
                 let key_arr = key_builder.finish();
                 (

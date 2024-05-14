@@ -183,100 +183,50 @@ mod test {
         assert_eq!(bitmap.contains(1), true);
     }
 
-    // #[tokio::test]
-    // async fn test_float_metadata_index_set_get() {
-    //     let provider = BlockfileProvider::new_memory();
-    //     let blockfile_writer = provider.create::<f32, &str>().unwrap();
-    //     let writer_id = blockfile_writer.id();
+    #[tokio::test]
+    async fn test_float_metadata_index_set_get() {
+        let provider = BlockfileProvider::new_memory();
+        let blockfile_writer = provider.create::<f32, &str>().unwrap();
+        let writer_id = blockfile_writer.id();
 
-    //     let mut writer = MetadataIndexWriter::<f32>::new(blockfile_writer);
-    //     writer.set("key", 1.0, 1).unwrap();
-    //     writer.write_to_blockfile().await.unwrap();
-    //     let flusher = writer.commit().await.unwrap();
-    //     flusher.flush().await.unwrap();
+        let mut writer = MetadataIndexWriter::<f32>::new(blockfile_writer);
+        writer.set("key", 1.0, 1).unwrap();
+        writer.write_to_blockfile().await.unwrap();
+        let flusher = writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
-    //     let blockfile_reader = provider
-    //         .open::<f32, RoaringBitmap>(&writer_id)
-    //         .await
-    //         .unwrap();
-    //     let reader = MetadataIndexReader::<f32>::new(blockfile_reader);
-    //     let bitmap = reader.get("key", 1.0).await.unwrap();
-    //     assert_eq!(bitmap.len(), 1);
-    //     assert_eq!(bitmap.contains(1), true);
-    // }
+        let blockfile_reader = provider
+            .open::<f32, RoaringBitmap>(&writer_id)
+            .await
+            .unwrap();
+        let reader = MetadataIndexReader::<f32>::new(blockfile_reader);
+        let bitmap = reader.get("key", 1.0).await.unwrap();
+        assert_eq!(bitmap.len(), 1);
+        assert_eq!(bitmap.contains(1), true);
+    }
 
-    // #[tokio::test]
-    // async fn test_bool_value_metadata_index_set_get() {
-    //     let provider = BlockfileProvider::new_memory();
-    //     let blockfile_writer = provider.create::<&str, &str>().unwrap();
-    //     let writer_id = blockfile_writer.id();
+    #[tokio::test]
+    async fn test_bool_value_metadata_index_set_get() {
+        let provider = BlockfileProvider::new_memory();
+        let blockfile_writer = provider.create::<&str, &str>().unwrap();
+        let writer_id = blockfile_writer.id();
 
-    //     let mut writer = MetadataIndexWriter::<bool>::new(blockfile_writer);
-    //     writer.set("key", true, 1).unwrap();
-    //     writer.write_to_blockfile().await.unwrap();
-    //     let flusher = writer.commit().await.unwrap();
-    //     flusher.flush().await.unwrap();
+        let mut writer = MetadataIndexWriter::<bool>::new(blockfile_writer);
+        writer.set("key", true, 1).unwrap();
+        writer.write_to_blockfile().await.unwrap();
+        let flusher = writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
 
-    //     let blockfile_reader = provider
-    //         .open::<&str, RoaringBitmap>(&writer_id)
-    //         .await
-    //         .unwrap();
-    //     let reader = MetadataIndexReader::<&str>::new(blockfile_reader);
-    //     let bitmap = reader.get("key", true).await.unwrap();
-    //     assert_eq!(bitmap.len(), 1);
-    //     assert_eq!(bitmap.contains(1), true);
-    // }
+        let blockfile_reader = provider
+            .open::<bool, RoaringBitmap>(&writer_id)
+            .await
+            .unwrap();
+        let reader = MetadataIndexReader::<bool>::new(blockfile_reader);
+        let bitmap = reader.get("key", true).await.unwrap();
+        assert_eq!(bitmap.len(), 1);
+        assert_eq!(bitmap.contains(1), true);
+    }
 }
-
-//     #[test]
-//     fn test_bool_value_metadata_index_set_get() {
-//         let mut provider = HashMapBlockfileProvider::new();
-//         let blockfile = provider
-//             .create("test", KeyType::String, ValueType::RoaringBitmap)
-//             .unwrap();
-//         let mut index = BlockfileMetadataIndex::<bool>::new(blockfile);
-//         index.begin_transaction().unwrap();
-//         index.set("key", true, 1).unwrap();
-//         index.commit_transaction().unwrap();
-
-//         let bitmap = index.get("key", true).unwrap();
-//         assert_eq!(bitmap.len(), 1);
-//         assert_eq!(bitmap.contains(1), true);
-//     }
-
-//     #[test]
-//     fn test_string_value_metadata_index_set_delete_get() {
-//         let mut provider = HashMapBlockfileProvider::new();
-//         let blockfile = provider
-//             .create("test", KeyType::String, ValueType::RoaringBitmap)
-//             .unwrap();
-//         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
-//         index.begin_transaction().unwrap();
-//         index.set("key", "value".to_string(), 1).unwrap();
-//         index.delete("key", "value".to_string(), 1).unwrap();
-//         index.commit_transaction().unwrap();
-
-//         let bitmap = index.get("key", "value".to_string()).unwrap();
-//         assert_eq!(bitmap.len(), 0);
-//     }
-
-//     #[test]
-//     fn test_string_value_metadata_index_set_delete_set_get() {
-//         let mut provider = HashMapBlockfileProvider::new();
-//         let blockfile = provider
-//             .create("test", KeyType::String, ValueType::RoaringBitmap)
-//             .unwrap();
-//         let mut index = BlockfileMetadataIndex::<String>::new(blockfile);
-//         index.begin_transaction().unwrap();
-//         index.set("key", "value".to_string(), 1).unwrap();
-//         index.delete("key", "value".to_string(), 1).unwrap();
-//         index.set("key", "value".to_string(), 1).unwrap();
-//         index.commit_transaction().unwrap();
-
-//         let bitmap = index.get("key", "value".to_string()).unwrap();
-//         assert_eq!(bitmap.len(), 1);
-//         assert_eq!(bitmap.contains(1), true);
-//     }
 
 //     #[test]
 //     fn test_string_value_metadata_index_multiple_keys() {

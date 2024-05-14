@@ -1,3 +1,4 @@
+mod bool_key;
 mod data_record_value;
 pub(in crate::blockstore::arrow) mod delta;
 pub(in crate::blockstore::arrow) mod delta_storage;
