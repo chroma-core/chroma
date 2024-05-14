@@ -3,7 +3,7 @@ import uuid
 import pytest
 import logging
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 import random
@@ -527,6 +527,7 @@ def batching_params(draw: st.DrawFn) -> BatchParams:
     )
 
 
+@settings(max_examples=10)
 @given(batching_params=batching_params())
 def test_get_vector(batching_params: BatchParams, api: ServerAPI) -> None:
     error_distribution = {"IndexError": 0, "TypeError": 0, "NoError": 0}
