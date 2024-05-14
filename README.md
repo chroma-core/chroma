@@ -23,15 +23,6 @@
 </p>
 
 
-<p align="center">
-  <a href="https://github.com/chroma-core/chroma/actions/workflows/chroma-integration-test.yml" target="_blank">
-    <img src="https://github.com/chroma-core/chroma/actions/workflows/chroma-integration-test.yml/badge.svg?branch=main" alt="Integration Tests">
-  </a> |
-  <a href="https://github.com/chroma-core/chroma/actions/workflows/chroma-test.yml" target="_blank">
-    <img src="https://github.com/chroma-core/chroma/actions/workflows/chroma-test.yml/badge.svg?branch=main" alt="Tests">
-  </a>
-</p>
-
 ```bash
 pip install chromadb # python client
 # for javascript, npm install chromadb!
