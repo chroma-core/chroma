@@ -1,5 +1,5 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
+    blockstore::provider::{BlockfileProvider, OpenError},
     errors::{ChromaError, ErrorCodes},
     execution::{data::data_chunk::Chunk, operator::Operator},
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
@@ -46,17 +46,17 @@ pub(crate) struct CountRecordsOutput {
 
 #[derive(Error, Debug)]
 pub(crate) enum CountRecordsError {
-    #[error("Error reading record segment reader")]
-    RecordSegmentReadError,
     #[error("Error creating record segment reader")]
-    RecordSegmentError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentCreateError(#[from] RecordSegmentReaderCreationError),
+    #[error("Error reading record segment")]
+    RecordSegmentReadError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CountRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CountRecordsError::RecordSegmentError(e) => e.code(),
-            CountRecordsError::RecordSegmentReadError => ErrorCodes::Internal,
+            CountRecordsError::RecordSegmentCreateError(e) => e.code(),
+            CountRecordsError::RecordSegmentReadError(e) => e.code(),
         }
     }
 }
@@ -76,8 +76,34 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         let reader = match segment_reader {
             Ok(r) => r,
             Err(e) => {
-                println!("Error opening record segment");
-                return Err(CountRecordsError::RecordSegmentError(*e));
+                match *e {
+                    RecordSegmentReaderCreationError::UninitializedSegment => {
+                        // This means there no compaction has occured.
+                        // So we can just traverse the log records
+                        // and count the number of records.
+                        let mut seen_id_set = HashSet::new();
+                        for (log_record, _) in input.log_records.iter() {
+                            match log_record.record.operation {
+                                Operation::Add | Operation::Upsert => {
+                                    seen_id_set.insert(log_record.record.id.clone());
+                                }
+                                Operation::Delete => {
+                                    seen_id_set.remove(log_record.record.id.as_str());
+                                }
+                                Operation::Update => {}
+                            }
+                        }
+                        return Ok(CountRecordsOutput {
+                            count: seen_id_set.len(),
+                        });
+                    }
+                    RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                }
             }
         };
         // Reconcile adds, updates and deletes.
@@ -102,9 +128,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                             .insert(log_record.record.id.clone());
                     }
                 }
-                Err(_) => {
+                Err(e) => {
                     println!("Error reading record segment");
-                    return Err(CountRecordsError::RecordSegmentReadError);
+                    return Err(CountRecordsError::RecordSegmentReadError(e));
                 }
             }
         }
@@ -148,9 +174,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Ok(val) => {
                 res_count += val as i32;
             }
-            Err(_) => {
+            Err(e) => {
                 println!("Error reading record segment");
-                return Err(CountRecordsError::RecordSegmentReadError);
+                return Err(CountRecordsError::RecordSegmentReadError(e));
             }
         };
         Ok(CountRecordsOutput {
@@ -282,5 +308,92 @@ mod tests {
             .await
             .expect("Count operator run failed");
         assert_eq!(3, count.count);
+    }
+
+    #[tokio::test]
+    async fn test_no_compaction_log_only() {
+        let in_memory_provider = BlockfileProvider::new_memory();
+        let record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::Record,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        // Add 1, 2. Delete 1. Add 3. Upsert 3. Expected count is 2.
+        let log_data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Upsert,
+                },
+            },
+        ];
+
+        let data: Chunk<LogRecord> = Chunk::new(log_data.into());
+        let input = CountRecordsInput {
+            record_segment_definition: record_segment,
+            blockfile_provider: in_memory_provider,
+            log_records: data,
+        };
+        let operator = CountRecordsOperator {};
+        let count = operator
+            .run(&input)
+            .await
+            .expect("Count operator run failed");
+        assert_eq!(2, count.count);
     }
 }
