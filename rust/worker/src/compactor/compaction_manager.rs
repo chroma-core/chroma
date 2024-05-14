@@ -39,7 +39,7 @@ pub(crate) struct CompactionManager {
     // Dependencies
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
-    storage: Box<Storage>,
+    storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
     // Dispatcher
@@ -68,7 +68,7 @@ impl CompactionManager {
         scheduler: Scheduler,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
-        storage: Box<Storage>,
+        storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
         compaction_manager_queue_size: usize,
@@ -304,9 +304,7 @@ mod tests {
     async fn test_compaction_manager() {
         let mut log = Box::new(InMemoryLog::new());
         let tmpdir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmpdir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         log.add_log(

@@ -30,7 +30,7 @@ pub(crate) struct ArrowBlockfileProvider {
 }
 
 impl ArrowBlockfileProvider {
-    pub(crate) fn new(storage: Box<Storage>) -> Self {
+    pub(crate) fn new(storage: Storage) -> Self {
         Self {
             block_manager: BlockManager::new(storage.clone()),
             sparse_index_manager: SparseIndexManager::new(storage),
@@ -99,11 +99,11 @@ impl ArrowBlockfileProvider {
 #[derive(Clone)]
 pub(super) struct BlockManager {
     read_cache: Arc<RwLock<HashMap<Uuid, Block>>>,
-    storage: Box<Storage>,
+    storage: Storage,
 }
 
 impl BlockManager {
-    pub(super) fn new(storage: Box<Storage>) -> Self {
+    pub(super) fn new(storage: Storage) -> Self {
         Self {
             read_cache: Arc::new(RwLock::new(HashMap::new())),
             storage,
@@ -238,11 +238,11 @@ impl ChromaError for BlockFlushError {
 #[derive(Clone)]
 pub(super) struct SparseIndexManager {
     cache: Arc<RwLock<HashMap<Uuid, SparseIndex>>>,
-    storage: Box<Storage>,
+    storage: Storage,
 }
 
 impl SparseIndexManager {
-    pub fn new(storage: Box<Storage>) -> Self {
+    pub fn new(storage: Storage) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             storage,
