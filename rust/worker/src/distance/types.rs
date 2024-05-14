@@ -211,7 +211,7 @@ use thiserror::Error;
 /// - `Cosine` - The cosine distance. Specifically, 1 - cosine.
 /// - `InnerProduct` - The inner product. Specifically, 1 - inner product.
 /// # Notes
-/// See https://docs.trychroma.com/usage-guide#changing-the-distance-function
+/// See https://docs.trychroma.com/guides#changing-the-distance-function
 #[derive(Clone, Debug, PartialEq)]
 pub enum DistanceFunction {
     Euclidean,

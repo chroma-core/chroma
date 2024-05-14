@@ -5,13 +5,13 @@ use crate::execution::operators::count_records::{
     CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
 };
 use crate::execution::operators::merge_metadata_results::{
-    MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
-    MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorResult,
+    MergeMetadataResultsOperator, MergeMetadataResultsOperatorInput,
+    MergeMetadataResultsOperatorResult,
 };
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsResult};
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, Handler};
-use crate::types::{Collection, LogRecord, Metadata, SegmentType};
+use crate::types::{Collection, LogRecord, Metadata, Operation, SegmentType};
 use crate::{
     blockstore::provider::BlockfileProvider,
     execution::operator::TaskMessage,
@@ -79,8 +79,6 @@ pub(crate) struct CountQueryOrchestrator {
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
-    // Count of records in the log
-    log_record_count: usize,
 }
 
 #[derive(Error, Debug)]
@@ -136,7 +134,6 @@ impl CountQueryOrchestrator {
             dispatcher,
             blockfile_provider,
             result_channel: None,
-            log_record_count: 0,
         }
     }
 
@@ -215,7 +212,8 @@ impl CountQueryOrchestrator {
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
             collection.id,
-            collection.log_position,
+            // The collection log position is inclusive, and we want to start from the next log.
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),
@@ -227,7 +225,7 @@ impl CountQueryOrchestrator {
             Err(e) => {
                 // Log an error - this implies the dispatcher was dropped somehow
                 // and is likely fatal
-                println!("Error sending Metadata Query task: {:?}", e);
+                println!("Error sending Count Query task: {:?}", e);
             }
         }
     }
@@ -373,9 +371,6 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
     async fn handle(&mut self, message: PullLogsResult, ctx: &ComponentContext<Self>) {
         match message {
             Ok(logs) => {
-                let logs = logs.logs();
-                self.log_record_count = logs.total_len();
-                // TODO: Add logic for merging logs with count from record segment.
                 let operator = CountRecordsOperator::new();
                 let input = CountRecordsInput::new(
                     self.record_segment
@@ -383,6 +378,7 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
                         .expect("Expect segment")
                         .clone(),
                     self.blockfile_provider.clone(),
+                    logs.logs(),
                 );
                 let msg = wrap(operator, input, ctx.sender.as_receiver());
                 match self.dispatcher.send(msg, None).await {
@@ -418,7 +414,7 @@ impl Handler<Result<CountRecordsOutput, CountRecordsError>> for CountQueryOrches
             .result_channel
             .take()
             .expect("Expect channel to be present");
-        match channel.send(Ok(msg.count + self.log_record_count)) {
+        match channel.send(Ok(msg.count)) {
             Ok(_) => (),
             Err(e) => {
                 // Log an error - this implied the listener was dropped
@@ -532,7 +528,8 @@ impl MetadataQueryOrchestrator {
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
             collection.id,
-            collection.log_position,
+            // The collection log position is inclusive, and we want to start from the next log.
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),
