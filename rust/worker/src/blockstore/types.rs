@@ -8,6 +8,7 @@ use super::memory::reader_writer::{
     MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
 };
 use super::memory::storage::{Readable, Writeable};
+use crate::blockstore::positional_posting_list_value::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};

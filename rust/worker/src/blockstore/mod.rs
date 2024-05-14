@@ -1,4 +1,4 @@
-mod positional_posting_list_value;
+pub mod positional_posting_list_value;
 mod types;
 
 pub mod arrow;
