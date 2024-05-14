@@ -26,7 +26,8 @@ RemainAfterExit = true
 WantedBy = multi-user.target
 ```
 
-Replace `/home/admin/chroma` with the path to your docker compose is.
+Replace `/home/admin/chroma` with the path to your docker compose is. You may also need to replace `/usr/bin/docker`
+with the path to your docker binary.
 
 Loading, enabling and starting the service:
 
