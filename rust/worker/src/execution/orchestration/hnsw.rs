@@ -109,6 +109,7 @@ pub(crate) struct HnswQueryOrchestrator {
     hnsw_result_distances: Option<Vec<f32>>,
     brute_force_result_user_ids: Option<Vec<String>>,
     brute_force_result_distances: Option<Vec<f32>>,
+    brute_force_result_embeddings: Option<Vec<Vec<f32>>>,
     // State machine management
     merge_dependency_count: u32,
     // Services
@@ -153,6 +154,7 @@ impl HnswQueryOrchestrator {
             hnsw_result_distances: None,
             brute_force_result_user_ids: None,
             brute_force_result_distances: None,
+            brute_force_result_embeddings: None,
             log,
             sysdb,
             dispatcher,
@@ -316,6 +318,8 @@ impl HnswQueryOrchestrator {
                 .as_ref()
                 .expect("Invariant violation. Brute force result distances are not set")
                 .clone(),
+            self.brute_force_result_embeddings.clone(),
+            self.include_embeddings,
             self.k as usize,
             record_segment.clone(),
             self.blockfile_provider.clone(),
@@ -569,6 +573,10 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
         match message {
             Ok(output) => {
                 let mut user_ids = Vec::new();
+                let mut embeddings = None;
+                if self.include_embeddings {
+                    embeddings = Some(Vec::new());
+                }
                 for index in output.indices {
                     let record = match output.data.get(index) {
                         Some(record) => record,
@@ -578,9 +586,20 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
                         }
                     };
                     user_ids.push(record.record.id.clone());
+                    if let Some(embeddings) = embeddings.as_mut() {
+                        embeddings.push(
+                            record
+                                .record
+                                .embedding
+                                .as_ref()
+                                .expect("Brute force result log record should have embedding set")
+                                .clone(),
+                        );
+                    }
                 }
                 self.brute_force_result_user_ids = Some(user_ids);
                 self.brute_force_result_distances = Some(output.distances);
+                self.brute_force_result_embeddings = embeddings;
             }
             Err(e) => {
                 // TODO: handle this error, technically never happens
@@ -627,8 +646,8 @@ impl Handler<MergeKnnResultsOperatorResult> for HnswQueryOrchestrator {
     ) {
         self.state = ExecutionState::Finished;
 
-        let (mut output_ids, mut output_distances) = match message {
-            Ok(output) => (output.user_ids, output.distances),
+        let (mut output_ids, mut output_distances, mut output_vectors) = match message {
+            Ok(output) => (output.user_ids, output.distances, output.vectors),
             Err(e) => {
                 self.terminate_with_error(e, ctx);
                 return;
@@ -637,13 +656,30 @@ impl Handler<MergeKnnResultsOperatorResult> for HnswQueryOrchestrator {
 
         let mut result = Vec::new();
         let mut query_results = Vec::new();
-        for (index, distance) in output_ids.drain(..).zip(output_distances.drain(..)) {
-            let query_result = VectorQueryResult {
-                id: index,
-                distance: distance,
-                vector: None,
-            };
-            query_results.push(query_result);
+        if self.include_embeddings {
+            for ((index, distance), vector) in
+                output_ids.drain(..).zip(output_distances.drain(..)).zip(
+                    output_vectors
+                        .expect("Embeddings are expected if include_embeddings is set")
+                        .drain(..),
+                )
+            {
+                let query_result = VectorQueryResult {
+                    id: index,
+                    distance: distance,
+                    vector: Some(vector),
+                };
+                query_results.push(query_result);
+            }
+        } else {
+            for (index, distance) in output_ids.drain(..).zip(output_distances.drain(..)) {
+                let query_result = VectorQueryResult {
+                    id: index,
+                    distance: distance,
+                    vector: None,
+                };
+                query_results.push(query_result);
+            }
         }
         result.push(query_results);
         trace!("Merged results: {:?}", result);
