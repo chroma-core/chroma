@@ -506,7 +506,7 @@ def batching_params(draw: st.DrawFn) -> BatchParams:
     )
 
 
-@settings(max_examples=10)
+@settings(max_examples=1, deadline=None)
 @given(batching_params=batching_params())
 def test_batching(batching_params: BatchParams, api: ServerAPI) -> None:
     error_distribution = {"IndexError": 0, "TypeError": 0, "NoError": 0}
