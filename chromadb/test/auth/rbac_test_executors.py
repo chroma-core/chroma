@@ -19,9 +19,7 @@ from chromadb.test.property.strategies import (
 
 
 def _create_tenant_executor(
-    api: ServerAPI,
-    _root_api: ServerAPI,
-    draw: st.DrawFn
+    api: ServerAPI, _root_api: ServerAPI, draw: st.DrawFn
 ) -> None:
     tenant = draw(tenant_database_name)
     try:
@@ -39,9 +37,7 @@ def _get_tenant_executor(
 
 
 def _create_database_executor(
-    api: ServerAPI,
-    _root_api: ServerAPI,
-    draw: st.DrawFn
+    api: ServerAPI, _root_api: ServerAPI, draw: st.DrawFn
 ) -> None:
     database = draw(tenant_database_name)
     try:
@@ -109,9 +105,7 @@ def _get_or_create_collection_executor(
 
 
 def _delete_collection_executor(
-    api: ServerAPI,
-    root_api: ServerAPI,
-    draw: st.DrawFn
+    api: ServerAPI, root_api: ServerAPI, draw: st.DrawFn
 ) -> None:
     collection = draw(collection_name())
     try:
@@ -122,9 +116,7 @@ def _delete_collection_executor(
 
 
 def _update_collection_executor(
-    api: ServerAPI,
-    root_api: ServerAPI,
-    draw: st.DrawFn
+    api: ServerAPI, root_api: ServerAPI, draw: st.DrawFn
 ) -> None:
     collection = draw(collection_name())
     try:
@@ -275,9 +267,7 @@ def _upsert_executor(
     col.upsert(ids=["1"], documents=["different test document"])
 
 
-api_executors: Dict[
-        str,
-        Callable[[ServerAPI, ServerAPI, st.DrawFn], None]] = {
+api_executors: Dict[str, Callable[[ServerAPI, ServerAPI, st.DrawFn], None]] = {
     "system:reset": _reset_executor,
     "tenant:create_tenant": _create_tenant_executor,
     "tenant:get_tenant": _get_tenant_executor,

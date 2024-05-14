@@ -1,4 +1,4 @@
-import 'isomorphic-fetch';
+import "isomorphic-fetch";
 /* eslint-disable */
 // tslint:disable
 /**
@@ -23,10 +23,10 @@ export const BASE_PATH = "";
  * @export
  */
 export const COLLECTION_FORMATS = {
-	csv: ",",
-	ssv: " ",
-	tsv: "\t",
-	pipes: "|",
+  csv: ",",
+  ssv: " ",
+  tsv: "\t",
+  pipes: "|",
 };
 
 /**
@@ -42,8 +42,8 @@ export type FetchAPI = typeof defaultFetch;
  * @interface FetchArgs
  */
 export interface FetchArgs {
-	url: string;
-	options: RequestInit;
+  url: string;
+  options: RequestInit;
 }
 
 /**
@@ -52,15 +52,19 @@ export interface FetchArgs {
  * @class BaseAPI
  */
 export class BaseAPI {
-	protected configuration?: Configuration;
+  protected configuration?: Configuration;
 
-	constructor(configuration?: Configuration, protected basePath: string = BASE_PATH, protected fetch: FetchAPI = defaultFetch) {
-		if (configuration) {
-			this.configuration = configuration;
-			this.basePath = configuration.basePath || this.basePath;
-		}
-	}
-};
+  constructor(
+    configuration?: Configuration,
+    protected basePath: string = BASE_PATH,
+    protected fetch: FetchAPI = defaultFetch,
+  ) {
+    if (configuration) {
+      this.configuration = configuration;
+      this.basePath = configuration.basePath || this.basePath;
+    }
+  }
+}
 
 /**
  *
@@ -69,9 +73,12 @@ export class BaseAPI {
  * @extends {Error}
  */
 export class RequiredError extends Error {
-	constructor(public field: string, msg?: string) {
-		super(msg);
-		Object.setPrototypeOf(this, RequiredError.prototype);
-		this.name = "RequiredError";
-	}
+  constructor(
+    public field: string,
+    msg?: string,
+  ) {
+    super(msg);
+    Object.setPrototypeOf(this, RequiredError.prototype);
+    this.name = "RequiredError";
+  }
 }

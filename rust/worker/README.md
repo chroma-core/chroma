@@ -12,4 +12,4 @@ This folder houses the Rust code for the query and compactor nodes. It is a stan
 
 ### Rust version
 
-Use rust 1.74.0 or greater.
+Use rust 1.77.0 or greater.

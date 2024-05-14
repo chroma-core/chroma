@@ -15,11 +15,9 @@ import pytest
 from chromadb.api import AdminAPI
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import Settings, System
-from chromadb.test.conftest import (
-  fastapi_fixture_admin_and_singleton_tenant_db_user
-)
+from chromadb.test.conftest import fastapi_fixture_admin_and_singleton_tenant_db_user
 from chromadb.test.property.test_collections_with_database_tenant import (
-  TenantDatabaseCollectionStateMachine,
+    TenantDatabaseCollectionStateMachine,
 )
 
 import chromadb.test.property.strategies as strategies
@@ -27,8 +25,8 @@ import numpy
 import chromadb.api.types as types
 
 # See conftest.py
-SINGLETON_TENANT = 'singleton_tenant'
-SINGLETON_DATABASE = 'singleton_database'
+SINGLETON_TENANT = "singleton_tenant"
+SINGLETON_DATABASE = "singleton_database"
 
 
 class SingletonTenantDatabaseCollectionStateMachine(
@@ -45,9 +43,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
         self.root_admin_client = self.admin_client
 
         self.singleton_client = singleton_client
-        self.singleton_admin_client = AdminClient.from_system(
-            singleton_client._system
-        )
+        self.singleton_admin_client = AdminClient.from_system(singleton_client._system)
 
     @initialize()
     def initialize(self) -> None:
@@ -59,17 +55,10 @@ class SingletonTenantDatabaseCollectionStateMachine(
         super().initialize()
 
         self.root_admin_client.create_tenant(SINGLETON_TENANT)
-        self.root_admin_client.create_database(
-            SINGLETON_DATABASE,
-            SINGLETON_TENANT
-        )
+        self.root_admin_client.create_database(SINGLETON_DATABASE, SINGLETON_TENANT)
 
         self.set_tenant_model(SINGLETON_TENANT, {})
-        self.set_database_model_for_tenant(
-            SINGLETON_TENANT,
-            SINGLETON_DATABASE,
-            {}
-        )
+        self.set_database_model_for_tenant(SINGLETON_TENANT, SINGLETON_DATABASE, {})
 
     @invariant()
     def check_api_and_admin_client_are_in_sync(self) -> None:
@@ -96,8 +85,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
         self.root_client.set_tenant(tenant, database)
 
     def get_tenant_model(
-        self,
-        tenant: str
+        self, tenant: str
     ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
         if self.api == self.singleton_client:
             tenant = SINGLETON_TENANT
@@ -106,7 +94,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
     def set_tenant_model(
         self,
         tenant: str,
-        model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]]
+        model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]],
     ) -> None:
         if self.api == self.singleton_client:
             # This never happens because we never actually issue a
@@ -114,7 +102,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             # thanks to the above overriding of get_tenant_model(),
             # the underlying state machine test should always expect an error
             # when it sends the request, so shouldn't try to update the model.
-            raise ValueError('trying to overwrite the model for singleton??')
+            raise ValueError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant] = model
 
     def has_database_for_tenant(self, tenant: str, database: str) -> bool:
@@ -127,7 +115,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
         self,
         tenant: str,
         database: str,
-        database_model: Dict[str, Optional[types.CollectionMetadata]]
+        database_model: Dict[str, Optional[types.CollectionMetadata]],
     ) -> None:
         if self.api == self.singleton_client:
             # This never happens because we never actually issue a
@@ -135,22 +123,16 @@ class SingletonTenantDatabaseCollectionStateMachine(
             # thanks to the above overriding of has_database_for_tenant(),
             # the underlying state machine test should always expect an error
             # when it sends the request, so shouldn't try to update the model.
-            raise ValueError('trying to overwrite the model for singleton??')
+            raise ValueError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant][database] = database_model
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
         if self.api == self.singleton_client:
-            return self.tenant_to_database_to_model[
-                SINGLETON_TENANT
-            ][
+            return self.tenant_to_database_to_model[SINGLETON_TENANT][
                 SINGLETON_DATABASE
             ]
-        return self.tenant_to_database_to_model[
-            self.curr_tenant
-        ][
-            self.curr_database
-        ]
+        return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
 def _singleton_and_root_clients() -> Tuple[Client, Client]:
@@ -206,18 +188,18 @@ def test_repeat_failure(
     state.check_api_and_admin_client_are_in_sync()
     state.create_coll(
         coll=strategies.Collection(
-            name='A00',
+            name="A00",
             metadata=None,
             embedding_function=strategies.hashing_embedding_function(
                 dim=2, dtype=numpy.float16
             ),
-            id=uuid.UUID('c9bcb72f-92b1-4604-a8cb-084162dfe98b'),
+            id=uuid.UUID("c9bcb72f-92b1-4604-a8cb-084162dfe98b"),
             dimension=2,
             dtype=numpy.float16,
             known_metadata_keys={},
             known_document_keywords=[],
             has_documents=False,
-            has_embeddings=True
+            has_embeddings=True,
         )
     )
     state.teardown()  # type: ignore

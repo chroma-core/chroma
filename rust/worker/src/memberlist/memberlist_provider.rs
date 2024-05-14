@@ -175,13 +175,17 @@ impl CustomResourceMemberlistProvider {
         };
 
         for subscriber in self.subscribers.iter() {
-            let _ = subscriber.send(curr_memberlist.clone()).await;
+            let _ = subscriber.send(curr_memberlist.clone(), None).await;
         }
     }
 }
 
 #[async_trait]
 impl Component for CustomResourceMemberlistProvider {
+    fn get_name() -> &'static str {
+        "Custom resource member list provider"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }

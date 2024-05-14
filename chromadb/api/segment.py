@@ -323,6 +323,8 @@ class SegmentAPI(ServerAPI):
         if new_metadata:
             validate_update_metadata(new_metadata)
 
+        self._validate_collection(id)
+
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
         if new_name and new_metadata:
@@ -498,6 +500,8 @@ class SegmentAPI(ServerAPI):
             }
         )
 
+        self._validate_collection(collection_id)
+
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
             validate_where_document(where_document)
@@ -531,6 +535,7 @@ class SegmentAPI(ServerAPI):
                 documents=[] if "documents" in include else None,
                 uris=[] if "uris" in include else None,
                 data=[] if "data" in include else None,
+                included=include,
             )
 
         vectors: Sequence[t.VectorEmbeddingRecord] = []
@@ -574,6 +579,7 @@ class SegmentAPI(ServerAPI):
             documents=documents if "documents" in include else None,  # type: ignore
             uris=uris if "uris" in include else None,  # type: ignore
             data=None,
+            included=include,
         )
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -649,6 +655,8 @@ class SegmentAPI(ServerAPI):
     @override
     def _count(self, collection_id: UUID) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
+        self._validate_collection(collection_id)
+
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
 
@@ -684,9 +692,8 @@ class SegmentAPI(ServerAPI):
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
-        metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
-
         if where or where_document:
+            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(
                 where=where, where_document=where_document
             )
@@ -721,6 +728,7 @@ class SegmentAPI(ServerAPI):
             all_ids: Set[str] = set()
             for id_list in ids:
                 all_ids.update(id_list)
+            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(ids=list(all_ids))
             metadata_by_id = {r["id"]: r["metadata"] for r in records}
             for id_list in ids:
@@ -766,6 +774,7 @@ class SegmentAPI(ServerAPI):
             documents=documents if documents else None,
             uris=uris if uris else None,
             data=None,
+            included=include,
         )
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
@@ -839,6 +848,9 @@ class SegmentAPI(ServerAPI):
                 )
             self._collection_cache[collection_id] = collections[0]
         return self._collection_cache[collection_id]
+
+    def _validate_collection(self, collection_id: UUID) -> None:
+        self._get_collection(collection_id)
 
 
 def _records(

@@ -1,8 +1,10 @@
-use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
+use crate::types::LogRecord;
 use async_trait::async_trait;
+use tracing::trace;
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.
@@ -64,21 +66,21 @@ impl PullLogsInput {
 /// The output of the pull logs operator.
 #[derive(Debug)]
 pub struct PullLogsOutput {
-    logs: DataChunk,
+    logs: Chunk<LogRecord>,
 }
 
 impl PullLogsOutput {
     /// Create a new pull logs output.
     /// # Parameters
     /// * `logs` - The logs that were read.
-    pub fn new(logs: DataChunk) -> Self {
+    pub fn new(logs: Chunk<LogRecord>) -> Self {
         PullLogsOutput { logs }
     }
 
     /// Get the log entries that were read by an invocation of the pull logs operator.
     /// # Returns
     /// The log entries that were read.
-    pub fn logs(&self) -> DataChunk {
+    pub fn logs(&self) -> Chunk<LogRecord> {
         self.logs.clone()
     }
 }
@@ -114,7 +116,8 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
             }
 
             num_records_read += logs.len();
-            offset += batch_size as i64;
+            // unwrap here is safe because we just checked if empty
+            offset = logs.last().unwrap().log_offset + 1;
             result.append(&mut logs);
 
             // We used a a timestamp and we didn't get a full batch, so we have retrieved
@@ -130,11 +133,13 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
                 break;
             }
         }
+        trace!("Log records {:?}", result);
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
+            trace!("Truncated log records {:?}", result);
         }
         // Convert to DataChunk
-        let data_chunk = DataChunk::new(result.into());
+        let data_chunk = Chunk::new(result.into());
         Ok(PullLogsOutput::new(data_chunk))
     }
 }
@@ -154,38 +159,39 @@ mod tests {
         let mut log = Box::new(InMemoryLog::new());
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_id_1 = collection_uuid_1.to_string();
         log.add_log(
-            collection_id_1.clone(),
+            collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 1,
+                collection_id: collection_uuid_1.clone(),
+                log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
-                    log_offset: 1,
+                    log_offset: 0,
                     record: OperationRecord {
                         id: "embedding_id_1".to_string(),
                         embedding: None,
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
             }),
         );
         log.add_log(
-            collection_id_1.clone(),
+            collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 2,
+                collection_id: collection_uuid_1.clone(),
+                log_offset: 1,
                 log_ts: 2,
                 record: LogRecord {
-                    log_offset: 2,
+                    log_offset: 1,
                     record: OperationRecord {
                         id: "embedding_id_2".to_string(),
                         embedding: None,
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },

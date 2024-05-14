@@ -24,6 +24,10 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
+class AuthError(Exception):
+    pass
+
+
 ClientAuthHeaders = Dict[str, SecretStr]
 
 
@@ -33,6 +37,7 @@ class ClientAuthProvider(Component):
     client requests. Client implementations (in our case, just the FastAPI
     client) must inject these headers into their requests.
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
@@ -52,6 +57,7 @@ class UserIdentity:
     _all_ information known about the user, and the AuthorizationProvider is
     responsible for making decisions based on that information.
     """
+
     user_id: str
     tenant: Optional[str] = None
     databases: Optional[List[str]] = None
@@ -71,20 +77,18 @@ class ServerAuthenticationProvider(Component):
     The ServerAuthenticationProvider should return a UserIdentity object if the
     request is authenticated for use by the ServerAuthorizationProvider.
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._ignore_auth_paths: Dict[
             str, List[str]
         ] = system.settings.chroma_server_auth_ignore_paths
         self.overwrite_singleton_tenant_database_access_from_auth = (
-            system.settings.
-            chroma_overwrite_singleton_tenant_database_access_from_auth
+            system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth
         )
 
     @abstractmethod
-    def authenticate_or_raise(
-        self, headers: Headers
-    ) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
         pass
 
     def ignore_operation(self, verb: str, path: str) -> bool:
@@ -100,13 +104,11 @@ class ServerAuthenticationProvider(Component):
         _creds = None
 
         if self._system.settings.chroma_server_authn_credentials_file:
-            _creds_file = str(self._system.settings[
-                "chroma_server_authn_credentials_file"
-            ])
+            _creds_file = str(
+                self._system.settings["chroma_server_authn_credentials_file"]
+            )
         if self._system.settings.chroma_server_authn_credentials:
-            _creds = str(self._system.settings[
-                "chroma_server_authn_credentials"
-            ])
+            _creds = str(self._system.settings["chroma_server_authn_credentials"])
         if not _creds_file and not _creds:
             raise ValueError(
                 "No credentials file or credentials found in "
@@ -122,9 +124,7 @@ class ServerAuthenticationProvider(Component):
         elif _creds_file:
             with open(_creds_file, "r") as f:
                 return f.readlines()
-        raise ValueError(
-            "Should never happen"
-        )
+        raise ValueError("Should never happen")
 
     def singleton_tenant_database_if_applicable(
         self, user: Optional[UserIdentity]
@@ -144,15 +144,13 @@ class ServerAuthenticationProvider(Component):
         - If the user has access to multiple tenants and/or databases this
           function will return None for the corresponding value(s).
         """
-        if (not self.overwrite_singleton_tenant_database_access_from_auth or
-                not user):
+        if not self.overwrite_singleton_tenant_database_access_from_auth or not user:
             return None, None
         tenant = None
         database = None
         if user.tenant and user.tenant != "*":
             tenant = user.tenant
-        if (user.databases and len(user.databases) == 1 and
-                user.databases[0] != "*"):
+        if user.databases and len(user.databases) == 1 and user.databases[0] != "*":
             database = user.databases[0]
         return tenant, database
 
@@ -161,6 +159,7 @@ class AuthzAction(str, Enum):
     """
     The set of actions that can be authorized by the authorization provider.
     """
+
     RESET = "system:reset"
     CREATE_TENANT = "tenant:create_tenant"
     GET_TENANT = "tenant:get_tenant"
@@ -187,6 +186,7 @@ class AuthzResource:
     """
     The resource being accessed in an authorization request.
     """
+
     tenant: Optional[str]
     database: Optional[str]
     collection: Optional[str]
@@ -202,23 +202,21 @@ class ServerAuthorizationProvider(Component):
     ServerAuthorizationProvider should raise an exception if the request is not
     authorized.
     """
+
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def authorize_or_raise(self,
-                           user: UserIdentity,
-                           action: AuthzAction,
-                           resource: AuthzResource) -> None:
+    def authorize_or_raise(
+        self, user: UserIdentity, action: AuthzAction, resource: AuthzResource
+    ) -> None:
         pass
 
     def read_config_or_config_file(self) -> List[str]:
         _config_file = None
         _config = None
         if self._system.settings.chroma_server_authz_config_file:
-            _config_file = self._system.settings[
-                "chroma_server_authz_config_file"
-            ]
+            _config_file = self._system.settings["chroma_server_authz_config_file"]
         if self._system.settings.chroma_server_authz_config:
             _config = str(self._system.settings["chroma_server_authz_config"])
         if not _config_file and not _config:
@@ -231,10 +229,8 @@ class ServerAuthorizationProvider(Component):
                 "Please provide only one."
             )
         if _config:
-            return [c for c in _config.split('\n') if c]
+            return [c for c in _config.split("\n") if c]
         elif _config_file:
             with open(_config_file, "r") as f:
                 return f.readlines()
-        raise ValueError(
-            "Should never happen"
-        )
+        raise ValueError("Should never happen")

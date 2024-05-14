@@ -76,7 +76,11 @@ def test_settings_invalid_hash_algorithm(mock: MagicMock) -> None:
 @patch("chromadb.db.migrations.verify_migration_sequence")
 @patch("chromadb.db.migrations.hashlib")
 @patch.dict(os.environ, {}, clear=True)
-def test_hashlib_alg(hashlib_mock: MagicMock, verify_migration_sequence_mock: MagicMock, migrations_hash_algorithm: str) -> None:
+def test_hashlib_alg(
+    hashlib_mock: MagicMock,
+    verify_migration_sequence_mock: MagicMock,
+    migrations_hash_algorithm: str,
+) -> None:
     """
     Test that only the appropriate hashlib functions are called
     """

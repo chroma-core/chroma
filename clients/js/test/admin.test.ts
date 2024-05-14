@@ -1,6 +1,7 @@
 import { expect, test } from "@jest/globals";
 import { AdminClient } from "../src/AdminClient";
 import adminClient from "./initAdminClient";
+import { ChromaError } from "../src/Errors";
 
 test("it should create the admin client connection", async () => {
   expect(adminClient).toBeDefined();
@@ -63,4 +64,14 @@ test("it should set the tenant and database", async () => {
   await adminClient.setDatabase({ database: "testDatabase2" });
 
   expect(adminClient.database).toBe("testDatabase2");
+});
+
+test("it should throw well-formatted errors", async () => {
+  try {
+    await adminClient.createDatabase({ name: "test", tenantName: "foo" });
+    expect(false).toBe(true);
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(ChromaError);
+  }
 });

@@ -1,16 +1,15 @@
-use crate::types::LogRecord;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub(crate) struct DataChunk {
-    data: Arc<[LogRecord]>,
+pub(crate) struct Chunk<T> {
+    data: Arc<[T]>,
     visibility: Arc<[bool]>,
 }
 
-impl DataChunk {
-    pub fn new(data: Arc<[LogRecord]>) -> Self {
+impl<T> Chunk<T> {
+    pub fn new(data: Arc<[T]>) -> Self {
         let len = data.len();
-        DataChunk {
+        Chunk {
             data,
             visibility: vec![true; len].into(),
         }
@@ -30,7 +29,7 @@ impl DataChunk {
     /// if the index is out of bounds, it returns None
     /// # Arguments
     /// * `index` - The index of the element
-    pub fn get(&self, index: usize) -> Option<&LogRecord> {
+    pub fn get(&self, index: usize) -> Option<&T> {
         if index < self.data.len() {
             Some(&self.data[index])
         } else {
@@ -69,7 +68,7 @@ impl DataChunk {
     /// The iterator returns a tuple of the element and its index
     /// # Returns
     /// An iterator over the visible elements in the data chunk
-    pub fn iter(&self) -> DataChunkIteraror<'_> {
+    pub fn iter(&self) -> DataChunkIteraror<'_, T> {
         DataChunkIteraror {
             chunk: self,
             index: 0,
@@ -77,13 +76,13 @@ impl DataChunk {
     }
 }
 
-pub(crate) struct DataChunkIteraror<'a> {
-    chunk: &'a DataChunk,
+pub(crate) struct DataChunkIteraror<'a, T> {
+    chunk: &'a Chunk<T>,
     index: usize,
 }
 
-impl<'a> Iterator for DataChunkIteraror<'a> {
-    type Item = (&'a LogRecord, usize);
+impl<'a, T> Iterator for DataChunkIteraror<'a, T> {
+    type Item = (&'a T, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.index < self.chunk.total_len() {
@@ -108,6 +107,7 @@ impl<'a> Iterator for DataChunkIteraror<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::LogRecord;
     use crate::types::Operation;
     use crate::types::OperationRecord;
 
@@ -121,6 +121,7 @@ mod tests {
                     embedding: None,
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -131,12 +132,13 @@ mod tests {
                     embedding: None,
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
         ];
         let data = data.into();
-        let mut chunk = DataChunk::new(data);
+        let mut chunk = Chunk::new(data);
         assert_eq!(chunk.len(), 2);
         let mut iter = chunk.iter();
         let elem = iter.next();

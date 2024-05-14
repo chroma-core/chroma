@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -21,10 +22,11 @@ func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDa
 	}
 	_, err := s.coordinator.CreateDatabase(ctx, createDatabase)
 	if err != nil {
-		if err == common.ErrDatabaseUniqueConstraintViolation {
+		if errors.Is(err, common.ErrDatabaseUniqueConstraintViolation) {
 			res.Status = failResponseWithError(err, 409)
-			return res, nil
+			return res, err
 		}
+
 		res.Status = failResponseWithError(err, errorCode)
 		return res, nil
 	}

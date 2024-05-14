@@ -32,6 +32,10 @@ impl Debug for WorkerThread {
 
 #[async_trait]
 impl Component for WorkerThread {
+    fn get_name() -> &'static str {
+        "Worker thread"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }
@@ -42,7 +46,7 @@ impl Component for WorkerThread {
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         let req = TaskRequestMessage::new(ctx.sender.as_receiver());
-        let res = self.dispatcher.send(req).await;
+        let res = self.dispatcher.send(req, None).await;
         // TODO: what to do with resp?
     }
 }
@@ -52,7 +56,7 @@ impl Handler<TaskMessage> for WorkerThread {
     async fn handle(&mut self, task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
         task.run().await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.sender.as_receiver());
-        let res = self.dispatcher.send(req).await;
+        let res = self.dispatcher.send(req, None).await;
         // TODO: task run should be able to error and we should send it as part of the result
     }
 }

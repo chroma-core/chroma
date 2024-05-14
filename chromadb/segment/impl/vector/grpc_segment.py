@@ -9,10 +9,10 @@ from chromadb.proto.convert import (
 from chromadb.segment import VectorReader
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
+from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Metadata,
     ScalarEncoding,
@@ -34,7 +34,6 @@ import grpc
 class GrpcVectorSegment(VectorReader, EnforceOverrides):
     _vector_reader_stub: VectorReaderStub
     _segment: Segment
-    _opentelemetry_client: OpenTelemetryClient
 
     def __init__(self, system: System, segment: Segment):
         # TODO: move to start() method
@@ -43,9 +42,10 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             raise Exception("Missing grpc_url in segment metadata")
 
         channel = grpc.insecure_channel(segment["metadata"]["grpc_url"])
+        interceptors = [OtelInterceptor()]
+        channel = grpc.intercept_channel(channel, *interceptors)
         self._vector_reader_stub = VectorReaderStub(channel)  # type: ignore
         self._segment = segment
-        self._opentelemetry_client = system.require(OpenTelemetryClient)
 
     @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override

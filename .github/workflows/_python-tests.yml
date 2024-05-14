@@ -1,0 +1,136 @@
+name: Chroma Python Base Tests
+
+on:
+  workflow_call:
+    inputs:
+      python_versions:
+        description: 'Python versions to test (as json array)'
+        required: false
+        default: '["3.8"]'
+        type: string
+
+
+jobs:
+  test:
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest, windows-latest]
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+                   "chromadb/test/auth/test_simple_rbac_authz.py",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_cross_version_persist.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_persist.py"]
+        include:
+          - test-globs: "chromadb/test/property/test_embeddings.py"
+            parallelized: true
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }}  ${{ matrix.test-globs }}
+        shell: bash
+
+  # todo: break out stress integration tests
+  test-single-node-integration:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/test_cli.py",
+                   "chromadb/test/auth/test_simple_rbac_authz.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_cross_version_persist.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_persist.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python (${{ matrix.python }})
+      uses: ./.github/actions/python
+    - name: Integration Test
+      run: bin/python-integration-test ${{ matrix.test-globs }}
+      shell: bash
+
+  test-cluster-integration:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ["16core-64gb-ubuntu-latest"]
+        test-globs: ["chromadb/test/db/test_system.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/ingest/test_producer_consumer.py",
+                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
+                   "chromadb/test/test_logservice.py",
+                   "chromadb/test/distributed/test_sanity.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        shell: bash
+
+  test-thin-client:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest] # # todo: should run on Windows, currently failing because Dockerfile doesn't build
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: clients/python/integration-test.sh
+        shell: bash
+
+  test-stress:
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: python -m pytest chromadb/test/stress/
+        shell: bash
+
+  test-single-node-integration-stress:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python (${{ matrix.python }})
+      uses: ./.github/actions/python
+    - name: Integration Test
+      run: bin/python-integration-test chromadb/test/stress/
+      shell: bash

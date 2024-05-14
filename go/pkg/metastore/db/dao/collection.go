@@ -3,7 +3,6 @@ package dao
 import (
 	"database/sql"
 	"errors"
-	"strings"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -26,57 +25,38 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	var getCollectionInput strings.Builder
-	getCollectionInput.WriteString("GetCollections input: ")
-
-	var collections []*dbmodel.CollectionAndMetadata
-
+func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
-		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, databases.name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Order("collections.id")
-	if limit != nil {
-		query = query.Limit(int(*limit))
-		getCollectionInput.WriteString("limit: " + string(*limit) + ", ")
-	}
-
-	if offset != nil {
-		query = query.Offset(int(*offset))
-		getCollectionInput.WriteString("offset: " + string(*offset) + ", ")
-	}
+		Order("collections.created_at ASC")
 
 	if databaseName != "" {
 		query = query.Where("databases.name = ?", databaseName)
-		getCollectionInput.WriteString("databases.name: " + databaseName + ", ")
 	}
-
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
-		getCollectionInput.WriteString("databases.tenant_id: " + tenantID + ", ")
 	}
-
 	if id != nil {
 		query = query.Where("collections.id = ?", *id)
-		getCollectionInput.WriteString("collections.id: " + *id + ", ")
 	}
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
-		getCollectionInput.WriteString("collections.name: " + *name + ", ")
 	}
-	log.Info(getCollectionInput.String())
 
+	if limit != nil {
+		query = query.Limit(int(*limit))
+	}
+	if offset != nil {
+		query = query.Offset(int(*offset))
+
+	}
 	rows, err := query.Rows()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var currentCollectionID string = ""
-	var metadata []*dbmodel.CollectionMetadata
-	var currentCollection *dbmodel.CollectionAndMetadata
-
+	collectionWithMetdata = make([]*dbmodel.CollectionAndMetadata, 0, len(collections))
 	for rows.Next() {
 		var (
 			collectionID         string
@@ -85,77 +65,49 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 			collectionName       string
 			collectionDimension  sql.NullInt32
 			collectionDatabaseID string
+			collectionCreatedAt  sql.NullTime
 			databaseName         string
 			databaseTenantID     string
-			key                  sql.NullString
-			strValue             sql.NullString
-			intValue             sql.NullInt64
-			floatValue           sql.NullFloat64
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
 		}
-		if collectionID != currentCollectionID {
-			currentCollectionID = collectionID
-			metadata = nil
 
-			currentCollection = &dbmodel.CollectionAndMetadata{
-				Collection: &dbmodel.Collection{
-					ID:          collectionID,
-					Name:        &collectionName,
-					DatabaseID:  collectionDatabaseID,
-					LogPosition: logPosition,
-					Version:     version,
-				},
-				CollectionMetadata: metadata,
-				TenantID:           databaseTenantID,
-				DatabaseName:       databaseName,
-			}
-			if collectionDimension.Valid {
-				currentCollection.Collection.Dimension = &collectionDimension.Int32
-			} else {
-				currentCollection.Collection.Dimension = nil
-			}
-
-			if currentCollectionID != "" {
-				collections = append(collections, currentCollection)
-			}
+		collection := &dbmodel.Collection{
+			ID:          collectionID,
+			Name:        &collectionName,
+			DatabaseID:  collectionDatabaseID,
+			LogPosition: logPosition,
+			Version:     version,
+		}
+		if collectionDimension.Valid {
+			collection.Dimension = &collectionDimension.Int32
+		}
+		if collectionCreatedAt.Valid {
+			collection.CreatedAt = collectionCreatedAt.Time
 		}
 
-		collectionMetadata := &dbmodel.CollectionMetadata{
-			CollectionID: collectionID,
-		}
-
-		if key.Valid {
-			collectionMetadata.Key = &key.String
-		} else {
-			collectionMetadata.Key = nil
-		}
-
-		if strValue.Valid {
-			collectionMetadata.StrValue = &strValue.String
-		} else {
-			collectionMetadata.StrValue = nil
-		}
-		if intValue.Valid {
-			collectionMetadata.IntValue = &intValue.Int64
-		} else {
-			collectionMetadata.IntValue = nil
-		}
-		if floatValue.Valid {
-			collectionMetadata.FloatValue = &floatValue.Float64
-		} else {
-			collectionMetadata.FloatValue = nil
-		}
-
-		metadata = append(metadata, collectionMetadata)
-		currentCollection.CollectionMetadata = metadata
+		collectionWithMetdata = append(collectionWithMetdata, &dbmodel.CollectionAndMetadata{
+			Collection:   collection,
+			TenantID:     databaseTenantID,
+			DatabaseName: databaseName,
+		})
 	}
-	log.Info("collections", zap.Any("collections", collections))
-	return collections, nil
+	rows.Close()
+	for _, collection := range collectionWithMetdata {
+		var metadata []*dbmodel.CollectionMetadata
+		err = s.db.Where("collection_id = ?", collection.Collection.ID).Find(&metadata).Error
+		if err != nil {
+			log.Error("get collection metadata failed", zap.Error(err))
+			return nil, err
+		}
+		collection.CollectionMetadata = metadata
+	}
+
+	return
 }
 
 func (s *collectionDb) DeleteCollectionByID(collectionID string) (int, error) {
@@ -199,13 +151,32 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 func (s *collectionDb) Update(in *dbmodel.Collection) error {
 	log.Info("update collection", zap.Any("collection", in))
 	updates := generateCollectionUpdatesWithoutID(in)
-	return s.db.Model(&dbmodel.Collection{}).Where("id = ?", in.ID).Updates(updates).Error
+	err := s.db.Model(&dbmodel.Collection{}).Where("id = ?", in.ID).Updates(updates).Error
+	if err != nil {
+		log.Error("create collection failed", zap.Error(err))
+		var pgErr *pgconn.PgError
+		ok := errors.As(err, &pgErr)
+		if ok {
+			log.Error("Postgres Error")
+			switch pgErr.Code {
+			case "23505":
+				log.Error("collection already exists")
+				return common.ErrCollectionUniqueConstraintViolation
+			default:
+				return err
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
 	log.Info("update log position and version", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion))
 	var collection dbmodel.Collection
-	err := s.db.Where("id = ?", collectionID).First(&collection).Error
+	// We use select for update to ensure no lost update happens even for isolation level read committed or below
+	// https://patrick.engineering/posts/postgres-internals/
+	err := s.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", collectionID).First(&collection).Error
 	if err != nil {
 		return 0, err
 	}

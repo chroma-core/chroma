@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use super::{Component, ComponentContext, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
+use tracing::Span;
 
 // Message Wrapper
 #[derive(Debug)]
@@ -11,11 +12,16 @@ where
     C: Component,
 {
     wrapper: Box<dyn WrapperTrait<C>>,
+    tracing_context: Option<tracing::Span>,
 }
 
 impl<C: Component> Wrapper<C> {
     pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
         self.wrapper.handle(component, ctx).await;
+    }
+
+    pub(super) fn get_tracing_context(&self) -> Option<tracing::Span> {
+        return self.tracing_context.clone();
     }
 }
 
@@ -40,13 +46,14 @@ where
     }
 }
 
-pub(crate) fn wrap<C, M>(message: M) -> Wrapper<C>
+pub(crate) fn wrap<C, M>(message: M, tracing_context: Option<tracing::Span>) -> Wrapper<C>
 where
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
     Wrapper {
         wrapper: Box::new(Some(message)),
+        tracing_context,
     }
 }
 
@@ -66,12 +73,16 @@ where
         Sender { sender }
     }
 
-    pub(crate) async fn send<M>(&self, message: M) -> Result<(), ChannelError>
+    pub(crate) async fn send<M>(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<(), ChannelError>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
-        let res = self.sender.send(wrap(message)).await;
+        let res = self.sender.send(wrap(message, tracing_context)).await;
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
@@ -102,7 +113,11 @@ where
 
 #[async_trait]
 pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
-    async fn send(&self, message: M) -> Result<(), ChannelError>;
+    async fn send(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<(), ChannelError>;
 }
 
 trait ReceiverClone<M> {
@@ -159,8 +174,12 @@ where
     C: Component + Handler<M>,
     M: Send + Debug + 'static,
 {
-    async fn send(&self, message: M) -> Result<(), ChannelError> {
-        let res = self.sender.send(wrap(message)).await;
+    async fn send(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<(), ChannelError> {
+        let res = self.sender.send(wrap(message, tracing_context)).await;
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
