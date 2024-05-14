@@ -141,7 +141,7 @@ impl HnswQueryOrchestrator {
         HnswQueryOrchestrator {
             state: ExecutionState::Pending,
             system,
-            merge_dependency_count: 2,
+            merge_dependency_count: 0,
             query_vectors,
             k,
             allowed_ids: allowed_ids.into(),
@@ -209,19 +209,22 @@ impl HnswQueryOrchestrator {
         self.state = ExecutionState::QueryKnn;
 
         // TODO: We shouldn't have to clone query vectors here. We should be able to pass a Arc<[f32]>-like to the input
-        let bf_input = BruteForceKnnOperatorInput {
-            data: logs,
-            query: self.query_vectors[0].clone(),
-            k: self.k as usize,
-            // TODO: get the distance metric from the segment metadata
-            distance_metric: DistanceFunction::Euclidean,
-        };
-        let operator = Box::new(BruteForceKnnOperator {});
-        let task = wrap(operator, bf_input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                // TODO: log an error and reply to caller
+        for query_vector in self.query_vectors.iter() {
+            let bf_input = BruteForceKnnOperatorInput {
+                data: logs.clone(),
+                query: query_vector.clone(),
+                k: self.k as usize,
+                // TODO: get the distance metric from the segment metadata
+                distance_metric: DistanceFunction::Euclidean,
+            };
+            let operator = Box::new(BruteForceKnnOperator {});
+            let task = wrap(operator, bf_input, self_address.clone());
+            match self.dispatcher.send(task, Some(Span::current())).await {
+                Ok(_) => (),
+                Err(e) => {
+                    // Log an error
+                    println!("Error sending Brute Force KNN task: {:?}", e);
+                }
             }
         }
     }
@@ -271,23 +274,25 @@ impl HnswQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Record Segment is not set");
 
-        // Dispatch a query task
-        let operator = Box::new(HnswKnnOperator {});
-        let input = HnswKnnOperatorInput {
-            segment: hnsw_segment_reader,
-            query: self.query_vectors[0].clone(),
-            k: self.k as usize,
-            record_segment: record_segment.clone(),
-            blockfile_provider: self.blockfile_provider.clone(),
-            allowed_ids: self.allowed_ids.clone(),
-            logs: logs.clone(),
-        };
-        let task = wrap(operator, input, ctx.sender.as_receiver());
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error
-                println!("Error sending HNSW KNN task: {:?}", e);
+        // Dispatch a query task per query vector
+        for query_vector in self.query_vectors.iter() {
+            let operator = Box::new(HnswKnnOperator {});
+            let input = HnswKnnOperatorInput {
+                segment: hnsw_segment_reader.clone(),
+                query: query_vector.clone(),
+                k: self.k as usize,
+                record_segment: record_segment.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                allowed_ids: self.allowed_ids.clone(),
+                logs: logs.clone(),
+            };
+            let task = wrap(operator, input, ctx.sender.as_receiver());
+            match self.dispatcher.send(task, Some(Span::current())).await {
+                Ok(_) => (),
+                Err(e) => {
+                    // Log an error
+                    println!("Error sending HNSW KNN task: {:?}", e);
+                }
             }
         }
     }
@@ -552,6 +557,9 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
+                // Set the merge dependency count to the number of query vectors * 2
+                // N for the HNSW query and N for the Brute force query
+                self.merge_dependency_count = (self.query_vectors.len() * 2) as u32;
                 self.brute_force_query(logs.clone(), ctx.sender.as_receiver())
                     .await;
                 self.hnsw_segment_query(logs, ctx).await;
