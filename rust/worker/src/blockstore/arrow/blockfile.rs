@@ -275,7 +275,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
-    pub(crate) async fn key_exists(&'me self, prefix: &str, key: K) -> bool {
+    pub(crate) async fn contains(&'me self, prefix: &str, key: K) -> bool {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
         let block = self.get_block(target_block_id).await;

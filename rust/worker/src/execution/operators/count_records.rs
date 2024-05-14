@@ -7,9 +7,9 @@ use tonic::async_trait;
 use crate::{
     blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
-    execution::operator::Operator,
+    execution::{data::data_chunk::Chunk, operator::Operator},
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    types::{Operation, Segment},
+    types::{LogRecord, Operation, Segment},
 };
 
 #[derive(Debug)]
@@ -25,21 +25,19 @@ impl CountRecordsOperator {
 pub(crate) struct CountRecordsInput {
     record_segment_definition: Segment,
     blockfile_provider: BlockfileProvider,
-    // Note: this vector needs to be in the same order as the log
-    // for the counting logic to be correct.
-    log_operation_and_id: Vec<(Operation, String)>,
+    log_records: Chunk<LogRecord>,
 }
 
 impl CountRecordsInput {
     pub(crate) fn new(
         record_segment_definition: Segment,
         blockfile_provider: BlockfileProvider,
-        log_operation_and_id: Vec<(Operation, String)>,
+        log_records: Chunk<LogRecord>,
     ) -> Self {
         Self {
             record_segment_definition,
             blockfile_provider,
-            log_operation_and_id,
+            log_records,
         }
     }
 }
@@ -86,19 +84,25 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             }
         };
         // Reconcile adds, updates and deletes.
-        let mut present_id_set: HashSet<String> = HashSet::new();
+        // Ids that exist in both the log and the segment (can be
+        // in both deleted and not deleted state).
+        let mut deleted_and_non_deleted_present_in_segment: HashSet<String> = HashSet::new();
         let mut res_count: i32 = 0;
-        for (_, id) in &input.log_operation_and_id {
-            // In theory, we can sort all the ids here
-            // and send them to the reader so that the reader
-            // can process all in one iteration of the sparse index.
-            // In practice the blocks
-            // will get cached so overall performance benefits
-            // should not be significant.
-            match reader.data_exists_for_user_id(id).await {
+        // In theory, we can sort all the ids here
+        // and send them to the reader so that the reader
+        // can process all in one iteration of the sparse index.
+        // In practice, the blocks
+        // will get cached so overall performance benefits
+        // should not be significant.
+        for (log_record, _) in input.log_records.iter() {
+            match reader
+                .data_exists_for_user_id(log_record.record.id.as_str())
+                .await
+            {
                 Ok(exists) => {
                     if exists {
-                        present_id_set.insert(id.clone());
+                        deleted_and_non_deleted_present_in_segment
+                            .insert(log_record.record.id.clone());
                     }
                 }
                 Err(_) => {
@@ -107,37 +111,41 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 }
             }
         }
-        let mut present_set_unique: HashSet<String> = present_id_set.clone();
-        let mut absent_set_unique: HashSet<String> = HashSet::new();
-        for (op, id) in &input.log_operation_and_id {
-            if present_id_set.contains(id) {
-                match op {
+        // Ids that are present in the log and segment and their end state is not deleted.
+        let mut non_deleted_present_in_segment: HashSet<String> =
+            deleted_and_non_deleted_present_in_segment.clone();
+        // Ids that are absent in the segment but present in log in non deleted state.
+        let mut non_deleted_absent_in_segment: HashSet<String> = HashSet::new();
+        for (log_record, _) in input.log_records.iter() {
+            if deleted_and_non_deleted_present_in_segment.contains(log_record.record.id.as_str()) {
+                match log_record.record.operation {
                     Operation::Add | Operation::Upsert => {
-                        present_set_unique.insert(id.clone());
+                        non_deleted_present_in_segment.insert(log_record.record.id.clone());
                     }
                     Operation::Delete => {
-                        present_set_unique.remove(id);
+                        non_deleted_present_in_segment.remove(log_record.record.id.as_str());
                     }
                     Operation::Update => {}
                 }
             } else {
-                match op {
+                match log_record.record.operation {
                     Operation::Add | Operation::Upsert => {
-                        absent_set_unique.insert(id.clone());
+                        non_deleted_absent_in_segment.insert(log_record.record.id.clone());
                     }
                     Operation::Delete => {
-                        absent_set_unique.remove(id);
+                        non_deleted_absent_in_segment.remove(log_record.record.id.as_str());
                     }
                     Operation::Update => {}
                 }
             }
         }
-        // These are the records that are present in the record segment but have
+        // Discount the records that are present in the record segment but have
         // been deleted more recently in the log.
-        res_count -= (present_id_set.len() - present_set_unique.len()) as i32;
-        // These are the records that are absent in the record segment but
+        res_count -= (deleted_and_non_deleted_present_in_segment.len()
+            - non_deleted_present_in_segment.len()) as i32;
+        // Add the records that are absent in the record segment but
         // have been inserted more recently in the log.
-        res_count += absent_set_unique.len() as i32;
+        res_count += non_deleted_absent_in_segment.len() as i32;
         // Finally, add the count from the record segment.
         match reader.count().await {
             Ok(val) => {
@@ -151,5 +159,134 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         Ok(CountRecordsOutput {
             count: res_count as usize,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, str::FromStr};
+
+    use uuid::Uuid;
+
+    use crate::{
+        blockstore::provider::BlockfileProvider,
+        execution::{
+            data::data_chunk::Chunk,
+            operator::Operator,
+            operators::count_records::{CountRecordsInput, CountRecordsOperator},
+        },
+        segment::{record_segment::RecordSegmentWriter, LogMaterializer, SegmentWriter},
+        types::{LogRecord, Operation, OperationRecord},
+    };
+
+    use crate::segment::types::SegmentFlusher;
+
+    #[tokio::test]
+    async fn test_merge_log_and_storage() {
+        let in_memory_provider = BlockfileProvider::new_memory();
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::Record,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &in_memory_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 3,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Delete,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            segment_writer.materialize(&data).await;
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let data = vec![
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "embedding_id_4".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 6,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Update,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let input = CountRecordsInput {
+            record_segment_definition: record_segment,
+            blockfile_provider: in_memory_provider,
+            log_records: data,
+        };
+        let operator = CountRecordsOperator {};
+        let count = operator
+            .run(&input)
+            .await
+            .expect("Count operator run failed");
+        assert_eq!(3, count.count);
     }
 }

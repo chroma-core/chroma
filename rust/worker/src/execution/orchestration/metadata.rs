@@ -370,13 +370,6 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
     async fn handle(&mut self, message: PullLogsResult, ctx: &ComponentContext<Self>) {
         match message {
             Ok(logs) => {
-                let mut operation_and_id: Vec<(Operation, String)> = Vec::new();
-                for (log_item, _) in logs.logs().iter() {
-                    operation_and_id.push((
-                        log_item.record.operation.clone(),
-                        log_item.record.id.clone(),
-                    ));
-                }
                 let operator = CountRecordsOperator::new();
                 let input = CountRecordsInput::new(
                     self.record_segment
@@ -384,7 +377,7 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
                         .expect("Expect segment")
                         .clone(),
                     self.blockfile_provider.clone(),
-                    operation_and_id,
+                    logs.logs(),
                 );
                 let msg = wrap(operator, input, ctx.sender.as_receiver());
                 match self.dispatcher.send(msg, None).await {

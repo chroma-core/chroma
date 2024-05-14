@@ -51,7 +51,7 @@ pub(crate) trait Readable<'referred_data>: Sized {
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 
-    fn key_exists(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
 }
 
 impl Writeable for &str {
@@ -166,7 +166,7 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
         Ok(storage.string_value_storage.iter().len())
     }
 
-    fn key_exists(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .string_value_storage
             .get(&CompositeKey {
@@ -286,7 +286,7 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         Ok(storage.int32_array_storage.iter().len())
     }
 
-    fn key_exists(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .int32_array_storage
             .get(&CompositeKey {
@@ -405,7 +405,7 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
 
-    fn key_exists(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .roaring_bitmap_storage
             .get(&CompositeKey {
@@ -519,7 +519,7 @@ impl<'referred_data> Readable<'referred_data> for u32 {
         Ok(storage.u32_storage.iter().len())
     }
 
-    fn key_exists(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .u32_storage
             .get(&CompositeKey {
@@ -731,7 +731,7 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
         Ok(storage.data_record_id_storage.iter().len())
     }
 
-    fn key_exists(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .data_record_id_storage
             .get(&CompositeKey {
