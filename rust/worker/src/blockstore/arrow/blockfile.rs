@@ -282,6 +282,22 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
+    pub(crate) async fn contains(&'me self, prefix: &str, key: K) -> bool {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.sparse_index.get_target_block_id(&search_key);
+        let block = self.get_block(target_block_id).await;
+        let res: Option<V> = match block {
+            Some(block) => block.get(prefix, key),
+            None => {
+                return false;
+            }
+        };
+        match res {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
     // Count the total number of records.
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         let mut block_ids: Vec<Uuid> = vec![];
