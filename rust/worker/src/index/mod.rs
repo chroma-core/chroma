@@ -1,4 +1,4 @@
-// mod fulltext;
+mod fulltext;
 mod hnsw;
 pub(crate) mod hnsw_provider;
 mod metadata;

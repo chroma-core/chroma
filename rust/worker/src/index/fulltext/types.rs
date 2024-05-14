@@ -1,103 +1,52 @@
-use crate::blockstore::{Blockfile, BlockfileKey, Key, PositionalPostingListBuilder, Value};
+use crate::blockstore::{
+    BlockfileFlusher, BlockfileReader, BlockfileWriter, PositionalPostingListBuilder,
+};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
+use arrow::array::Int32Array;
 use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
-    #[error("Already in a transaction")]
-    AlreadyInTransaction,
-    #[error("Not in a transaction")]
-    NotInTransaction,
+    #[error("Multiple tokens found in frequencies blockfile")]
+    MultipleTokenFrequencies,
+    #[error("Empty value in positional posting list")]
+    EmptyValueInPositionalPostingList,
 }
 
 impl ChromaError for FullTextIndexError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            FullTextIndexError::AlreadyInTransaction => ErrorCodes::FailedPrecondition,
-            FullTextIndexError::NotInTransaction => ErrorCodes::FailedPrecondition,
-        }
+        ErrorCodes::Internal
     }
 }
 
-pub(crate) trait FullTextIndex {
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
-
-    // Must be done inside a transaction.
-    fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>>;
-    // Only searches committed state.
-    fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>>;
-}
-
-pub(crate) struct BlockfileFullTextIndex {
-    posting_lists_blockfile: Box<dyn Blockfile>,
-    frequencies_blockfile: Box<dyn Blockfile>,
+pub(crate) struct FullTextIndexWriter {
+    posting_lists_blockfile_writer: BlockfileWriter,
+    frequencies_blockfile_writer: BlockfileWriter,
     tokenizer: Box<dyn ChromaTokenizer>,
-    in_transaction: bool,
 
     // term -> positional posting list builder for that term
     uncommitted: HashMap<String, PositionalPostingListBuilder>,
     uncommitted_frequencies: HashMap<String, i32>,
 }
 
-impl BlockfileFullTextIndex {
-    pub(crate) fn new(
-        posting_lists_blockfile: Box<dyn Blockfile>,
-        frequencies_blockfile: Box<dyn Blockfile>,
+impl FullTextIndexWriter {
+    fn new(
+        posting_lists_blockfile_writer: BlockfileWriter,
+        frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: Box<dyn ChromaTokenizer>,
     ) -> Self {
-        BlockfileFullTextIndex {
-            posting_lists_blockfile,
-            frequencies_blockfile,
+        FullTextIndexWriter {
+            posting_lists_blockfile_writer,
+            frequencies_blockfile_writer,
             tokenizer,
-            in_transaction: false,
             uncommitted: HashMap::new(),
             uncommitted_frequencies: HashMap::new(),
         }
     }
-}
-
-impl FullTextIndex for BlockfileFullTextIndex {
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        if self.in_transaction {
-            return Err(Box::new(FullTextIndexError::AlreadyInTransaction));
-        }
-        self.posting_lists_blockfile.begin_transaction()?;
-        self.frequencies_blockfile.begin_transaction()?;
-        self.in_transaction = true;
-        Ok(())
-    }
-
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_transaction {
-            return Err(Box::new(FullTextIndexError::NotInTransaction));
-        }
-        self.in_transaction = false;
-        for (key, mut value) in self.uncommitted.drain() {
-            let positional_posting_list = value.build();
-            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
-            self.posting_lists_blockfile.set(
-                blockfilekey,
-                &Value::PositionalPostingListValue(positional_posting_list),
-            );
-        }
-        for (key, value) in self.uncommitted_frequencies.drain() {
-            let blockfilekey = BlockfileKey::new("".to_string(), Key::String(key.to_string()));
-            self.frequencies_blockfile
-                .set(blockfilekey, &Value::IntValue(value));
-        }
-        self.posting_lists_blockfile.commit_transaction()?;
-        self.frequencies_blockfile.commit_transaction()?;
-        self.uncommitted.clear();
-        Ok(())
-    }
 
     fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
-        if !self.in_transaction {
-            return Err(Box::new(FullTextIndexError::NotInTransaction));
-        }
         let tokens = self.tokenizer.encode(document);
         for token in tokens.get_tokens() {
             self.uncommitted_frequencies
@@ -116,31 +65,135 @@ impl FullTextIndex for BlockfileFullTextIndex {
             // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
             if !builder.contains_doc_id(offset_id) {
                 // Casting to i32 is safe since we limit the size of the document.
-                builder.add_doc_id_and_positions(offset_id, vec![token.offset_from as i32]);
+                let res =
+                    builder.add_doc_id_and_positions(offset_id, vec![token.offset_from as i32]);
+                if res.is_err() {
+                    return res;
+                }
             } else {
-                builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]);
+                let res =
+                    builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]);
+                if res.is_err() {
+                    return res;
+                }
             }
         }
         Ok(())
     }
 
-    fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+    async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        for (key, mut value) in self.uncommitted.drain() {
+            let built_list = value.build();
+            for doc_id in built_list.doc_ids.iter() {
+                match doc_id {
+                    Some(doc_id) => {
+                        let positional_posting_list =
+                            built_list.get_positions_for_doc_id(doc_id).unwrap();
+                        let res = self
+                            .posting_lists_blockfile_writer
+                            .set(key.as_str(), doc_id as u32, &positional_posting_list)
+                            .await;
+                        if res.is_err() {
+                            return res;
+                        }
+                    }
+                    None => {
+                        panic!("Positions for doc ID not found in positional posting list -- should never happen")
+                    }
+                }
+            }
+        }
+        for (key, value) in self.uncommitted_frequencies.drain() {
+            // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
+            let res = self
+                .frequencies_blockfile_writer
+                .set(key.as_str(), value as u32, 0)
+                .await;
+            if res.is_err() {
+                return res;
+            }
+        }
+        Ok(())
+    }
+
+    async fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
+        // TODO should we be `await?`ing these? Or can we just return the futures?
+        let posting_lists_blockfile_flusher = self
+            .posting_lists_blockfile_writer
+            .commit::<u32, &Int32Array>()?;
+        let frequencies_blockfile_flusher =
+            self.frequencies_blockfile_writer.commit::<u32, &str>()?;
+        Ok(FullTextIndexFlusher {
+            posting_lists_blockfile_flusher,
+            frequencies_blockfile_flusher,
+        })
+    }
+}
+
+pub(crate) struct FullTextIndexFlusher {
+    posting_lists_blockfile_flusher: BlockfileFlusher,
+    frequencies_blockfile_flusher: BlockfileFlusher,
+}
+
+impl FullTextIndexFlusher {
+    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+        let res = self
+            .posting_lists_blockfile_flusher
+            .flush::<u32, &Int32Array>()
+            .await;
+        if res.is_err() {
+            return res;
+        }
+        let res = self
+            .frequencies_blockfile_flusher
+            .flush::<u32, &str>()
+            .await;
+        if res.is_err() {
+            return res;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct FullTextIndexReader<'me> {
+    posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
+    frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
+    tokenizer: Box<dyn ChromaTokenizer>,
+}
+
+impl<'me> FullTextIndexReader<'me> {
+    fn new(
+        posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
+        frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
+        tokenizer: Box<dyn ChromaTokenizer>,
+    ) -> Self {
+        FullTextIndexReader {
+            posting_lists_blockfile_reader,
+            frequencies_blockfile_reader,
+            tokenizer,
+        }
+    }
+
+    async fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
         let binding = self.tokenizer.encode(query);
         let tokens = binding.get_tokens();
 
         // Get query tokens sorted by frequency.
-        let mut token_frequencies = vec![];
+        let mut token_frequencies: Vec<(String, u32)> = vec![];
         for token in tokens {
-            let blockfilekey =
-                BlockfileKey::new("".to_string(), Key::String(token.text.to_string()));
-            let value = self.frequencies_blockfile.get(blockfilekey);
-            match value {
-                Ok(Value::IntValue(frequency)) => {
-                    token_frequencies.push((token.text.to_string(), frequency));
-                }
-                Ok(_) => {
-                    return Ok(vec![]);
-                }
+            // TODO better error matching (NotFoundError should return Ok(vec![])) but some others should error.
+            let res = self
+                .frequencies_blockfile_reader
+                .get_by_prefix(token.text.as_str())?;
+            if res.len() == 0 {
+                return Ok(vec![]);
+            }
+            if res.len() > 1 {
+                return Err(Box::new(FullTextIndexError::MultipleTokenFrequencies));
+            }
+            let res = res[0];
+            // Throw away the "value" since we store frequencies in the keys.
+            token_frequencies.push((token.text.to_string(), res.1));
         }
         // TODO sort by frequency. This adds an additional layer of complexity
         // with repeat characters where we need to keep track of which positions

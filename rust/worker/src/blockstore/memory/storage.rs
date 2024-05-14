@@ -50,6 +50,8 @@ pub(crate) trait Readable<'referred_data>: Sized {
     ) -> Vec<(&'referred_data CompositeKey, Self)>;
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
 }
 
 impl Writeable for &str {
@@ -163,6 +165,16 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.string_value_storage.iter().len())
     }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .string_value_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
+    }
 }
 
 // TODO: remove this and make this all use a unified storage so we don't have two impls
@@ -273,6 +285,16 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.int32_array_storage.iter().len())
     }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .int32_array_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
+    }
 }
 
 impl Writeable for &RoaringBitmap {
@@ -382,6 +404,16 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .roaring_bitmap_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
+    }
 }
 
 impl Writeable for f32 {
@@ -486,6 +518,16 @@ impl<'referred_data> Readable<'referred_data> for f32 {
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.f32_storage.iter().len())
     }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .f32_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
+    }
 }
 
 impl Writeable for u32 {
@@ -589,6 +631,16 @@ impl<'referred_data> Readable<'referred_data> for u32 {
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.u32_storage.iter().len())
+    }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .u32_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
     }
 }
 
@@ -697,6 +749,16 @@ impl<'referred_data> Readable<'referred_data> for bool {
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.bool_storage.iter().len())
+    }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .bool_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
     }
 }
 
@@ -899,6 +961,16 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.data_record_id_storage.iter().len())
+    }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .data_record_id_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
     }
 }
 
