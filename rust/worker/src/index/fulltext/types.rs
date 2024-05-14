@@ -714,4 +714,3 @@ mod tests {
         assert_eq!(res, vec![3]);
     }
 }
-}
