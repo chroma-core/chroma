@@ -1,5 +1,5 @@
 use arrow::{
-    array::{AsArray, Int32Array, Int32Builder, ListArray, ListBuilder},
+    array::{Array, AsArray, Int32Array, Int32Builder, ListArray, ListBuilder},
     datatypes::Int32Type,
 };
 use thiserror::Error;
@@ -30,6 +30,13 @@ impl PositionalPostingList {
             }
             None => None,
         }
+    }
+
+    pub(crate) fn size_in_bytes(&self) -> usize {
+        let mut size = 0;
+        size += self.doc_ids.len() * std::mem::size_of::<i32>();
+        size += self.positions.len() * std::mem::size_of::<i32>();
+        size
     }
 }
 
@@ -70,9 +77,11 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
-    ) -> Result<(), PositionalPostingListBuilderError> {
+    ) -> Result<(), Box<dyn ChromaError>> {
         if self.doc_ids.contains(&doc_id) {
-            return Err(PositionalPostingListBuilderError::DocIdAlreadyExists);
+            return Err(Box::new(
+                PositionalPostingListBuilderError::DocIdAlreadyExists,
+            ));
         }
 
         self.doc_ids.insert(doc_id);
@@ -88,9 +97,11 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
-    ) -> Result<(), PositionalPostingListBuilderError> {
+    ) -> Result<(), Box<dyn ChromaError>> {
         if !self.doc_ids.contains(&doc_id) {
-            return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
+            return Err(Box::new(
+                PositionalPostingListBuilderError::DocIdDoesNotExist,
+            ));
         }
 
         self.positions.get_mut(&doc_id).unwrap().extend(positions);
