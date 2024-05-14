@@ -1,9 +1,3 @@
-use std::collections::HashSet;
-
-use thiserror::Error;
-
-use tonic::async_trait;
-
 use crate::{
     blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
@@ -11,6 +5,9 @@ use crate::{
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{LogRecord, Operation, Segment},
 };
+use std::collections::HashSet;
+use thiserror::Error;
+use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct CountRecordsOperator {}
@@ -164,10 +161,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, str::FromStr};
-
-    use uuid::Uuid;
-
+    use crate::segment::types::SegmentFlusher;
     use crate::{
         blockstore::provider::BlockfileProvider,
         execution::{
@@ -178,8 +172,8 @@ mod tests {
         segment::{record_segment::RecordSegmentWriter, LogMaterializer, SegmentWriter},
         types::{LogRecord, Operation, OperationRecord},
     };
-
-    use crate::segment::types::SegmentFlusher;
+    use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_merge_log_and_storage() {

@@ -263,7 +263,6 @@ impl BlockfileFlusher {
 
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
-            // TODO: should memory blockfiles have ids?
             BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.id(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
         }
