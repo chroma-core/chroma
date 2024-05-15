@@ -155,7 +155,7 @@ impl HnswQueryOrchestrator {
         // Set the finish dependency count to the number of query vectors
         // since each query vector will have a merge task
         let finish_dependency_count = query_vectors.len() as u32;
-        // pre-allcoate the result vectors
+        // pre-allocate the result vectors
         let results = Some(Vec::with_capacity(query_vectors.len()));
 
         HnswQueryOrchestrator {
