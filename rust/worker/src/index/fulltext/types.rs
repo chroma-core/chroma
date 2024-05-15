@@ -5,6 +5,7 @@ use crate::index::fulltext::tokenizer::ChromaTokenizer;
 use arrow::array::Int32Array;
 use std::collections::HashMap;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
@@ -119,7 +120,7 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    pub async fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
+    pub fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
@@ -156,6 +157,14 @@ impl FullTextIndexFlusher {
         }
         Ok(())
     }
+
+    pub fn pls_id(&self) -> Uuid {
+        self.posting_lists_blockfile_flusher.id()
+    }
+
+    pub fn freqs_id(&self) -> Uuid {
+        self.frequencies_blockfile_flusher.id()
+    }
 }
 
 pub(crate) struct FullTextIndexReader<'me> {
@@ -165,7 +174,7 @@ pub(crate) struct FullTextIndexReader<'me> {
 }
 
 impl<'me> FullTextIndexReader<'me> {
-    fn new(
+    pub fn new(
         posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
         frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
         tokenizer: Box<dyn ChromaTokenizer>,
@@ -177,7 +186,7 @@ impl<'me> FullTextIndexReader<'me> {
         }
     }
 
-    async fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+    pub async fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
         let binding = self.tokenizer.encode(query);
         let tokens = binding.get_tokens();
 
@@ -318,7 +327,7 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -347,7 +356,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -386,7 +395,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("helo", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -420,7 +429,7 @@ mod tests {
         index_writer.add_document("aaa", 1).unwrap();
         index_writer.add_document("aaaaa", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -453,7 +462,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -486,7 +495,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -520,7 +529,7 @@ mod tests {
         index_writer.add_document("hello world hello", 1).unwrap();
         index_writer.add_document("    hello ", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -558,7 +567,7 @@ mod tests {
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.add_document("hello", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -598,7 +607,7 @@ mod tests {
         index_writer.add_document("world", 3).unwrap();
         index_writer.add_document("world hello", 4).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -648,7 +657,7 @@ mod tests {
         index_writer.add_document("aaabbb", 4).unwrap();
         index_writer.add_document("aabbbbaaaaabbb", 5).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -692,7 +701,7 @@ mod tests {
         index_writer.add_document("hello world!!!", 2).unwrap();
         index_writer.add_document(".!.!.!", 3).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
