@@ -1,6 +1,5 @@
-use crate::blockstore::{
-    BlockfileFlusher, BlockfileReader, BlockfileWriter, PositionalPostingListBuilder,
-};
+use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
+use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
 use arrow::array::Int32Array;

@@ -26,7 +26,7 @@ const FILES: [&'static str; 4] = [
 pub(crate) struct HnswIndexProvider {
     cache: Arc<RwLock<HashMap<Uuid, Arc<RwLock<HnswIndex>>>>>,
     pub(crate) temporary_storage_path: PathBuf,
-    storage: Box<Storage>,
+    storage: Storage,
 }
 
 impl Debug for HnswIndexProvider {
@@ -41,7 +41,7 @@ impl Debug for HnswIndexProvider {
 }
 
 impl HnswIndexProvider {
-    pub(crate) fn new(storage: Box<Storage>, storage_path: PathBuf) -> Self {
+    pub(crate) fn new(storage: Storage, storage_path: PathBuf) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             storage,
@@ -475,9 +475,7 @@ mod tests {
         // Create the directories needed
         std::fs::create_dir_all(&hnsw_tmp_path).unwrap();
 
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            storage_dir.to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
 
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path);
         let segment = Segment {

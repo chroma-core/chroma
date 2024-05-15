@@ -78,9 +78,6 @@ impl ChromaError for MergeMetadataResultsOperatorError {
     }
 }
 
-pub type MergeMetadataResultsOperatorResult =
-    Result<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>;
-
 #[async_trait]
 impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput>
     for MergeMetadataResultsOperator
@@ -90,7 +87,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
     async fn run(
         &self,
         input: &MergeMetadataResultsOperatorInput,
-    ) -> MergeMetadataResultsOperatorResult {
+    ) -> Result<MergeMetadataResultsOperatorOutput, Self::Error> {
         trace!(
             "[MergeMetadataResultsOperator] segment id: {}",
             input.record_segment_definition.id.to_string()

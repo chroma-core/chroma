@@ -42,8 +42,6 @@ pub struct BruteForceKnnOperatorOutput {
     pub distances: Vec<f32>,
 }
 
-pub type BruteForceKnnOperatorResult = Result<BruteForceKnnOperatorOutput, ()>;
-
 #[derive(Debug)]
 struct Entry {
     index: usize,
@@ -82,7 +80,10 @@ impl Eq for Entry {}
 impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for BruteForceKnnOperator {
     type Error = ();
 
-    async fn run(&self, input: &BruteForceKnnOperatorInput) -> BruteForceKnnOperatorResult {
+    async fn run(
+        &self,
+        input: &BruteForceKnnOperatorInput,
+    ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
         let mut heap = BinaryHeap::with_capacity(input.k);
         let data_chunk = &input.data;
         for data in data_chunk.iter() {

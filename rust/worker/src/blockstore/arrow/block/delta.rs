@@ -241,9 +241,7 @@ mod test {
     #[tokio::test]
     async fn test_sizing_int_arr_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &Int32Array>();
 
@@ -270,9 +268,7 @@ mod test {
     #[tokio::test]
     async fn test_sizing_string_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &str>();
         let delta_id = delta.id.clone();
@@ -321,9 +317,7 @@ mod test {
     #[tokio::test]
     async fn test_sizing_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<f32, &str>();
 
@@ -344,9 +338,7 @@ mod test {
     #[tokio::test]
     async fn test_sizing_roaring_bitmap_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &RoaringBitmap>();
 
@@ -374,9 +366,7 @@ mod test {
     #[tokio::test]
     async fn test_data_record() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let ids = vec!["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = vec![
