@@ -24,6 +24,7 @@ pub(crate) struct ArrowBlockfileWriter {
     block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
     sparse_index: SparseIndex,
     id: Uuid,
+    write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -62,6 +63,7 @@ impl ArrowBlockfileWriter {
             block_deltas: block_deltas,
             sparse_index: sparse_index,
             id,
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -78,6 +80,7 @@ impl ArrowBlockfileWriter {
             block_deltas: block_deltas,
             sparse_index: new_sparse_index,
             id,
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -110,6 +113,9 @@ impl ArrowBlockfileWriter {
         key: K,
         value: V,
     ) -> Result<(), Box<dyn ChromaError>> {
+        // TODO: for now the BF writer locks the entire write operation
+        let _guard = self.write_mutex.lock().await;
+
         // TODO: value must be smaller than the block size except for position lists, which are a special case
         //         // where we split the value across multiple blocks
         //         if !self.in_transaction() {
@@ -173,6 +179,7 @@ impl ArrowBlockfileWriter {
         prefix: &str,
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {
+        let _guard = self.write_mutex.lock().await;
         // Get the target block id for the key
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
@@ -275,6 +282,22 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
+    pub(crate) async fn contains(&'me self, prefix: &str, key: K) -> bool {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.sparse_index.get_target_block_id(&search_key);
+        let block = self.get_block(target_block_id).await;
+        let res: Option<V> = match block {
+            Some(block) => block.get(prefix, key),
+            None => {
+                return false;
+            }
+        };
+        match res {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
     // Count the total number of records.
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         let mut block_ids: Vec<Uuid> = vec![];
@@ -321,9 +344,7 @@ mod tests {
     #[tokio::test]
     async fn test_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
@@ -355,9 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_blockfile() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
@@ -389,9 +408,7 @@ mod tests {
     #[tokio::test]
     async fn test_splitting() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
@@ -493,9 +510,7 @@ mod tests {
     #[tokio::test]
     async fn test_string_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
@@ -524,9 +539,7 @@ mod tests {
     #[tokio::test]
     async fn test_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let provider = ArrowBlockfileProvider::new(storage);
 
         let writer = provider.create::<f32, &str>().unwrap();
@@ -552,9 +565,7 @@ mod tests {
     #[tokio::test]
     async fn test_roaring_bitmap_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider
@@ -588,9 +599,7 @@ mod tests {
     #[tokio::test]
     async fn test_uint_key_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<u32, u32>().unwrap();
@@ -616,9 +625,7 @@ mod tests {
     #[tokio::test]
     async fn test_data_record_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
@@ -661,9 +668,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();

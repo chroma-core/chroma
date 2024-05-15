@@ -1,14 +1,15 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::execution::operator::wrap;
+use crate::execution::operator::{wrap, TaskResult};
 use crate::execution::operators::count_records::{
     CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
 };
 use crate::execution::operators::merge_metadata_results::{
     MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
-    MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorResult,
+    MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput,
 };
-use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsResult};
+use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
+use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, Handler};
 use crate::types::{Collection, LogRecord, Metadata, SegmentType};
@@ -79,8 +80,6 @@ pub(crate) struct CountQueryOrchestrator {
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
-    // Count of records in the log
-    log_record_count: usize,
 }
 
 #[derive(Error, Debug)]
@@ -136,7 +135,6 @@ impl CountQueryOrchestrator {
             dispatcher,
             blockfile_provider,
             result_channel: None,
-            log_record_count: 0,
         }
     }
 
@@ -215,7 +213,8 @@ impl CountQueryOrchestrator {
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
             collection.id,
-            collection.log_position,
+            // The collection log position is inclusive, and we want to start from the next log.
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),
@@ -227,7 +226,7 @@ impl CountQueryOrchestrator {
             Err(e) => {
                 // Log an error - this implies the dispatcher was dropped somehow
                 // and is likely fatal
-                println!("Error sending Metadata Query task: {:?}", e);
+                println!("Error sending Count Query task: {:?}", e);
             }
         }
     }
@@ -369,13 +368,15 @@ impl Component for CountQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<PullLogsResult> for CountQueryOrchestrator {
-    async fn handle(&mut self, message: PullLogsResult, ctx: &ComponentContext<Self>) {
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrator {
+    async fn handle(
+        &mut self,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
         match message {
             Ok(logs) => {
-                let logs = logs.logs();
-                self.log_record_count = logs.total_len();
-                // TODO: Add logic for merging logs with count from record segment.
                 let operator = CountRecordsOperator::new();
                 let input = CountRecordsInput::new(
                     self.record_segment
@@ -383,6 +384,7 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
                         .expect("Expect segment")
                         .clone(),
                     self.blockfile_provider.clone(),
+                    logs.logs(),
                 );
                 let msg = wrap(operator, input, ctx.sender.as_receiver());
                 match self.dispatcher.send(msg, None).await {
@@ -402,12 +404,13 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<Result<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
+impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
     async fn handle(
         &mut self,
-        message: Result<CountRecordsOutput, CountRecordsError>,
+        message: TaskResult<CountRecordsOutput, CountRecordsError>,
         ctx: &ComponentContext<Self>,
     ) {
+        let message = message.into_inner();
         let msg = match message {
             Ok(m) => m,
             Err(e) => {
@@ -418,7 +421,7 @@ impl Handler<Result<CountRecordsOutput, CountRecordsError>> for CountQueryOrches
             .result_channel
             .take()
             .expect("Expect channel to be present");
-        match channel.send(Ok(msg.count + self.log_record_count)) {
+        match channel.send(Ok(msg.count)) {
             Ok(_) => (),
             Err(e) => {
                 // Log an error - this implied the listener was dropped
@@ -532,7 +535,8 @@ impl MetadataQueryOrchestrator {
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
             collection.id,
-            collection.log_position,
+            // The collection log position is inclusive, and we want to start from the next log.
+            collection.log_position + 1,
             100,
             None,
             Some(end_timestamp),
@@ -753,8 +757,13 @@ impl Component for MetadataQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<PullLogsResult> for MetadataQueryOrchestrator {
-    async fn handle(&mut self, message: PullLogsResult, ctx: &ComponentContext<Self>) {
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchestrator {
+    async fn handle(
+        &mut self,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
         match message {
             Ok(logs) => {
                 let logs = logs.logs();
@@ -768,12 +777,15 @@ impl Handler<PullLogsResult> for MetadataQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<MergeMetadataResultsOperatorResult> for MetadataQueryOrchestrator {
+impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>>
+    for MetadataQueryOrchestrator
+{
     async fn handle(
         &mut self,
-        message: MergeMetadataResultsOperatorResult,
+        message: TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>,
         ctx: &ComponentContext<Self>,
     ) {
+        let message = message.into_inner();
         let output = match message {
             Ok(output) => output,
             Err(e) => {

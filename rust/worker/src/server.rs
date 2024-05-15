@@ -212,6 +212,98 @@ impl WorkerServer {
 
         return Ok(Response::new(resp));
     }
+
+    async fn query_metadata_instrumented(
+        &self,
+        request: Request<QueryMetadataRequest>,
+    ) -> Result<Response<QueryMetadataResponse>, Status> {
+        let request = request.into_inner();
+        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher,
+            None => {
+                return Err(Status::internal("No dispatcher found"));
+            }
+        };
+
+        let system = match self.system {
+            Some(ref system) => system,
+            None => {
+                return Err(Status::internal("No system found"));
+            }
+        };
+
+        // For now we don't support limit/offset/where/where document
+        if request.limit.is_some() || request.offset.is_some() {
+            return Err(Status::unimplemented("Limit and offset not supported"));
+        }
+        if request.where_document.is_some() {
+            return Err(Status::unimplemented("Where document not supported"));
+        }
+        if request.r#where.is_some() {
+            return Err(Status::unimplemented("Where not supported"));
+        }
+
+        let query_ids = request.ids;
+
+        let orchestrator = MetadataQueryOrchestrator::new(
+            system.clone(),
+            &segment_uuid,
+            query_ids,
+            self.log.clone(),
+            self.sysdb.clone(),
+            dispatcher.clone(),
+            self.blockfile_provider.clone(),
+        );
+
+        let result = orchestrator.run().await;
+        let result = match result {
+            Ok(result) => result,
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "Error running orchestrator: {}",
+                    e
+                )))
+            }
+        };
+
+        let mut output = Vec::new();
+        let (ids, metadatas, documents) = result;
+        for ((id, metadata), document) in ids
+            .into_iter()
+            .zip(metadatas.into_iter())
+            .zip(documents.into_iter())
+        {
+            // The transport layer assumes the document exists in the metadata
+            // with the special key "chroma:document"
+            let mut output_metadata = match metadata {
+                Some(metadata) => metadata,
+                None => HashMap::new(),
+            };
+            match document {
+                Some(document) => {
+                    output_metadata
+                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                }
+                None => {}
+            }
+            let record = chroma_proto::MetadataEmbeddingRecord {
+                id,
+                metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+            };
+            output.push(record);
+        }
+
+        // This is an implementation stub
+        let response = chroma_proto::QueryMetadataResponse { records: output };
+        Ok(Response::new(response))
+    }
 }
 
 #[tonic::async_trait]
@@ -308,93 +400,10 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         &self,
         request: Request<QueryMetadataRequest>,
     ) -> Result<Response<QueryMetadataResponse>, Status> {
-        let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Segment UUID"));
-            }
-        };
-
-        println!("Querying metadata for segment {}", segment_uuid);
-
-        let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
-            None => {
-                return Err(Status::internal("No dispatcher found"));
-            }
-        };
-
-        let system = match self.system {
-            Some(ref system) => system,
-            None => {
-                return Err(Status::internal("No system found"));
-            }
-        };
-
-        // For now we don't support limit/offset/where/where document
-        if request.limit.is_some() || request.offset.is_some() {
-            return Err(Status::unimplemented("Limit and offset not supported"));
-        }
-        if request.where_document.is_some() {
-            return Err(Status::unimplemented("Where document not supported"));
-        }
-        if request.r#where.is_some() {
-            return Err(Status::unimplemented("Where not supported"));
-        }
-
-        let query_ids = request.ids;
-
-        let orchestrator = MetadataQueryOrchestrator::new(
-            system.clone(),
-            &segment_uuid,
-            query_ids,
-            self.log.clone(),
-            self.sysdb.clone(),
-            dispatcher.clone(),
-            self.blockfile_provider.clone(),
-        );
-
-        let result = orchestrator.run().await;
-        let result = match result {
-            Ok(result) => result,
-            Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )))
-            }
-        };
-
-        let mut output = Vec::new();
-        let (ids, metadatas, documents) = result;
-        for ((id, metadata), document) in ids
-            .into_iter()
-            .zip(metadatas.into_iter())
-            .zip(documents.into_iter())
-        {
-            // The transport layer assumes the document exists in the metadata
-            // with the special key "chroma:document"
-            let mut output_metadata = match metadata {
-                Some(metadata) => metadata,
-                None => HashMap::new(),
-            };
-            match document {
-                Some(document) => {
-                    output_metadata
-                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
-                }
-                None => {}
-            }
-            let record = chroma_proto::MetadataEmbeddingRecord {
-                id,
-                metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-            };
-            output.push(record);
-        }
-
-        // This is an implementation stub
-        let response = chroma_proto::QueryMetadataResponse { records: output };
-        Ok(Response::new(response))
+        let query_span = trace_span!("Query metadata", segment_id = request.get_ref().segment_id);
+        let instrumented_span = wrap_span_with_parent_context(query_span, request.metadata());
+        self.query_metadata_instrumented(request)
+            .instrument(instrumented_span)
+            .await
     }
 }

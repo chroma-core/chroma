@@ -599,6 +599,22 @@ impl RecordSegmentReader<'_> {
         self.id_to_data.get("", offset_id).await
     }
 
+    pub(crate) async fn data_exists_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<bool, Box<dyn ChromaError>> {
+        if !self.user_id_to_id.contains("", user_id).await {
+            return Ok(false);
+        }
+        let offset_id = match self.user_id_to_id.get("", user_id).await {
+            Ok(id) => id,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        Ok(self.id_to_data.contains("", offset_id).await)
+    }
+
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         self.id_to_data.count().await
     }

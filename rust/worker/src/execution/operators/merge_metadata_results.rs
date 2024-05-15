@@ -2,14 +2,14 @@ use crate::{
     blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
     execution::{data::data_chunk::Chunk, operator::Operator},
-    segment::record_segment::RecordSegmentReader,
+    segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{
         update_metdata_to_metdata, LogRecord, Metadata, MetadataValueConversionError, Segment,
     },
 };
 use async_trait::async_trait;
-use std::f64::consts::E;
 use thiserror::Error;
+use tracing::{error, trace};
 
 #[derive(Debug)]
 pub struct MergeMetadataResultsOperator {}
@@ -61,7 +61,7 @@ pub struct MergeMetadataResultsOperatorOutput {
 #[derive(Error, Debug)]
 pub enum MergeMetadataResultsOperatorError {
     #[error("Error creating Record Segment")]
-    RecordSegmentError,
+    RecordSegmentCreationError(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading Record Segment")]
     RecordSegmentReadError,
     #[error("Error converting metadata")]
@@ -71,15 +71,12 @@ pub enum MergeMetadataResultsOperatorError {
 impl ChromaError for MergeMetadataResultsOperatorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MergeMetadataResultsOperatorError::RecordSegmentError => ErrorCodes::Internal,
+            MergeMetadataResultsOperatorError::RecordSegmentCreationError(e) => e.code(),
             MergeMetadataResultsOperatorError::RecordSegmentReadError => ErrorCodes::Internal,
             MergeMetadataResultsOperatorError::MetadataConversionError(e) => e.code(),
         }
     }
 }
-
-pub type MergeMetadataResultsOperatorResult =
-    Result<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>;
 
 #[async_trait]
 impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput>
@@ -90,7 +87,37 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
     async fn run(
         &self,
         input: &MergeMetadataResultsOperatorInput,
-    ) -> MergeMetadataResultsOperatorResult {
+    ) -> Result<MergeMetadataResultsOperatorOutput, Self::Error> {
+        trace!(
+            "[MergeMetadataResultsOperator] segment id: {}",
+            input.record_segment_definition.id.to_string()
+        );
+
+        let mut ids: Vec<String> = Vec::new();
+        let mut metadata = Vec::new();
+        let mut documents = Vec::new();
+        // Add the data from the brute force results
+        for (log_entry, index) in input.filtered_log.iter() {
+            ids.push(log_entry.record.id.to_string());
+            let output_metadata = match &log_entry.record.metadata {
+                Some(log_metadata) => match update_metdata_to_metdata(log_metadata) {
+                    Ok(metadata) => Some(metadata),
+                    Err(e) => {
+                        println!("Error converting log metadata: {:?}", e);
+                        return Err(MergeMetadataResultsOperatorError::MetadataConversionError(
+                            e,
+                        ));
+                    }
+                },
+                None => {
+                    println!("No metadata found for log entry");
+                    None
+                }
+            };
+            metadata.push(output_metadata);
+            documents.push(log_entry.record.document.clone());
+        }
+
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
@@ -99,13 +126,30 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         {
             Ok(reader) => reader,
             Err(e) => {
-                return Err(MergeMetadataResultsOperatorError::RecordSegmentError);
+                match *e {
+                    RecordSegmentReaderCreationError::UninitializedSegment => {
+                        // This means no compaction has occured, so we can just return whats on the log.
+                        return Ok(MergeMetadataResultsOperatorOutput {
+                            ids,
+                            metadata,
+                            documents,
+                        });
+                    }
+                    RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        error!("Error creating Record Segment: {:?}", e);
+                        return Err(
+                            MergeMetadataResultsOperatorError::RecordSegmentCreationError(*e),
+                        );
+                    }
+                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        error!("Error creating Record Segment: {:?}", e);
+                        return Err(
+                            MergeMetadataResultsOperatorError::RecordSegmentCreationError(*e),
+                        );
+                    }
+                }
             }
         };
-
-        let mut ids: Vec<String> = Vec::new();
-        let mut metadata = Vec::new();
-        let mut documents = Vec::new();
 
         // Hydrate the data from the record segment for filtered data
         for index_offset_id in input.filtered_index_offset_ids.iter() {
@@ -169,28 +213,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                 Some(document) => documents.push(Some(document.to_string())),
                 None => documents.push(None),
             }
-        }
-
-        // Merge the data from the brute force results
-        for (log_entry, index) in input.filtered_log.iter() {
-            ids.push(log_entry.record.id.to_string());
-            let output_metadata = match &log_entry.record.metadata {
-                Some(log_metadata) => match update_metdata_to_metdata(log_metadata) {
-                    Ok(metadata) => Some(metadata),
-                    Err(e) => {
-                        println!("Error converting log metadata: {:?}", e);
-                        return Err(MergeMetadataResultsOperatorError::MetadataConversionError(
-                            e,
-                        ));
-                    }
-                },
-                None => {
-                    println!("No metadata found for log entry");
-                    None
-                }
-            };
-            metadata.push(output_metadata);
-            documents.push(log_entry.record.document.clone());
         }
 
         Ok(MergeMetadataResultsOperatorOutput {
