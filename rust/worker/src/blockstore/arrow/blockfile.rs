@@ -344,9 +344,7 @@ mod tests {
     #[tokio::test]
     async fn test_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
@@ -378,9 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_blockfile() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
@@ -412,9 +408,7 @@ mod tests {
     #[tokio::test]
     async fn test_splitting() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
@@ -516,9 +510,7 @@ mod tests {
     #[tokio::test]
     async fn test_string_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
@@ -547,9 +539,7 @@ mod tests {
     #[tokio::test]
     async fn test_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let provider = ArrowBlockfileProvider::new(storage);
 
         let writer = provider.create::<f32, &str>().unwrap();
@@ -575,9 +565,7 @@ mod tests {
     #[tokio::test]
     async fn test_roaring_bitmap_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider
@@ -611,9 +599,7 @@ mod tests {
     #[tokio::test]
     async fn test_uint_key_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<u32, u32>().unwrap();
@@ -639,9 +625,7 @@ mod tests {
     #[tokio::test]
     async fn test_data_record_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
 
         let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
@@ -684,9 +668,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmp_dir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();

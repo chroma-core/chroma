@@ -66,16 +66,16 @@ impl ChromaError for MergeKnnResultsOperatorError {
     }
 }
 
-pub type MergeKnnResultsOperatorResult =
-    Result<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>;
-
 #[async_trait]
 impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
     for MergeKnnResultsOperator
 {
     type Error = Box<dyn ChromaError>;
 
-    async fn run(&self, input: &MergeKnnResultsOperatorInput) -> MergeKnnResultsOperatorResult {
+    async fn run(
+        &self,
+        input: &MergeKnnResultsOperatorInput,
+    ) -> Result<MergeKnnResultsOperatorOutput, Self::Error> {
         let (result_user_ids, result_distances, result_vectors) =
             match RecordSegmentReader::from_segment(
                 &input.record_segment_definition,

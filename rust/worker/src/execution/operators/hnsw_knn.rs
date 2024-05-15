@@ -53,8 +53,6 @@ impl ChromaError for HnswKnnOperatorError {
     }
 }
 
-pub type HnswKnnOperatorResult = Result<HnswKnnOperatorOutput, Box<dyn ChromaError>>;
-
 impl HnswKnnOperator {
     async fn get_disallowed_ids(
         &self,
@@ -103,7 +101,10 @@ impl HnswKnnOperator {
 impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
     type Error = Box<dyn ChromaError>;
 
-    async fn run(&self, input: &HnswKnnOperatorInput) -> HnswKnnOperatorResult {
+    async fn run(
+        &self,
+        input: &HnswKnnOperatorInput,
+    ) -> Result<HnswKnnOperatorOutput, Self::Error> {
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,

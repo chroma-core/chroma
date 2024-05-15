@@ -37,7 +37,7 @@ impl BlockfileProvider {
         BlockfileProvider::HashMapBlockfileProvider(HashMapBlockfileProvider::new())
     }
 
-    pub(crate) fn new_arrow(storage: Box<Storage>) -> Self {
+    pub(crate) fn new_arrow(storage: Storage) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(storage))
     }
 
