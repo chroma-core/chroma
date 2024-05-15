@@ -44,13 +44,11 @@ pub struct FlushS3Output {
     pub(crate) segment_flush_info: Arc<[SegmentFlushInfo]>,
 }
 
-pub type FlushS3Result = Result<FlushS3Output, Box<dyn ChromaError>>;
-
 #[async_trait]
 impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
     type Error = Box<dyn ChromaError>;
 
-    async fn run(&self, input: &FlushS3Input) -> FlushS3Result {
+    async fn run(&self, input: &FlushS3Input) -> Result<FlushS3Output, Self::Error> {
         let record_segment_flusher = input.record_segment_writer.clone().commit();
         let record_segment_flush_info = match record_segment_flusher {
             Ok(flusher) => {

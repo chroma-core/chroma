@@ -4,17 +4,19 @@ use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
-    BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorResult,
+    BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput,
 };
 use crate::execution::operators::hnsw_knn::{
-    HnswKnnOperator, HnswKnnOperatorInput, HnswKnnOperatorResult,
+    HnswKnnOperator, HnswKnnOperatorInput, HnswKnnOperatorOutput,
 };
 use crate::execution::operators::merge_knn_results::{
-    MergeKnnResultsOperator, MergeKnnResultsOperatorInput, MergeKnnResultsOperatorResult,
+    MergeKnnResultsOperator, MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput,
 };
-use crate::execution::operators::pull_log::PullLogsResult;
+use crate::execution::operators::pull_log::PullLogsOutput;
 use crate::index::hnsw_provider::HnswIndexProvider;
+use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
@@ -164,7 +166,10 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
+    async fn pull_logs(
+        &mut self,
+        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+    ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
         let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
@@ -204,7 +209,7 @@ impl HnswQueryOrchestrator {
     async fn brute_force_query(
         &mut self,
         logs: Chunk<LogRecord>,
-        self_address: Box<dyn Receiver<BruteForceKnnOperatorResult>>,
+        self_address: Box<dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, ()>>>,
     ) {
         self.state = ExecutionState::QueryKnn;
 
@@ -541,12 +546,13 @@ impl Component for HnswQueryOrchestrator {
 // ============== Handlers ==============
 
 #[async_trait]
-impl Handler<PullLogsResult> for HnswQueryOrchestrator {
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrator {
     async fn handle(
         &mut self,
-        message: PullLogsResult,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
+        let message = message.into_inner();
         self.state = ExecutionState::Partition;
 
         match message {
@@ -564,12 +570,13 @@ impl Handler<PullLogsResult> for HnswQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
+impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestrator {
     async fn handle(
         &mut self,
-        message: BruteForceKnnOperatorResult,
+        message: TaskResult<BruteForceKnnOperatorOutput, ()>,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
+        let message = message.into_inner();
         match message {
             Ok(output) => {
                 let mut user_ids = Vec::new();
@@ -616,8 +623,13 @@ impl Handler<BruteForceKnnOperatorResult> for HnswQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<HnswKnnOperatorResult> for HnswQueryOrchestrator {
-    async fn handle(&mut self, message: HnswKnnOperatorResult, ctx: &ComponentContext<Self>) {
+impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQueryOrchestrator {
+    async fn handle(
+        &mut self,
+        message: TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
         self.merge_dependency_count -= 1;
 
         match message {
@@ -638,12 +650,15 @@ impl Handler<HnswKnnOperatorResult> for HnswQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<MergeKnnResultsOperatorResult> for HnswQueryOrchestrator {
+impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
+    for HnswQueryOrchestrator
+{
     async fn handle(
         &mut self,
-        message: MergeKnnResultsOperatorResult,
+        message: TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
+        let message = message.into_inner();
         self.state = ExecutionState::Finished;
 
         let (mut output_ids, mut output_distances, mut output_vectors) = match message {
