@@ -28,6 +28,7 @@ use crate::{
     system::{Component, Handler, Receiver},
 };
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -107,13 +108,21 @@ pub(crate) struct HnswQueryOrchestrator {
     hnsw_segment: Option<Segment>,
     record_segment: Option<Segment>,
     collection: Option<Collection>,
-    hnsw_result_offset_ids: Option<Vec<usize>>,
-    hnsw_result_distances: Option<Vec<f32>>,
-    brute_force_result_user_ids: Option<Vec<String>>,
-    brute_force_result_distances: Option<Vec<f32>>,
-    brute_force_result_embeddings: Option<Vec<Vec<f32>>>,
+    // query_vectors index to the result
+    hnsw_result_offset_ids: HashMap<usize, Vec<usize>>,
+    hnsw_result_distances: HashMap<usize, Vec<f32>>,
+    brute_force_result_user_ids: HashMap<usize, Vec<String>>,
+    brute_force_result_distances: HashMap<usize, Vec<f32>>,
+    brute_force_result_embeddings: HashMap<usize, Vec<Vec<f32>>>,
+    // Task id to query_vectors index
+    hnsw_task_id_to_query_index: HashMap<Uuid, usize>,
+    brute_force_task_id_to_query_index: HashMap<Uuid, usize>,
+    merge_task_id_to_query_index: HashMap<Uuid, usize>,
+    // Result state
+    results: Option<Vec<Vec<VectorQueryResult>>>,
     // State machine management
     merge_dependency_count: u32,
+    finish_dependency_count: u32,
     // Services
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
@@ -140,10 +149,20 @@ impl HnswQueryOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
     ) -> Self {
+        // Set the merge dependency count to the number of query vectors * 2
+        // N for the HNSW query and N for the Brute force query
+        let merge_dependency_count = (query_vectors.len() * 2) as u32;
+        // Set the finish dependency count to the number of query vectors
+        // since each query vector will have a merge task
+        let finish_dependency_count = query_vectors.len() as u32;
+        // pre-allocate the result vectors
+        let results = Some(Vec::with_capacity(query_vectors.len()));
+
         HnswQueryOrchestrator {
             state: ExecutionState::Pending,
             system,
-            merge_dependency_count: 2,
+            merge_dependency_count,
+            finish_dependency_count,
             query_vectors,
             k,
             allowed_ids: allowed_ids.into(),
@@ -152,11 +171,15 @@ impl HnswQueryOrchestrator {
             hnsw_segment: None,
             record_segment: None,
             collection: None,
-            hnsw_result_offset_ids: None,
-            hnsw_result_distances: None,
-            brute_force_result_user_ids: None,
-            brute_force_result_distances: None,
-            brute_force_result_embeddings: None,
+            hnsw_result_offset_ids: HashMap::new(),
+            hnsw_result_distances: HashMap::new(),
+            brute_force_result_user_ids: HashMap::new(),
+            brute_force_result_distances: HashMap::new(),
+            brute_force_result_embeddings: HashMap::new(),
+            hnsw_task_id_to_query_index: HashMap::new(),
+            brute_force_task_id_to_query_index: HashMap::new(),
+            merge_task_id_to_query_index: HashMap::new(),
+            results,
             log,
             sysdb,
             dispatcher,
@@ -214,19 +237,23 @@ impl HnswQueryOrchestrator {
         self.state = ExecutionState::QueryKnn;
 
         // TODO: We shouldn't have to clone query vectors here. We should be able to pass a Arc<[f32]>-like to the input
-        let bf_input = BruteForceKnnOperatorInput {
-            data: logs,
-            query: self.query_vectors[0].clone(),
-            k: self.k as usize,
-            // TODO: get the distance metric from the segment metadata
-            distance_metric: DistanceFunction::Euclidean,
-        };
-        let operator = Box::new(BruteForceKnnOperator {});
-        let task = wrap(operator, bf_input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                // TODO: log an error and reply to caller
+        for (i, query_vector) in self.query_vectors.iter().enumerate() {
+            let bf_input = BruteForceKnnOperatorInput {
+                data: logs.clone(),
+                query: query_vector.clone(),
+                k: self.k as usize,
+                // TODO: get the distance metric from the segment metadata
+                distance_metric: DistanceFunction::Euclidean,
+            };
+            let operator = Box::new(BruteForceKnnOperator {});
+            let task = wrap(operator, bf_input, self_address.clone());
+            self.brute_force_task_id_to_query_index.insert(task.id(), i);
+            match self.dispatcher.send(task, Some(Span::current())).await {
+                Ok(_) => (),
+                Err(e) => {
+                    // Log an error
+                    println!("Error sending Brute Force KNN task: {:?}", e);
+                }
             }
         }
     }
@@ -258,9 +285,12 @@ impl HnswQueryOrchestrator {
             Err(e) => match *e {
                 DistributedHNSWSegmentFromSegmentError::Uninitialized => {
                     // no task, decrement the merge dependency count and return
-                    self.hnsw_result_distances = Some(Vec::new());
-                    self.hnsw_result_offset_ids = Some(Vec::new());
-                    self.merge_dependency_count -= 1;
+                    // with an empty result
+                    for (i, _) in self.query_vectors.iter().enumerate() {
+                        self.merge_dependency_count -= 1;
+                        self.hnsw_result_distances.insert(i, Vec::new());
+                        self.hnsw_result_offset_ids.insert(i, Vec::new());
+                    }
                     return;
                 }
                 _ => {
@@ -276,54 +306,74 @@ impl HnswQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Record Segment is not set");
 
-        // Dispatch a query task
-        let operator = Box::new(HnswKnnOperator {});
-        let input = HnswKnnOperatorInput {
-            segment: hnsw_segment_reader,
-            query: self.query_vectors[0].clone(),
-            k: self.k as usize,
-            record_segment: record_segment.clone(),
-            blockfile_provider: self.blockfile_provider.clone(),
-            allowed_ids: self.allowed_ids.clone(),
-            logs: logs.clone(),
-        };
-        let task = wrap(operator, input, ctx.sender.as_receiver());
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error
-                println!("Error sending HNSW KNN task: {:?}", e);
+        // Dispatch a query task per query vector
+        for (i, query_vector) in self.query_vectors.iter().enumerate() {
+            let operator = Box::new(HnswKnnOperator {});
+            let input = HnswKnnOperatorInput {
+                segment: hnsw_segment_reader.clone(),
+                query: query_vector.clone(),
+                k: self.k as usize,
+                record_segment: record_segment.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                allowed_ids: self.allowed_ids.clone(),
+                logs: logs.clone(),
+            };
+            let task = wrap(operator, input, ctx.sender.as_receiver());
+            self.hnsw_task_id_to_query_index.insert(task.id(), i);
+            match self.dispatcher.send(task, Some(Span::current())).await {
+                Ok(_) => (),
+                Err(e) => {
+                    // Log an error
+                    println!("Error sending HNSW KNN task: {:?}", e);
+                }
             }
         }
     }
 
     async fn merge_results(&mut self, ctx: &ComponentContext<Self>) {
         self.state = ExecutionState::MergeResults;
+        for i in 0..self.query_vectors.len() {
+            self.merge_results_for_index(ctx, i).await;
+        }
+    }
 
+    async fn merge_results_for_index(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+        query_vector_index: usize,
+    ) {
         let record_segment = self
             .record_segment
             .as_ref()
             .expect("Invariant violation. Record Segment is not set");
 
+        let hnsw_result_offset_ids = self
+            .hnsw_result_offset_ids
+            .remove(&query_vector_index)
+            .expect(
+                "Invariant violation. HNSW result offset ids are not set for query vector index",
+            );
+
+        let hnsw_result_distances = self
+            .hnsw_result_distances
+            .remove(&query_vector_index)
+            .expect(
+                "Invariant violation. HNSW result distances are not set for query vector index",
+            );
+
+        let brute_force_result_user_ids = self.brute_force_result_user_ids.remove(&query_vector_index).expect("Invariant violation. Brute force result user ids are not set for query vector index");
+        let brute_force_result_distances = self.brute_force_result_distances.remove(&query_vector_index).expect("Invariant violation. Brute force result distances are not set for query vector index");
+        let brute_force_result_embeddings = self
+            .brute_force_result_embeddings
+            .remove(&query_vector_index);
+
         let operator = Box::new(MergeKnnResultsOperator {});
         let input = MergeKnnResultsOperatorInput::new(
-            self.hnsw_result_offset_ids
-                .as_ref()
-                .expect("Invariant violation. HNSW result offset ids are not set")
-                .clone(),
-            self.hnsw_result_distances
-                .as_ref()
-                .expect("Invariant violation. HNSW result distances are not set")
-                .clone(),
-            self.brute_force_result_user_ids
-                .as_ref()
-                .expect("Invariant violation. Brute force result user ids are not set")
-                .clone(),
-            self.brute_force_result_distances
-                .as_ref()
-                .expect("Invariant violation. Brute force result distances are not set")
-                .clone(),
-            self.brute_force_result_embeddings.clone(),
+            hnsw_result_offset_ids,
+            hnsw_result_distances,
+            brute_force_result_user_ids,
+            brute_force_result_distances,
+            brute_force_result_embeddings,
             self.include_embeddings,
             self.k as usize,
             record_segment.clone(),
@@ -331,6 +381,8 @@ impl HnswQueryOrchestrator {
         );
 
         let task = wrap(operator, input, ctx.sender.as_receiver());
+        self.merge_task_id_to_query_index
+            .insert(task.id(), query_vector_index);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -413,10 +465,6 @@ impl HnswQueryOrchestrator {
         let segment = match segments {
             Ok(mut segments) => {
                 if segments.is_empty() {
-                    println!(
-                        "1. Record segment not found for collection: {:?}",
-                        collection_id
-                    );
                     return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
                         *collection_id,
                     )));
@@ -429,10 +477,6 @@ impl HnswQueryOrchestrator {
         };
 
         if segment.r#type != SegmentType::Record {
-            println!(
-                "2. Record segment not found for collection: {:?}",
-                collection_id
-            );
             return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
                 *collection_id,
             )));
@@ -576,7 +620,13 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
         message: TaskResult<BruteForceKnnOperatorOutput, ()>,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
+        let task_id = message.id();
         let message = message.into_inner();
+        let query_index = self
+            .brute_force_task_id_to_query_index
+            .remove(&task_id)
+            .expect("Invariant violation. Brute force task id is not set for query vector index");
+
         match message {
             Ok(output) => {
                 let mut user_ids = Vec::new();
@@ -604,9 +654,14 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
                         );
                     }
                 }
-                self.brute_force_result_user_ids = Some(user_ids);
-                self.brute_force_result_distances = Some(output.distances);
-                self.brute_force_result_embeddings = embeddings;
+                self.brute_force_result_user_ids
+                    .insert(query_index, user_ids);
+                self.brute_force_result_distances
+                    .insert(query_index, output.distances);
+                if let Some(embeddings) = embeddings {
+                    self.brute_force_result_embeddings
+                        .insert(query_index, embeddings);
+                }
             }
             Err(e) => {
                 // TODO: handle this error, technically never happens
@@ -616,7 +671,6 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
         self.merge_dependency_count -= 1;
 
         if self.merge_dependency_count == 0 {
-            // Trigger merge results
             self.merge_results(ctx).await;
         }
     }
@@ -629,21 +683,28 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
         message: TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>,
         ctx: &ComponentContext<Self>,
     ) {
+        let task_id = message.id();
         let message = message.into_inner();
-        self.merge_dependency_count -= 1;
+        let query_index = self
+            .hnsw_task_id_to_query_index
+            .remove(&task_id)
+            .expect("Invariant violation. HNSW task id is not set for query vector index");
 
         match message {
             Ok(output) => {
-                self.hnsw_result_offset_ids = Some(output.offset_ids);
-                self.hnsw_result_distances = Some(output.distances);
+                self.hnsw_result_offset_ids
+                    .insert(query_index, output.offset_ids);
+                self.hnsw_result_distances
+                    .insert(query_index, output.distances);
             }
             Err(e) => {
                 self.terminate_with_error(e, ctx);
             }
         }
 
+        self.merge_dependency_count -= 1;
+
         if self.merge_dependency_count == 0 {
-            // Trigger merge results
             self.merge_results(ctx).await;
         }
     }
@@ -658,10 +719,16 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
         message: TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
+        let task_id = message.id();
         let message = message.into_inner();
+        let query_index = self
+            .merge_task_id_to_query_index
+            .remove(&task_id)
+            .expect("Invariant violation. Merge task id is not set for query vector index");
+
         self.state = ExecutionState::Finished;
 
-        let (mut output_ids, mut output_distances, mut output_vectors) = match message {
+        let (mut output_ids, mut output_distances, output_vectors) = match message {
             Ok(output) => (output.user_ids, output.distances, output.vectors),
             Err(e) => {
                 self.terminate_with_error(e, ctx);
@@ -669,7 +736,6 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
             }
         };
 
-        let mut result = Vec::new();
         let mut query_results = Vec::new();
         if self.include_embeddings {
             for ((index, distance), vector) in
@@ -696,21 +762,43 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
                 query_results.push(query_result);
             }
         }
-        result.push(query_results);
-        trace!("Merged results: {:?}", result);
+        trace!("Merged results: {:?}", query_results);
 
-        let result_channel = match self.result_channel.take() {
-            Some(tx) => tx,
-            None => {
-                // Log an error - this is an invariant violation, the result channel should always be set
-                return;
+        let results_slice = self
+            .results
+            .as_mut()
+            .expect("Invariant violation. Results are not set")
+            .spare_capacity_mut();
+        results_slice[query_index].write(query_results);
+        self.finish_dependency_count -= 1;
+
+        if self.finish_dependency_count == 0 {
+            let result_channel = match self.result_channel.take() {
+                Some(tx) => tx,
+                None => {
+                    // Log an error - this is an invariant violation, the result channel should always be set
+                    return;
+                }
+            };
+
+            unsafe {
+                // Safety: We have ensured that the results are set and the length is equal to the number of query vectors
+                // https://doc.rust-lang.org/stable/std/mem/union.MaybeUninit.html#out-pointers
+                self.results
+                    .as_mut()
+                    .expect("Invariant violation. Results are not set")
+                    .set_len(self.query_vectors.len());
             }
-        };
 
-        match result_channel.send(Ok(result)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error
+            match result_channel.send(Ok(self
+                .results
+                .take()
+                .expect("Invariant violation. Results are not set")))
+            {
+                Ok(_) => (),
+                Err(e) => {
+                    // Log an error
+                }
             }
         }
     }
