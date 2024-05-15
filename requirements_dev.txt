@@ -8,8 +8,8 @@ mypy-protobuf
 pre-commit
 pytest
 pytest-asyncio
-pytest_httpserver==1.0.10
 pytest-xdist
+pytest_httpserver==1.0.10
 setuptools_scm
 types-protobuf
 types-requests==2.30.0.0
