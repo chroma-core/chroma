@@ -5,6 +5,8 @@ import random
 from chromadb.api import ServerAPI
 import time
 
+from chromadb.api.types import QueryResult
+
 EPS = 1e-6
 MEMBERLIST_SLEEP = 5
 COMPACTION_SLEEP = 120
@@ -83,47 +85,65 @@ def test_add_include_all_with_compaction_delay(api: ServerAPI) -> None:
 
     time.sleep(COMPACTION_SLEEP)  # Wait for the documents to be compacted
 
-    random_query = [random.random(), random.random(), random.random()]
+    random_query_1 = [random.random(), random.random(), random.random()]
+    random_query_2 = [random.random(), random.random(), random.random()]
 
     # Query the collection with a random query
     results = collection.query(
-        query_embeddings=[random_query],  # type: ignore
+        query_embeddings=[random_query_1, random_query_2],  # type: ignore
         n_results=10,
         include=["metadatas", "documents", "distances", "embeddings"],
     )
 
     ids_and_embeddings = list(zip(ids, embeddings))
-    # Check that the distances are correct in l2
-    gt_ids_distances_embeddings = [
-        (id, sum((a - b) ** 2 for a, b in zip(embedding, random_query)), embedding)
-        for id, embedding in ids_and_embeddings
-    ]
-    gt_ids_distances_embeddings.sort(key=lambda x: x[1])
-    retrieved_distances = results["distances"][0]  # type: ignore
 
-    # Check that the query results are sorted by distance
-    for i in range(1, len(retrieved_distances)):
-        assert retrieved_distances[i - 1] <= retrieved_distances[i]
+    def validate(results: QueryResult, query: list[float], result_index: int) -> None:
+        # Check that the distances are correct in l2
+        gt_ids_distances_embeddings = [
+            (id, sum((a - b) ** 2 for a, b in zip(embedding, query)), embedding)
+            for id, embedding in ids_and_embeddings
+        ]
+        gt_ids_distances_embeddings.sort(key=lambda x: x[1])
+        retrieved_distances = results["distances"][result_index]  # type: ignore
 
-    for i in range(len(retrieved_distances)):
-        assert abs(gt_ids_distances_embeddings[i][1] - retrieved_distances[i]) < EPS
+        # Check that the query results are sorted by distance
+        for i in range(1, len(retrieved_distances)):
+            assert retrieved_distances[i - 1] <= retrieved_distances[i]
 
-    # Check that the ids are correct
-    retrieved_ids = results["ids"][0]
-    for i in range(len(retrieved_ids)):
-        assert retrieved_ids[i] == gt_ids_distances_embeddings[i][0]
+        for i in range(len(retrieved_distances)):
+            assert abs(gt_ids_distances_embeddings[i][1] - retrieved_distances[i]) < EPS
 
-    # Check that the documents are correct
-    retrieved_documents = results["documents"][0]  # type: ignore
-    for i in range(len(retrieved_documents)):
-        assert retrieved_documents[i] == f"document_{gt_ids_distances_embeddings[i][0]}"
+        # Check that the ids are correct
+        retrieved_ids = results["ids"][result_index]
+        for i in range(len(retrieved_ids)):
+            assert retrieved_ids[i] == gt_ids_distances_embeddings[i][0]
 
-    # Check that the embeddings are correct
-    retrieved_embeddings = results["embeddings"][0]  # type: ignore
-    for i in range(len(retrieved_embeddings)):
-        # eps compare the embeddings
-        for j in range(3):
-            assert (
-                abs(retrieved_embeddings[i][j] - gt_ids_distances_embeddings[i][2][j])
-                < EPS
-            )
+        # Check that the documents are correct
+        if "documents" in results and results["documents"] is not None:
+            retrieved_documents = results["documents"][result_index]
+            for i in range(len(retrieved_documents)):
+                assert (
+                    retrieved_documents[i]
+                    == f"document_{gt_ids_distances_embeddings[i][0]}"
+                )
+        else:
+            assert False
+
+        # Check that the embeddings are correct
+        if "embeddings" in results and results["embeddings"] is not None:
+            retrieved_embeddings = results["embeddings"][result_index]
+            for i in range(len(retrieved_embeddings)):
+                # eps compare the embeddings
+                for j in range(3):
+                    assert (
+                        abs(
+                            retrieved_embeddings[i][j]
+                            - gt_ids_distances_embeddings[i][2][j]
+                        )
+                        < EPS
+                    )
+        else:
+            assert False
+
+    validate(results, random_query_1, 0)
+    validate(results, random_query_2, 1)
