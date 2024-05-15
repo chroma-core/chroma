@@ -16,6 +16,7 @@ use crate::execution::operators::merge_knn_results::{
 };
 use crate::execution::operators::pull_log::PullLogsOutput;
 use crate::index::hnsw_provider::HnswIndexProvider;
+use crate::index::IndexConfig;
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
@@ -108,6 +109,7 @@ pub(crate) struct HnswQueryOrchestrator {
     hnsw_segment: Option<Segment>,
     record_segment: Option<Segment>,
     collection: Option<Collection>,
+    index_config: Option<IndexConfig>,
     // query_vectors index to the result
     hnsw_result_offset_ids: HashMap<usize, Vec<usize>>,
     hnsw_result_distances: HashMap<usize, Vec<f32>>,
@@ -171,6 +173,7 @@ impl HnswQueryOrchestrator {
             hnsw_segment: None,
             record_segment: None,
             collection: None,
+            index_config: None,
             hnsw_result_offset_ids: HashMap::new(),
             hnsw_result_distances: HashMap::new(),
             brute_force_result_user_ids: HashMap::new(),
@@ -235,6 +238,11 @@ impl HnswQueryOrchestrator {
         self_address: Box<dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, ()>>>,
     ) {
         self.state = ExecutionState::QueryKnn;
+        let distance_function = &self
+            .index_config
+            .as_ref()
+            .expect("Invariant violation. Index config is not set")
+            .distance_function;
 
         // TODO: We shouldn't have to clone query vectors here. We should be able to pass a Arc<[f32]>-like to the input
         for (i, query_vector) in self.query_vectors.iter().enumerate() {
@@ -242,8 +250,7 @@ impl HnswQueryOrchestrator {
                 data: logs.clone(),
                 query: query_vector.clone(),
                 k: self.k as usize,
-                // TODO: get the distance metric from the segment metadata
-                distance_metric: DistanceFunction::Euclidean,
+                distance_metric: distance_function.clone(),
             };
             let operator = Box::new(BruteForceKnnOperator {});
             let task = wrap(operator, bf_input, self_address.clone());
@@ -578,6 +585,16 @@ impl Component for HnswQueryOrchestrator {
                 return;
             }
         };
+
+        match IndexConfig::from_segment(&hnsw_segment, collection.dimension.unwrap()) {
+            Ok(index_config) => {
+                self.index_config = Some(index_config);
+            }
+            Err(e) => {
+                self.terminate_with_error(e, ctx);
+                return;
+            }
+        }
 
         self.record_segment = Some(record_segment);
         self.hnsw_segment = Some(hnsw_segment);
