@@ -2,6 +2,7 @@
 # instead of a property based test. We can use the delta to get the property
 # test working and then enable
 import random
+from typing import List
 from chromadb.api import ServerAPI
 import time
 
@@ -97,7 +98,7 @@ def test_add_include_all_with_compaction_delay(api: ServerAPI) -> None:
 
     ids_and_embeddings = list(zip(ids, embeddings))
 
-    def validate(results: QueryResult, query: list[float], result_index: int) -> None:
+    def validate(results: QueryResult, query: List[float], result_index: int) -> None:
         # Check that the distances are correct in l2
         gt_ids_distances_embeddings = [
             (id, sum((a - b) ** 2 for a, b in zip(embedding, query)), embedding)
