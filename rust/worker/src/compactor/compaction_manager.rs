@@ -26,12 +26,9 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::path::Path;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
-use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -246,11 +243,10 @@ impl Component for CompactionManager {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
-        ctx.scheduler.schedule_interval(
+        ctx.scheduler.schedule(
             ctx.sender.clone(),
             ScheduleMessage {},
             self.compaction_interval,
-            None,
             ctx,
         );
     }
@@ -268,10 +264,17 @@ impl Handler<ScheduleMessage> for CompactionManager {
     async fn handle(
         &mut self,
         _message: ScheduleMessage,
-        _ctx: &ComponentContext<CompactionManager>,
+        ctx: &ComponentContext<CompactionManager>,
     ) {
         println!("CompactionManager: Performing compaction");
         self.compact_batch().await;
+        // Compaction is done, schedule the next compaction
+        ctx.scheduler.schedule(
+            ctx.sender.clone(),
+            ScheduleMessage {},
+            self.compaction_interval,
+            ctx,
+        );
     }
 }
 
@@ -299,6 +302,8 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use crate::types::Segment;
+    use std::str::FromStr;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_compaction_manager() {
