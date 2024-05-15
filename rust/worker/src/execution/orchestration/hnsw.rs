@@ -770,15 +770,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
             .expect("Invariant violation. Results are not set")
             .spare_capacity_mut();
         results_slice[query_index].write(query_results);
-        println!(
-            "Finish dependency count before: {}",
-            self.finish_dependency_count
-        );
         self.finish_dependency_count -= 1;
-        println!(
-            "Finish dependency count after: {}",
-            self.finish_dependency_count
-        );
 
         if self.finish_dependency_count == 0 {
             let result_channel = match self.result_channel.take() {
