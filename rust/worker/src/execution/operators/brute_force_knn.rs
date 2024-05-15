@@ -1,4 +1,5 @@
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::operators::normalize_vectors::normalize;
 use crate::types::LogRecord;
 use crate::types::Operation;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
@@ -84,6 +85,16 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         &self,
         input: &BruteForceKnnOperatorInput,
     ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
+        let should_normalize = match input.distance_metric {
+            DistanceFunction::Cosine => true,
+            _ => false,
+        };
+
+        let normalized_query = match should_normalize {
+            true => Some(normalize(&input.query)),
+            false => None,
+        };
+
         let mut heap = BinaryHeap::with_capacity(input.k);
         let data_chunk = &input.data;
         for data in data_chunk.iter() {
@@ -101,8 +112,17 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                     continue;
                 }
             };
-            let distance = input.distance_metric.distance(&embedding[..], &input.query);
-            heap.push(Entry { index, distance });
+            if should_normalize {
+                let normalized_query = normalized_query.as_ref().expect("Invariant violation. Should have set normalized query if should_normalize is true.");
+                let normalized_embedding = normalize(&embedding[..]);
+                let distance = input
+                    .distance_metric
+                    .distance(&normalized_embedding[..], &normalized_query[..]);
+                heap.push(Entry { index, distance });
+            } else {
+                let distance = input.distance_metric.distance(&embedding[..], &input.query);
+                heap.push(Entry { index, distance });
+            }
         }
 
         let mut visibility = vec![false; data_chunk.total_len()];
