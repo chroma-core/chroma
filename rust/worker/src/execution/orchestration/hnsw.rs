@@ -330,9 +330,18 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn merge_results(&mut self, ctx: &ComponentContext<Self>, query_vector_index: usize) {
+    async fn merge_results(&mut self, ctx: &ComponentContext<Self>) {
         self.state = ExecutionState::MergeResults;
+        for i in 0..self.query_vectors.len() {
+            self.merge_results_for_index(ctx, i).await;
+        }
+    }
 
+    async fn merge_results_for_index(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+        query_vector_index: usize,
+    ) {
         let record_segment = self
             .record_segment
             .as_ref()
@@ -662,8 +671,7 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
         self.merge_dependency_count -= 1;
 
         if self.merge_dependency_count == 0 {
-            // Trigger merge results
-            self.merge_results(ctx, query_index).await;
+            self.merge_results(ctx).await;
         }
     }
 }
@@ -697,8 +705,7 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
         self.merge_dependency_count -= 1;
 
         if self.merge_dependency_count == 0 {
-            // Trigger merge results
-            self.merge_results(ctx, query_index).await;
+            self.merge_results(ctx).await;
         }
     }
 }
@@ -763,7 +770,15 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
             .expect("Invariant violation. Results are not set")
             .spare_capacity_mut();
         results_slice[query_index].write(query_results);
+        println!(
+            "Finish dependency count before: {}",
+            self.finish_dependency_count
+        );
         self.finish_dependency_count -= 1;
+        println!(
+            "Finish dependency count after: {}",
+            self.finish_dependency_count
+        );
 
         if self.finish_dependency_count == 0 {
             let result_channel = match self.result_channel.take() {
@@ -776,6 +791,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
 
             unsafe {
                 // Safety: We have ensured that the results are set and the length is equal to the number of query vectors
+                // https://doc.rust-lang.org/stable/std/mem/union.MaybeUninit.html#out-pointers
                 self.results
                     .as_mut()
                     .expect("Invariant violation. Results are not set")
