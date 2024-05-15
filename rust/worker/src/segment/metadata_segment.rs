@@ -32,10 +32,10 @@ pub(crate) struct MetadataSegmentWriter {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
     // TODO this needs a real lifetime. However doing it breaks the commit() method
     // for some reason? This works for now.
-    pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<&'static str>>,
-    pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<bool>>,
-    pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<f32>>,
-    pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<u32>>,
+    pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter>,
+    pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter>,
+    pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter>,
+    pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter>,
 }
 
 impl Debug for MetadataSegmentWriter {

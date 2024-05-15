@@ -8,7 +8,7 @@ use roaring::RoaringBitmap;
 use std::{collections::HashMap, marker::PhantomData};
 use uuid::Uuid;
 
-pub(crate) struct MetadataIndexWriter<K: ArrowWriteableKey + Writeable> {
+pub(crate) struct MetadataIndexWriter {
     blockfile_writer: BlockfileWriter,
     // We use a Vec<(KeyWrapper, RoaringBitmap)> instead of a HashMap because
     // f32 doesn't implement Eq or Hash. Eq is trivial since we disallow
