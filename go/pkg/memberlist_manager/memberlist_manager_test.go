@@ -113,7 +113,10 @@ func TestMemberlistStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
-	assert.Equal(t, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}, *memberlist)
+	// assert the memberlist has the correct members
+	if !memberlistSame(*memberlist, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}) {
+		t.Fatalf("Memberlist did not update after adding a member")
+	}
 }
 
 func createFakePod(memberId string, podIp string, clientset kubernetes.Interface) {
@@ -250,5 +253,5 @@ func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, exp
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
-	return reflect.DeepEqual(expected_memberlist, *memberlist)
+	return memberlistSame(*memberlist, expected_memberlist)
 }
