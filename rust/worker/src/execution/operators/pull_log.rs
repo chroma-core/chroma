@@ -85,13 +85,11 @@ impl PullLogsOutput {
     }
 }
 
-pub type PullLogsResult = Result<PullLogsOutput, PullLogsError>;
-
 #[async_trait]
 impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
     type Error = PullLogsError;
 
-    async fn run(&self, input: &PullLogsInput) -> PullLogsResult {
+    async fn run(&self, input: &PullLogsInput) -> Result<PullLogsOutput, PullLogsError> {
         // We expect the log to be cheaply cloneable, we need to clone it since we need
         // a mutable reference to it. Not necessarily the best, but it works for our needs.
         let mut client_clone = self.client.clone();

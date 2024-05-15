@@ -1,17 +1,18 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::execution::operator::wrap;
+use crate::execution::operator::{wrap, TaskResult};
 use crate::execution::operators::count_records::{
     CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
 };
 use crate::execution::operators::merge_metadata_results::{
-    MergeMetadataResultsOperator, MergeMetadataResultsOperatorInput,
-    MergeMetadataResultsOperatorResult,
+    MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
+    MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput,
 };
-use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsResult};
+use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
+use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, Handler};
-use crate::types::{Collection, LogRecord, Metadata, Operation, SegmentType};
+use crate::types::{Collection, LogRecord, Metadata, SegmentType};
 use crate::{
     blockstore::provider::BlockfileProvider,
     execution::operator::TaskMessage,
@@ -367,8 +368,13 @@ impl Component for CountQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<PullLogsResult> for CountQueryOrchestrator {
-    async fn handle(&mut self, message: PullLogsResult, ctx: &ComponentContext<Self>) {
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrator {
+    async fn handle(
+        &mut self,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
         match message {
             Ok(logs) => {
                 let operator = CountRecordsOperator::new();
@@ -398,12 +404,13 @@ impl Handler<PullLogsResult> for CountQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<Result<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
+impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
     async fn handle(
         &mut self,
-        message: Result<CountRecordsOutput, CountRecordsError>,
+        message: TaskResult<CountRecordsOutput, CountRecordsError>,
         ctx: &ComponentContext<Self>,
     ) {
+        let message = message.into_inner();
         let msg = match message {
             Ok(m) => m,
             Err(e) => {
@@ -750,8 +757,13 @@ impl Component for MetadataQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<PullLogsResult> for MetadataQueryOrchestrator {
-    async fn handle(&mut self, message: PullLogsResult, ctx: &ComponentContext<Self>) {
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchestrator {
+    async fn handle(
+        &mut self,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
         match message {
             Ok(logs) => {
                 let logs = logs.logs();
@@ -765,12 +777,15 @@ impl Handler<PullLogsResult> for MetadataQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<MergeMetadataResultsOperatorResult> for MetadataQueryOrchestrator {
+impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>>
+    for MetadataQueryOrchestrator
+{
     async fn handle(
         &mut self,
-        message: MergeMetadataResultsOperatorResult,
+        message: TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>,
         ctx: &ComponentContext<Self>,
     ) {
+        let message = message.into_inner();
         let output = match message {
             Ok(output) => output,
             Err(e) => {

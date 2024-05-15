@@ -45,13 +45,11 @@ pub struct WriteSegmentsOutput {
     pub(crate) hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
 }
 
-pub type WriteSegmentsResult = Result<WriteSegmentsOutput, ()>;
-
 #[async_trait]
 impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator {
     type Error = ();
 
-    async fn run(&self, input: &WriteSegmentsInput) -> WriteSegmentsResult {
+    async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
         println!("Materializing N Records: {:?}", input.chunk.len());
         let res = input.record_segment_writer.materialize(&input.chunk).await;
         println!("Materialized N Records: {:?}", res.len());
