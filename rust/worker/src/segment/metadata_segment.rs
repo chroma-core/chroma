@@ -19,7 +19,8 @@ use crate::index::fulltext::types::{
 use crate::index::metadata::types::{
     MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
-use crate::types::{Segment, SegmentType};
+use crate::types::SegmentType;
+use crate::types::{MetadataValue, Operation, Segment};
 
 const FULL_TEXT_PLS: &str = "full_text_pls";
 const FULL_TEXT_FREQS: &str = "full_text_freqs";
@@ -345,7 +346,68 @@ impl SegmentWriter for MetadataSegmentWriter {
         &self,
         records: crate::execution::data::data_chunk::Chunk<MaterializedLogRecord>,
     ) {
-        unreachable!();
+        for record in records.iter() {
+            let segment_offset_id = record.0.segment_offset_id;
+            match record.0.log_record.record.operation {
+                Operation::Add => {
+                    match &record.0.materialized_record.metadata {
+                        Some(metadata) => {
+                            for (key, value) in metadata.iter() {
+                                match value {
+                                    MetadataValue::Str(value) => {
+                                        match &self.string_metadata_index_writer {
+                                            Some(writer) => {
+                                                let _ = writer.set(
+                                                    key,
+                                                    value.as_str(),
+                                                    segment_offset_id,
+                                                );
+                                            }
+                                            None => {}
+                                        }
+                                    }
+                                    MetadataValue::Float(value) => {
+                                        match &self.f32_metadata_index_writer {
+                                            Some(writer) => {
+                                                let _ = writer.set(
+                                                    key,
+                                                    *value as f32,
+                                                    segment_offset_id,
+                                                );
+                                            }
+                                            None => {}
+                                        }
+                                    }
+                                    MetadataValue::Int(value) => {
+                                        match &self.u32_metadata_index_writer {
+                                            Some(writer) => {
+                                                let _ = writer.set(
+                                                    key,
+                                                    *value as u32,
+                                                    segment_offset_id,
+                                                );
+                                            }
+                                            None => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        None => {}
+                    };
+                    match &record.0.materialized_record.document {
+                        Some(document) => match &self.full_text_index_writer {
+                            Some(writer) => {
+                                let _ = writer.add_document(document, segment_offset_id as i32);
+                            }
+                            None => {}
+                        },
+                        None => {}
+                    }
+                }
+                _ => todo!(),
+            }
+        }
     }
 
     fn apply_log_chunk(

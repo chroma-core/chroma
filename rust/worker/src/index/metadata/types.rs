@@ -4,8 +4,11 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use core::ops::BitOr;
+use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::sync::Arc;
 
 #[derive(Debug, Error)]
 pub(crate) enum MetadataIndexError {
@@ -33,49 +36,65 @@ impl ChromaError for MetadataIndexError {
 pub(crate) enum MetadataIndexWriter {
     StringMetadataIndexWriter(
         BlockfileWriter,
-        HashMap<String, HashMap<String, RoaringBitmap>>,
+        Arc<Mutex<HashMap<String, HashMap<String, RoaringBitmap>>>>,
     ),
     U32MetadataIndexWriter(
         BlockfileWriter,
-        HashMap<String, HashMap<u32, RoaringBitmap>>,
+        Arc<Mutex<HashMap<String, HashMap<u32, RoaringBitmap>>>>,
     ),
     // We use a Vec<(KeyWrapper, RoaringBitmap)> instead of a HashMap because
     // f32 doesn't implement Eq or Hash. Eq is trivial since we disallow
     // about NaN values, but Hash is harder.
     // Linear scanning is fine since we will only ever have 2^16 values
     // and the expected case is much less than that.
-    F32MetadataIndexWriter(BlockfileWriter, HashMap<String, Vec<(f32, RoaringBitmap)>>),
+    F32MetadataIndexWriter(
+        BlockfileWriter,
+        Arc<Mutex<HashMap<String, Vec<(f32, RoaringBitmap)>>>>,
+    ),
     BoolMetadataIndexWriter(
         BlockfileWriter,
-        HashMap<String, HashMap<bool, RoaringBitmap>>,
+        Arc<Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
     ),
 }
 
 impl MetadataIndexWriter {
     pub fn new_string(init_blockfile_writer: BlockfileWriter) -> Self {
-        MetadataIndexWriter::StringMetadataIndexWriter(init_blockfile_writer, HashMap::new())
+        MetadataIndexWriter::StringMetadataIndexWriter(
+            init_blockfile_writer,
+            Arc::new(Mutex::new(HashMap::new())),
+        )
     }
 
     pub fn new_u32(init_blockfile_writer: BlockfileWriter) -> Self {
-        MetadataIndexWriter::U32MetadataIndexWriter(init_blockfile_writer, HashMap::new())
+        MetadataIndexWriter::U32MetadataIndexWriter(
+            init_blockfile_writer,
+            Arc::new(Mutex::new(HashMap::new())),
+        )
     }
 
     pub fn new_f32(init_blockfile_writer: BlockfileWriter) -> Self {
-        MetadataIndexWriter::F32MetadataIndexWriter(init_blockfile_writer, HashMap::new())
+        MetadataIndexWriter::F32MetadataIndexWriter(
+            init_blockfile_writer,
+            Arc::new(Mutex::new(HashMap::new())),
+        )
     }
 
     pub fn new_bool(init_blockfile_writer: BlockfileWriter) -> Self {
-        MetadataIndexWriter::BoolMetadataIndexWriter(init_blockfile_writer, HashMap::new())
+        MetadataIndexWriter::BoolMetadataIndexWriter(
+            init_blockfile_writer,
+            Arc::new(Mutex::new(HashMap::new())),
+        )
     }
 
     fn look_up_key_and_populate_uncommitted_rbms(
-        &mut self,
+        &self,
         prefix: &str,
         key: &KeyWrapper,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::String(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     if !uncommitted_rbms.contains_key(prefix) {
                         uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
                     }
@@ -88,6 +107,7 @@ impl MetadataIndexWriter {
             },
             MetadataIndexWriter::U32MetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     if !uncommitted_rbms.contains_key(prefix) {
                         uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
                     }
@@ -100,6 +120,7 @@ impl MetadataIndexWriter {
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     if !uncommitted_rbms.contains_key(prefix) {
                         uncommitted_rbms.insert(prefix.to_string(), vec![]);
                     }
@@ -112,6 +133,7 @@ impl MetadataIndexWriter {
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     if !uncommitted_rbms.contains_key(prefix) {
                         uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
                     }
@@ -127,7 +149,7 @@ impl MetadataIndexWriter {
     }
 
     pub fn set<K: Into<KeyWrapper>>(
-        &mut self,
+        &self,
         prefix: &str,
         key: K,
         offset_id: u32,
@@ -137,6 +159,7 @@ impl MetadataIndexWriter {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::String(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
@@ -145,6 +168,7 @@ impl MetadataIndexWriter {
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
@@ -153,6 +177,7 @@ impl MetadataIndexWriter {
             },
             MetadataIndexWriter::U32MetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
@@ -161,6 +186,7 @@ impl MetadataIndexWriter {
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
                     rbm.1.insert(offset_id);
@@ -174,6 +200,7 @@ impl MetadataIndexWriter {
     pub async fn write_to_blockfile(&mut self) -> Result<(), Box<dyn ChromaError>> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+                let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         blockfile_writer
@@ -183,6 +210,7 @@ impl MetadataIndexWriter {
                 }
             }
             MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+                let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         blockfile_writer.set(prefix.as_str(), *key, rbm).await?
@@ -190,6 +218,7 @@ impl MetadataIndexWriter {
                 }
             }
             MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+                let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         blockfile_writer.set(prefix.as_str(), *key, rbm).await?
@@ -197,6 +226,7 @@ impl MetadataIndexWriter {
                 }
             }
             MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+                let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         blockfile_writer.set(prefix.as_str(), *key, rbm).await?

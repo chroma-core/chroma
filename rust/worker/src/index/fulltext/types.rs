@@ -2,8 +2,11 @@ use crate::blockstore::positional_posting_list_value::PositionalPostingListBuild
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
+
 use arrow::array::Int32Array;
+use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -24,11 +27,12 @@ impl ChromaError for FullTextIndexError {
 pub(crate) struct FullTextIndexWriter {
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
-    tokenizer: Box<dyn ChromaTokenizer>,
+    // This is a crime.
+    tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 
     // term -> positional posting list builder for that term
-    uncommitted: HashMap<String, PositionalPostingListBuilder>,
-    uncommitted_frequencies: HashMap<String, i32>,
+    uncommitted: Arc<Mutex<HashMap<String, PositionalPostingListBuilder>>>,
+    uncommitted_frequencies: Arc<Mutex<HashMap<String, i32>>>,
 }
 
 impl FullTextIndexWriter {
@@ -40,25 +44,23 @@ impl FullTextIndexWriter {
         FullTextIndexWriter {
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
-            tokenizer,
-            uncommitted: HashMap::new(),
-            uncommitted_frequencies: HashMap::new(),
+            tokenizer: Arc::new(Mutex::new(tokenizer)),
+            uncommitted: Arc::new(Mutex::new(HashMap::new())),
+            uncommitted_frequencies: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn add_document(
-        &mut self,
-        document: &str,
-        offset_id: i32,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        let tokens = self.tokenizer.encode(document);
+    pub fn add_document(&self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
+        let mut tokenizer = self.tokenizer.lock();
+        let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
-            self.uncommitted_frequencies
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+            uncommitted_frequencies
                 .entry(token.text.to_string())
                 .and_modify(|e| *e += 1)
                 .or_insert(1);
-            let builder = self
-                .uncommitted
+            let mut uncommitted = self.uncommitted.lock();
+            let builder = uncommitted
                 .entry(token.text.to_string())
                 .or_insert(PositionalPostingListBuilder::new());
 
@@ -86,7 +88,8 @@ impl FullTextIndexWriter {
     }
 
     pub async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        for (key, mut value) in self.uncommitted.drain() {
+        let mut uncommitted = self.uncommitted.lock();
+        for (key, mut value) in uncommitted.drain() {
             let built_list = value.build();
             for doc_id in built_list.doc_ids.iter() {
                 match doc_id {
@@ -107,7 +110,8 @@ impl FullTextIndexWriter {
                 }
             }
         }
-        for (key, value) in self.uncommitted_frequencies.drain() {
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+        for (key, value) in uncommitted_frequencies.drain() {
             // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
             let res = self
                 .frequencies_blockfile_writer
