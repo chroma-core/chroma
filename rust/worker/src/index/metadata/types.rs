@@ -20,6 +20,17 @@ impl ChromaError for MetadataIndexError {
     }
 }
 
+// This pattern for enum dispatch is weird. We do it for cause:
+// - We can't incrementally write rbms to the blockfile -- we have to build up
+//   each rbm then write them all at once.
+//   - (We actually could incrementally write, but we would still need to track
+//      intermediate state since blockfilewriters don't have read-then-write semantics.)
+// - We can't store the rbms in a generic KeyWrapper -> rbm hashmap since KeyWrapper
+//   doesn't implement Hash or Eq. We could implement them but the f32 type makes
+//   that a little hairy.
+// - We could do the Arrow pattern of having keys know how to write themselves
+//  into MetadataIndexWriter store and long term we probably want to. But for now
+//  this gets the job done.
 pub(crate) enum MetadataIndexWriter {
     StringMetadataIndexWriter(
         BlockfileWriter,
