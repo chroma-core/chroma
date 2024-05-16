@@ -117,6 +117,26 @@ impl SparseIndex {
         panic!("No blocks in the sparse index");
     }
 
+    pub(super) fn get_block_ids_gt(&self, search_key: CompositeKey) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        let search_key = SparseIndexDelimiter::Key(search_key.clone());
+        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
+            if let Some((next_key, next_uuid)) = next_iter.next() {
+                if search_key >= *curr_key && search_key < *next_key {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+            // curr_key is inclusive hence strictly less than.
+            if search_key < *curr_key {
+                block_ids.push(*curr_uuid);
+            }
+        }
+        block_ids
+    }
+
     pub(super) fn add_block(&self, start_key: CompositeKey, block_id: Uuid) {
         self.forward
             .lock()

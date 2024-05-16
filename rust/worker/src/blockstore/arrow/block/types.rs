@@ -92,6 +92,29 @@ impl Block {
         None
     }
 
+    pub fn get_gt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            // TODO: Understand the prefix.
+            if curr_prefix == prefix && curr_key > key {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
     pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         index: usize,
