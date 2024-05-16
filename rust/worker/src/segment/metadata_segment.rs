@@ -412,7 +412,7 @@ impl SegmentWriter for MetadataSegmentWriter {
 
     fn apply_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<crate::types::LogRecord>,
+        _: crate::execution::data::data_chunk::Chunk<crate::types::LogRecord>,
     ) {
         unreachable!();
     }
