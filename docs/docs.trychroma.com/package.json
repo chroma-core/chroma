@@ -27,6 +27,7 @@
     "katex": "^0.16.9",
     "next": "latest",
     "next-themes": "^0.3.0",
+    "posthog-js": "^1.131.4",
     "prismjs": "^1.29.0",
     "react": "latest",
     "react-dom": "latest",

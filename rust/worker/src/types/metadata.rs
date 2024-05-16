@@ -41,6 +41,7 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
+            None => Ok(UpdateMetadataValue::None),
             _ => Err(UpdateMetadataValueConversionError::InvalidValue),
         }
     }
