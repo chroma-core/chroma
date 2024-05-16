@@ -182,7 +182,7 @@ impl MetadataSegmentWriter {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let string_metadata_index_writer = MetadataIndexWriter::new(string_metadata_writer);
+        let string_metadata_index_writer = MetadataIndexWriter::new_string(string_metadata_writer);
 
         let bool_metadata_writer = match segment.file_path.get(BOOL_METADATA) {
             Some(bool_metadata_path) => match bool_metadata_path.get(0) {
@@ -211,7 +211,7 @@ impl MetadataSegmentWriter {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let bool_metadata_index_writer = MetadataIndexWriter::new(bool_metadata_writer);
+        let bool_metadata_index_writer = MetadataIndexWriter::new_bool(bool_metadata_writer);
 
         let f32_metadata_writer = match segment.file_path.get(F32_METADATA) {
             Some(f32_metadata_path) => match f32_metadata_path.get(0) {
@@ -240,7 +240,7 @@ impl MetadataSegmentWriter {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let f32_metadata_index_writer = MetadataIndexWriter::new(f32_metadata_writer);
+        let f32_metadata_index_writer = MetadataIndexWriter::new_f32(f32_metadata_writer);
 
         let u32_metadata_writer = match segment.file_path.get(U32_METADATA) {
             Some(u32_metadata_path) => match u32_metadata_path.get(0) {
@@ -269,7 +269,7 @@ impl MetadataSegmentWriter {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let u32_metadata_index_writer = MetadataIndexWriter::new(u32_metadata_writer);
+        let u32_metadata_index_writer = MetadataIndexWriter::new_u32(u32_metadata_writer);
 
         Ok(MetadataSegmentWriter {
             full_text_index_writer: Some(full_text_index_writer),
@@ -289,7 +289,7 @@ impl MetadataSegmentWriter {
         self.full_text_index_writer = Some(full_text_index_writer);
         match res {
             Ok(_) => {}
-            Err(e) => return Err(MetadataSegmentError::BlockfileWriteError),
+            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
         }
 
         let mut string_metadata_index_writer = self
@@ -300,7 +300,7 @@ impl MetadataSegmentWriter {
         self.string_metadata_index_writer = Some(string_metadata_index_writer);
         match res {
             Ok(_) => {}
-            Err(e) => return Err(MetadataSegmentError::BlockfileWriteError),
+            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
         }
 
         let mut bool_metadata_index_writer = self
@@ -311,7 +311,7 @@ impl MetadataSegmentWriter {
         self.bool_metadata_index_writer = Some(bool_metadata_index_writer);
         match res {
             Ok(_) => {}
-            Err(e) => return Err(MetadataSegmentError::BlockfileWriteError),
+            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
         }
 
         let mut f32_metadata_index_writer = self
@@ -322,7 +322,7 @@ impl MetadataSegmentWriter {
         self.f32_metadata_index_writer = Some(f32_metadata_index_writer);
         match res {
             Ok(_) => {}
-            Err(e) => return Err(MetadataSegmentError::BlockfileWriteError),
+            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
         }
 
         let mut u32_metadata_index_writer = self
@@ -333,7 +333,7 @@ impl MetadataSegmentWriter {
         self.u32_metadata_index_writer = Some(u32_metadata_index_writer);
         match res {
             Ok(_) => {}
-            Err(e) => return Err(MetadataSegmentError::BlockfileWriteError),
+            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
         }
 
         Ok(())
@@ -391,16 +391,16 @@ impl SegmentWriter for MetadataSegmentWriter {
     }
 }
 
-pub(crate) struct MetadataSegmentFlusher<'me> {
+pub(crate) struct MetadataSegmentFlusher {
     pub(crate) full_text_index_flusher: FullTextIndexFlusher,
-    pub(crate) string_metadata_index_flusher: MetadataIndexFlusher<&'me str>,
-    pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher<bool>,
-    pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher<f32>,
-    pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher<u32>,
+    pub(crate) string_metadata_index_flusher: MetadataIndexFlusher,
+    pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
+    pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher,
+    pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
 }
 
 #[async_trait]
-impl SegmentFlusher for MetadataSegmentFlusher<'_> {
+impl SegmentFlusher for MetadataSegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
         let full_text_freqs_id = self.full_text_index_flusher.freqs_id();
@@ -457,10 +457,10 @@ impl SegmentFlusher for MetadataSegmentFlusher<'_> {
 
 pub(crate) struct MetadataSegmentReader<'me> {
     pub(crate) full_text_index_reader: FullTextIndexReader<'me>,
-    pub(crate) string_metadata_index_reader: MetadataIndexReader<'me, &'me str>,
-    pub(crate) bool_metadata_index_reader: MetadataIndexReader<'me, bool>,
-    pub(crate) f32_metadata_index_reader: MetadataIndexReader<'me, f32>,
-    pub(crate) u32_metadata_index_reader: MetadataIndexReader<'me, u32>,
+    pub(crate) string_metadata_index_reader: MetadataIndexReader<'me>,
+    pub(crate) bool_metadata_index_reader: MetadataIndexReader<'me>,
+    pub(crate) f32_metadata_index_reader: MetadataIndexReader<'me>,
+    pub(crate) u32_metadata_index_reader: MetadataIndexReader<'me>,
 }
 
 impl MetadataSegmentReader<'_> {
@@ -556,7 +556,7 @@ impl MetadataSegmentReader<'_> {
             },
             None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
-        let string_metadata_index_reader = MetadataIndexReader::new(string_metadata_reader);
+        let string_metadata_index_reader = MetadataIndexReader::new_string(string_metadata_reader);
 
         let bool_metadata_reader = match segment.file_path.get(BOOL_METADATA) {
             Some(bool_metadata_path) => match bool_metadata_path.get(0) {
@@ -582,7 +582,7 @@ impl MetadataSegmentReader<'_> {
             },
             None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
-        let bool_metadata_index_reader = MetadataIndexReader::new(bool_metadata_reader);
+        let bool_metadata_index_reader = MetadataIndexReader::new_bool(bool_metadata_reader);
 
         let u32_metadata_reader = match segment.file_path.get(U32_METADATA) {
             Some(u32_metadata_path) => match u32_metadata_path.get(0) {
@@ -608,7 +608,7 @@ impl MetadataSegmentReader<'_> {
             },
             None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
-        let u32_metadata_index_reader = MetadataIndexReader::new(u32_metadata_reader);
+        let u32_metadata_index_reader = MetadataIndexReader::new_u32(u32_metadata_reader);
 
         let f32_metadata_reader = match segment.file_path.get(F32_METADATA) {
             Some(f32_metadata_path) => match f32_metadata_path.get(0) {
@@ -634,7 +634,7 @@ impl MetadataSegmentReader<'_> {
             },
             None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
-        let f32_metadata_index_reader = MetadataIndexReader::new(f32_metadata_reader);
+        let f32_metadata_index_reader = MetadataIndexReader::new_f32(f32_metadata_reader);
 
         Ok(MetadataSegmentReader {
             full_text_index_reader,
