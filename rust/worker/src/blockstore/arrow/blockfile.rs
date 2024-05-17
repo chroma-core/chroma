@@ -9,6 +9,7 @@ use super::{
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
+use arrow::error;
 use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
@@ -107,6 +108,49 @@ impl ArrowBlockfileWriter {
         Ok(flusher)
     }
 
+    pub(crate) fn split_and_add<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+        prefix: &str,
+        key: K,
+        value: V,
+        delta: BlockDelta,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        if delta.can_add(prefix, &key, &value) {
+            delta.add(prefix, key, value);
+        } else {
+            let (split_key, new_delta) = delta.split::<K, V>();
+            self.sparse_index.add_block(split_key, new_delta.id);
+            match new_delta.get_min_key() {
+                Some(min_key) => {
+                    if search_key >= min_key {
+                        // Add to new_delta recursively.
+                        match self.split_and_add(prefix, key, value, new_delta.clone()) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
+                    } else {
+                        // Add to old delta recursively.
+                        match self.split_and_add(prefix, key, value, delta.clone()) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
+                    }
+                }
+                None => {
+                    panic!("New block after split cannot be empty");
+                }
+            }
+            let mut deltas = self.block_deltas.lock();
+            deltas.insert(new_delta.id, new_delta);
+        }
+        Ok(())
+    }
+
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
@@ -160,18 +204,9 @@ impl ArrowBlockfileWriter {
             Some(delta) => delta,
         };
 
-        // Check if we can add to the the delta without pushing the block over the max size.
-        // If we can't, we need to split the block and create a new delta
-        if delta.can_add(prefix, &key, &value) {
-            delta.add(prefix, key, value);
-        } else {
-            let (split_key, new_delta) = delta.split::<K, V>();
-            self.sparse_index.add_block(split_key, new_delta.id);
-            new_delta.add(prefix, key, value);
-            let mut deltas = self.block_deltas.lock();
-            deltas.insert(new_delta.id, new_delta);
-        }
-        Ok(())
+        // Add this key-value to the delta splitting it
+        // recursively if it overflows.
+        self.split_and_add(prefix, key, value, delta)
     }
 
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
@@ -504,6 +539,40 @@ mod tests {
                 assert!(reader.sparse_index.is_valid());
             }
             _ => panic!("Unexpected reader type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_splitting_boundary() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id_1 = writer.id();
+
+        // Add the larger keys first then smaller.
+        let n = 1200;
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        writer.commit::<&str, &Int32Array>().unwrap();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_1)
+            .await
+            .unwrap();
+
+        for i in 0..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value.values(), &[i]);
         }
     }
 
