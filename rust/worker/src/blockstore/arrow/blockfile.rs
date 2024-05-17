@@ -167,7 +167,20 @@ impl ArrowBlockfileWriter {
         } else {
             let (split_key, new_delta) = delta.split::<K, V>();
             self.sparse_index.add_block(split_key, new_delta.id);
-            new_delta.add(prefix, key, value);
+            match new_delta.get_min_key() {
+                Some(min_key) => {
+                    if search_key >= min_key {
+                        new_delta.add(prefix, key, value);
+                    } else {
+                        delta.add(prefix, key, value);
+                    }
+                }
+                None => {
+                    // Shouldn't happen but if in any case our MAX_BLOCK_SIZE
+                    // is screwed, insert in the old block.
+                    delta.add(prefix, key, value);
+                }
+            }
             let mut deltas = self.block_deltas.lock();
             deltas.insert(new_delta.id, new_delta);
         }
@@ -504,6 +517,40 @@ mod tests {
                 assert!(reader.sparse_index.is_valid());
             }
             _ => panic!("Unexpected reader type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_splitting_boundary() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id_1 = writer.id();
+
+        // Add the larger keys first then smaller.
+        let n = 1200;
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        writer.commit::<&str, &Int32Array>().unwrap();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_1)
+            .await
+            .unwrap();
+
+        for i in 0..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value.values(), &[i]);
         }
     }
 
