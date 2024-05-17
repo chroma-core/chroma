@@ -615,6 +615,24 @@ impl RecordSegmentReader<'_> {
         Ok(self.id_to_data.contains("", offset_id).await)
     }
 
+    /// Returns all data in the record segment, sorted by
+    /// embedding id
+    pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
+        let mut data = Vec::new();
+        let mut offset_id = 0;
+        loop {
+            match self.id_to_data.get("", offset_id).await {
+                Ok(record) => {
+                    data.push(record);
+                    offset_id += 1;
+                }
+                Err(e) => {
+                    return Ok(data);
+                }
+            }
+        }
+    }
+
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         self.id_to_data.count().await
     }

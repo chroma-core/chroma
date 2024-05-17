@@ -26,9 +26,12 @@ pub struct MergeMetadataResultsOperatorInput {
     // TODO: Once we support update/delete this should be MaterializedLogRecord
     filtered_log: Chunk<LogRecord>,
     // The query ids that were not found in the log, that we need to pull from the record segment
-    remaining_query_ids: Vec<String>,
-    // The offset ids that were found in the log, from where/where_document results
-    filtered_index_offset_ids: Vec<u32>,
+    // if this not present, it means no ids or filters were applied and we should
+    // read the entire record segment
+    remaining_query_ids: Option<Vec<String>>,
+    // The offset ids that were found in the log, from where/where_document filters
+    // if they were specified in the query
+    filtered_index_offset_ids: Option<Vec<u32>>,
     record_segment_definition: Segment,
     blockfile_provider: BlockfileProvider,
 }
@@ -36,8 +39,8 @@ pub struct MergeMetadataResultsOperatorInput {
 impl MergeMetadataResultsOperatorInput {
     pub fn new(
         filtered_log: Chunk<LogRecord>,
-        remaining_query_ids: Vec<String>,
-        filtered_index_offset_ids: Vec<u32>,
+        remaining_query_ids: Option<Vec<String>>,
+        filtered_index_offset_ids: Option<Vec<u32>>,
         record_segment_definition: Segment,
         blockfile_provider: BlockfileProvider,
     ) -> Self {
@@ -151,69 +154,79 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             }
         };
 
-        // Hydrate the data from the record segment for filtered data
-        for index_offset_id in input.filtered_index_offset_ids.iter() {
-            let record = match record_segment_reader
-                .get_data_for_offset_id(*index_offset_id as u32)
-                .await
-            {
-                Ok(record) => record,
-                Err(e) => {
-                    println!("Error reading Record Segment: {:?}", e);
-                    return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                }
-            };
+        // Hydrate the data from the record segment for filtered data, if
+        // filters were applied
+        if input.filtered_index_offset_ids.is_some() {
+            for index_offset_id in input.filtered_index_offset_ids.unwrap().iter() {
+                let record = match record_segment_reader
+                    .get_data_for_offset_id(*index_offset_id as u32)
+                    .await
+                {
+                    Ok(record) => record,
+                    Err(e) => {
+                        println!("Error reading Record Segment: {:?}", e);
+                        return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                    }
+                };
 
-            let user_id = match record_segment_reader
-                .get_user_id_for_offset_id(*index_offset_id as u32)
-                .await
-            {
-                Ok(user_id) => user_id,
-                Err(e) => {
-                    println!("Error reading Record Segment: {:?}", e);
-                    return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                }
-            };
+                let user_id = match record_segment_reader
+                    .get_user_id_for_offset_id(*index_offset_id as u32)
+                    .await
+                {
+                    Ok(user_id) => user_id,
+                    Err(e) => {
+                        println!("Error reading Record Segment: {:?}", e);
+                        return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                    }
+                };
 
-            ids.push(user_id.to_string());
-            metadata.push(record.metadata.clone());
-            match record.document {
-                Some(document) => documents.push(Some(document.to_string())),
-                None => documents.push(None),
+                ids.push(user_id.to_string());
+                metadata.push(record.metadata.clone());
+                match record.document {
+                    Some(document) => documents.push(Some(document.to_string())),
+                    None => documents.push(None),
+                }
             }
         }
 
         // Hydrate the data from the record segment for the remaining data
-        for query_id in input.remaining_query_ids.iter() {
-            let offset_id = match record_segment_reader
-                .get_offset_id_for_user_id(query_id)
-                .await
-            {
-                Ok(offset_id) => offset_id,
-                Err(e) => {
-                    println!("Error reading Record Segment: {:?}", e);
-                    return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                }
-            };
+        // if query_ids were specified
+        if input.remaining_query_ids.is_some() {
+            for query_id in input.remaining_query_ids.unwrap().iter() {
+                let offset_id = match record_segment_reader
+                    .get_offset_id_for_user_id(query_id)
+                    .await
+                {
+                    Ok(offset_id) => offset_id,
+                    Err(e) => {
+                        println!("Error reading Record Segment: {:?}", e);
+                        return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                    }
+                };
 
-            let record = match record_segment_reader
-                .get_data_for_offset_id(offset_id)
-                .await
-            {
-                Ok(record) => record,
-                Err(e) => {
-                    println!("Error reading Record Segment: {:?}", e);
-                    return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                }
-            };
+                let record = match record_segment_reader
+                    .get_data_for_offset_id(offset_id)
+                    .await
+                {
+                    Ok(record) => record,
+                    Err(e) => {
+                        println!("Error reading Record Segment: {:?}", e);
+                        return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                    }
+                };
 
-            ids.push(record.id.to_string());
-            metadata.push(record.metadata.clone());
-            match record.document {
-                Some(document) => documents.push(Some(document.to_string())),
-                None => documents.push(None),
+                ids.push(record.id.to_string());
+                metadata.push(record.metadata.clone());
+                match record.document {
+                    Some(document) => documents.push(Some(document.to_string())),
+                    None => documents.push(None),
+                }
             }
         }
+
+        // If neither filters or queries were applied, we should read the entire record segment
+        // in user id order
+        if input.filtered_index_offset_ids.is_none() && input.remaining_query_ids.is_none() {}
 
         Ok(MergeMetadataResultsOperatorOutput {
             ids,
