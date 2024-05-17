@@ -149,8 +149,8 @@ impl BlockKeyArrowBuilder {
 }
 
 #[derive(Clone)]
-pub struct StringValueStorage {
-    pub storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
+pub(super) struct StringValueStorage {
+    pub(super) storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
 }
 
 impl StringValueStorage {
@@ -268,8 +268,8 @@ impl StringValueStorage {
 }
 
 #[derive(Clone)]
-pub struct UInt32Storage {
-    pub storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
+pub(super) struct UInt32Storage {
+    pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
 }
 
 impl UInt32Storage {
