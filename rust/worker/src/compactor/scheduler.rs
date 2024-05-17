@@ -277,16 +277,16 @@ mod tests {
         let last_compaction_time_1 = 2;
         sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
 
-        let my_ip = "0.0.0.1".to_string();
+        let my_member_id = "1".to_string();
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
-        assignment_policy.set_members(vec![my_ip.clone()]);
+        assignment_policy.set_members(vec![my_member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_ip.clone(),
+            my_member_id.clone(),
             log,
             sysdb.clone(),
             scheduler_policy,
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(jobs.count(), 0);
 
         // Set memberlist
-        scheduler.set_memberlist(vec![my_ip.clone()]);
+        scheduler.set_memberlist(vec![my_member_id.clone()]);
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
@@ -325,8 +325,8 @@ mod tests {
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
 
         // Test filter_collections
-        let member_1 = "0.0.0.1".to_string();
-        let member_2 = "0.0.0.2".to_string();
+        let member_1 = "1".to_string();
+        let member_2 = "5".to_string();
         let members = vec![member_1.clone(), member_2.clone()];
         scheduler.set_memberlist(members.clone());
         scheduler.schedule().await;

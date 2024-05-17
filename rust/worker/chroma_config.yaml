@@ -6,7 +6,7 @@
 query_service:
     service_name: "query-service"
     otel_endpoint: "http://jaeger:4317"
-    my_ip: "10.244.0.9"
+    my_member_id: "query-service-0"
     my_port: 50051
     assignment_policy:
         RendezvousHashing:
@@ -36,7 +36,7 @@ query_service:
 compaction_service:
     service_name: "compaction-service"
     otel_endpoint: "http://jaeger:4317"
-    my_ip: "10.244.0.9"
+    my_member_id: "compaction-service-0"
     my_port: 50051
     assignment_policy:
         RendezvousHashing:

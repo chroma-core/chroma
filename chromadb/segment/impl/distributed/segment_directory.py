@@ -23,6 +23,7 @@ from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 WATCH_TIMEOUT_SECONDS = 60
 KUBERNETES_NAMESPACE = "chroma"
 KUBERNETES_GROUP = "chroma.cluster"
+HEADLESS_SERVICE = "svc.cluster.local"
 
 
 class MockMemberlistProvider(MemberlistProvider, EnforceOverrides):
@@ -181,7 +182,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     ) -> Memberlist:
         if "members" not in api_response_spec:
             return []
-        return [m["url"] for m in api_response_spec["members"]]
+        return [m["member_id"] for m in api_response_spec["members"]]
 
     def _notify(self, memberlist: Memberlist) -> None:
         for callback in self.callbacks:
@@ -222,7 +223,8 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher)
-        assignment = f"{assignment}:50051"  # TODO: make port configurable
+        service_name = self.extract_service_name(assignment)
+        assignment = f"{assignment}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"  # TODO: make port configurable
         return assignment
 
     @override
@@ -239,3 +241,11 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         with self._curr_memberlist_mutex:
             add_attributes_to_current_span({"new_memberlist": memberlist})
             self._curr_memberlist = memberlist
+
+    def extract_service_name(self, pod_name: str) -> Optional[str]:
+        # Split the pod name by the hyphen
+        parts = pod_name.split("-")
+        # The service name is expected to be the prefix before the last hyphen
+        if len(parts) > 1:
+            return "-".join(parts[:-1])
+        return None
