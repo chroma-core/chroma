@@ -92,6 +92,30 @@ impl Block {
         None
     }
 
+    pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            if curr_prefix == prefix {
+                res.push((
+                    curr_prefix,
+                    K::get(self.data.column(1), i),
+                    V::get(self.data.column(2), i),
+                ));
+            }
+        }
+        return Some(res);
+    }
+
     pub fn get_gt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -157,12 +181,7 @@ impl Block {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
             let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
-            // println!(
-            //     "(Sanket-temp) Current key {:?}, search key {:?}",
-            //     curr_key_composite, search_key_composite
-            // );
             if curr_key_composite <= search_key_composite {
-                // println!("(Sanket-temp) Pushing {:?}", curr_key_composite);
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }

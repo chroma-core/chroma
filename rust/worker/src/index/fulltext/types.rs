@@ -183,7 +183,8 @@ impl<'me> FullTextIndexReader<'me> {
             // TODO better error matching (NotFoundError should return Ok(vec![])) but some others should error.
             let res = self
                 .frequencies_blockfile_reader
-                .get_by_prefix(token.text.as_str())?;
+                .get_by_prefix(token.text.as_str())
+                .await?;
             if res.len() == 0 {
                 return Ok(vec![]);
             }
@@ -209,6 +210,7 @@ impl<'me> FullTextIndexReader<'me> {
         let first_token_positional_posting_list = self
             .posting_lists_blockfile_reader
             .get_by_prefix(first_token)
+            .await
             .unwrap();
         for (_, doc_id, positions) in first_token_positional_posting_list.iter() {
             let positions_vec: Vec<i32> = positions
@@ -225,6 +227,7 @@ impl<'me> FullTextIndexReader<'me> {
             let positional_posting_list = self
                 .posting_lists_blockfile_reader
                 .get_by_prefix(token.as_str())
+                .await
                 .unwrap();
             // TODO once we sort by frequency, we need to find the token position
             // here, taking into account which positions for repeats of the same

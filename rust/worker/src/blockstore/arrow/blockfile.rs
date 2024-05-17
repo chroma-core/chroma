@@ -473,6 +473,32 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         return Ok(result);
     }
 
+    pub(crate) async fn get_by_prefix(
+        &'me self,
+        prefix: &str,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let block_ids = self.sparse_index.get_block_ids_prefix(prefix);
+        let mut result: Vec<(&str, K, V)> = vec![];
+        for block_id in block_ids {
+            let block_opt = self.get_block(block_id).await;
+            let block = match block_opt {
+                Some(b) => b,
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+            };
+            match block.get_prefix(prefix) {
+                Some(data) => {
+                    result.extend(data);
+                }
+                None => {
+                    return Err(Box::new(BlockfileError::NotFoundError));
+                }
+            };
+        }
+        Ok(result)
+    }
+
     pub(crate) async fn contains(&'me self, prefix: &str, key: K) -> bool {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);

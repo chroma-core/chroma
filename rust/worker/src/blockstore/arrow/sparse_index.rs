@@ -105,12 +105,7 @@ impl SparseIndex {
         let mut iter_curr = forward.iter();
         let mut iter_next = forward.iter().skip(1);
         let search_key = SparseIndexDelimiter::Key(search_key.clone());
-        println!("(Sanket-temp) Search key {:?}", search_key);
         while let Some((curr_key, curr_block_id)) = iter_curr.next() {
-            println!(
-                "(Sanket-temp) get_target_block_id start key {:?}, block id {:?}",
-                curr_key, curr_block_id
-            );
             if let Some((next_key, _)) = iter_next.next() {
                 if search_key >= *curr_key && search_key < *next_key {
                     return *curr_block_id;
@@ -122,6 +117,51 @@ impl SparseIndex {
         panic!("No blocks in the sparse index");
     }
 
+    pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
+            let non_start_curr_key: Option<CompositeKey>;
+            match curr_key {
+                SparseIndexDelimiter::Start => non_start_curr_key = None,
+                SparseIndexDelimiter::Key(k) => non_start_curr_key = Some(k.clone()),
+            }
+            if let Some((next_key, _)) = next_iter.next() {
+                // This can't be a start key but we still need to extract it ugh.
+                let non_start_next_key: Option<CompositeKey>;
+                match next_key {
+                    // TODO: Add error here if next is start?
+                    // Can I panic or should I change the interface?
+                    SparseIndexDelimiter::Start => non_start_next_key = None,
+                    SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k.clone()),
+                }
+                // If delimeter starts with the same prefix then there will be keys inside the
+                // block with this prefix.
+                if non_start_curr_key.is_some()
+                    && prefix == non_start_curr_key.clone().unwrap().prefix.as_str()
+                {
+                    block_ids.push(*curr_uuid);
+                }
+                // If prefix is between the current delim and next delim then there could
+                // be keys in this block that have this prefix.
+                if (non_start_curr_key.is_none()
+                    || prefix > non_start_curr_key.unwrap().prefix.as_str())
+                    && (prefix <= non_start_next_key.unwrap().prefix.as_str())
+                {
+                    block_ids.push(*curr_uuid);
+                }
+            } else {
+                // Last block.
+                if prefix >= non_start_curr_key.unwrap().prefix.as_str() {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+        }
+        block_ids
+    }
+
     pub(super) fn get_block_ids_gt(&self, search_key: CompositeKey) -> Vec<Uuid> {
         let lock_guard = self.forward.lock();
         let mut curr_iter = lock_guard.iter();
@@ -131,10 +171,6 @@ impl SparseIndex {
         while let Some((curr_key, curr_uuid)) = curr_iter.next() {
             // Not the last block.
             if let Some((next_key, _)) = next_iter.next() {
-                println!(
-                    "(Sanket-temp) Current key {:?}, next key {:?}",
-                    curr_key, next_key
-                );
                 // Compare with the next block to determine if suitable.
                 if search_key >= *curr_key && search_key < *next_key {
                     block_ids.push(*curr_uuid);
@@ -144,7 +180,6 @@ impl SparseIndex {
                     block_ids.push(*curr_uuid);
                 }
             } else {
-                println!("(Sanket-temp) Pushing last block with id {}", curr_uuid);
                 // last block always gets pushed.
                 block_ids.push(*curr_uuid);
             }
@@ -158,12 +193,7 @@ impl SparseIndex {
         let mut block_ids = vec![];
         let search_key = SparseIndexDelimiter::Key(search_key.clone());
         while let Some((curr_key, curr_uuid)) = curr_iter.next() {
-            println!(
-                "(Sanket-temp) Block with start {:?} id {}",
-                curr_key, curr_uuid
-            );
             if *curr_key < search_key {
-                println!("Pushing block with start {:?}", curr_key);
                 block_ids.push(*curr_uuid);
             } else {
                 break;
@@ -181,10 +211,6 @@ impl SparseIndex {
         while let Some((curr_key, curr_uuid)) = curr_iter.next() {
             // Not the last block.
             if let Some((next_key, _)) = next_iter.next() {
-                println!(
-                    "(Sanket-temp) Current key {:?}, next key {:?}",
-                    curr_key, next_key
-                );
                 // Compare with the next block to determine if suitable.
                 if search_key >= *curr_key && search_key < *next_key {
                     block_ids.push(*curr_uuid);
@@ -194,7 +220,6 @@ impl SparseIndex {
                     block_ids.push(*curr_uuid);
                 }
             } else {
-                println!("(Sanket-temp) Pushing last block with id {}", curr_uuid);
                 // last block always gets pushed.
                 block_ids.push(*curr_uuid);
             }
@@ -208,18 +233,9 @@ impl SparseIndex {
         let mut block_ids = vec![];
         let search_key = SparseIndexDelimiter::Key(search_key.clone());
         while let Some((curr_key, curr_uuid)) = curr_iter.next() {
-            println!(
-                "(Sanket-temp) Block with start {:?} id {}",
-                curr_key, curr_uuid
-            );
             if *curr_key <= search_key {
-                println!("(Sanket-temp) Pushing block with start {:?}", curr_key);
                 block_ids.push(*curr_uuid);
             } else {
-                println!(
-                    "(Sanket-temp) Else block: Pushing block with start {:?}",
-                    curr_key
-                );
                 block_ids.push(*curr_uuid);
                 break;
             }

@@ -281,13 +281,13 @@ impl<
     }
 
     // TODO: make prefix &str
-    pub(crate) fn get_by_prefix(
+    pub(crate) async fn get_by_prefix(
         &'referred_data self,
         prefix: &str,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
-            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_by_prefix(prefix).await,
         }
     }
 

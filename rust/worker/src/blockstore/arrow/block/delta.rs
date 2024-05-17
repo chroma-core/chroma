@@ -167,8 +167,6 @@ impl BlockDelta {
         let mut running_value_size = 0;
         let mut running_count = 0;
 
-        println!("(Sanket-temp) Tree before split {:?}", self.builder);
-
         // The split key will be the last key that pushes the block over the half size. Not the first key that pushes it over
         let mut split_key = None;
         for i in 1..self.len() {
@@ -208,7 +206,6 @@ impl BlockDelta {
                     builder: split_after,
                     id: Uuid::new_v4(),
                 };
-                println!("(Sanket-temp) New split tree {:?} ", new_delta.builder);
                 return (split_key.clone(), new_delta);
             }
         }

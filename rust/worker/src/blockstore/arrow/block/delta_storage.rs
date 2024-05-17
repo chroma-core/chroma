@@ -232,12 +232,10 @@ impl StringValueStorage {
         match storage.as_mut() {
             None => unreachable!("Invariant violation. A StringValueBuilder should have storage."),
             Some(storage) => {
-                println!("(Sanket-temp) B tree before split {:?}", storage);
                 let split = storage.split_off(&CompositeKey {
                     prefix: prefix.to_string(),
                     key,
                 });
-                println!("(Sanket-temp) split B tree {:?}", split);
                 StringValueStorage {
                     storage: Arc::new(RwLock::new(Some(split))),
                 }
@@ -313,12 +311,10 @@ impl UInt32Storage {
 
     fn split(&self, prefix: &str, key: KeyWrapper) -> UInt32Storage {
         let mut storage_guard = self.storage.write();
-        println!("(Sanket-temp) B tree before split {:?}", storage_guard);
         let split = storage_guard.split_off(&CompositeKey {
             prefix: prefix.to_string(),
             key,
         });
-        println!("(Sanket-temp) After split B tree {:?}", split);
         UInt32Storage {
             storage: Arc::new(RwLock::new(split)),
         }
