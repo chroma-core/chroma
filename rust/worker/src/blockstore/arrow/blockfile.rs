@@ -588,6 +588,67 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_prefix() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, u32>().unwrap();
+        let id = writer.id();
+
+        // write 2000 rows per prefix for 5 prefixes.
+        let num_keys = 2000;
+        for j in 1..=5 {
+            let prefix = format!("{}/{}", "prefix", j);
+            for i in 1..=num_keys {
+                let key = format!("{}/{}", "key", i);
+                writer
+                    .set(prefix.as_str(), key.as_str(), i as u32)
+                    .await
+                    .unwrap();
+            }
+        }
+        // commit.
+        writer.commit::<&str, u32>().unwrap();
+
+        let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
+        // Generate a random number between 1 and 5.
+        let mut rng = rand::thread_rng();
+        let n: u32 = rng.gen_range(1..=5);
+        let prefix_query = format!("{}/{}", "prefix", n);
+        println!("Query {}", prefix_query);
+        let res = reader.get_by_prefix(prefix_query.as_str()).await;
+        match res {
+            Ok(c) => {
+                let mut kv_map = HashMap::new();
+                for entry in c {
+                    kv_map.insert(format!("{}/{}", entry.0, entry.1), entry.2);
+                }
+                for j in 1..=5 {
+                    let prefix = format!("{}/{}", "prefix", j);
+                    for i in 1..=num_keys {
+                        let key = format!("{}/{}", "key", i);
+                        let map_key = format!("{}/{}", prefix, key);
+                        if prefix == prefix_query {
+                            assert!(
+                                kv_map.contains_key(&map_key),
+                                "{}",
+                                format!("Key {} should be present but not found", map_key)
+                            );
+                        } else {
+                            assert!(
+                                !kv_map.contains_key(&map_key),
+                                "{}",
+                                format!("Key {} should not be present but found", map_key)
+                            );
+                        }
+                    }
+                }
+            }
+            Err(_) => assert!(true, "Error running get by prefix"),
+        }
+    }
+
     #[parameterized(operation = {"gt", "gte", "lt", "lte"})]
     #[parameterized_macro(tokio::test)]
     async fn test_gt(operation: &str) {
@@ -597,9 +658,7 @@ mod tests {
         let writer = blockfile_provider.create::<&str, u32>().unwrap();
         let id = writer.id();
 
-        // Each block is 16384 bytes. A key is ~4 bytes and value is ~4 bytes. So total
-        // key value pairs in one block = 16384/8 = 2048.
-        // write 5000 rows to have more than one block.
+        // write 5000 rows to create more than one block.
         let num_keys = 5000;
         let prefix = "prefix";
         for i in 1..num_keys {
@@ -613,8 +672,7 @@ mod tests {
         // Generate a random number between 1 and num_keys.
         let mut rng = rand::thread_rng();
         let n: u32 = rng.gen_range(0..num_keys);
-        // let query = format!("{}/{}", "key", n);
-        let query = format!("{}/{}", "key", 4638);
+        let query = format!("{}/{}", "key", n);
         println!("Query {}", query);
         println!("Operation {}", operation);
         let greater_than = match operation {

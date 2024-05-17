@@ -123,19 +123,19 @@ impl SparseIndex {
         let mut next_iter = lock_guard.iter().skip(1);
         let mut block_ids = vec![];
         while let Some((curr_key, curr_uuid)) = curr_iter.next() {
-            let non_start_curr_key: Option<CompositeKey>;
+            let non_start_curr_key: Option<&CompositeKey>;
             match curr_key {
                 SparseIndexDelimiter::Start => non_start_curr_key = None,
-                SparseIndexDelimiter::Key(k) => non_start_curr_key = Some(k.clone()),
+                SparseIndexDelimiter::Key(k) => non_start_curr_key = Some(k),
             }
             if let Some((next_key, _)) = next_iter.next() {
                 // This can't be a start key but we still need to extract it ugh.
-                let non_start_next_key: Option<CompositeKey>;
+                let non_start_next_key: Option<&CompositeKey>;
                 match next_key {
                     // TODO: Add error here if next is start?
                     // Can I panic or should I change the interface?
                     SparseIndexDelimiter::Start => non_start_next_key = None,
-                    SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k.clone()),
+                    SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k),
                 }
                 // If delimeter starts with the same prefix then there will be keys inside the
                 // block with this prefix.
