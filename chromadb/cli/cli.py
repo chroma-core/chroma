@@ -31,6 +31,9 @@ def run(
     path: str = typer.Option(
         "./chroma_data", help="The path to the file or directory."
     ),
+    persistent: Annotated[
+        Optional[bool], typer.Option(help="If set, the server will run in persistent mode.")
+    ] = True,
     host: Annotated[
         Optional[str], typer.Option(help="The host to listen to. Default: localhost")
     ] = "localhost",
@@ -48,7 +51,8 @@ def run(
     print("Running Chroma")
     print("\033[0m")  # Reset
 
-    typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
+    if persistent:
+        typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
     typer.echo(
         f"\033[1mConnect to chroma at\033[0m: \033[32mhttp://{host}:{port}\033[0m"
     )
@@ -57,7 +61,7 @@ def run(
     )
 
     # set ENV variable for PERSIST_DIRECTORY to path
-    os.environ["IS_PERSISTENT"] = "True"
+    os.environ["IS_PERSISTENT"] = str(persistent)
     os.environ["PERSIST_DIRECTORY"] = path
     os.environ["CHROMA_SERVER_NOFILE"] = "65535"
 
