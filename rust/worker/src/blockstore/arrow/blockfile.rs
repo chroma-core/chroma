@@ -9,6 +9,7 @@ use super::{
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
+use arrow::error;
 use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
@@ -32,12 +33,15 @@ pub(crate) struct ArrowBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
     BlockNotFound,
+    #[error("Split point not found")]
+    SplitPointNotFound,
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
+            ArrowBlockfileError::SplitPointNotFound => ErrorCodes::Internal,
         }
     }
 }
@@ -107,6 +111,49 @@ impl ArrowBlockfileWriter {
         Ok(flusher)
     }
 
+    pub(crate) fn split_and_add<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+        prefix: &str,
+        key: K,
+        value: V,
+        delta: BlockDelta,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        if delta.can_add(prefix, &key, &value) {
+            delta.add(prefix, key, value);
+        } else {
+            let (split_key, new_delta) = delta.split::<K, V>();
+            self.sparse_index.add_block(split_key, new_delta.id);
+            match new_delta.get_min_key() {
+                Some(min_key) => {
+                    if search_key >= min_key {
+                        // Add to new_delta recursively.
+                        match self.split_and_add(prefix, key, value, new_delta.clone()) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
+                    } else {
+                        // Add to old delta recursively.
+                        match self.split_and_add(prefix, key, value, delta.clone()) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
+                    }
+                }
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::SplitPointNotFound));
+                }
+            }
+            let mut deltas = self.block_deltas.lock();
+            deltas.insert(new_delta.id, new_delta);
+        }
+        Ok(())
+    }
+
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
@@ -160,31 +207,9 @@ impl ArrowBlockfileWriter {
             Some(delta) => delta,
         };
 
-        // Check if we can add to the the delta without pushing the block over the max size.
-        // If we can't, we need to split the block and create a new delta
-        if delta.can_add(prefix, &key, &value) {
-            delta.add(prefix, key, value);
-        } else {
-            let (split_key, new_delta) = delta.split::<K, V>();
-            self.sparse_index.add_block(split_key, new_delta.id);
-            match new_delta.get_min_key() {
-                Some(min_key) => {
-                    if search_key >= min_key {
-                        new_delta.add(prefix, key, value);
-                    } else {
-                        delta.add(prefix, key, value);
-                    }
-                }
-                None => {
-                    // Shouldn't happen but if in any case our MAX_BLOCK_SIZE
-                    // is screwed, insert in the old block.
-                    delta.add(prefix, key, value);
-                }
-            }
-            let mut deltas = self.block_deltas.lock();
-            deltas.insert(new_delta.id, new_delta);
-        }
-        Ok(())
+        // Add this key-value to the delta splitting it
+        // recursively if it overflows.
+        self.split_and_add(prefix, key, value, delta)
     }
 
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
