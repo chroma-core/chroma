@@ -236,7 +236,6 @@ impl SparseIndex {
             if *curr_key <= search_key {
                 block_ids.push(*curr_uuid);
             } else {
-                block_ids.push(*curr_uuid);
                 break;
             }
         }
