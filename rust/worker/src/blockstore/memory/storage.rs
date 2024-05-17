@@ -49,6 +49,11 @@ pub(crate) trait Readable<'referred_data>: Sized {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)>;
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)>;
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
@@ -160,6 +165,17 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
             .map(|(k, v)| (k, v.as_str()))
             .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage
+            .string_value_storage
+            .iter()
+            .nth(index)
+            .map(|(k, v)| (k, v.as_str()))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -282,6 +298,17 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage
+            .int32_array_storage
+            .iter()
+            .nth(index)
+            .map(|(k, v)| (k, v.clone()))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.int32_array_storage.iter().len())
     }
@@ -401,6 +428,17 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage
+            .roaring_bitmap_storage
+            .iter()
+            .nth(index)
+            .map(|(k, v)| (k, v.clone()))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
@@ -515,6 +553,13 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage.f32_storage.iter().nth(index).map(|(k, v)| (k, *v))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.f32_storage.iter().len())
     }
@@ -627,6 +672,13 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
             .map(|(k, v)| (k, v.clone()))
             .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage.u32_storage.iter().nth(index).map(|(k, v)| (k, *v))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -745,6 +797,13 @@ impl<'referred_data> Readable<'referred_data> for bool {
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
             .map(|(k, v)| (k, *v))
             .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage.bool_storage.iter().nth(index).map(|(k, v)| (k, *v))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -957,6 +1016,24 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
                 )
             })
             .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        let (k, v) = storage.data_record_id_storage.iter().nth(index).unwrap();
+        let embedding = storage.data_record_embedding_storage.get(k).unwrap();
+        let id = v;
+        Some((
+            k,
+            DataRecord {
+                id,
+                embedding,
+                metadata: None,
+                document: None,
+            },
+        ))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {

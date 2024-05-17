@@ -260,7 +260,7 @@ impl ArrowBlockfileWriter {
 
 pub(crate) struct ArrowBlockfileReader<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> {
     block_manager: BlockManager,
-    sparse_index: SparseIndex,
+    pub(super) sparse_index: SparseIndex,
     loaded_blocks: Mutex<HashMap<Uuid, Box<Block>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
     id: Uuid,
@@ -277,7 +277,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
-    async fn get_block(&self, block_id: Uuid) -> Option<&Block> {
+    pub(super) async fn get_block(&self, block_id: Uuid) -> Option<&Block> {
         if !self.loaded_blocks.lock().contains_key(&block_id) {
             let block = self.block_manager.get(&block_id).await?;
             self.loaded_blocks.lock().insert(block_id, Box::new(block));

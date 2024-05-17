@@ -1,5 +1,6 @@
 use super::arrow::blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter};
 use super::arrow::flusher::ArrowBlockfileFlusher;
+use super::arrow::iterator::ArrowBlockfileIterator;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
@@ -12,6 +13,7 @@ use crate::blockstore::positional_posting_list_value::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
+use futures::Stream;
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
 use thiserror::Error;
@@ -74,55 +76,6 @@ impl Key for u32 {
         4
     }
 }
-
-// ===== Value Types =====
-
-// impl<'a> Clone for Value<'a> {
-//     fn clone(&self) -> Self {
-//         // TODO: make this correct for all types
-//         match self {
-//             Value::Int32ArrayValue(arr) => {
-//                 // An arrow array, if nested in a larger structure, when cloned may clone the entire larger buffer.
-//                 // This leads to a large memory overhead and also breaks our sizing assumptions. In order to work around this,
-//                 // we have to manuallly create a new array and copy the data over.
-
-//                 // Note that we use a vector here to avoid the overhead of the builder. The from() method for primitive
-//                 // types uses unsafe code to wrap the vecs underlying buffer in an arrow array.
-
-//                 // There are more performant ways to do this, but this is the most straightforward.
-//                 let mut new_vec = Vec::with_capacity(arr.len());
-//                 for i in 0..arr.len() {
-//                     new_vec.push(arr.value(i));
-//                 }
-//                 let new_arr = Int32Array::from(new_vec);
-//                 Value::Int32ArrayValue(new_arr)
-//             }
-//             Value::PositionalPostingListValue(list) => {
-//                 Value::PositionalPostingListValue(list.clone())
-//             }
-//             Value::StringValue(s) => Value::StringValue(s.clone()),
-//             Value::RoaringBitmapValue(bitmap) => Value::RoaringBitmapValue(bitmap.clone()),
-//             Value::IntValue(i) => Value::IntValue(*i),
-//             Value::UintValue(u) => Value::UintValue(*u),
-//             Value::DataRecordValue(record) => Value::DataRecordValue(record.clone()),
-//         }
-//     }
-// }
-
-// impl Value<'_> {
-//     pub(crate) fn get_size(&self) -> usize {
-//         match self {
-//             Value::Int32ArrayValue(arr) => arr.get_buffer_memory_size(),
-//             Value::PositionalPostingListValue(list) => {
-//                 unimplemented!("Size of positional posting list")
-//             }
-//             Value::StringValue(s) => s.len(),
-//             Value::RoaringBitmapValue(bitmap) => bitmap.serialized_size(),
-//             Value::IntValue(_) | Value::UintValue(_) => 4,
-//             Value::DataRecordValue(record) => record.get_size(),
-//         }
-//     }
-// }
 
 pub(crate) trait Value: Clone {
     fn get_size(&self) -> usize;
@@ -386,6 +339,31 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
+        }
+    }
+}
+
+pub(crate) enum BlockfileIterator<
+    'me,
+    K: Key + ArrowReadableKey<'me>,
+    V: Value + ArrowReadableValue<'me>,
+> {
+    MemoryBlockfileReader(()),
+    ArrowBlockfileIterator(ArrowBlockfileIterator<'me, K, V>),
+}
+
+impl<
+        'me,
+        K: Key + Into<KeyWrapper> + From<&'me KeyWrapper> + ArrowReadableKey<'me>,
+        V: Value + Readable<'me> + ArrowReadableValue<'me>,
+    > BlockfileIterator<'me, K, V>
+{
+    pub(crate) fn as_stream(&'me self) -> impl Stream<Item = Result<Option<(&'me str, K, V)>, ()>> {
+        match self {
+            BlockfileIterator::MemoryBlockfileReader(reader) => todo!(),
+            BlockfileIterator::ArrowBlockfileIterator(iterator) => {
+                return iterator.as_stream();
+            }
         }
     }
 }

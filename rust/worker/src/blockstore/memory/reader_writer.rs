@@ -1,3 +1,5 @@
+use async_stream::try_stream;
+
 use super::{
     super::{BlockfileError, Key, Value},
     storage::{Readable, Storage, StorageBuilder, StorageManager, Writeable},
@@ -190,12 +192,51 @@ impl<
     }
 }
 
+struct MemoryBlockfileIterator<'me, K: Key, V: Value> {
+    reader: &'me MemoryBlockfileReader<K, V>,
+}
+
+impl<
+        'storage,
+        K: Key + Into<KeyWrapper> + From<&'storage KeyWrapper>,
+        V: Value + Readable<'storage>,
+    > MemoryBlockfileIterator<'storage, K, V>
+{
+    pub(crate) fn new(reader: &'storage MemoryBlockfileReader<K, V>) -> Self {
+        Self { reader }
+    }
+
+    pub(crate) fn as_stream(
+        &'storage self,
+    ) -> impl futures::Stream<Item = Result<(&'storage str, K, V), ()>> {
+        // TODO: don't unwrap
+        let count = V::count(&self.reader.storage).unwrap();
+        try_stream! {
+            for i in 0..count {
+                let res = V::get_at_index(&self.reader.storage, i);
+                match res {
+                    Some((key, value)) => {
+                        let prefix = key.prefix.as_str();
+                        let key = K::from(&key.key);
+                        yield (prefix, key, value);
+                    }
+                    None => {
+                        // TODO: handle this
+                        panic!("Error reading from storage")
+                    }
+                };
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::execution::data::data_chunk::Chunk;
     use crate::segment::DataRecord;
     use crate::types::{LogRecord, Operation, OperationRecord};
+    use futures::{pin_mut, StreamExt};
 
     #[test]
     fn test_blockfile_string() {
@@ -864,5 +905,28 @@ mod tests {
 
         let key_1 = reader.get("prefix", "key1");
         assert!(key_1.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_iterator() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+        let _ = writer.set("prefix", "key1", "value1");
+        let _ = writer.set("prefix", "key2", "value2");
+        let _ = writer.set("different_prefix", "key3", "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        let iterator = MemoryBlockfileIterator::new(&reader);
+        let mut stream = iterator.as_stream();
+        pin_mut!(stream);
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first, ("prefix", "key1", "value1"));
+        let second = stream.next().await.unwrap().unwrap();
+        assert_eq!(second, ("prefix", "key2", "value2"));
+        let third = stream.next().await.unwrap().unwrap();
+        assert_eq!(third, ("different_prefix", "key3", "value3"));
     }
 }
