@@ -1,4 +1,7 @@
+use std::pin::Pin;
+
 use async_stream::try_stream;
+use futures::Stream;
 
 use super::{
     super::{BlockfileError, Key, Value},
@@ -190,30 +193,15 @@ impl<
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.storage.id
     }
-}
 
-struct MemoryBlockfileIterator<'me, K: Key, V: Value> {
-    reader: &'me MemoryBlockfileReader<K, V>,
-}
-
-impl<
-        'storage,
-        K: Key + Into<KeyWrapper> + From<&'storage KeyWrapper>,
-        V: Value + Readable<'storage>,
-    > MemoryBlockfileIterator<'storage, K, V>
-{
-    pub(crate) fn new(reader: &'storage MemoryBlockfileReader<K, V>) -> Self {
-        Self { reader }
-    }
-
-    pub(crate) fn as_stream(
+    pub(crate) fn iter(
         &'storage self,
-    ) -> impl futures::Stream<Item = Result<(&'storage str, K, V), ()>> {
+    ) -> Pin<Box<dyn Stream<Item = Result<(&'storage str, K, V), ()>> + 'storage>> {
         // TODO: don't unwrap
-        let count = V::count(&self.reader.storage).unwrap();
-        try_stream! {
+        let count = V::count(&self.storage).unwrap();
+        Box::pin(try_stream! {
             for i in 0..count {
-                let res = V::get_at_index(&self.reader.storage, i);
+                let res = V::get_at_index(&self.storage, i);
                 match res {
                     Some((key, value)) => {
                         let prefix = key.prefix.as_str();
@@ -221,12 +209,11 @@ impl<
                         yield (prefix, key, value);
                     }
                     None => {
-                        // TODO: handle this
-                        panic!("Error reading from storage")
+                        yield Err(())?
                     }
                 };
             }
-        }
+        })
     }
 }
 
@@ -919,14 +906,14 @@ mod tests {
 
         let reader: MemoryBlockfileReader<&str, &str> =
             MemoryBlockfileReader::open(id, storage_manager.clone());
-        let iterator = MemoryBlockfileIterator::new(&reader);
-        let mut stream = iterator.as_stream();
-        pin_mut!(stream);
+        let mut stream = reader.iter();
         let first = stream.next().await.unwrap().unwrap();
         assert_eq!(first, ("prefix", "key1", "value1"));
         let second = stream.next().await.unwrap().unwrap();
         assert_eq!(second, ("prefix", "key2", "value2"));
         let third = stream.next().await.unwrap().unwrap();
         assert_eq!(third, ("different_prefix", "key3", "value3"));
+        let fourth = stream.next().await;
+        assert_eq!(fourth, None);
     }
 }

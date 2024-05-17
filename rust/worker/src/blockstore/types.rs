@@ -1,6 +1,5 @@
 use super::arrow::blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter};
 use super::arrow::flusher::ArrowBlockfileFlusher;
-use super::arrow::iterator::ArrowBlockfileIterator;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
@@ -13,9 +12,10 @@ use crate::blockstore::positional_posting_list_value::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
+use std::pin::Pin;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -341,29 +341,13 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
         }
     }
-}
 
-pub(crate) enum BlockfileIterator<
-    'me,
-    K: Key + ArrowReadableKey<'me>,
-    V: Value + ArrowReadableValue<'me>,
-> {
-    MemoryBlockfileReader(()),
-    ArrowBlockfileIterator(ArrowBlockfileIterator<'me, K, V>),
-}
-
-impl<
-        'me,
-        K: Key + Into<KeyWrapper> + From<&'me KeyWrapper> + ArrowReadableKey<'me>,
-        V: Value + Readable<'me> + ArrowReadableValue<'me>,
-    > BlockfileIterator<'me, K, V>
-{
-    pub(crate) fn as_stream(&'me self) -> impl Stream<Item = Result<Option<(&'me str, K, V)>, ()>> {
+    pub(crate) fn iter(
+        &'referred_data self,
+    ) -> Pin<Box<dyn Stream<Item = Result<(&'referred_data str, K, V), ()>> + 'referred_data>> {
         match self {
-            BlockfileIterator::MemoryBlockfileReader(reader) => todo!(),
-            BlockfileIterator::ArrowBlockfileIterator(iterator) => {
-                return iterator.as_stream();
-            }
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.iter(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.iter(),
         }
     }
 }

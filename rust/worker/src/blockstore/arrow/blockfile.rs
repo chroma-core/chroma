@@ -9,8 +9,10 @@ use super::{
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
-use arrow::error;
+use async_stream::try_stream;
+use futures::Stream;
 use parking_lot::Mutex;
+use std::pin::Pin;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
 use thiserror::Error;
@@ -359,20 +361,36 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
     pub(crate) fn id(&self) -> Uuid {
         self.id
     }
+
+    pub(crate) fn iter(
+        &'me self,
+    ) -> Pin<Box<dyn Stream<Item = Result<(&'me str, K, V), ()>> + 'me>> {
+        Box::pin(try_stream! {
+            let sparse_index = &self.sparse_index;
+            let mut block_index = 0;
+            while let Some(block_uuid) = sparse_index.forward.lock().iter().nth(block_index).map(|(_, uuid)| *uuid) {
+                // TODO: don't unwrap
+                let block = self.get_block(block_uuid).await.unwrap();
+                for i in 0..block.len() {
+                    let res = block.get_at_index::<'me, K, V>(i);
+                    yield res.unwrap();
+                }
+                block_index += 1;
+            }
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::{
-            arrow::{block, provider::ArrowBlockfileProvider},
-            provider::BlockfileProvider,
-        },
+        blockstore::arrow::provider::ArrowBlockfileProvider,
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,
     };
     use arrow::array::Int32Array;
+    use futures::StreamExt;
     use rand::seq::IteratorRandom;
     use std::collections::HashMap;
 
@@ -786,5 +804,31 @@ mod tests {
                 assert_eq!(value, format!("{:04}", i));
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_iterator() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+
+        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let id = writer.id();
+
+        writer.set("prefix1", "key1", "value1").await.unwrap();
+        writer.set("prefix1", "key2", "value2").await.unwrap();
+        writer.set("prefix2", "key1", "value3").await.unwrap();
+        writer.commit::<&str, &str>().unwrap();
+
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
+        let mut stream = reader.iter();
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first, ("prefix1", "key1", "value1"));
+        let second = stream.next().await.unwrap().unwrap();
+        assert_eq!(second, ("prefix1", "key2", "value2"));
+        let third = stream.next().await.unwrap().unwrap();
+        assert_eq!(third, ("prefix2", "key1", "value3"));
+        let fourth = stream.next().await;
+        assert_eq!(fourth, None);
     }
 }
