@@ -121,7 +121,6 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<Vec<(&str, K, V)>> {
-        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
         let prefix_array = self
             .data
             .column(0)
@@ -132,8 +131,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
-            if curr_key_composite > search_key_composite {
+            if curr_prefix > prefix || (curr_prefix == prefix && curr_key > key) {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
@@ -145,7 +143,6 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<Vec<(&str, K, V)>> {
-        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
         let prefix_array = self
             .data
             .column(0)
@@ -156,8 +153,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
-            if curr_key_composite < search_key_composite {
+            if curr_prefix < prefix || (curr_prefix == prefix && curr_key < key) {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
@@ -169,7 +165,6 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<Vec<(&str, K, V)>> {
-        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
         let prefix_array = self
             .data
             .column(0)
@@ -180,8 +175,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
-            if curr_key_composite <= search_key_composite {
+            if curr_prefix <= prefix || (curr_prefix == prefix && curr_key <= key) {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
@@ -193,7 +187,6 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<Vec<(&str, K, V)>> {
-        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
         let prefix_array = self
             .data
             .column(0)
@@ -204,8 +197,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
-            if curr_key_composite >= search_key_composite {
+            if curr_prefix >= prefix || (curr_prefix == prefix && curr_key >= key) {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }

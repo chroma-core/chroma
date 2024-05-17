@@ -557,9 +557,10 @@ mod tests {
         types::MetadataValue,
     };
     use arrow::array::Int32Array;
-    use parameterized::parameterized;
+    use proptest::{num, prelude::*};
     use rand::{seq::IteratorRandom, Rng};
     use std::collections::HashMap;
+    use tokio::runtime::Runtime;
 
     #[tokio::test]
     async fn test_count() {
@@ -654,75 +655,104 @@ mod tests {
         }
     }
 
-    #[parameterized(operation = {"gt", "gte", "lt", "lte"})]
-    #[parameterized_macro(tokio::test)]
-    async fn test_gt(operation: &str) {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
-        let writer = blockfile_provider.create::<&str, u32>().unwrap();
-        let id = writer.id();
+    fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
+        Runtime::new().unwrap().block_on(async {
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            let blockfile_provider = ArrowBlockfileProvider::new(storage);
+            let writer = blockfile_provider.create::<&str, u32>().unwrap();
+            let id = writer.id();
+            println!("Number of keys {}", num_keys);
+            let prefix = "prefix";
+            for i in 1..num_keys {
+                let key = format!("{}/{}", "key", i);
+                writer.set(prefix, key.as_str(), i as u32).await.unwrap();
+            }
+            // commit.
+            writer.commit::<&str, u32>().unwrap();
 
-        // write 5000 rows to create more than one block.
-        let num_keys = 5000;
-        let prefix = "prefix";
-        for i in 1..num_keys {
-            let key = format!("{}/{}", "key", i);
-            writer.set(prefix, key.as_str(), i as u32).await.unwrap();
+            let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
+            let query = format!("{}/{}", "key", query_key);
+            println!("Query {}", query);
+            println!("Operation {:?}", operation);
+            let greater_than = match operation {
+                ComparisonOperation::GreaterThan => reader.get_gt(prefix, query.as_str()).await,
+                ComparisonOperation::GreaterThanOrEquals => {
+                    reader.get_gte(prefix, query.as_str()).await
+                }
+                ComparisonOperation::LessThan => reader.get_lt(prefix, query.as_str()).await,
+                ComparisonOperation::LessThanOrEquals => {
+                    reader.get_lte(prefix, query.as_str()).await
+                }
+                _ => {
+                    assert!(true, "Invalid operation");
+                    // Won't reach here.
+                    Ok(vec![])
+                }
+            };
+            match greater_than {
+                Ok(c) => {
+                    let mut kv_map = HashMap::new();
+                    for entry in c {
+                        kv_map.insert(entry.1, entry.2);
+                    }
+                    for i in 1..num_keys {
+                        let key = format!("{}/{}", "key", i);
+                        let mut condition: bool = false;
+                        match operation {
+                            ComparisonOperation::GreaterThan => condition = key > query,
+                            ComparisonOperation::GreaterThanOrEquals => condition = key >= query,
+                            ComparisonOperation::LessThan => condition = key < query,
+                            ComparisonOperation::LessThanOrEquals => condition = key <= query,
+                            _ => assert!(true, "invalid input"),
+                        }
+                        if condition {
+                            assert!(
+                                kv_map.contains_key(key.as_str()),
+                                "{}",
+                                format!("Key {} should be present but not found", key)
+                            );
+                        } else {
+                            assert!(
+                                !kv_map.contains_key(key.as_str()),
+                                "{}",
+                                format!("Key {} should not be present but found", key)
+                            );
+                        }
+                    }
+                }
+                Err(_) => assert!(true, "Error getting gt"),
+            }
+        });
+    }
+
+    #[derive(Debug)]
+    pub(crate) enum ComparisonOperation {
+        GreaterThan,
+        LessThan,
+        GreaterThanOrEquals,
+        LessThanOrEquals,
+    }
+
+    proptest! {
+        #[test]
+        fn test_gt(num_key in 1..10000u32, query_key in 1..10000u32) {
+            blockfile_comparisons(ComparisonOperation::GreaterThan, num_key, query_key);
         }
-        // commit.
-        writer.commit::<&str, u32>().unwrap();
 
-        let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
-        // Generate a random number between 1 and num_keys.
-        let mut rng = rand::thread_rng();
-        let n: u32 = rng.gen_range(0..num_keys);
-        let query = format!("{}/{}", "key", n);
-        println!("Query {}", query);
-        println!("Operation {}", operation);
-        let greater_than = match operation {
-            "gt" => reader.get_gt(prefix, query.as_str()).await,
-            "gte" => reader.get_gte(prefix, query.as_str()).await,
-            "lt" => reader.get_lt(prefix, query.as_str()).await,
-            "lte" => reader.get_lte(prefix, query.as_str()).await,
-            _ => {
-                assert!(true, "Invalid operation");
-                // Won't reach here.
-                Ok(vec![])
-            }
-        };
-        match greater_than {
-            Ok(c) => {
-                let mut kv_map = HashMap::new();
-                for entry in c {
-                    kv_map.insert(entry.1, entry.2);
-                }
-                for i in 1..num_keys {
-                    let key = format!("{}/{}", "key", i);
-                    let mut condition: bool = false;
-                    match operation {
-                        "gt" => condition = key > query,
-                        "gte" => condition = key >= query,
-                        "lt" => condition = key < query,
-                        "lte" => condition = key <= query,
-                        _ => assert!(true, "invalid input"),
-                    }
-                    if condition {
-                        assert!(
-                            kv_map.contains_key(key.as_str()),
-                            "{}",
-                            format!("Key {} should be present but not found", key)
-                        );
-                    } else {
-                        assert!(
-                            !kv_map.contains_key(key.as_str()),
-                            "{}",
-                            format!("Key {} should not be present but found", key)
-                        );
-                    }
-                }
-            }
-            Err(_) => assert!(true, "Error getting gt"),
+        #[test]
+        fn test_lt(num_key in 1..10000u32, query_key in 1..10000u32) {
+            blockfile_comparisons(ComparisonOperation::LessThan, num_key, query_key);
+        }
+
+        #[test]
+        fn test_gte(num_key in 1..10000u32, query_key in 1..10000u32) {
+            blockfile_comparisons(ComparisonOperation::GreaterThanOrEquals, num_key, query_key);
+        }
+
+        #[test]
+        fn test_lte(num_key in 1..10000u32, query_key in 1..10000u32) {
+            blockfile_comparisons(ComparisonOperation::LessThanOrEquals, num_key, query_key);
         }
     }
 

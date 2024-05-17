@@ -132,9 +132,9 @@ impl SparseIndex {
                 // This can't be a start key but we still need to extract it.
                 let non_start_next_key: Option<&CompositeKey>;
                 match next_key {
-                    // TODO: Add error here if next is start?
-                    // Can I panic or should I change the interface?
-                    SparseIndexDelimiter::Start => non_start_next_key = None,
+                    SparseIndexDelimiter::Start => {
+                        panic!("Invariance violation. Sparse index is not valid.");
+                    }
                     SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k),
                 }
                 // If delimeter starts with the same prefix then there will be keys inside the

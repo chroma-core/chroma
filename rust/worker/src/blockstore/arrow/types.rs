@@ -26,7 +26,7 @@ pub(crate) trait ArrowWriteableValue: Value {
     fn get_delta_builder() -> BlockStorage;
 }
 
-pub(crate) trait ArrowReadableKey<'referred_data>: Key + PartialEq {
+pub(crate) trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(
         prefix: &str,
