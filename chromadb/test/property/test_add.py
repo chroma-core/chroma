@@ -3,15 +3,23 @@ import uuid
 from random import randint
 from typing import cast, List, Any, Dict
 import pytest
+import time
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ServerAPI
 from chromadb.api.types import Embeddings, Metadatas
+from chromadb.test.conftest import MEMBERLIST_SLEEP, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.utils.batch_utils import create_batches
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
+
+def reset(api: ServerAPI) -> None:
+    api.reset()
+    if not NOT_CLUSTER_ONLY:
+        time.sleep(MEMBERLIST_SLEEP)
 
 
 @given(collection=collection_st, record_set=strategies.recordsets(collection_st))
@@ -21,7 +29,7 @@ def test_add(
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
 ) -> None:
-    api.reset()
+    reset(api)
 
     # TODO: Generative embedding functions
     coll = api.create_collection(
@@ -70,7 +78,8 @@ def create_large_recordset(
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
 def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
-    api.reset()
+    reset(api)
+
     record_set = create_large_recordset(
         min_size=api.max_batch_size,
         max_size=api.max_batch_size + int(api.max_batch_size * random.random()),
@@ -100,7 +109,8 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
 def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) -> None:
-    api.reset()
+    reset(api)
+
     record_set = create_large_recordset(
         min_size=api.max_batch_size,
         max_size=api.max_batch_size + int(api.max_batch_size * random.random()),
@@ -127,7 +137,7 @@ def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) 
     ids by input order."
 )
 def test_out_of_order_ids(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     ooo_ids = [
         "40",
         "05",
@@ -167,8 +177,7 @@ def test_out_of_order_ids(api: ServerAPI) -> None:
 
 def test_add_partial(api: ServerAPI) -> None:
     """Tests adding a record set with some of the fields set to None."""
-
-    api.reset()
+    reset(api)
 
     coll = api.create_collection("test")
     # TODO: We need to clean up the api types to support this typing
