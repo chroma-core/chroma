@@ -335,19 +335,20 @@ impl<
         }
     }
 
+    pub(crate) async fn get_at_index(
+        &'referred_data self,
+        index: usize,
+    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_at_index(index),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_at_index(index).await,
+        }
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
-        }
-    }
-
-    pub(crate) fn iter(
-        &'referred_data self,
-    ) -> Pin<Box<dyn Stream<Item = Result<(&'referred_data str, K, V), ()>> + 'referred_data>> {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.iter(),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.iter(),
         }
     }
 }

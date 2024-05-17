@@ -157,7 +157,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         // Hydrate the data from the record segment for filtered data, if
         // filters were applied
         if input.filtered_index_offset_ids.is_some() {
-            for index_offset_id in input.filtered_index_offset_ids.unwrap().iter() {
+            for index_offset_id in input.filtered_index_offset_ids.as_ref().unwrap().iter() {
                 let record = match record_segment_reader
                     .get_data_for_offset_id(*index_offset_id as u32)
                     .await
@@ -192,7 +192,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         // Hydrate the data from the record segment for the remaining data
         // if query_ids were specified
         if input.remaining_query_ids.is_some() {
-            for query_id in input.remaining_query_ids.unwrap().iter() {
+            for query_id in input.remaining_query_ids.as_ref().unwrap().iter() {
                 let offset_id = match record_segment_reader
                     .get_offset_id_for_user_id(query_id)
                     .await
@@ -226,7 +226,23 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
         // If neither filters or queries were applied, we should read the entire record segment
         // in user id order
-        if input.filtered_index_offset_ids.is_none() && input.remaining_query_ids.is_none() {}
+        if input.filtered_index_offset_ids.is_none() && input.remaining_query_ids.is_none() {
+            let data = match record_segment_reader.get_all_data().await {
+                Ok(data) => data,
+                Err(e) => {
+                    println!("Error reading Record Segment: {:?}", e);
+                    return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                }
+            };
+            for record in data.iter() {
+                ids.push(record.id.to_string());
+                metadata.push(record.metadata.clone());
+                match record.document {
+                    Some(document) => documents.push(Some(document.to_string())),
+                    None => documents.push(None),
+                }
+            }
+        }
 
         Ok(MergeMetadataResultsOperatorOutput {
             ids,

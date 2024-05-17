@@ -6,7 +6,10 @@ use crate::{
 use arrow::array::Int32Array;
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 pub(crate) trait Writeable {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder);
@@ -1053,39 +1056,39 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
 
 #[derive(Clone)]
 pub(crate) struct StorageBuilder {
-    bool_storage: Arc<RwLock<Option<HashMap<CompositeKey, bool>>>>,
+    bool_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, bool>>>>,
     // String Value
-    string_value_storage: Arc<RwLock<Option<HashMap<CompositeKey, String>>>>,
+    string_value_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
     // u32 Value
-    u32_storage: Arc<RwLock<Option<HashMap<CompositeKey, u32>>>>,
+    u32_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, u32>>>>,
     // f32 value
-    f32_storage: Arc<RwLock<Option<HashMap<CompositeKey, f32>>>>,
+    f32_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, f32>>>>,
     // Roaring Bitmap Value
-    roaring_bitmap_storage: Arc<RwLock<Option<HashMap<CompositeKey, RoaringBitmap>>>>,
+    roaring_bitmap_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, RoaringBitmap>>>>,
     // Int32 Array Value
-    int32_array_storage: Arc<RwLock<Option<HashMap<CompositeKey, Int32Array>>>>,
+    int32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Int32Array>>>>,
     // Data Record Fields
-    data_record_id_storage: Arc<RwLock<Option<HashMap<CompositeKey, String>>>>,
-    data_record_embedding_storage: Arc<RwLock<Option<HashMap<CompositeKey, Vec<f32>>>>>,
+    data_record_id_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
+    data_record_embedding_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<f32>>>>>,
     pub(super) id: uuid::Uuid,
 }
 
 #[derive(Clone)]
 pub(crate) struct Storage {
-    bool_storage: Arc<HashMap<CompositeKey, bool>>,
+    bool_storage: Arc<BTreeMap<CompositeKey, bool>>,
     // String Value
-    string_value_storage: Arc<HashMap<CompositeKey, String>>,
+    string_value_storage: Arc<BTreeMap<CompositeKey, String>>,
     // u32 Value
-    u32_storage: Arc<HashMap<CompositeKey, u32>>,
+    u32_storage: Arc<BTreeMap<CompositeKey, u32>>,
     // f32 value
-    f32_storage: Arc<HashMap<CompositeKey, f32>>,
+    f32_storage: Arc<BTreeMap<CompositeKey, f32>>,
     // Roaring Bitmap Value
-    roaring_bitmap_storage: Arc<HashMap<CompositeKey, RoaringBitmap>>,
+    roaring_bitmap_storage: Arc<BTreeMap<CompositeKey, RoaringBitmap>>,
     // Int32 Array Value
-    int32_array_storage: Arc<HashMap<CompositeKey, Int32Array>>,
+    int32_array_storage: Arc<BTreeMap<CompositeKey, Int32Array>>,
     // Data Record Fields
-    data_record_id_storage: Arc<HashMap<CompositeKey, String>>,
-    data_record_embedding_storage: Arc<HashMap<CompositeKey, Vec<f32>>>,
+    data_record_id_storage: Arc<BTreeMap<CompositeKey, String>>,
+    data_record_embedding_storage: Arc<BTreeMap<CompositeKey, Vec<f32>>>,
     pub(super) id: uuid::Uuid,
 }
 
@@ -1112,14 +1115,14 @@ impl StorageManager {
     pub(super) fn create(&self) -> StorageBuilder {
         let id = uuid::Uuid::new_v4();
         let builder = StorageBuilder {
-            bool_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            string_value_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            u32_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            f32_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            roaring_bitmap_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            int32_array_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            data_record_id_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            data_record_embedding_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
+            bool_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            string_value_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            u32_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            f32_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            roaring_bitmap_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            int32_array_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            data_record_id_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            data_record_embedding_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             id,
         };
         let mut cache_guard = self.write_cache.write();
