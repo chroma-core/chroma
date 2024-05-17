@@ -150,6 +150,11 @@ impl BlockManager {
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, delta: &BlockDelta) {
         let record_batch = delta.finish::<K, V>();
         let block = Block::from_record_batch(delta.id, record_batch);
+        println!(
+            "(Sanket-temp) Block id {}, value {:?}",
+            delta.id,
+            block.data.column(1)
+        );
         self.read_cache.write().insert(block.id, block);
     }
 

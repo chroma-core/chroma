@@ -97,6 +97,7 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<Vec<(&str, K, V)>> {
+        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
         let prefix_array = self
             .data
             .column(0)
@@ -107,8 +108,85 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            // TODO: Understand the prefix.
-            if curr_prefix == prefix && curr_key > key {
+            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
+            if curr_key_composite > search_key_composite {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_lt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
+            if curr_key_composite < search_key_composite {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_lte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
+            // println!(
+            //     "(Sanket-temp) Current key {:?}, search key {:?}",
+            //     curr_key_composite, search_key_composite
+            // );
+            if curr_key_composite <= search_key_composite {
+                // println!("(Sanket-temp) Pushing {:?}", curr_key_composite);
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_gte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let search_key_composite = CompositeKey::new(prefix.to_string(), key.clone());
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            let curr_key_composite = CompositeKey::new(curr_prefix.to_string(), curr_key.clone());
+            if curr_key_composite >= search_key_composite {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }

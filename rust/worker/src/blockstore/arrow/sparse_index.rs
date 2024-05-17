@@ -105,7 +105,12 @@ impl SparseIndex {
         let mut iter_curr = forward.iter();
         let mut iter_next = forward.iter().skip(1);
         let search_key = SparseIndexDelimiter::Key(search_key.clone());
+        println!("(Sanket-temp) Search key {:?}", search_key);
         while let Some((curr_key, curr_block_id)) = iter_curr.next() {
+            println!(
+                "(Sanket-temp) get_target_block_id start key {:?}, block id {:?}",
+                curr_key, curr_block_id
+            );
             if let Some((next_key, _)) = iter_next.next() {
                 if search_key >= *curr_key && search_key < *next_key {
                     return *curr_block_id;
@@ -124,14 +129,99 @@ impl SparseIndex {
         let mut block_ids = vec![];
         let search_key = SparseIndexDelimiter::Key(search_key.clone());
         while let Some((curr_key, curr_uuid)) = curr_iter.next() {
-            if let Some((next_key, next_uuid)) = next_iter.next() {
+            // Not the last block.
+            if let Some((next_key, _)) = next_iter.next() {
+                println!(
+                    "(Sanket-temp) Current key {:?}, next key {:?}",
+                    curr_key, next_key
+                );
+                // Compare with the next block to determine if suitable.
                 if search_key >= *curr_key && search_key < *next_key {
                     block_ids.push(*curr_uuid);
                 }
-            }
-            // curr_key is inclusive hence strictly less than.
-            if search_key < *curr_key {
+                // curr_key is inclusive hence strictly less than.
+                if search_key < *curr_key {
+                    block_ids.push(*curr_uuid);
+                }
+            } else {
+                println!("(Sanket-temp) Pushing last block with id {}", curr_uuid);
+                // last block always gets pushed.
                 block_ids.push(*curr_uuid);
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_lt(&self, search_key: CompositeKey) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut block_ids = vec![];
+        let search_key = SparseIndexDelimiter::Key(search_key.clone());
+        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
+            println!(
+                "(Sanket-temp) Block with start {:?} id {}",
+                curr_key, curr_uuid
+            );
+            if *curr_key < search_key {
+                println!("Pushing block with start {:?}", curr_key);
+                block_ids.push(*curr_uuid);
+            } else {
+                break;
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_gte(&self, search_key: CompositeKey) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        let search_key = SparseIndexDelimiter::Key(search_key.clone());
+        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
+            // Not the last block.
+            if let Some((next_key, _)) = next_iter.next() {
+                println!(
+                    "(Sanket-temp) Current key {:?}, next key {:?}",
+                    curr_key, next_key
+                );
+                // Compare with the next block to determine if suitable.
+                if search_key >= *curr_key && search_key < *next_key {
+                    block_ids.push(*curr_uuid);
+                }
+                // curr_key is inclusive hence strictly less than.
+                if search_key < *curr_key {
+                    block_ids.push(*curr_uuid);
+                }
+            } else {
+                println!("(Sanket-temp) Pushing last block with id {}", curr_uuid);
+                // last block always gets pushed.
+                block_ids.push(*curr_uuid);
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_lte(&self, search_key: CompositeKey) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut block_ids = vec![];
+        let search_key = SparseIndexDelimiter::Key(search_key.clone());
+        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
+            println!(
+                "(Sanket-temp) Block with start {:?} id {}",
+                curr_key, curr_uuid
+            );
+            if *curr_key <= search_key {
+                println!("(Sanket-temp) Pushing block with start {:?}", curr_key);
+                block_ids.push(*curr_uuid);
+            } else {
+                println!(
+                    "(Sanket-temp) Else block: Pushing block with start {:?}",
+                    curr_key
+                );
+                block_ids.push(*curr_uuid);
+                break;
             }
         }
         block_ids

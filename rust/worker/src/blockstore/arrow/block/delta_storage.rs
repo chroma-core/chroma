@@ -149,8 +149,8 @@ impl BlockKeyArrowBuilder {
 }
 
 #[derive(Clone)]
-pub(super) struct StringValueStorage {
-    pub(super) storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
+pub struct StringValueStorage {
+    pub storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
 }
 
 impl StringValueStorage {
@@ -232,10 +232,12 @@ impl StringValueStorage {
         match storage.as_mut() {
             None => unreachable!("Invariant violation. A StringValueBuilder should have storage."),
             Some(storage) => {
+                println!("(Sanket-temp) B tree before split {:?}", storage);
                 let split = storage.split_off(&CompositeKey {
                     prefix: prefix.to_string(),
                     key,
                 });
+                println!("(Sanket-temp) split B tree {:?}", split);
                 StringValueStorage {
                     storage: Arc::new(RwLock::new(Some(split))),
                 }
@@ -268,8 +270,8 @@ impl StringValueStorage {
 }
 
 #[derive(Clone)]
-pub(super) struct UInt32Storage {
-    pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
+pub struct UInt32Storage {
+    pub storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
 }
 
 impl UInt32Storage {
@@ -311,10 +313,12 @@ impl UInt32Storage {
 
     fn split(&self, prefix: &str, key: KeyWrapper) -> UInt32Storage {
         let mut storage_guard = self.storage.write();
+        println!("(Sanket-temp) B tree before split {:?}", storage_guard);
         let split = storage_guard.split_off(&CompositeKey {
             prefix: prefix.to_string(),
             key,
         });
+        println!("(Sanket-temp) After split B tree {:?}", split);
         UInt32Storage {
             storage: Arc::new(RwLock::new(split)),
         }

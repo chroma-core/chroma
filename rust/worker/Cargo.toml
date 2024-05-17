@@ -58,6 +58,7 @@ proptest-state-machine = "0.1.0"
 "rand" = "0.8.5"
 rayon = "1.8.0"
 criterion = "0.3"
+parameterized = "2.0.0"
 
 [build-dependencies]
 tonic-build = "0.10"
