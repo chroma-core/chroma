@@ -129,7 +129,7 @@ impl SparseIndex {
                 SparseIndexDelimiter::Key(k) => non_start_curr_key = Some(k),
             }
             if let Some((next_key, _)) = next_iter.next() {
-                // This can't be a start key but we still need to extract it ugh.
+                // This can't be a start key but we still need to extract it.
                 let non_start_next_key: Option<&CompositeKey>;
                 match next_key {
                     // TODO: Add error here if next is start?

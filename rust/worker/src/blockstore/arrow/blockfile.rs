@@ -353,6 +353,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
+    /// Returns all arrow records whose key > supplied key.
     pub(crate) async fn get_gt(
         &'me self,
         prefix: &str,
@@ -383,6 +384,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         return Ok(result);
     }
 
+    /// Returns all arrow records whose key < supplied key.
     pub(crate) async fn get_lt(
         &'me self,
         prefix: &str,
@@ -413,6 +415,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         return Ok(result);
     }
 
+    /// Returns all arrow records whose key >= supplied key.
     pub(crate) async fn get_gte(
         &'me self,
         prefix: &str,
@@ -422,7 +425,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let block_ids = self.sparse_index.get_block_ids_gte(search_key);
         let mut result: Vec<(&str, K, V)> = vec![];
-        // Read all the blocks individually to get keys < key.
+        // Read all the blocks individually to get keys >= key.
         for block_id in block_ids {
             let block_opt = self.get_block(block_id).await;
             let block = match block_opt {
@@ -443,6 +446,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         return Ok(result);
     }
 
+    /// Returns all arrow records whose key <= supplied key.
     pub(crate) async fn get_lte(
         &'me self,
         prefix: &str,
@@ -473,6 +477,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         return Ok(result);
     }
 
+    /// Returns all arrow records whose prefix is same as supplied prefix.
     pub(crate) async fn get_by_prefix(
         &'me self,
         prefix: &str,
