@@ -33,7 +33,7 @@ sample_collections = [
         dimension=128,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
-        version=None,
+        version=0,
     ),
     Collection(
         id=uuid.UUID(int=2),
@@ -42,7 +42,7 @@ sample_collections = [
         dimension=None,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
-        version=None,
+        version=0,
     ),
     Collection(
         id=uuid.UUID(int=3),
@@ -51,7 +51,7 @@ sample_collections = [
         dimension=None,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
-        version=None,
+        version=0,
     ),
 ]
 
