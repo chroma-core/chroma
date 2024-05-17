@@ -33,15 +33,12 @@ pub(crate) struct ArrowBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
     BlockNotFound,
-    #[error("Split point not found")]
-    SplitPointNotFound,
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
-            ArrowBlockfileError::SplitPointNotFound => ErrorCodes::Internal,
         }
     }
 }
@@ -145,7 +142,7 @@ impl ArrowBlockfileWriter {
                     }
                 }
                 None => {
-                    return Err(Box::new(ArrowBlockfileError::SplitPointNotFound));
+                    panic!("New block after split cannot be empty");
                 }
             }
             let mut deltas = self.block_deltas.lock();
