@@ -318,6 +318,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             dimension=request.dimension,
             database=database,
             tenant=tenant,
+            version=None,
         )
         collections[request.id] = new_collection
         return CreateCollectionResponse(
