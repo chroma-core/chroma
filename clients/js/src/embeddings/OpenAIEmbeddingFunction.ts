@@ -47,6 +47,33 @@ class OpenAIAPIv3 implements OpenAIAPI {
   }
 }
 
+class OpenAIAPIAzure implements OpenAIAPI {
+  private openai: any;
+
+  constructor(configuration: { apiKey: string; apiVersion?: string; apiBase?: string; deployment?: string }) {
+    this.openai = new OpenAIApi.AzureOpenAI({
+      apiKey: configuration.apiKey,
+      apiBase: configuration.apiBase,
+      apiVersion: configuration.apiVersion,
+      deployment: configuration.deployment,
+    });
+  }
+
+  public async createEmbedding(params: {
+    model: string;
+    input: string[];
+    user?: string;
+  }): Promise<number[][]> {
+    const embeddings: number[][] = [];
+    const response = await this.openai.embeddings.create(params);
+    const data = response["data"];
+    for (let i = 0; i < data.length; i += 1) {
+      embeddings.push(data[i]["embedding"]);
+    }
+    return embeddings;
+  }
+}
+
 class OpenAIAPIv4 implements OpenAIAPI {
   private readonly apiKey: any;
   private openai: any;
@@ -76,6 +103,10 @@ class OpenAIAPIv4 implements OpenAIAPI {
 export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   private api_key: string;
   private org_id: string;
+  private api_type?: string;
+  private api_version?: string;
+  private api_base?: string;
+  private deployment?: string;
   private model: string;
   private openaiApi?: OpenAIAPI;
 
@@ -83,16 +114,28 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     openai_api_key,
     openai_model,
     openai_organization_id,
+    api_type,
+    api_base,
+    api_version,
+    deployment,
   }: {
     openai_api_key: string;
     openai_model?: string;
     openai_organization_id?: string;
+    api_type?: string;
+    api_base?: string;
+    api_version?: string;
+    deployment?: string;
   }) {
     // we used to construct the client here, but we need to async import the types
     // for the openai npm package, and the constructor can not be async
     this.api_key = openai_api_key;
     this.org_id = openai_organization_id || "";
     this.model = openai_model || "text-embedding-ada-002";
+    this.api_type = api_type;
+    this.api_base = api_base;
+    this.api_version = api_version;
+    this.deployment = deployment;
   }
 
   private async loadClient() {
@@ -115,7 +158,14 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       throw _a; // Re-throw other errors
     }
 
-    if (openAiMajorVersion > 3) {
+    if (this.api_type === "azure") {
+      this.openaiApi = new OpenAIAPIAzure({
+        apiKey: this.api_key,
+        apiBase: this.api_base,
+        apiVersion: this.api_version,
+        deployment: this.deployment
+      });
+    } else if (openAiMajorVersion > 3) {
       this.openaiApi = new OpenAIAPIv4(this.api_key);
     } else {
       this.openaiApi = new OpenAIAPIv3({
