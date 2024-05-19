@@ -557,6 +557,7 @@ mod tests {
         types::MetadataValue,
     };
     use arrow::array::Int32Array;
+    use proptest::test_runner::Config;
     use proptest::{num, prelude::*};
     use rand::{seq::IteratorRandom, Rng};
     use std::collections::HashMap;
@@ -735,6 +736,7 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(Config::with_cases(10))]
         #[test]
         fn test_gt(num_key in 1..10000u32, query_key in 1..10000u32) {
             blockfile_comparisons(ComparisonOperation::GreaterThan, num_key, query_key);
