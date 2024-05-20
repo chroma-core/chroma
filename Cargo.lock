@@ -4508,7 +4508,6 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "async-stream",
  "async-trait",
  "aws-config",
  "aws-sdk-s3",

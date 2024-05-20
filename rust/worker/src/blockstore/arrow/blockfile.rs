@@ -344,7 +344,9 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         let block = block.unwrap();
         let res = block.get_at_index::<'me, K, V>(index - block_offset);
         match res {
-            Some(res) => Ok((res.0, res.1, res.2)),
+            Some((prefix, key, value)) => {
+                return Ok((prefix, key, value));
+            }
             _ => {
                 return Err(Box::new(BlockfileError::NotFoundError));
             }

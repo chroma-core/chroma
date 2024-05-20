@@ -208,7 +208,6 @@ mod tests {
     use crate::execution::data::data_chunk::Chunk;
     use crate::segment::DataRecord;
     use crate::types::{LogRecord, Operation, OperationRecord};
-    use futures::{pin_mut, StreamExt};
 
     #[test]
     fn test_blockfile_string() {
