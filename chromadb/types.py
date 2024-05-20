@@ -31,9 +31,9 @@ class Collection(TypedDict):
     dimension: Optional[int]
     tenant: str
     database: str
-    # This field is only used in the distributed version of chroma
-    # therefore it is optional in our APIs
-    version: Optional[int]
+    # The version is only used in the distributed version of chroma
+    # in single-node chroma, this field is always 0
+    version: int
 
 
 class Database(TypedDict):

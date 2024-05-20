@@ -226,7 +226,7 @@ class SqlSysDB(SqlDB, SysDB):
             dimension=dimension,
             tenant=tenant,
             database=database,
-            version=None,
+            version=0,
         )
 
         with self.tx() as cur:
@@ -429,7 +429,7 @@ class SqlSysDB(SqlDB, SysDB):
                         dimension=dimension,
                         tenant=str(rows[0][4]),
                         database=str(rows[0][3]),
-                        version=None,
+                        version=0,
                     )
                 )
 

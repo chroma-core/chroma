@@ -193,7 +193,7 @@ def test_update_collections(sysdb: SysDB) -> None:
         dimension=sample_collections[0]["dimension"],
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
-        version=None,
+        version=0,
     )
 
     sysdb.reset_state()
