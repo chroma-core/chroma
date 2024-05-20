@@ -595,65 +595,61 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_prefix() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
-        let writer = blockfile_provider.create::<&str, u32>().unwrap();
-        let id = writer.id();
+    fn test_prefix(num_keys: u32, prefix_for_query: u32) {
+        Runtime::new().unwrap().block_on(async {
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            let blockfile_provider = ArrowBlockfileProvider::new(storage);
+            let writer = blockfile_provider.create::<&str, u32>().unwrap();
+            let id = writer.id();
 
-        // write 2000 rows per prefix for 5 prefixes.
-        let num_keys = 2000;
-        for j in 1..=5 {
-            let prefix = format!("{}/{}", "prefix", j);
-            for i in 1..=num_keys {
-                let key = format!("{}/{}", "key", i);
-                writer
-                    .set(prefix.as_str(), key.as_str(), i as u32)
-                    .await
-                    .unwrap();
-            }
-        }
-        // commit.
-        writer.commit::<&str, u32>().unwrap();
-
-        let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
-        // Generate a random number between 1 and 5.
-        let mut rng = rand::thread_rng();
-        let n: u32 = rng.gen_range(1..=5);
-        let prefix_query = format!("{}/{}", "prefix", n);
-        println!("Query {}", prefix_query);
-        let res = reader.get_by_prefix(prefix_query.as_str()).await;
-        match res {
-            Ok(c) => {
-                let mut kv_map = HashMap::new();
-                for entry in c {
-                    kv_map.insert(format!("{}/{}", entry.0, entry.1), entry.2);
+            for j in 1..=5 {
+                let prefix = format!("{}/{}", "prefix", j);
+                for i in 1..=num_keys {
+                    let key = format!("{}/{}", "key", i);
+                    writer
+                        .set(prefix.as_str(), key.as_str(), i as u32)
+                        .await
+                        .unwrap();
                 }
-                for j in 1..=5 {
-                    let prefix = format!("{}/{}", "prefix", j);
-                    for i in 1..=num_keys {
-                        let key = format!("{}/{}", "key", i);
-                        let map_key = format!("{}/{}", prefix, key);
-                        if prefix == prefix_query {
-                            assert!(
-                                kv_map.contains_key(&map_key),
-                                "{}",
-                                format!("Key {} should be present but not found", map_key)
-                            );
-                        } else {
-                            assert!(
-                                !kv_map.contains_key(&map_key),
-                                "{}",
-                                format!("Key {} should not be present but found", map_key)
-                            );
+            }
+            // commit.
+            writer.commit::<&str, u32>().unwrap();
+
+            let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
+            let prefix_query = format!("{}/{}", "prefix", prefix_for_query);
+            println!("Query {}, num_keys {}", prefix_query, num_keys);
+            let res = reader.get_by_prefix(prefix_query.as_str()).await;
+            match res {
+                Ok(c) => {
+                    let mut kv_map = HashMap::new();
+                    for entry in c {
+                        kv_map.insert(format!("{}/{}", entry.0, entry.1), entry.2);
+                    }
+                    for j in 1..=5 {
+                        let prefix = format!("{}/{}", "prefix", j);
+                        for i in 1..=num_keys {
+                            let key = format!("{}/{}", "key", i);
+                            let map_key = format!("{}/{}", prefix, key);
+                            if prefix == prefix_query {
+                                assert!(
+                                    kv_map.contains_key(&map_key),
+                                    "{}",
+                                    format!("Key {} should be present but not found", map_key)
+                                );
+                            } else {
+                                assert!(
+                                    !kv_map.contains_key(&map_key),
+                                    "{}",
+                                    format!("Key {} should not be present but found", map_key)
+                                );
+                            }
                         }
                     }
                 }
+                Err(_) => assert!(true, "Error running get by prefix"),
             }
-            Err(_) => assert!(true, "Error running get by prefix"),
-        }
+        });
     }
 
     fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
@@ -738,23 +734,28 @@ mod tests {
     proptest! {
         #![proptest_config(Config::with_cases(10))]
         #[test]
-        fn test_gt(num_key in 1..10000u32, query_key in 1..10000u32) {
+        fn test_get_gt(num_key in 1..10000u32, query_key in 1..10000u32) {
             blockfile_comparisons(ComparisonOperation::GreaterThan, num_key, query_key);
         }
 
         #[test]
-        fn test_lt(num_key in 1..10000u32, query_key in 1..10000u32) {
+        fn test_get_lt(num_key in 1..10000u32, query_key in 1..10000u32) {
             blockfile_comparisons(ComparisonOperation::LessThan, num_key, query_key);
         }
 
         #[test]
-        fn test_gte(num_key in 1..10000u32, query_key in 1..10000u32) {
+        fn test_get_gte(num_key in 1..10000u32, query_key in 1..10000u32) {
             blockfile_comparisons(ComparisonOperation::GreaterThanOrEquals, num_key, query_key);
         }
 
         #[test]
-        fn test_lte(num_key in 1..10000u32, query_key in 1..10000u32) {
+        fn test_get_lte(num_key in 1..10000u32, query_key in 1..10000u32) {
             blockfile_comparisons(ComparisonOperation::LessThanOrEquals, num_key, query_key);
+        }
+
+        #[test]
+        fn test_get_by_prefix(num_key in 1..10000u32, prefix_query in 1..=5u32) {
+            test_prefix(num_key, prefix_query);
         }
     }
 
