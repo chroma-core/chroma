@@ -72,6 +72,7 @@ jobs:
         platform: ["16core-64gb-ubuntu-latest"]
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",

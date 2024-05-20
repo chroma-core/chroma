@@ -7,10 +7,9 @@ from chromadb.api import ServerAPI
 import time
 
 from chromadb.api.types import QueryResult
+from chromadb.test.conftest import COMPACTION_SLEEP, MEMBERLIST_SLEEP
 
 EPS = 1e-6
-MEMBERLIST_SLEEP = 5
-COMPACTION_SLEEP = 120
 
 
 def test_add(
