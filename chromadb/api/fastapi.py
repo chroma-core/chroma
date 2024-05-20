@@ -209,7 +209,16 @@ class FastAPI(ServerAPI):
         json_collections = json.loads(resp.text)
         collections = []
         for json_collection in json_collections:
-            collections.append(Collection(self, **json_collection))
+            model = CollectionModel(
+                id=json_collection["id"],
+                name=json_collection["name"],
+                metadata=json_collection["metadata"],
+                dimension=json_collection["dimension"],
+                tenant=json_collection["tenant"],
+                database=json_collection["database"],
+                version=json_collection["version"],
+            )
+            collections.append(Collection(self, model=model))
 
         return collections
 
