@@ -8,6 +8,7 @@ use crate::types::{
     update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -613,6 +614,26 @@ impl RecordSegmentReader<'_> {
             }
         };
         Ok(self.id_to_data.contains("", offset_id).await)
+    }
+
+    /// Returns all data in the record segment, sorted by
+    /// embedding id
+    pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
+        let mut data = Vec::new();
+        let max_size = self.user_id_to_id.count().await?;
+        for i in 0..max_size {
+            let res = self.user_id_to_id.get_at_index(i).await;
+            match res {
+                Ok((_, _, offset_id)) => {
+                    let data_record = self.id_to_data.get("", offset_id).await?;
+                    data.push(data_record);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(data)
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {

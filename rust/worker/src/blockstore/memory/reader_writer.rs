@@ -177,6 +177,18 @@ impl<
         Ok(values)
     }
 
+    pub(crate) fn get_at_index(
+        &'storage self,
+        index: usize,
+    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+        let res = V::get_at_index(&self.storage, index);
+        let (key, value) = match res {
+            Some((key, value)) => (key, value),
+            None => return Err(Box::new(BlockfileError::NotFoundError)),
+        };
+        Ok((key.prefix.as_str(), K::from(&key.key), value))
+    }
+
     pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         V::count(&self.storage)
     }
@@ -864,5 +876,31 @@ mod tests {
 
         let key_1 = reader.get("prefix", "key1");
         assert!(key_1.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_by_index() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("key{:04}", i);
+            let value = format!("value{:04}", i);
+            let _ = writer.set("prefix", key.as_str(), value.as_str());
+        }
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        for i in 0..n {
+            let expected_key = format!("key{:04}", i);
+            let expected_value = format!("value{:04}", i);
+            let (prefix, key, value) = reader.get_at_index(i).unwrap();
+            assert_eq!(prefix, "prefix");
+            assert_eq!(key, expected_key.as_str());
+            assert_eq!(value, expected_value.as_str());
+        }
     }
 }

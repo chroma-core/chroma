@@ -9,7 +9,6 @@ use super::{
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
-use arrow::error;
 use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
@@ -260,7 +259,7 @@ impl ArrowBlockfileWriter {
 
 pub(crate) struct ArrowBlockfileReader<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> {
     block_manager: BlockManager,
-    sparse_index: SparseIndex,
+    pub(super) sparse_index: SparseIndex,
     loaded_blocks: Mutex<HashMap<Uuid, Box<Block>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
     id: Uuid,
@@ -277,7 +276,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         }
     }
 
-    async fn get_block(&self, block_id: Uuid) -> Option<&Block> {
+    pub(super) async fn get_block(&self, block_id: Uuid) -> Option<&Block> {
         if !self.loaded_blocks.lock().contains_key(&block_id) {
             let block = self.block_manager.get(&block_id).await?;
             self.loaded_blocks.lock().insert(block_id, Box::new(block));
@@ -312,6 +311,43 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         match res {
             Some(value) => Ok(value),
             None => {
+                return Err(Box::new(BlockfileError::NotFoundError));
+            }
+        }
+    }
+
+    pub(crate) async fn get_at_index(
+        &'me self,
+        index: usize,
+    ) -> Result<(&'me str, K, V), Box<dyn ChromaError>> {
+        let mut block_offset = 0;
+        let mut block = None;
+        let sparse_index_len = self.sparse_index.len();
+        for i in 0..sparse_index_len {
+            let uuid = {
+                let sparse_index_forward = self.sparse_index.forward.lock();
+                *sparse_index_forward.iter().nth(i).unwrap().1
+            };
+            block = self.get_block(uuid).await;
+            match block {
+                Some(b) => {
+                    if block_offset + b.len() > index {
+                        break;
+                    }
+                    block_offset += b.len();
+                }
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+            }
+        }
+        let block = block.unwrap();
+        let res = block.get_at_index::<'me, K, V>(index - block_offset);
+        match res {
+            Some((prefix, key, value)) => {
+                return Ok((prefix, key, value));
+            }
+            _ => {
                 return Err(Box::new(BlockfileError::NotFoundError));
             }
         }
@@ -364,10 +400,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::{
-            arrow::{block, provider::ArrowBlockfileProvider},
-            provider::BlockfileProvider,
-        },
+        blockstore::arrow::provider::ArrowBlockfileProvider,
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,
@@ -785,6 +818,37 @@ mod tests {
                 let value = reader.get("key", &key).await.unwrap();
                 assert_eq!(value, format!("{:04}", i));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_at_index() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id_1 = writer.id();
+
+        let n = 1200;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        writer.commit::<&str, &Int32Array>().unwrap();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_1)
+            .await
+            .unwrap();
+
+        for i in 0..n {
+            let expected_key = format!("{:04}", i);
+            let expected_value = Int32Array::from(vec![i]);
+            let res = reader.get_at_index(i as usize).await.unwrap();
+            assert_eq!(res.0, "key");
+            assert_eq!(res.1, expected_key);
+            assert_eq!(res.2, expected_value);
         }
     }
 }

@@ -1,6 +1,6 @@
 use super::{
     delta::BlockDelta,
-    delta_storage::{BlockStorage, DataRecordStorage, Int32ArrayStorage},
+    delta_storage::{BlockStorage, DataRecordStorage},
 };
 use crate::{
     blockstore::{
@@ -10,16 +10,13 @@ use crate::{
     chroma_proto::UpdateMetadata,
     segment::DataRecord,
 };
-use arrow::array::{AsArray, BinaryArray};
+use arrow::array::BinaryArray;
 use arrow::{
-    array::{
-        Array, ArrayAccessor, FixedSizeBinaryArray, FixedSizeListArray, Float32Array, Int32Array,
-        ListArray, StringArray, StructArray,
-    },
+    array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray},
     util::bit_util,
 };
 use prost::Message;
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
