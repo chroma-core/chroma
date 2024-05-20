@@ -29,6 +29,7 @@ test("it should create a collection", async () => {
       id: collection.id,
       database: "default_database",
       tenant: "default_tenant",
+      version: 0,
     },
   ]).toEqual(expect.arrayContaining(collections));
   expect([{ name: "test2", metadata: null }]).not.toEqual(
