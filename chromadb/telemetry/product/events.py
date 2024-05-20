@@ -1,3 +1,4 @@
+import os
 from typing import cast, ClassVar
 from chromadb.telemetry.product import ProductTelemetryEvent
 from chromadb.utils.embedding_functions import get_builtins
@@ -7,6 +8,12 @@ class ClientStartEvent(ProductTelemetryEvent):
     def __init__(self) -> None:
         super().__init__()
 
+
+class ServerStartEvent(ProductTelemetryEvent):
+    is_cli: bool
+    def __init__(self) -> None:
+        super().__init__()
+        self.is_cli = os.environ.get("CHROMA_CLI", "False") == "True"
 
 class ClientCreateCollectionEvent(ProductTelemetryEvent):
     collection_uuid: str
