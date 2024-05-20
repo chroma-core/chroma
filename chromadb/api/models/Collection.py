@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
 import numpy as np
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
@@ -90,6 +90,10 @@ class Collection:
     @property
     def name(self) -> str:
         return self._model["name"]
+
+    @property
+    def metadata(self) -> CollectionMetadata:
+        return cast(CollectionMetadata, self._model["metadata"])
 
     @property
     def tenant(self) -> str:
