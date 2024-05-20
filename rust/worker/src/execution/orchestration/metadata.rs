@@ -575,7 +575,6 @@ impl MetadataQueryOrchestrator {
             let mut new_visibility = Vec::new();
             for (log_entry, _) in logs.iter() {
                 if query_id_set.contains(&log_entry.record.id) {
-                    println!("Query id: {} found in log", log_entry.record.id);
                     new_visibility.push(true);
                     remaining_query_ids.remove(&log_entry.record.id);
                 } else {
