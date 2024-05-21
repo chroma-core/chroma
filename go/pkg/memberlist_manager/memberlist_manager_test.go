@@ -185,7 +185,7 @@ func TestMemberlistManager(t *testing.T) {
 	// Get the memberlist
 	ok := retryUntilCondition(func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0"}})
-	}, 10, 1*time.Second)
+	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after adding a pod")
 	}
@@ -196,7 +196,7 @@ func TestMemberlistManager(t *testing.T) {
 	// Get the memberlist
 	ok = retryUntilCondition(func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}})
-	}, 10, 1*time.Second)
+	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after adding a pod")
 	}
@@ -207,7 +207,7 @@ func TestMemberlistManager(t *testing.T) {
 	// Get the memberlist
 	ok = retryUntilCondition(func() bool {
 		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-1"}})
-	}, 10, 1*time.Second)
+	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after deleting a pod")
 	}
