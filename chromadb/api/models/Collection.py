@@ -103,6 +103,26 @@ class Collection:
     def database(self) -> str:
         return self._model["database"]
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Collection):
+            return False
+        id_match = self.id == other.id
+        name_match = self.name == other.name
+        metadata_match = self.metadata == other.metadata
+        tenant_match = self.tenant == other.tenant
+        database_match = self.database == other.database
+        embedding_function_match = self._embedding_function == other._embedding_function
+        data_loader_match = self._data_loader == other._data_loader
+        return (
+            id_match
+            and name_match
+            and metadata_match
+            and tenant_match
+            and database_match
+            and embedding_function_match
+            and data_loader_match
+        )
+
     def get_model(self) -> CollectionModel:
         return self._model
 
