@@ -43,7 +43,9 @@ def main(
         google_api_key = os.environ["GOOGLE_API_KEY"]
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(api_key=google_api_key)
+    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
+        api_key=google_api_key
+    )
 
     # If the collection already exists, we just return it. This allows us to add more
     # data to an existing collection.

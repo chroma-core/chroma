@@ -1,0 +1,30 @@
+# TODO Once distributed chroma is operational, update this to update the
+# OSS helm chart we'll host. For now, just kick off the job which updates
+# hosted-chroma's version.
+
+name: 📦 Release Helm Chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'k8s/**'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Trigger Hosted Chroma Coordinator Release
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
+        script: |
+          const result = await github.rest.actions.createWorkflowDispatch({
+            owner: 'chroma-core',
+            repo: 'hosted-chroma',
+            workflow_id: 'copy-oss-helm.yaml',
+            ref: 'main'
+          })
+          console.log(result)

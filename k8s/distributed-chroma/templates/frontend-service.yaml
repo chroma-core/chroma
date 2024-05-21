@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-service
+  template:
+    metadata:
+      labels:
+        app: frontend-service
+    spec:
+      containers:
+        - name: frontend-service
+          image: "{{ .Values.frontendService.image.repository }}:{{ .Values.frontendService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: chroma
+              mountPath: /test
+          env:
+            - name: IS_PERSISTENT
+              {{ .Values.frontendService.isPersistent }}
+            - name: CHROMA_PRODUCER_IMPL
+              {{ .Values.frontendService.producerImpl }}
+            - name: CHROMA_CONSUMER_IMPL
+              {{ .Values.frontendService.consumerImpl }}
+            - name: CHROMA_SEGMENT_MANAGER_IMPL
+              {{ .Values.frontendService.segmentManagerImpl }}
+            - name: ALLOW_RESET
+              {{ .Values.frontendService.allowReset }}
+            - name: CHROMA_SYSDB_IMPL
+              {{ .Values.frontendService.sysdbImpl }}
+            - name: CHROMA_SERVER_GRPC_PORT
+              {{ .Values.frontendService.serverGrpcPort }}
+            - name: CHROMA_COORDINATOR_HOST
+              {{ .Values.frontendService.coordinatorHost }}
+            - name: CHROMA_SERVER_AUTHN_PROVIDER
+              {{ .Values.frontendService.authnProvider }}
+            - name: CHROMA_SERVER_AUTHZ_PROVIDER
+              {{ .Values.frontendService.authzProvider }}
+            - name: CHROMA_MEMBERLIST_PROVIDER_IMPL
+              {{ .Values.frontendService.memberlistProviderImpl }}
+            - name: CHROMA_LOGSERVICE_HOST
+              {{ .Values.frontendService.logServiceHost }}
+            - name: CHROMA_LOGSERVICE_PORT
+              {{ .Values.frontendService.logServicePort }}
+{{ .Values.frontendService.otherEnvConfig | nindent 12 }}
+      volumes:
+        - name: chroma
+          emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: server-port
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: frontend-service
+  type: ClusterIP

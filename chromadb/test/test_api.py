@@ -1,10 +1,13 @@
 # type: ignore
+import traceback
 import requests
+from urllib3.connectionpool import InsecureRequestWarning
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
+from chromadb.errors import InvalidCollectionException
 import chromadb.server.fastapi
 import pytest
 import tempfile
@@ -89,6 +92,8 @@ def test_persist_index_loading(api_fixture, request):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -116,6 +121,8 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -144,6 +151,8 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -216,6 +225,17 @@ def test_add(api):
     assert collection.count() == 2
 
 
+def test_collection_add_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.add(**batch_records)
+
+
 def test_get_or_create(api):
     api.reset()
 
@@ -258,8 +278,21 @@ def test_get_from_db(api):
     for key in records.keys():
         if (key in includes) or (key == "ids"):
             assert len(records[key]) == 2
+        elif key == "included":
+            assert set(records[key]) == set(includes)
         else:
             assert records[key] is None
+
+
+def test_collection_get_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.get()
 
 
 def test_reset_db(api):
@@ -288,6 +321,8 @@ def test_get_nearest_neighbors(api):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -300,6 +335,8 @@ def test_get_nearest_neighbors(api):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -312,6 +349,8 @@ def test_get_nearest_neighbors(api):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 2
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -334,12 +373,34 @@ def test_delete_with_index(api):
     collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
 
 
+def test_collection_delete_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.delete(ids=["id1"])
+
+
 def test_count(api):
     api.reset()
     collection = api.create_collection("testspace")
     assert collection.count() == 0
     collection.add(**batch_records)
     assert collection.count() == 2
+
+
+def test_collection_count_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.count()
 
 
 def test_modify(api):
@@ -351,6 +412,17 @@ def test_modify(api):
     assert collection.name == "testspace2"
 
 
+def test_collection_modify_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.modify(name="test2")
+
+
 def test_modify_error_on_existing_name(api):
     api.reset()
 
@@ -360,13 +432,15 @@ def test_modify_error_on_existing_name(api):
     with pytest.raises(Exception):
         c2.modify(name="testspace")
 
+
 def test_modify_warn_on_DF_change(api, caplog):
     api.reset()
-    
+
     collection = api.create_collection("testspace")
 
-    with pytest.raises(Exception, match="not supported") as e:
+    with pytest.raises(Exception, match="not supported"):
         collection.modify(metadata={"hnsw:space": "cosine"})
+
 
 def test_metadata_cru(api):
     api.reset()
@@ -433,6 +507,8 @@ def test_increment_index_on(api):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -485,8 +561,43 @@ def test_peek(api):
     for key in peek.keys():
         if key in ["embeddings", "documents", "metadatas"] or key == "ids":
             assert len(peek[key]) == 2
+        elif key == "included":
+            assert set(peek[key]) == set(["embeddings", "metadatas", "documents"])
         else:
             assert peek[key] is None
+
+
+def test_collection_peek_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.peek()
+
+
+def test_collection_query_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.query(query_texts=["test"])
+
+
+def test_collection_update_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.update(ids=["id1"], documents=["test"])
 
 
 # TEST METADATA AND METADATA FILTERING
@@ -511,8 +622,8 @@ def test_metadata_add_get_int_float(api):
     assert items["metadatas"][0]["int_value"] == 1
     assert items["metadatas"][0]["float_value"] == 1.001
     assert items["metadatas"][1]["int_value"] == 2
-    assert type(items["metadatas"][0]["int_value"]) == int
-    assert type(items["metadatas"][0]["float_value"]) == float
+    assert isinstance(items["metadatas"][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0]["float_value"], float)
 
 
 def test_metadata_add_query_int_float(api):
@@ -526,8 +637,8 @@ def test_metadata_add_query_int_float(api):
     assert items["metadatas"] is not None
     assert items["metadatas"][0][0]["int_value"] == 1
     assert items["metadatas"][0][0]["float_value"] == 1.001
-    assert type(items["metadatas"][0][0]["int_value"]) == int
-    assert type(items["metadatas"][0][0]["float_value"]) == float
+    assert isinstance(items["metadatas"][0][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0][0]["float_value"], float)
 
 
 def test_metadata_get_where_string(api):
@@ -990,22 +1101,26 @@ def test_query_include(api):
     collection = api.create_collection("test_query_include")
     collection.add(**records)
 
+    include = ["metadatas", "documents", "distances"]
     items = collection.query(
         query_embeddings=[0, 0, 0],
-        include=["metadatas", "documents", "distances"],
+        include=include,
         n_results=1,
     )
     assert items["embeddings"] is None
     assert items["ids"][0][0] == "id1"
     assert items["metadatas"][0][0]["int_value"] == 1
+    assert set(items["included"]) == set(include)
 
+    include = ["embeddings", "documents", "distances"]
     items = collection.query(
         query_embeddings=[0, 0, 0],
-        include=["embeddings", "documents", "distances"],
+        include=include,
         n_results=1,
     )
     assert items["metadatas"] is None
     assert items["ids"][0][0] == "id1"
+    assert set(items["included"]) == set(include)
 
     items = collection.query(
         query_embeddings=[[0, 0, 0], [1, 2, 1.2]],
@@ -1025,22 +1140,27 @@ def test_get_include(api):
     collection = api.create_collection("test_get_include")
     collection.add(**records)
 
-    items = collection.get(include=["metadatas", "documents"], where={"int_value": 1})
+    include = ["metadatas", "documents"]
+    items = collection.get(include=include, where={"int_value": 1})
     assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
     assert items["metadatas"][0]["int_value"] == 1
     assert items["documents"][0] == "this document is first"
+    assert set(items["included"]) == set(include)
 
-    items = collection.get(include=["embeddings", "documents"])
+    include = ["embeddings", "documents"]
+    items = collection.get(include=include)
     assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
     assert approx_equal(items["embeddings"][1][0], 1.2)
+    assert set(items["included"]) == set(include)
 
     items = collection.get(include=[])
     assert items["documents"] is None
     assert items["metadatas"] is None
     assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
+    assert items["included"] == []
 
     with pytest.raises(ValueError, match="include"):
         items = collection.get(include=["metadatas", "undefined"])
@@ -1168,6 +1288,8 @@ def test_persist_index_loading_params(api, request):
     for key in nn.keys():
         if (key in includes) or (key == "ids"):
             assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
         else:
             assert nn[key] is None
 
@@ -1286,6 +1408,8 @@ def test_get_nearest_neighbors_where_n_results_more_than_element(api):
     for key in results.keys():
         if key in includes or key == "ids":
             assert len(results[key][0]) == 2
+        elif key == "included":
+            assert set(results[key]) == set(includes)
         else:
             assert results[key] is None
 
@@ -1392,6 +1516,17 @@ def test_upsert(api):
     assert get_result["documents"][0] is None
 
 
+def test_collection_upsert_with_invalid_collection_throws(api):
+    api.reset()
+    collection = api.create_collection("test")
+    api.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.upsert(**initial_records)
+
+
 # test to make sure add, query, update, upsert error on invalid embeddings input
 
 
@@ -1437,6 +1572,7 @@ def test_invalid_embeddings(api):
 
 # test to make sure update shows exception for bad dimensionality
 
+
 def test_dimensionality_exception_update(api):
     api.reset()
     collection = api.create_collection("test_dimensionality_update_exception")
@@ -1446,7 +1582,9 @@ def test_dimensionality_exception_update(api):
         collection.update(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
 
+
 # test to make sure upsert shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_upsert(api):
     api.reset()
@@ -1456,3 +1594,39 @@ def test_dimensionality_exception_upsert(api):
     with pytest.raises(Exception) as e:
         collection.upsert(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
+
+
+def test_ssl_self_signed(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
+    client_ssl.heartbeat()
+
+
+def test_ssl_self_signed_without_ssl_verify(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
+    client_ssl.heartbeat()
+    _port = client_ssl._server._settings.chroma_server_http_port
+    with pytest.raises(ValueError) as e:
+        chromadb.HttpClient(ssl=True, port=_port)
+    stack_trace = traceback.format_exception(
+        type(e.value), e.value, e.value.__traceback__
+    )
+    client_ssl.clear_system_cache()
+    assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
+
+
+def test_ssl_self_signed_with_verify_false(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
+    client_ssl.heartbeat()
+    _port = client_ssl._server._settings.chroma_server_http_port
+    with pytest.warns(InsecureRequestWarning) as record:
+        client = chromadb.HttpClient(
+            ssl=True,
+            port=_port,
+            settings=chromadb.Settings(chroma_server_ssl_verify=False),
+        )
+        client.heartbeat()
+    client_ssl.clear_system_cache()
+    assert "Unverified HTTPS request" in str(record[0].message)

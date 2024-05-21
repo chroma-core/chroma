@@ -1,0 +1,25 @@
+name: Rust tests
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        working-directory: chroma
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: chroma
+      - name: Setup
+        uses: ./chroma/.github/actions/rust
+      - name: Build
+        run: cargo build --verbose
+      - name: Test
+        run: cargo test --verbose

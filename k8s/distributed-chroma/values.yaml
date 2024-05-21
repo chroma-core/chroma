@@ -1,0 +1,83 @@
+# Default values for distributed-chroma.
+# Strongly prefer single quotes.
+
+namespace: 'chroma'
+
+frontendService:
+  image:
+    repository: 'local'
+    tag: 'frontend-service'
+
+  # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
+  # populated from secrets or configMaps. So we let consumers fill these directly.
+  # TODO we could maybe have mutually exclusive pieces of config, e.g. isPersistentValue
+  # and isPersistentFromConfigMap or something.
+  isPersistent: 'value: "TRUE"'
+  producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
+  allowReset: 'value: "TRUE"'
+  sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
+  serverGrpcPort: 'value: "50051"'
+  coordinatorHost: 'value: "sysdb.chroma"'
+  authProvider: 'value: ""'
+  authCredentialsProvider: 'value: ""'
+  authzProvider: 'value: ""'
+  authzConfigProvider: 'value: ""'
+  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"'
+  logServiceHost: 'value: "logservice.chroma"'
+  logServicePort: 'value: "50051"'
+  otherEnvConfig: |
+      - name: CHROMA_OTEL_COLLECTION_ENDPOINT
+        value: "http://jaeger:4317"
+      - name: CHROMA_OTEL_GRANULARITY
+        value: all
+sysdb:
+  image:
+    repository: 'local'
+    tag: 'sysdb'
+  replicaCount: 1
+  env:
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "jaeger:4317"'
+  flags:
+
+logService:
+  image:
+    repository: 'local'
+    tag: 'log-service'
+  env:
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "jaeger:4317"'
+  flags:
+
+queryService:
+  image:
+    repository: 'local'
+    tag: 'query-service'
+  env:
+
+compactionService:
+  image:
+    repository: 'local'
+    tag: 'compaction-service'
+  env:
+
+sysdbMigration:
+  image:
+    repository: 'local'
+    tag: 'sysdb-migration'
+  username: chroma
+  password: chroma
+  netloc: postgres
+  port: 5432
+  dbName: sysdb
+  sslmode: disable
+
+logServiceMigration:
+  image:
+    repository: 'local'
+    tag: 'logservice-migration'
+  env:
+  - name: CHROMA_DB_LOG_URL
+    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'

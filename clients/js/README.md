@@ -13,7 +13,7 @@ This package gives you a JS/TS interface to talk to a backend Chroma DB over RES
 
 ## Getting started
 
-Chroma needs to be running in order for this client to talk to it. Please see the [🧪 Usage Guide](https://docs.trychroma.com/usage-guide) to learn how to quickly stand this up.
+Chroma needs to be running in order for this client to talk to it. Please see the [🧪 Usage Guide](https://docs.trychroma.com/guides) to learn how to quickly stand this up.
 
 ## Small example
 
@@ -41,4 +41,3 @@ const queryData = await collection.query({
 ## License
 
 Apache 2.0
-

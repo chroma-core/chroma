@@ -1,9 +1,12 @@
 from typing import Optional
+
 from typing_extensions import Annotated
 import typer
 import uvicorn
 import os
 import webbrowser
+
+from chromadb.cli.utils import set_log_file_path
 
 app = typer.Typer()
 
@@ -31,6 +34,9 @@ def run(
     host: Annotated[
         Optional[str], typer.Option(help="The host to listen to. Default: localhost")
     ] = "localhost",
+    log_path: Annotated[
+        Optional[str], typer.Option(help="The path to the log file.")
+    ] = "chroma.log",
     port: int = typer.Option(8000, help="The port to run the server on."),
     test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
@@ -54,19 +60,20 @@ def run(
     os.environ["IS_PERSISTENT"] = "True"
     os.environ["PERSIST_DIRECTORY"] = path
     os.environ["CHROMA_SERVER_NOFILE"] = "65535"
+    os.environ["CHROMA_CLI"] = "True"
 
     # get the path where chromadb is installed
     chromadb_path = os.path.dirname(os.path.realpath(__file__))
 
     # this is the path of the CLI, we want to move up one directory
     chromadb_path = os.path.dirname(chromadb_path)
-
+    log_config = set_log_file_path(f"{chromadb_path}/log_config.yml", f"{log_path}")
     config = {
         "app": "chromadb.app:app",
         "host": host,
         "port": port,
         "workers": 1,
-        "log_config": f"{chromadb_path}/log_config.yml",
+        "log_config": log_config,  # Pass the modified log_config dictionary
         "timeout_keep_alive": 30,
     }
 

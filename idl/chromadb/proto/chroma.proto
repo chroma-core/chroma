@@ -2,19 +2,14 @@ syntax = "proto3";
 
 package chroma;
 
-option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 message Status {
   string reason = 1;
   int32 code = 2; // TODO: What is the enum of this code?
 }
 
-message ChromaResponse {
-  Status status = 1;
-}
-
 // Types here should mirror chromadb/types.py
-
 enum Operation {
     ADD = 0;
     UPDATE = 1;
@@ -36,27 +31,32 @@ message Vector {
 enum SegmentScope {
     VECTOR = 0;
     METADATA = 1;
+    RECORD = 2;
+    SQLITE = 3;
+}
+
+message FilePaths {
+    repeated string paths = 1;
 }
 
 message Segment {
     string id = 1;
     string type = 2;
     SegmentScope scope = 3;
-    optional string topic = 4; // TODO should channel <> segment binding exist here?
-    // If a segment has a collection, it implies that this segment implements the full
-    // collection and can be used to service queries (for it's given scope.)
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
+    map<string,FilePaths> file_paths = 7;
 }
 
 message Collection {
   string id = 1;
   string name = 2;
-  string topic = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
   string tenant = 6;
   string database = 7;
+  int64 log_position = 8;
+  int32 version = 9;
 }
 
 message Database {
@@ -81,29 +81,183 @@ message UpdateMetadata {
     map<string, UpdateMetadataValue> metadata = 1;
 }
 
-message SubmitEmbeddingRecord {
+// Represents an operation the user submits
+message OperationRecord {
     string id = 1;
     optional Vector vector = 2;
     optional UpdateMetadata metadata = 3;
     Operation operation = 4;
-    string collection_id = 5;
 }
 
-message VectorEmbeddingRecord {
+/* Metadata Reader Interface */
+
+service MetadataReader {
+    rpc QueryMetadata(QueryMetadataRequest) returns (QueryMetadataResponse) {}
+    rpc CountRecords(CountRecordsRequest) returns (CountRecordsResponse) {}
+}
+
+message CountRecordsRequest {
+    string segment_id = 1;
+}
+
+// TODO: Add error propagation in the response.
+message CountRecordsResponse {
+    uint32 count = 1;
+}
+
+message QueryMetadataRequest {
+    string segment_id = 1;
+    Where where = 2;
+    WhereDocument where_document = 3;
+    repeated string ids = 4;
+    optional int32 limit = 5;
+    optional int32 offset = 6;
+}
+
+message QueryMetadataResponse {
+    repeated MetadataEmbeddingRecord records = 1;
+}
+
+message MetadataEmbeddingRecord {
     string id = 1;
-    bytes seq_id = 2;
-    Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
+    UpdateMetadata metadata = 2;
 }
 
-message VectorQueryResult {
-    string id = 1;
-    bytes seq_id = 2;
-    double distance = 3;
-    optional Vector vector = 4;
+// A `WhereDocument` clause for filtering metadata. A `WhereDocument` clause is a tree of
+// `WhereDocument` clauses, where each node is exactly one of:
+// - A leaf node representing a `$contains` or `$not_contains` query directly.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+message WhereDocument {
+    oneof where_document {
+        DirectWhereDocument direct = 1;
+        WhereDocumentChildren children = 2;
+    }
 }
 
-message VectorQueryResults {
-    repeated VectorQueryResult results = 1;
+// A leaf-node `WhereDocument` clause may compare a document to a single value.
+message DirectWhereDocument {
+    string document = 1;
+    WhereDocumentOperator operator = 2;
+}
+
+// Types of operators for `WhereDocument` clauses. A `WhereDocument` clause can
+// either require that a document contains a value or that it does not contain
+// a value.
+enum WhereDocumentOperator {
+    CONTAINS = 0;
+    NOT_CONTAINS = 1;
+}
+
+// A branch-node `WhereDocument` node has a list of children.
+message WhereDocumentChildren {
+    repeated WhereDocument children = 1;
+    BooleanOperator operator = 2;
+}
+
+// A `Where` clause for filtering metadata. A `Where` clause is a tree of
+// `Where` clauses, where each node is exactly one of:
+// - A leaf node representing a direct comparison between a metadata key and a
+//   value or list of values.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+message Where {
+    oneof where {
+        DirectComparison direct_comparison = 1;
+        WhereChildren children = 2;
+    }
+}
+
+// A leaf-node `Where` clause.
+message DirectComparison {
+    string key = 1;
+    oneof comparison {
+        SingleStringComparison single_string_operand = 2;
+        StringListComparison string_list_operand = 3;
+        SingleIntComparison single_int_operand = 4;
+        IntListComparison int_list_operand = 5;
+        SingleDoubleComparison single_double_operand = 6;
+        DoubleListComparison double_list_operand = 7;
+    }
+}
+
+// A branch-node `Where` clause has a list of children and a specification
+// for how to combine them.
+message WhereChildren {
+    repeated Where children = 1;
+    BooleanOperator operator = 2;
+}
+
+// A `Where` clause may have a list of children. This enum specifies how the
+// children should be combined.
+enum BooleanOperator {
+    AND = 0;
+    OR = 1;
+}
+
+// A `Where` clause may have a list of allowed or disallowed values. This enum
+// specifies which type of list it is.
+enum ListOperator {
+    IN = 0;
+    NIN = 1;
+}
+
+// A leaf-node `Where` clause may compare a string, int, or float to a single
+// value of the same type. These comparators apply to all three of those types.
+enum GenericComparator {
+    EQ = 0;
+    NE = 1;
+}
+
+// Used when a leaf-node `Where` clause compares an int or float to a single
+// value of the same type.
+enum NumberComparator {
+    GT = 0;
+    GTE = 1;
+    LT = 2;
+    LTE = 3;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a list of strings.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message StringListComparison {
+    repeated string values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a single string.
+message SingleStringComparison {
+    string value = 1;
+    GenericComparator comparator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a list of ints.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message IntListComparison {
+    repeated int64 values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a single int.
+message SingleIntComparison {
+    int64 value = 1;
+    oneof comparator {
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
+    }
+}
+
+// Used when a leaf-node `Where` clause compares a float to a list of floats.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message DoubleListComparison {
+    repeated double values = 1;
+    ListOperator list_operator = 2;
+}
+
+message SingleDoubleComparison {
+    double value = 1;
+    oneof comparator {
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
+    }
 }
 
 /* Vector Reader Interface */
@@ -122,6 +276,11 @@ message GetVectorsResponse {
     repeated VectorEmbeddingRecord records = 1;
 }
 
+message VectorEmbeddingRecord {
+    string id = 1;
+    Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
+}
+
 message QueryVectorsRequest {
     repeated Vector vectors = 1;
     int32 k = 2;
@@ -133,4 +292,14 @@ message QueryVectorsRequest {
 
 message QueryVectorsResponse {
     repeated VectorQueryResults results = 1;
+}
+
+message VectorQueryResults {
+    repeated VectorQueryResult results = 1;
+}
+
+message VectorQueryResult {
+    string id = 1;
+    float distance = 3;
+    optional Vector vector = 4;
 }

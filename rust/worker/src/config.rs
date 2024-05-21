@@ -1,7 +1,10 @@
+use async_trait::async_trait;
 use figment::providers::{Env, Format, Serialized, Yaml};
 use serde::Deserialize;
 
-const DEFAULT_CONFIG_PATH: &str = "chroma_config.yaml";
+use crate::errors::ChromaError;
+
+const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 const ENV_PREFIX: &str = "CHROMA_";
 
 #[derive(Deserialize)]
@@ -13,10 +16,11 @@ const ENV_PREFIX: &str = "CHROMA_";
 /// variables take precedence over values in the YAML file.
 /// By default, it is read from the current working directory,
 /// with the filename chroma_config.yaml.
-struct RootConfig {
+pub(crate) struct RootConfig {
     // The root config object wraps the worker config object so that
     // we can share the same config file between multiple services.
-    worker: WorkerConfig,
+    pub query_service: QueryServiceConfig,
+    pub compaction_service: CompactionServiceConfig,
 }
 
 impl RootConfig {
@@ -34,7 +38,7 @@ impl RootConfig {
     /// The default location is the current working directory, with the filename chroma_config.yaml.
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    pub fn load() -> Self {
+    pub(crate) fn load() -> Self {
         return Self::load_from_path(DEFAULT_CONFIG_PATH);
     }
 
@@ -53,12 +57,11 @@ impl RootConfig {
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    pub fn load_from_path(path: &str) -> Self {
+    pub(crate) fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
-            k if k == "num_indexing_threads" => k.into(),
-            k if k == "my_ip" => k.into(),
+            k if k == "my_member_id" => k.into(),
             k => k.as_str().replace("__", ".").into(),
         }));
         if std::path::Path::new(path).exists() {
@@ -66,10 +69,10 @@ impl RootConfig {
         }
         // Apply defaults - this seems to be the best way to do it.
         // https://github.com/SergioBenitez/Figment/issues/77#issuecomment-1642490298
-        f = f.join(Serialized::default(
-            "worker.num_indexing_threads",
-            num_cpus::get(),
-        ));
+        // f = f.join(Serialized::default(
+        //     "worker.num_indexing_threads",
+        //     num_cpus::get(),
+        // ));
         let res = f.extract();
         match res {
             Ok(config) => return config,
@@ -82,19 +85,49 @@ impl RootConfig {
 /// # Description
 /// The primary config for the worker service.
 /// ## Description of parameters
-/// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided
-/// - num_indexing_threads: The number of indexing threads to use. If not provided, defaults to the number of cores on the machine.
+/// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
+/// - assignment_policy: The assignment policy to use. Must be provided.
 /// # Notes
 /// In order to set the enviroment variables, you must prefix them with CHROMA_WORKER__<FIELD_NAME>.
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
-pub(crate) struct WorkerConfig {
-    pub(crate) my_ip: String,
-    pub(crate) num_indexing_threads: u32,
-    pub(crate) pulsar_tenant: String,
-    pub(crate) pulsar_namespace: String,
+pub(crate) struct QueryServiceConfig {
+    pub(crate) service_name: String,
+    pub(crate) otel_endpoint: String,
+    pub(crate) my_member_id: String,
+    pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
+    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
+    pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) log: crate::log::config::LogConfig,
+    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+}
+
+#[derive(Deserialize)]
+/// # Description
+/// The primary config for the compaction service.
+/// ## Description of parameters
+/// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
+/// - assignment_policy: The assignment policy to use. Must be provided.
+/// # Notes
+/// In order to set the enviroment variables, you must prefix them with CHROMA_COMPACTOR__<FIELD_NAME>.
+/// For example, to set my_ip, you would set CHROMA_COMPACTOR__MY_IP.
+/// Each submodule that needs to be configured from the config object should implement the Configurable trait and
+/// have its own field in this struct for its Config struct.
+pub(crate) struct CompactionServiceConfig {
+    pub(crate) service_name: String,
+    pub(crate) otel_endpoint: String,
+    pub(crate) my_member_id: String,
+    pub(crate) my_port: u16,
+    pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
+    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
+    pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) log: crate::log::config::LogConfig,
+    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub(crate) compactor: crate::compactor::config::CompactorConfig,
 }
 
 /// # Description
@@ -102,8 +135,11 @@ pub(crate) struct WorkerConfig {
 /// # Notes
 /// This trait is used to configure structs from the config object.
 /// Components that need to be configured from the config object should implement this trait.
-pub(crate) trait Configurable {
-    fn from_config(config: WorkerConfig) -> Self;
+#[async_trait]
+pub(crate) trait Configurable<T> {
+    async fn try_from_config(worker_config: &T) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
 }
 
 #[cfg(test)]
@@ -117,21 +153,80 @@ mod tests {
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
-                worker:
-                    my_ip: "192.0.0.1"
-                    num_indexing_threads: 4
-                    pulsar_tenant: "public"
-                    pulsar_namespace: "default"
+                query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "query-service-0"
+                    my_port: 50051
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "query-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+
+                compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "compaction-service-0"
+                    my_port: 50051
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "compaction-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+                    compactor:
+                        compaction_manager_queue_size: 1000
+                        max_concurrent_jobs: 100
+                        compaction_interval_sec: 60
                 "#,
             );
             let config = RootConfig::load();
-            assert_eq!(config.worker.my_ip, "192.0.0.1");
-            assert_eq!(config.worker.num_indexing_threads, 4);
-            assert_eq!(config.worker.pulsar_tenant, "public");
-            assert_eq!(config.worker.pulsar_namespace, "default");
+            assert_eq!(config.query_service.my_member_id, "query-service-0");
+            assert_eq!(config.query_service.my_port, 50051);
+
+            assert_eq!(
+                config.compaction_service.my_member_id,
+                "compaction-service-0"
+            );
+            assert_eq!(config.compaction_service.my_port, 50051);
             Ok(())
         });
     }
@@ -142,21 +237,80 @@ mod tests {
             let _ = jail.create_file(
                 "random_path.yaml",
                 r#"
-                worker:
-                    my_ip: "192.0.0.1"
-                    num_indexing_threads: 4
-                    pulsar_tenant: "public"
-                    pulsar_namespace: "default"
+                query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "query-service-0"
+                    my_port: 50051
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "query-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+
+                compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "compaction-service-0"
+                    my_port: 50051
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "compaction-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+                    compactor:
+                        compaction_manager_queue_size: 1000
+                        max_concurrent_jobs: 100
+                        compaction_interval_sec: 60
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
-            assert_eq!(config.worker.my_ip, "192.0.0.1");
-            assert_eq!(config.worker.num_indexing_threads, 4);
-            assert_eq!(config.worker.pulsar_tenant, "public");
-            assert_eq!(config.worker.pulsar_namespace, "default");
+            assert_eq!(config.query_service.my_member_id, "query-service-0");
+            assert_eq!(config.query_service.my_port, 50051);
+
+            assert_eq!(
+                config.compaction_service.my_member_id,
+                "compaction-service-0"
+            );
+            assert_eq!(config.compaction_service.my_port, 50051);
             Ok(())
         });
     }
@@ -168,8 +322,10 @@ mod tests {
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
-                worker:
-                    num_indexing_threads: 4
+                query_service:
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
                 "#,
             );
             let _ = RootConfig::load();
@@ -183,18 +339,77 @@ mod tests {
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
-                worker:
-                    my_ip: "192.0.0.1"
-                    pulsar_tenant: "public"
-                    pulsar_namespace: "default"
+                query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "query-service-0"
+                    my_port: 50051
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "query-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+
+                compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "compaction-service-0"
+                    my_port: 50051
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "compaction-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+                    compactor:
+                        compaction_manager_queue_size: 1000
+                        max_concurrent_jobs: 100
+                        compaction_interval_sec: 60
                 "#,
             );
             let config = RootConfig::load();
-            assert_eq!(config.worker.my_ip, "192.0.0.1");
-            assert_eq!(config.worker.num_indexing_threads, num_cpus::get() as u32);
+            assert_eq!(config.query_service.my_member_id, "query-service-0");
+            assert_eq!(
+                config.compaction_service.my_member_id,
+                "compaction-service-0"
+            );
             Ok(())
         });
     }
@@ -202,24 +417,100 @@ mod tests {
     #[test]
     fn test_config_with_env_override() {
         Jail::expect_with(|jail| {
-            let _ = jail.set_env("CHROMA_WORKER__MY_IP", "192.0.0.1");
-            let _ = jail.set_env("CHROMA_WORKER__PULSAR_TENANT", "A");
-            let _ = jail.set_env("CHROMA_WORKER__PULSAR_NAMESPACE", "B");
+            let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
+            let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
+            let _ = jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID",
+                "compaction-service-0",
+            );
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
+            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
-                worker:
+                query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "query-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    storage:
+                        S3:
+                            bucket: "chroma"
+                            credentials: Minio
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+
+                compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "compaction-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+                    compactor:
+                        compaction_manager_queue_size: 1000
+                        max_concurrent_jobs: 100
+                        compaction_interval_sec: 60
                 "#,
             );
             let config = RootConfig::load();
-            assert_eq!(config.worker.my_ip, "192.0.0.1");
-            assert_eq!(config.worker.num_indexing_threads, num_cpus::get() as u32);
-            assert_eq!(config.worker.pulsar_tenant, "A");
-            assert_eq!(config.worker.pulsar_namespace, "B");
+            assert_eq!(config.query_service.my_member_id, "query-service-0");
+            assert_eq!(config.query_service.my_port, 50051);
+            assert_eq!(
+                config.compaction_service.my_member_id,
+                "compaction-service-0"
+            );
+            assert_eq!(config.compaction_service.my_port, 50051);
+            match &config.compaction_service.storage {
+                crate::storage::config::StorageConfig::S3(s) => {
+                    assert_eq!(s.bucket, "buckets!");
+                    assert_eq!(
+                        s.credentials,
+                        crate::storage::config::S3CredentialsConfig::AWS
+                    );
+                }
+                _ => panic!("Invalid storage config"),
+            }
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_default_config_path() {
+        // Sanity check that root config loads from default path correctly
+        let _ = RootConfig::load();
     }
 }

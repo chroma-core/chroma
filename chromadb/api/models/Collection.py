@@ -382,7 +382,8 @@ class Collection(BaseModel):
             validate_metadata(metadata)
             if "hnsw:space" in metadata:
                 raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently.")
+                    "Changing the distance function of a collection once it is created is not supported currently."
+                )
 
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
@@ -628,6 +629,6 @@ class Collection(BaseModel):
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
-                "https://docs.trychroma.com/embeddings"
+                "https://docs.trychroma.com/guides/embeddings"
             )
         return self._embedding_function(input=input)

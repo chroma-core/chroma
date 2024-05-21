@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.7.3",
+  "version": "1.8.1",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -58,11 +58,12 @@
     "db:clean": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test.yml down --volumes",
     "db:cleanauth": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test-auth.yml down --volumes",
     "db:run": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test.yml up --detach && sleep 5",
-    "db:run-auth-basic": "cd ../.. && docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd && echo \"CHROMA_SERVER_AUTH_CREDENTIALS_FILE=/chroma/server.htpasswd\\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider\\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.basic.BasicAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
-    "db:run-auth-token": "cd ../.. && echo \"CHROMA_SERVER_AUTH_CREDENTIALS=test-token\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
-    "db:run-auth-xtoken": "cd ../.. && echo \"CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=X_CHROMA_TOKEN\nCHROMA_SERVER_AUTH_CREDENTIALS=test-token\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
+    "db:run-auth-basic": "cd ../.. && docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd && echo \"CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=/chroma/server.htpasswd\\n\\nCHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.basic_authn.BasicAuthenticationServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
+    "db:run-auth-token": "cd ../.. && echo \"CHROMA_SERVER_AUTHN_CREDENTIALS=test-token\\nCHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
+    "db:run-auth-xtoken": "cd ../.. && echo \"CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=X_CHROMA_TOKEN\\nCHROMA_SERVER_AUTHN_CREDENTIALS=test-token\\nCHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
     "prebuild": "rimraf dist",
     "build": "tsup",
+    "watch": "tsup --watch",
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
     "release": "run-s build test:run && npm publish",
@@ -72,8 +73,8 @@
     "node": ">=14.17.0"
   },
   "dependencies": {
-    "isomorphic-fetch": "^3.0.0",
-    "cliui": "^8.0.1"
+    "cliui": "^8.0.1",
+    "isomorphic-fetch": "^3.0.0"
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",

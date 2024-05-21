@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from typing import Dict, Type
 from overrides import overrides, EnforceOverrides
-from fastapi.responses import JSONResponse
 
 
 class ChromaError(Exception, EnforceOverrides):
@@ -17,12 +16,6 @@ class ChromaError(Exception, EnforceOverrides):
     def name(cls) -> str:
         """Return the error name"""
         pass
-
-    def fastapi_json_response(self) -> JSONResponse:
-        return JSONResponse(
-            content={"error": self.name(), "message": self.message()},
-            status_code=self.code(),
-        )
 
 
 class InvalidDimensionException(ChromaError):

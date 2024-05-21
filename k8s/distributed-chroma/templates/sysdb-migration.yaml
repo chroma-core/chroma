@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sysdb-migration
+  namespace: {{ .Values.namespace }}
+  annotations:
+  {{ range .Values.sysdbMigration.annotations }}
+    {{ .name }}: {{ .value }}
+  {{ end }}
+spec:
+  template:
+    metadata:
+      labels:
+        app: sysdb-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - command:
+            - "/bin/sh"
+            - "-c"
+            - "atlas migrate apply --url postgres://{{ .Values.sysdbMigration.username }}:{{ .Values.sysdbMigration.password }}@{{ .Values.sysdbMigration.netloc }}:{{ .Values.sysdbMigration.port }}/{{ .Values.sysdbMigration.dbName }}?sslmode={{ .Values.sysdbMigration.sslmode }}"
+          image: "{{ .Values.sysdbMigration.image.repository }}:{{ .Values.sysdbMigration.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          name: migration
+          env:
+            {{ range .Values.sysdb.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+
+---

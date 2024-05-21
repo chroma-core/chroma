@@ -1,6 +1,6 @@
 import argparse
 import os
-from typing import List, Dict
+from typing import List
 
 import google.generativeai as genai
 import chromadb
@@ -78,7 +78,9 @@ def main(
     client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(api_key=google_api_key, task_type="RETRIEVAL_QUERY")
+    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
+        api_key=google_api_key, task_type="RETRIEVAL_QUERY"
+    )
 
     # Get the collection.
     collection = client.get_collection(

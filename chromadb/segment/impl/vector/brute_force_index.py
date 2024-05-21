@@ -2,7 +2,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 import numpy as np
 import numpy.typing as npt
 from chromadb.types import (
-    EmbeddingRecord,
+    LogRecord,
     VectorEmbeddingRecord,
     VectorQuery,
     VectorQueryResult,
@@ -59,7 +59,7 @@ class BruteForceIndex:
         self.free_indices = list(range(self.size))
         self.vectors.fill(0)
 
-    def upsert(self, records: List[EmbeddingRecord]) -> None:
+    def upsert(self, records: List[LogRecord]) -> None:
         if len(records) + len(self) > self.size:
             raise Exception(
                 "Index with capacity {} and {} current entries cannot add {} records".format(
@@ -68,9 +68,9 @@ class BruteForceIndex:
             )
 
         for i, record in enumerate(records):
-            id = record["id"]
-            vector = record["embedding"]
-            self.id_to_seq_id[id] = record["seq_id"]
+            id = record["operation_record"]["id"]
+            vector = record["operation_record"]["embedding"]
+            self.id_to_seq_id[id] = record["log_offset"]
             if id in self.deleted_ids:
                 self.deleted_ids.remove(id)
 
@@ -86,9 +86,9 @@ class BruteForceIndex:
                 self.index_to_id[next_index] = id
                 self.vectors[next_index] = vector
 
-    def delete(self, records: List[EmbeddingRecord]) -> None:
+    def delete(self, records: List[LogRecord]) -> None:
         for record in records:
-            id = record["id"]
+            id = record["operation_record"]["id"]
             if id in self.id_to_index:
                 index = self.id_to_index[id]
                 self.deleted_ids.add(id)
@@ -113,7 +113,6 @@ class BruteForceIndex:
             VectorEmbeddingRecord(
                 id=id,
                 embedding=self.vectors[self.id_to_index[id]].tolist(),
-                seq_id=self.id_to_seq_id[id],
             )
             for id in target_ids
         ]
@@ -145,7 +144,6 @@ class BruteForceIndex:
                             VectorQueryResult(
                                 id=id,
                                 distance=distances[i][j].item(),
-                                seq_id=self.id_to_seq_id[id],
                                 embedding=self.vectors[j].tolist(),
                             )
                         )

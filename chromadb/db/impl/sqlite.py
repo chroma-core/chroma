@@ -34,6 +34,7 @@ class TxWrapper(base.TxWrapper):
     @override
     def __enter__(self) -> base.Cursor:
         if len(self._tx_stack.stack) == 0:
+            self._conn.execute("PRAGMA case_sensitive_like = ON")
             self._conn.execute("BEGIN;")
         self._tx_stack.stack.append(self)
         return self._conn.cursor()  # type: ignore
