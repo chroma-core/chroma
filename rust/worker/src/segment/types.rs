@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
-use crate::errors::ChromaError;
+use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
-    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata, Operation,
-    OperationRecord,
+    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata,
+    MetadataValueConversionError, Operation, OperationRecord,
 };
 use async_trait::async_trait;
+use thiserror::Error;
 
 use super::record_segment::RecordSegmentReader;
 
@@ -29,6 +30,26 @@ impl<'a> MaterializedLogRecord<'a> {
             segment_offset_id,
             log_record,
             materialized_record,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum LogMaterializerV2Error {
+    #[error("Error materializing document metadata {0}")]
+    MetadataMaterializationError(#[from] MetadataValueConversionError),
+    #[error("Error materializing document embedding")]
+    EmbeddingMaterializationError,
+    #[error("Error reading record segment {0}")]
+    RecordSegmentError(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for LogMaterializerV2Error {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            LogMaterializerV2Error::MetadataMaterializationError(e) => e.code(),
+            LogMaterializerV2Error::EmbeddingMaterializationError => ErrorCodes::Internal,
+            LogMaterializerV2Error::RecordSegmentError(e) => e.code(),
         }
     }
 }
@@ -70,8 +91,10 @@ pub(crate) struct MaterializedLogRecordV2<'a> {
     final_embedding: Option<&'a [f32]>,
 }
 
-impl<'a> MaterializedLogRecordV2<'a> {
-    pub(crate) fn from_data_record(data_record: DataRecord<'a>, offset_id: u32) -> Self {
+impl<'a> From<(DataRecord<'a>, u32)> for MaterializedLogRecordV2<'a> {
+    fn from(data_record_info: (DataRecord<'a>, u32)) -> Self {
+        let data_record = data_record_info.0;
+        let offset_id = data_record_info.1;
         Self {
             data_record: Some(data_record),
             offset_id,
@@ -82,20 +105,22 @@ impl<'a> MaterializedLogRecordV2<'a> {
             final_embedding: None,
         }
     }
+}
 
-    pub(crate) fn from_operation_record(
-        log_record: &'a OperationRecord,
-        offset_id: u32,
-        user_id: &'a str,
-    ) -> Self {
+impl<'a> TryFrom<(&'a OperationRecord, u32, &'a str)> for MaterializedLogRecordV2<'a> {
+    type Error = LogMaterializerV2Error;
+
+    fn try_from(
+        log_operation_info: (&'a OperationRecord, u32, &'a str),
+    ) -> Result<Self, Self::Error> {
+        let log_record = log_operation_info.0;
+        let offset_id = log_operation_info.1;
+        let user_id = log_operation_info.2;
         let metadata = match &log_record.metadata {
             Some(metadata) => match update_metdata_to_metdata(metadata) {
                 Ok(m) => Some(m),
                 Err(e) => {
-                    panic!(
-                        "Front end should have already validated metadata format. Error msg {}",
-                        e
-                    );
+                    return Err(LogMaterializerV2Error::MetadataMaterializationError(e));
                 }
             },
             None => None,
@@ -108,10 +133,12 @@ impl<'a> MaterializedLogRecordV2<'a> {
 
         let embedding = match &log_record.embedding {
             Some(embedding) => Some(embedding.as_slice()),
-            None => panic!("Embedding must always be set for an ADD operation"),
+            None => {
+                return Err(LogMaterializerV2Error::EmbeddingMaterializationError);
+            }
         };
 
-        Self {
+        Ok(Self {
             data_record: None,
             offset_id,
             user_id: Some(user_id),
@@ -119,7 +146,7 @@ impl<'a> MaterializedLogRecordV2<'a> {
             metadata_to_be_merged: metadata,
             final_document: document,
             final_embedding: embedding,
-        }
+        })
     }
 }
 
@@ -132,7 +159,7 @@ pub(crate) struct LogMaterializerV2<'a> {
 impl<'a> LogMaterializerV2<'a> {
     pub(crate) async fn materializeV2(
         &'a self,
-    ) -> Result<Chunk<MaterializedLogRecordV2<'a>>, Box<dyn ChromaError>> {
+    ) -> Result<Chunk<MaterializedLogRecordV2<'a>>, LogMaterializerV2Error> {
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecordV2> =
             HashMap::new();
@@ -146,7 +173,7 @@ impl<'a> LogMaterializerV2<'a> {
             {
                 Ok(res) => exists = res,
                 Err(e) => {
-                    return Err(e);
+                    return Err(LogMaterializerV2Error::RecordSegmentError(e));
                 }
             };
             if exists {
@@ -158,11 +185,11 @@ impl<'a> LogMaterializerV2<'a> {
                     Ok((data_record, offset_id)) => {
                         existing_id_to_materialized.insert(
                             log_record.record.id.as_str(),
-                            MaterializedLogRecordV2::from_data_record(data_record, offset_id),
+                            MaterializedLogRecordV2::from((data_record, offset_id)),
                         );
                     }
                     Err(e) => {
-                        return Err(e);
+                        return Err(LogMaterializerV2Error::RecordSegmentError(e));
                     }
                 }
             }
@@ -181,14 +208,18 @@ impl<'a> LogMaterializerV2<'a> {
                         let next_offset_id = self
                             .curr_max_offset_id
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        new_id_to_materialized.insert(
+                        let materialized_record = match MaterializedLogRecordV2::try_from((
+                            &log_record.record,
+                            next_offset_id,
                             log_record.record.id.as_str(),
-                            MaterializedLogRecordV2::from_operation_record(
-                                &log_record.record,
-                                next_offset_id,
-                                log_record.record.id.as_str(),
-                            ),
-                        );
+                        )) {
+                            Ok(record) => record,
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
+                        new_id_to_materialized
+                            .insert(log_record.record.id.as_str(), materialized_record);
                     }
                 }
                 Operation::Delete => {
@@ -293,14 +324,18 @@ impl<'a> LogMaterializerV2<'a> {
                         let next_offset_id = self
                             .curr_max_offset_id
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        new_id_to_materialized.insert(
+                        let materialized_record = match MaterializedLogRecordV2::try_from((
+                            &log_record.record,
+                            next_offset_id,
                             log_record.record.id.as_str(),
-                            MaterializedLogRecordV2::from_operation_record(
-                                &log_record.record,
-                                next_offset_id,
-                                log_record.record.id.as_str(),
-                            ),
-                        );
+                        )) {
+                            Ok(record) => record,
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
+                        new_id_to_materialized
+                            .insert(log_record.record.id.as_str(), materialized_record);
                     }
                 }
             }
