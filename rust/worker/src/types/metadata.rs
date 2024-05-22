@@ -280,6 +280,75 @@ pub(crate) fn update_metdata_to_metdata(
     Ok(metadata)
 }
 
+/*
+===========================================
+Metadata queries
+===========================================
+*/
+
+pub(crate) enum Where {
+    DirectWhereComparison(DirectComparison),
+    WhereChildren(WhereChildren),
+}
+
+pub(crate) struct DirectComparison {
+    pub key: String,
+    pub comparison: WhereComparison,
+}
+
+pub(crate) enum WhereComparison {
+    SingleStringComparison(String, WhereClauseComparator),
+    SingleIntComparison(i32, WhereClauseComparator),
+    SingleFloatComparison(f64, WhereClauseComparator),
+    StringListComparison(Vec<String>, WhereClauseListOperator),
+    IntListComparison(Vec<i32>, WhereClauseListOperator),
+    FloatListComparison(Vec<f64>, WhereClauseListOperator),
+}
+
+pub(crate) enum WhereClauseComparator {
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+}
+
+pub(crate) enum WhereClauseListOperator {
+    In,
+    NotIn,
+}
+
+pub(crate) struct WhereChildren {
+    pub children: Vec<Where>,
+    pub operator: WhereChildrenOperator,
+}
+
+pub(crate) enum WhereChildrenOperator {
+    And,
+    Or,
+}
+
+pub(crate) enum WhereDocument {
+    DirectWhereDocumentComparison(DirectDocumentComparison),
+    WhereDocumentChildren(WhereDocumentChildren),
+}
+
+pub(crate) struct DirectDocumentComparison {
+    pub key: String,
+    pub operator: WhereDocumentOperator,
+}
+
+pub(crate) enum WhereDocumentOperator {
+    Contains,
+    NotContains,
+}
+
+pub(crate) struct WhereDocumentChildren {
+    pub children: Vec<WhereDocument>,
+    pub operator: WhereChildrenOperator,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
