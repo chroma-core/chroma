@@ -62,9 +62,9 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
+        normalize_embeddings: bool = False,
         # Since we do dynamic imports we have to type this as Any
         model: Any = None,
-        normalize_embeddings: bool = False,
         **kwargs: Any,
     ):
         """Initialize SentenceTransformerEmbeddingFunction.
@@ -72,8 +72,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         Args:
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
             device (str, optional): Device used for computation, defaults to "cpu"
-            model (SentenceTransformer, optional): SentenceTransformer model
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
+            model (SentenceTransformer, optional): SentenceTransformer model
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
         if model is not None or model_name not in self.models:
