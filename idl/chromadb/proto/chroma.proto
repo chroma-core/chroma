@@ -74,6 +74,7 @@ message UpdateMetadataValue {
         string string_value = 1;
         int64 int_value = 2;
         double float_value = 3;
+        bool boolean_value = 4;
     }
 }
 
@@ -176,6 +177,8 @@ message DirectComparison {
         IntListComparison int_list_operand = 5;
         SingleDoubleComparison single_double_operand = 6;
         DoubleListComparison double_list_operand = 7;
+        SingleBooleanComparison single_boolean_operand = 8;
+        BooleanListComparison boolean_list_operand = 9;
     }
 }
 
@@ -258,6 +261,19 @@ message SingleDoubleComparison {
         GenericComparator generic_comparator = 2;
         NumberComparator number_comparator = 3;
     }
+}
+
+// Used when a leaf-node `Where` clause compares a boolean to a list of booleans.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message BooleanListComparison {
+    repeated bool values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares a boolean to a single boolean.
+message SingleBooleanComparison {
+    bool value = 1;
+    GenericComparator comparator = 2;
 }
 
 /* Vector Reader Interface */
