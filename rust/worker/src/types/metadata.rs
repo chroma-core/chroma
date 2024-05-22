@@ -286,16 +286,19 @@ Metadata queries
 ===========================================
 */
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum Where {
     DirectWhereComparison(DirectComparison),
     WhereChildren(WhereChildren),
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct DirectComparison {
     pub key: String,
     pub comparison: WhereComparison,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WhereComparison {
     SingleStringComparison(String, WhereClauseComparator),
     SingleIntComparison(i32, WhereClauseComparator),
@@ -305,6 +308,7 @@ pub(crate) enum WhereComparison {
     DoubleListComparison(Vec<f64>, WhereClauseListOperator),
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WhereClauseComparator {
     Equal,
     NotEqual,
@@ -314,41 +318,49 @@ pub(crate) enum WhereClauseComparator {
     LessThanOrEqual,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WhereClauseListOperator {
     In,
     NotIn,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct WhereChildren {
     pub children: Vec<Where>,
     pub operator: BooleanOperator,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum BooleanOperator {
     And,
     Or,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WhereDocument {
     DirectWhereDocumentComparison(DirectDocumentComparison),
     WhereDocumentChildren(WhereDocumentChildren),
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct DirectDocumentComparison {
     pub document: String,
     pub operator: WhereDocumentOperator,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WhereDocumentOperator {
     Contains,
     NotContains,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct WhereDocumentChildren {
     pub children: Vec<WhereDocument>,
     pub operator: BooleanOperator,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WhereConversionError {
     InvalidWhere,
     InvalidWhereComparison,
@@ -714,5 +726,155 @@ mod tests {
             converted_metadata.get("baz").unwrap(),
             &MetadataValue::Str("42".to_string())
         );
+    }
+
+    #[test]
+    fn test_where_clause_simple_from() {
+        let proto_where = chroma_proto::Where {
+            r#where: Some(chroma_proto::r#where::Where::DirectComparison(
+                chroma_proto::DirectComparison {
+                    key: "foo".to_string(),
+                    comparison: Some(
+                        chroma_proto::direct_comparison::Comparison::SingleIntOperand(
+                            chroma_proto::SingleIntComparison {
+                                value: 42,
+                                comparator: None,
+                            },
+                        ),
+                    ),
+                },
+            )),
+        };
+        let where_clause: Where = proto_where.try_into().unwrap();
+        match where_clause {
+            Where::DirectWhereComparison(comparison) => {
+                assert_eq!(comparison.key, "foo");
+                match comparison.comparison {
+                    WhereComparison::SingleIntComparison(value, _) => {
+                        assert_eq!(value, 42);
+                    }
+                    _ => panic!("Invalid comparison type"),
+                }
+            }
+            _ => panic!("Invalid where type"),
+        }
+    }
+
+    #[test]
+    fn test_where_clause_with_children() {
+        let proto_where = chroma_proto::Where {
+            r#where: Some(chroma_proto::r#where::Where::Children(
+                chroma_proto::WhereChildren {
+                    children: vec![
+                        chroma_proto::Where {
+                            r#where: Some(chroma_proto::r#where::Where::DirectComparison(
+                                chroma_proto::DirectComparison {
+                                    key: "foo".to_string(),
+                                    comparison: Some(
+                                        chroma_proto::direct_comparison::Comparison::SingleIntOperand(
+                                            chroma_proto::SingleIntComparison {
+                                                value: 42,
+                                                comparator: None,
+                                            },
+                                        ),
+                                    ),
+                                },
+                            )),
+                        },
+                        chroma_proto::Where {
+                            r#where: Some(chroma_proto::r#where::Where::DirectComparison(
+                                chroma_proto::DirectComparison {
+                                    key: "bar".to_string(),
+                                    comparison: Some(
+                                        chroma_proto::direct_comparison::Comparison::SingleIntOperand(
+                                            chroma_proto::SingleIntComparison {
+                                                value: 42,
+                                                comparator: None,
+                                            },
+                                        ),
+                                    ),
+                                },
+                            )),
+                        },
+                    ],
+                    operator: chroma_proto::BooleanOperator::And.try_into().unwrap(),
+                },
+            )),
+        };
+        let where_clause: Where = proto_where.try_into().unwrap();
+        match where_clause {
+            Where::WhereChildren(children) => {
+                assert_eq!(children.children.len(), 2);
+                assert_eq!(children.operator, BooleanOperator::And);
+            }
+            _ => panic!("Invalid where type"),
+        }
+    }
+
+    #[test]
+    fn test_where_document_simple() {
+        let proto_where = chroma_proto::WhereDocument {
+            r#where_document: Some(chroma_proto::where_document::WhereDocument::Direct(
+                chroma_proto::DirectWhereDocument {
+                    document: "foo".to_string(),
+                    operator: chroma_proto::WhereDocumentOperator::Contains
+                        .try_into()
+                        .unwrap(),
+                },
+            )),
+        };
+        let where_document: WhereDocument = proto_where.try_into().unwrap();
+        match where_document {
+            WhereDocument::DirectWhereDocumentComparison(comparison) => {
+                assert_eq!(comparison.document, "foo");
+                assert_eq!(comparison.operator, WhereDocumentOperator::Contains);
+            }
+            _ => panic!("Invalid where document type"),
+        }
+    }
+
+    #[test]
+    fn test_where_document_with_children() {
+        let proto_where = chroma_proto::WhereDocument {
+            r#where_document: Some(chroma_proto::where_document::WhereDocument::Children(
+                chroma_proto::WhereDocumentChildren {
+                    children: vec![
+                        chroma_proto::WhereDocument {
+                            r#where_document: Some(
+                                chroma_proto::where_document::WhereDocument::Direct(
+                                    chroma_proto::DirectWhereDocument {
+                                        document: "foo".to_string(),
+                                        operator: chroma_proto::WhereDocumentOperator::Contains
+                                            .try_into()
+                                            .unwrap(),
+                                    },
+                                ),
+                            ),
+                        },
+                        chroma_proto::WhereDocument {
+                            r#where_document: Some(
+                                chroma_proto::where_document::WhereDocument::Direct(
+                                    chroma_proto::DirectWhereDocument {
+                                        document: "bar".to_string(),
+                                        operator: chroma_proto::WhereDocumentOperator::Contains
+                                            .try_into()
+                                            .unwrap(),
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
+                    operator: chroma_proto::BooleanOperator::And.try_into().unwrap(),
+                },
+            )),
+        };
+        let where_document: WhereDocument = proto_where.try_into().unwrap();
+        match where_document {
+            WhereDocument::WhereDocumentChildren(children) => {
+                assert_eq!(children.children.len(), 2);
+                assert_eq!(children.operator, BooleanOperator::And);
+            }
+            _ => panic!("Invalid where document type"),
+        }
     }
 }
