@@ -91,21 +91,24 @@ impl<'a> MaterializedLogRecordV2<'a> {
         let metadata = match &log_record.metadata {
             Some(metadata) => match update_metdata_to_metdata(metadata) {
                 Ok(m) => Some(m),
-                Err(e) => panic!("Should not panic. TODO"),
+                Err(e) => {
+                    panic!(
+                        "Front end should have already validated metadata format. Error msg {}",
+                        e
+                    );
+                }
             },
             None => None,
         };
 
         let document = match &log_record.document {
             Some(doc) => Some(doc.as_str()),
-            // TODO(Sanket): Should this be an error since this is an insert operation.
             None => None,
         };
 
         let embedding = match &log_record.embedding {
             Some(embedding) => Some(embedding.as_slice()),
-            // TODO(Sanket): Should this be an error since this is an insert operation.
-            None => None,
+            None => panic!("Embedding must always be set for an ADD operation"),
         };
 
         Self {
@@ -127,8 +130,10 @@ pub(crate) struct LogMaterializerV2<'a> {
 }
 
 impl<'a> LogMaterializerV2<'a> {
-    pub(crate) async fn materializeV2(&'a self) -> Chunk<MaterializedLogRecordV2<'a>> {
-        // Find entries that can be skipped completely.
+    pub(crate) async fn materializeV2(
+        &'a self,
+    ) -> Result<Chunk<MaterializedLogRecordV2<'a>>, Box<dyn ChromaError>> {
+        // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecordV2> =
             HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecordV2> = HashMap::new();
@@ -140,7 +145,9 @@ impl<'a> LogMaterializerV2<'a> {
                 .await
             {
                 Ok(res) => exists = res,
-                Err(e) => (),
+                Err(e) => {
+                    return Err(e);
+                }
             };
             if exists {
                 match self
@@ -154,12 +161,14 @@ impl<'a> LogMaterializerV2<'a> {
                             MaterializedLogRecordV2::from_data_record(data_record, offset_id),
                         );
                     }
-                    // TODO(Sanket): Error handling here.
-                    Err(e) => (),
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
             }
         }
-        // Time to build the actual records.
+        // Populate updates to these and fresh records that are being
+        // inserted for the first time.
         for (log_record, _) in self.logs.iter() {
             match log_record.record.operation {
                 Operation::Add => {
@@ -184,7 +193,7 @@ impl<'a> LogMaterializerV2<'a> {
                 }
                 Operation::Delete => {
                     // If the delete is for a record that is currently not in the
-                    // record segment, then we can just not process these records
+                    // record segment, then we can just NOT process these records
                     // at all. On the other hand if it is for a record that is currently
                     // in the record segment then we'll have to pass it as a delete
                     // to the compactor so that it can be deleted.
@@ -193,11 +202,17 @@ impl<'a> LogMaterializerV2<'a> {
                     } else if existing_id_to_materialized
                         .contains_key(log_record.record.id.as_str())
                     {
-                        // Mark state as deleted.
-                        existing_id_to_materialized
+                        // Mark state as deleted. Other fields become noop after such a delete.
+                        // We should still clear them out since there can be a subsequent insert
+                        // for the same id after the delete.
+                        let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
-                            .unwrap()
-                            .final_operation = Operation::Delete;
+                            .unwrap();
+                        record_from_map.final_operation = Operation::Delete;
+                        record_from_map.final_document = None;
+                        record_from_map.final_embedding = None;
+                        record_from_map.metadata_to_be_merged = None;
+                        record_from_map.user_id = None;
                     }
                 }
                 Operation::Update => {
@@ -213,6 +228,7 @@ impl<'a> LogMaterializerV2<'a> {
                         {
                             Some(res) => res,
                             None => {
+                                // Does not exist in either maps. Ignore this update.
                                 continue;
                             }
                         },
@@ -296,7 +312,7 @@ impl<'a> LogMaterializerV2<'a> {
         for (_key, value) in new_id_to_materialized {
             res.push(value);
         }
-        Chunk::new(res.into())
+        Ok(Chunk::new(res.into()))
     }
 }
 
@@ -465,17 +481,24 @@ mod tests {
         let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
             .await
             .expect("Error creating segment reader");
-        let curr_max_offset_id = Arc::new(AtomicU32::new(2));
+        let curr_max_offset_id = Arc::new(AtomicU32::new(3));
         let materializer = LogMaterializerV2 {
             record_segment_reader: reader,
             logs: data,
             curr_max_offset_id,
         };
-        let res = materializer.materializeV2().await;
+        let res = materializer
+            .materializeV2()
+            .await
+            .expect("Error materializing logs");
         assert_eq!(3, res.len());
+        let mut id1_found = 0;
+        let mut id2_found = 0;
+        let mut id3_found = 0;
         for (log, _) in res.iter() {
             // Embedding 3.
             if log.user_id.is_some() {
+                id3_found += 1;
                 assert_eq!("embedding_id_3", log.user_id.unwrap());
                 assert_eq!(true, log.data_record.is_none());
                 assert_eq!("doc3", log.final_document.unwrap());
@@ -497,8 +520,65 @@ mod tests {
                 }
                 assert_eq!(hello_found, 1);
                 assert_eq!(hello_again_found, 1);
+            } else if log.data_record.as_ref().unwrap().id == "embedding_id_2" {
+                id2_found += 1;
+                assert_eq!(Operation::Delete, log.final_operation);
+                assert_eq!(2, log.offset_id);
+                assert_eq!(None, log.final_document);
+                assert_eq!(None, log.final_embedding);
+                assert_eq!(None, log.user_id);
+                assert_eq!(None, log.metadata_to_be_merged);
+                assert_eq!(true, log.data_record.is_some());
+            } else if log.data_record.as_ref().unwrap().id == "embedding_id_1" {
+                id1_found += 1;
+                assert_eq!(Operation::Update, log.final_operation);
+                assert_eq!(1, log.offset_id);
+                assert_eq!(None, log.final_document);
+                assert_eq!(None, log.final_embedding);
+                assert_eq!(None, log.user_id);
+                let mut hello_found = 0;
+                let mut hello_again_found = 0;
+                for (key, value) in log.metadata_to_be_merged.as_ref().unwrap() {
+                    if key == "hello" {
+                        assert_eq!(MetadataValue::Str(String::from("new_world")), *value);
+                        hello_found += 1;
+                    } else if key == "hello_again" {
+                        assert_eq!(MetadataValue::Str(String::from("new_world")), *value);
+                        hello_again_found += 1;
+                    } else {
+                        assert!(1 == 1, "Not expecting any other key");
+                    }
+                }
+                assert_eq!(hello_found, 1);
+                assert_eq!(hello_again_found, 1);
+                assert_eq!(true, log.data_record.is_some());
+                assert_eq!(log.data_record.as_ref().unwrap().document, Some("doc1"));
+                assert_eq!(
+                    log.data_record.as_ref().unwrap().embedding,
+                    vec![1.0, 2.0, 3.0].as_slice()
+                );
+                hello_found = 0;
+                let mut bye_found = 0;
+                for (key, value) in log.data_record.as_ref().unwrap().metadata.as_ref().unwrap() {
+                    if key == "hello" {
+                        assert_eq!(MetadataValue::Str(String::from("world")), *value);
+                        hello_found += 1;
+                    } else if key == "bye" {
+                        assert_eq!(MetadataValue::Str(String::from("world")), *value);
+                        bye_found += 1;
+                    } else {
+                        assert!(1 == 1, "Not expecting any other key");
+                    }
+                }
+                assert_eq!(hello_found, 1);
+                assert_eq!(bye_found, 1);
+            } else {
+                assert!(1 == 1, "Not expecting any other materialized record");
             }
         }
+        assert_eq!(1, id1_found);
+        assert_eq!(1, id2_found);
+        assert_eq!(1, id3_found);
     }
 
     // This is just a POC test to show how the materialize method could be tested, we can
