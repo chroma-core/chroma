@@ -33,6 +33,7 @@ sample_collections = [
         dimension=128,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     ),
     Collection(
         id=uuid.UUID(int=2),
@@ -41,6 +42,7 @@ sample_collections = [
         dimension=None,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     ),
     Collection(
         id=uuid.UUID(int=3),
@@ -49,6 +51,7 @@ sample_collections = [
         dimension=None,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     ),
 ]
 
@@ -190,6 +193,7 @@ def test_update_collections(sysdb: SysDB) -> None:
         dimension=sample_collections[0]["dimension"],
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     )
 
     sysdb.reset_state()

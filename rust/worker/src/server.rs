@@ -250,7 +250,11 @@ impl WorkerServer {
             return Err(Status::unimplemented("Where not supported"));
         }
 
-        let query_ids = request.ids;
+        // If no ids are provided, pass None to the orchestrator
+        let query_ids = match request.ids.len() {
+            0 => None,
+            _ => Some(request.ids),
+        };
 
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),

@@ -16,7 +16,11 @@ type IMemberlistStore interface {
 	UpdateMemberlist(ctx context.Context, memberlist *Memberlist, resourceVersion string) error
 }
 
-type Memberlist []string
+type Member struct {
+	id string
+}
+
+type Memberlist []Member
 
 type CRMemberlistStore struct {
 	dynamicClient            dynamic.Interface
@@ -48,7 +52,10 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 	cast_members := members.([]interface{})
 	for _, member := range cast_members {
 		member_map := member.(map[string]interface{})
-		memberlist = append(memberlist, member_map["url"].(string))
+		member := Member{
+			id: member_map["member_id"].(string),
+		}
+		memberlist = append(memberlist, member)
 	}
 	return &memberlist, unstrucuted.GetResourceVersion(), nil
 }
@@ -57,7 +64,7 @@ func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist *Me
 	gvr := getGvr()
 	log.Info("Updating memberlist store", zap.Any("memberlist", memberlist))
 	unstructured := memberlistToCr(memberlist, s.coordinatorNamespace, s.memberlistCustomResource, resourceVersion)
-	_, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Update(context.TODO(), unstructured, metav1.UpdateOptions{})
+	_, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Update(context.Background(), unstructured, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}
@@ -73,7 +80,7 @@ func memberlistToCr(memberlist *Memberlist, namespace string, memberlistName str
 	members := []interface{}{}
 	for _, member := range *memberlist {
 		members = append(members, map[string]interface{}{
-			"url": member,
+			"member_id": member.id,
 		})
 	}
 

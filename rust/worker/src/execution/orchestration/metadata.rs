@@ -47,8 +47,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     system: System,
     // Query state
     metadata_segment_id: Uuid,
-    query_ids: Vec<String>,
-    // TODO
+    query_ids: Option<Vec<String>>,
     // State fetched or created for query execution
     metadata_segment: Option<Segment>,
     record_segment: Option<Segment>,
@@ -435,7 +434,7 @@ impl MetadataQueryOrchestrator {
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
-        query_ids: Vec<String>,
+        query_ids: Option<Vec<String>>,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
@@ -562,36 +561,48 @@ impl MetadataQueryOrchestrator {
         // since in the server we disallow where/where document.
         // When we implement this we can move it to an operator
 
-        // Build a query_id set
-        let query_id_set: HashSet<String> = self.query_ids.iter().cloned().collect();
-        // The query ids that are not present in the log
-        let mut remaining_query_ids = query_id_set.clone();
-
-        // Build the list of ids in the log to indices in the chunk
-        let mut new_visibility = Vec::new();
-        for (log_entry, _) in logs.iter() {
-            if query_id_set.contains(&log_entry.record.id) {
-                println!("Query id: {} found in log", log_entry.record.id);
-                new_visibility.push(true);
-                remaining_query_ids.remove(&log_entry.record.id);
-            } else {
-                new_visibility.push(false);
-            }
-        }
-        logs.set_visibility(new_visibility);
-
         // TODO: If we were to search the metadata segment we would do it here
-        let filtered_index_offset_ids: Vec<u32> = Vec::new();
-        let remaining_query_ids = remaining_query_ids.into_iter().collect();
-        self.merge_results(logs, remaining_query_ids, filtered_index_offset_ids, ctx)
+        let filtered_index_offset_ids = None;
+
+        if self.query_ids.is_some() {
+            // Build a query_id set
+            let query_id_set: HashSet<String> =
+                self.query_ids.as_ref().unwrap().iter().cloned().collect();
+            // The query ids that are not present in the log
+            let mut remaining_query_ids = query_id_set.clone();
+
+            // Build the list of ids in the log to indices in the chunk
+            let mut new_visibility = Vec::new();
+            for (log_entry, _) in logs.iter() {
+                if query_id_set.contains(&log_entry.record.id) {
+                    new_visibility.push(true);
+                    remaining_query_ids.remove(&log_entry.record.id);
+                } else {
+                    new_visibility.push(false);
+                }
+            }
+            logs.set_visibility(new_visibility);
+
+            let remaining_query_ids = remaining_query_ids.into_iter().collect();
+            self.merge_results(
+                logs,
+                Some(remaining_query_ids),
+                filtered_index_offset_ids,
+                ctx,
+            )
             .await;
+        } else {
+            // No query ids to filter on
+            self.merge_results(logs, None, filtered_index_offset_ids, ctx)
+                .await;
+        }
     }
 
     async fn merge_results(
         &mut self,
         logs: Chunk<LogRecord>,
-        remaining_query_ids: Vec<String>,
-        filtered_index_offset_ids: Vec<u32>,
+        remaining_query_ids: Option<Vec<String>>,
+        filtered_index_offset_ids: Option<Vec<u32>>,
         ctx: &ComponentContext<Self>,
     ) {
         println!("Merging metadata results");

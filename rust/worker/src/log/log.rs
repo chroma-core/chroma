@@ -163,7 +163,7 @@ impl Log for GrpcLog {
     ) -> Result<Vec<LogRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
-            None => -1,
+            None => i64::MAX,
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
             collection_id: collection_id.to_string(),

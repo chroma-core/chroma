@@ -111,7 +111,6 @@ k8s_resource(
     'query-service-memberlist-readerwriter:ClusterRole',
     'query-service-query-service-memberlist-binding:clusterrolebinding',
     'query-service-memberlist-readerwriter-binding:clusterrolebinding',
-    'query-service:service',
 
     'compaction-service-memberlist-readerwriter:ClusterRole',
     'compaction-service-compaction-service-memberlist-binding:clusterrolebinding',
