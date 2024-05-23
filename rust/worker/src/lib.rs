@@ -15,6 +15,7 @@ mod sysdb;
 mod system;
 mod tracing;
 mod types;
+mod utils;
 
 use config::Configurable;
 use memberlist::MemberlistProvider;

@@ -301,10 +301,10 @@ pub(crate) struct DirectComparison {
 #[derive(Debug, PartialEq)]
 pub(crate) enum WhereComparison {
     SingleStringComparison(String, WhereClauseComparator),
-    SingleIntComparison(i32, WhereClauseComparator),
+    SingleIntComparison(u32, WhereClauseComparator),
     SingleDoubleComparison(f64, WhereClauseComparator),
     StringListComparison(Vec<String>, WhereClauseListOperator),
-    IntListComparison(Vec<i32>, WhereClauseListOperator),
+    IntListComparison(Vec<u32>, WhereClauseListOperator),
     DoubleListComparison(Vec<f64>, WhereClauseListOperator),
 }
 
@@ -447,7 +447,7 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
                     None => WhereClauseComparator::Equal,
                 };
                 Ok(WhereComparison::SingleIntComparison(
-                    proto_int.value as i32,
+                    proto_int.value as u32,
                     comparator,
                 ))
             }
@@ -504,7 +504,7 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
                         Err(_) => return Err(WhereConversionError::InvalidWhereComparison),
                     };
                 Ok(WhereComparison::IntListComparison(
-                    proto_list.values.into_iter().map(|v| v as i32).collect(),
+                    proto_list.values.into_iter().map(|v| v as u32).collect(),
                     list_operator.try_into()?,
                 ))
             }

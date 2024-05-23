@@ -326,23 +326,25 @@ impl<'me> MetadataIndexReader<'me> {
 
     pub async fn get(
         &'me self,
-        prefix: &str,
-        key: &'me KeyWrapper,
+        metadata_key: &str,
+        metadata_value: &'me KeyWrapper,
     ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
         match self {
-            MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => match key {
-                KeyWrapper::String(k) => {
-                    let rbm = blockfile_reader.get(prefix, k).await;
-                    match rbm {
-                        Ok(rbm) => Ok(rbm),
-                        Err(e) => Err(e),
+            MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => {
+                match metadata_value {
+                    KeyWrapper::String(k) => {
+                        let rbm = blockfile_reader.get(metadata_key, k).await;
+                        match rbm {
+                            Ok(rbm) => Ok(rbm),
+                            Err(e) => Err(e),
+                        }
                     }
+                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
-            },
-            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
+            }
+            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let rbm = blockfile_reader.get(prefix, *k).await;
+                    let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
                         Err(e) => Err(e),
@@ -350,9 +352,9 @@ impl<'me> MetadataIndexReader<'me> {
                 }
                 _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
             },
-            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let rbm = blockfile_reader.get(prefix, *k).await;
+                    let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
                         Err(e) => Err(e),
@@ -360,28 +362,30 @@ impl<'me> MetadataIndexReader<'me> {
                 }
                 _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
             },
-            MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => match key {
-                KeyWrapper::Bool(k) => {
-                    let rbm = blockfile_reader.get(prefix, *k).await;
-                    match rbm {
-                        Ok(rbm) => Ok(rbm),
-                        Err(e) => Err(e),
+            MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => {
+                match metadata_value {
+                    KeyWrapper::Bool(k) => {
+                        let rbm = blockfile_reader.get(metadata_key, *k).await;
+                        match rbm {
+                            Ok(rbm) => Ok(rbm),
+                            Err(e) => Err(e),
+                        }
                     }
+                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
-            },
+            }
         }
     }
 
     pub async fn lt(
         &'me self,
-        prefix: &str,
-        key: &'me KeyWrapper,
+        metadata_key: &str,
+        metadata_value: &'me KeyWrapper,
     ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
         match self {
-            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lt(prefix, *k);
+                    let read = blockfile_reader.get_lt(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -395,9 +399,9 @@ impl<'me> MetadataIndexReader<'me> {
                 }
                 _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
             },
-            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(prefix, *k);
+                    let read = blockfile_reader.get_lt(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -417,13 +421,13 @@ impl<'me> MetadataIndexReader<'me> {
 
     pub async fn lte(
         &'me self,
-        prefix: &str,
-        key: &'me KeyWrapper,
+        metadata_key: &str,
+        metadata_value: &'me KeyWrapper,
     ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
         match self {
-            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lte(prefix, *k);
+                    let read = blockfile_reader.get_lte(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -437,9 +441,9 @@ impl<'me> MetadataIndexReader<'me> {
                 }
                 _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
             },
-            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(prefix, *k);
+                    let read = blockfile_reader.get_lt(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -459,13 +463,13 @@ impl<'me> MetadataIndexReader<'me> {
 
     pub async fn gt(
         &'me self,
-        prefix: &str,
-        key: &'me KeyWrapper,
+        metadata_key: &str,
+        metadata_value: &'me KeyWrapper,
     ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
         match self {
-            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gt(prefix, *k);
+                    let read = blockfile_reader.get_gt(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -479,9 +483,9 @@ impl<'me> MetadataIndexReader<'me> {
                 }
                 _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
             },
-            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gt(prefix, *k);
+                    let read = blockfile_reader.get_gt(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -501,13 +505,13 @@ impl<'me> MetadataIndexReader<'me> {
 
     pub async fn gte(
         &'me self,
-        prefix: &str,
-        key: &'me KeyWrapper,
+        metadata_key: &str,
+        metadata_value: &'me KeyWrapper,
     ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
         match self {
-            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gte(prefix, *k);
+                    let read = blockfile_reader.get_gte(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -521,9 +525,9 @@ impl<'me> MetadataIndexReader<'me> {
                 }
                 _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
             },
-            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
+            MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gte(prefix, *k);
+                    let read = blockfile_reader.get_gte(metadata_key, *k);
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();

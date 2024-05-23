@@ -174,7 +174,7 @@ impl FullTextIndexFlusher {
 pub(crate) struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
     frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
-    tokenizer: Box<dyn ChromaTokenizer>,
+    tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 }
 
 impl<'me> FullTextIndexReader<'me> {
@@ -186,12 +186,13 @@ impl<'me> FullTextIndexReader<'me> {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
             frequencies_blockfile_reader,
-            tokenizer,
+            tokenizer: Arc::new(Mutex::new(tokenizer)),
         }
     }
 
-    pub async fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
-        let binding = self.tokenizer.encode(query);
+    pub async fn search(&self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+        let mut tokenizer = self.tokenizer.lock();
+        let binding = tokenizer.encode(query);
         let tokens = binding.get_tokens();
 
         // Get query tokens sorted by frequency.
