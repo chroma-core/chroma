@@ -2,6 +2,7 @@ package memberlist_manager
 
 import (
 	"context"
+	"errors"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -51,9 +52,16 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 	}
 	cast_members := members.([]interface{})
 	for _, member := range cast_members {
-		member_map := member.(map[string]interface{})
+		member_map, ok := member.(map[string]interface{})
+		if !ok {
+			return nil, "", errors.New("failed to cast member to map")
+		}
+		member_id, ok := member_map["member_id"].(string)
+		if !ok {
+			return nil, "", errors.New("failed to cast member_id to string")
+		}
 		member := Member{
-			id: member_map["member_id"].(string),
+			id: member_id,
 		}
 		memberlist = append(memberlist, member)
 	}
