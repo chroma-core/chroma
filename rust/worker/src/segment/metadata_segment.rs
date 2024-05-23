@@ -1,8 +1,7 @@
 use arrow::array::Int32Array;
 use async_trait::async_trait;
 use core::panic;
-use figment::Metadata;
-use futures::future::{BoxFuture, FutureExt};
+use futures::future::BoxFuture;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -14,10 +13,6 @@ use uuid::Uuid;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
-use crate::chroma_proto::{
-    DoubleListComparison, IntListComparison, SingleDoubleComparison, SingleIntComparison,
-    SingleStringComparison, StringListComparison,
-};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 use crate::index::fulltext::types::{
@@ -101,7 +96,7 @@ impl MetadataSegmentWriter {
         blockfile_provider: &BlockfileProvider,
     ) -> Result<MetadataSegmentWriter, MetadataSegmentError> {
         println!("Creating MetadataSegmentWriter from Segment");
-        if segment.r#type != SegmentType::Metadata {
+        if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
         if segment.file_path.contains_key(FULL_TEXT_FREQS)
@@ -546,7 +541,7 @@ impl MetadataSegmentReader<'_> {
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, MetadataSegmentError> {
-        if segment.r#type != SegmentType::Metadata {
+        if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
         if segment.file_path.contains_key(FULL_TEXT_FREQS)

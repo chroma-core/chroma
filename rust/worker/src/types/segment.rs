@@ -13,7 +13,6 @@ pub(crate) enum SegmentType {
     BlockfileMetadata,
     Record,
     Sqlite,
-    Metadata,
 }
 
 impl From<SegmentType> for String {
@@ -25,7 +24,6 @@ impl From<SegmentType> for String {
             SegmentType::Record => "urn:chroma:segment/record".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
             SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
-            SegmentType::Metadata => "urn:chroma:segment/metadata".to_string(),
         }
     }
 }
