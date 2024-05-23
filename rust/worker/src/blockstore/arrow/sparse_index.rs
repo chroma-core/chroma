@@ -154,7 +154,9 @@ impl SparseIndex {
                 }
             } else {
                 // Last block.
-                if non_start_curr_key.is_none() || prefix >= non_start_curr_key.unwrap().prefix.as_str() {
+                if non_start_curr_key.is_none()
+                    || prefix >= non_start_curr_key.unwrap().prefix.as_str()
+                {
                     block_ids.push(*curr_uuid);
                 }
             }
