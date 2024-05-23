@@ -343,7 +343,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lt(prefix, *k);
+                    let read = blockfile_reader.get_lt(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -359,7 +359,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(prefix, *k);
+                    let read = blockfile_reader.get_lt(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -385,7 +385,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lte(prefix, *k);
+                    let read = blockfile_reader.get_lte(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -401,7 +401,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(prefix, *k);
+                    let read = blockfile_reader.get_lt(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -427,7 +427,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gt(prefix, *k);
+                    let read = blockfile_reader.get_gt(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -443,7 +443,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gt(prefix, *k);
+                    let read = blockfile_reader.get_gt(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -469,7 +469,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gte(prefix, *k);
+                    let read = blockfile_reader.get_gte(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -485,7 +485,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match key {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gte(prefix, *k);
+                    let read = blockfile_reader.get_gte(prefix, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
