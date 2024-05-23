@@ -133,7 +133,7 @@ impl SparseIndex {
                 let non_start_next_key: Option<&CompositeKey>;
                 match next_key {
                     SparseIndexDelimiter::Start => {
-                        panic!("Invariance violation. Sparse index is not valid.");
+                        panic!("Invariant violation. Sparse index is not valid.");
                     }
                     SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k),
                 }
@@ -182,7 +182,7 @@ impl SparseIndex {
             if let Some((next_delim, _)) = next_iter.next() {
                 next_key = match next_delim {
                     SparseIndexDelimiter::Start => {
-                        panic!("Invariance violation. Sparse index is not valid.")
+                        panic!("Invariant violation. Sparse index is not valid.")
                     }
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
@@ -223,7 +223,7 @@ impl SparseIndex {
             if let Some((next_delim, _)) = next_iter.next() {
                 next_key = match next_delim {
                     SparseIndexDelimiter::Start => {
-                        panic!("Invariance violation. Sparse index is not valid.")
+                        panic!("Invariant violation. Sparse index is not valid.")
                     }
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
@@ -260,7 +260,7 @@ impl SparseIndex {
             if let Some((next_delim, _)) = next_iter.next() {
                 next_key = match next_delim {
                     SparseIndexDelimiter::Start => {
-                        panic!("Invariance violation. Sparse index is not valid.")
+                        panic!("Invariant violation. Sparse index is not valid.")
                     }
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
@@ -301,7 +301,7 @@ impl SparseIndex {
             if let Some((next_delim, _)) = next_iter.next() {
                 next_key = match next_delim {
                     SparseIndexDelimiter::Start => {
-                        panic!("Invariance violation. Sparse index is not valid.")
+                        panic!("Invariant violation. Sparse index is not valid.")
                     }
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
