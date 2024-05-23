@@ -131,7 +131,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            if curr_prefix > prefix || (curr_prefix == prefix && curr_key > key) {
+            if curr_prefix == prefix && curr_key > key {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
@@ -153,7 +153,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            if curr_prefix < prefix || (curr_prefix == prefix && curr_key < key) {
+            if curr_prefix == prefix && curr_key < key {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
@@ -175,7 +175,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            if curr_prefix < prefix || (curr_prefix == prefix && curr_key <= key) {
+            if curr_prefix == prefix && curr_key <= key {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
@@ -197,7 +197,7 @@ impl Block {
         for i in 0..self.data.num_rows() {
             let curr_prefix = prefix_array.value(i);
             let curr_key = K::get(self.data.column(1), i);
-            if curr_prefix > prefix || (curr_prefix == prefix && curr_key >= key) {
+            if curr_prefix == prefix && curr_key >= key {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }

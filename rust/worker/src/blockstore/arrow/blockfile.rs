@@ -6,6 +6,7 @@ use super::{
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
+use crate::blockstore::key::KeyWrapper;
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
@@ -257,7 +258,11 @@ impl ArrowBlockfileWriter {
     }
 }
 
-pub(crate) struct ArrowBlockfileReader<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> {
+pub(crate) struct ArrowBlockfileReader<
+    'me,
+    K: ArrowReadableKey<'me> + Into<KeyWrapper>,
+    V: ArrowReadableValue<'me>,
+> {
     block_manager: BlockManager,
     pub(super) sparse_index: SparseIndex,
     loaded_blocks: Mutex<HashMap<Uuid, Box<Block>>>,
@@ -265,7 +270,9 @@ pub(crate) struct ArrowBlockfileReader<'me, K: ArrowReadableKey<'me>, V: ArrowRe
     id: Uuid,
 }
 
-impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileReader<'me, K, V> {
+impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me>>
+    ArrowBlockfileReader<'me, K, V>
+{
     pub(super) fn new(id: Uuid, block_manager: BlockManager, sparse_index: SparseIndex) -> Self {
         Self {
             block_manager,
@@ -359,9 +366,8 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
-        // Get all block ids that contain keys > key from sparse index.
-        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let block_ids = self.sparse_index.get_block_ids_gt(search_key);
+        // Get all block ids that contain keys > key from sparse index for this prefix.
+        let block_ids = self.sparse_index.get_block_ids_gt(prefix, key.clone());
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys > key.
         for block_id in block_ids {
@@ -391,8 +397,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys < key from sparse index.
-        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let block_ids = self.sparse_index.get_block_ids_lt(search_key);
+        let block_ids = self.sparse_index.get_block_ids_lt(prefix, key.clone());
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys < key.
         for block_id in block_ids {
@@ -422,8 +427,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys >= key from sparse index.
-        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let block_ids = self.sparse_index.get_block_ids_gte(search_key);
+        let block_ids = self.sparse_index.get_block_ids_gte(prefix, key.clone());
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys >= key.
         for block_id in block_ids {
@@ -453,8 +457,7 @@ impl<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>> ArrowBlockfileRe
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys <= key from sparse index.
-        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let block_ids = self.sparse_index.get_block_ids_lte(search_key);
+        let block_ids = self.sparse_index.get_block_ids_lte(prefix, key.clone());
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys <= key.
         for block_id in block_ids {

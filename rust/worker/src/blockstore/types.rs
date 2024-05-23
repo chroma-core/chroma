@@ -229,7 +229,7 @@ impl BlockfileFlusher {
 
 pub(crate) enum BlockfileReader<
     'me,
-    K: Key + ArrowReadableKey<'me>,
+    K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,
     V: Value + ArrowReadableValue<'me>,
 > {
     MemoryBlockfileReader(MemoryBlockfileReader<K, V>),
