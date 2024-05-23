@@ -3,7 +3,7 @@ title: "🛣️ Roadmap"
 ---
 
 {% note type="default" title="Last Updated" %}
-`May 1, 2023`
+`May 20, 2024`
 {% /note %}
 
 The goal of this doc is to align *core* and *community* efforts for the project and to share what's in store for this year!

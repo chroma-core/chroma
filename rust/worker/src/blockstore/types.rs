@@ -229,7 +229,7 @@ impl BlockfileFlusher {
 
 pub(crate) enum BlockfileReader<
     'me,
-    K: Key + ArrowReadableKey<'me>,
+    K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,
     V: Value + ArrowReadableValue<'me>,
 > {
     MemoryBlockfileReader(MemoryBlockfileReader<K, V>),
@@ -281,57 +281,57 @@ impl<
     }
 
     // TODO: make prefix &str
-    pub(crate) fn get_by_prefix(
+    pub(crate) async fn get_by_prefix(
         &'referred_data self,
         prefix: &str,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
-            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_by_prefix(prefix).await,
         }
     }
 
-    pub(crate) fn get_gt(
+    pub(crate) async fn get_gt(
         &'referred_data self,
         prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gt(prefix, key).await,
         }
     }
 
-    pub(crate) fn get_lt(
+    pub(crate) async fn get_lt(
         &'referred_data self,
         prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lt(prefix, key).await,
         }
     }
 
-    pub(crate) fn get_gte(
+    pub(crate) async fn get_gte(
         &'referred_data self,
         prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gte(prefix, key).await,
         }
     }
 
-    pub(crate) fn get_lte(
+    pub(crate) async fn get_lte(
         &'referred_data self,
         prefix: &str,
         key: K,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => todo!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lte(prefix, key).await,
         }
     }
 
