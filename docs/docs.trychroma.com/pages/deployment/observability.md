@@ -41,4 +41,6 @@ Traces in Zipkin will start appearing after you make a request to Chroma.
 
 ## Client (SDK) Observability
 
-See [OpenLLMetry Integration](/integrations/openllmetry).
+See 
+- [OpenLLMetry Integration](/integrations/openllmetry).
+- [OpenLIT Integration](/integrations/openlit).
