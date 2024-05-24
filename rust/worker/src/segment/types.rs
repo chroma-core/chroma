@@ -672,17 +672,22 @@ mod tests {
             assert_ne!(data.id, "embedding_id_2");
             if data.id == "embedding_id_1" {
                 assert_eq!(
-                    data.metadata.clone()
+                    data.metadata
+                        .clone()
                         .expect("Metadata is empty")
                         .contains_key("hello"),
                     true
                 );
                 assert_eq!(
-                    data.metadata.clone().expect("Metadata is empty").get("hello"),
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .get("hello"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
                 assert_eq!(
-                    data.metadata.clone()
+                    data.metadata
+                        .clone()
                         .expect("Metadata is empty")
                         .contains_key("bye"),
                     true
@@ -692,36 +697,48 @@ mod tests {
                     Some(&MetadataValue::Str(String::from("world")))
                 );
                 assert_eq!(
-                    data.metadata.clone()
+                    data.metadata
+                        .clone()
                         .expect("Metadata is empty")
                         .contains_key("hello_again"),
                     true
                 );
                 assert_eq!(
-                    data.metadata.clone().expect("Metadata is empty").get("hello_again"),
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .get("hello_again"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
                 assert_eq!(data.document.expect("Non empty document"), "doc1");
                 assert_eq!(data.embedding, vec![1.0, 2.0, 3.0]);
             } else if data.id == "embedding_id_3" {
                 assert_eq!(
-                    data.metadata.clone()
+                    data.metadata
+                        .clone()
                         .expect("Metadata is empty")
                         .contains_key("hello"),
                     true
                 );
                 assert_eq!(
-                    data.metadata.clone().expect("Metadata is empty").get("hello"),
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .get("hello"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
                 assert_eq!(
-                    data.metadata.clone()
+                    data.metadata
+                        .clone()
                         .expect("Metadata is empty")
                         .contains_key("hello_again"),
                     true
                 );
                 assert_eq!(
-                    data.metadata.clone().expect("Metadata is empty").get("hello_again"),
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .get("hello_again"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
                 assert_eq!(data.document.expect("Non empty document"), "doc3");
