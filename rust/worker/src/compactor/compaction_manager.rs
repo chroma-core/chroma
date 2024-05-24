@@ -109,6 +109,7 @@ impl CompactionManager {
                     self.hnsw_index_provider.clone(),
                     dispatcher.clone(),
                     None,
+                    None,
                 );
 
                 match orchestrator.run().await {
