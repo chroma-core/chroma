@@ -4,9 +4,7 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::types::{
-    update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
-};
+use crate::types::{update_metdata_to_metdata, LogRecord, Operation, Segment, SegmentType};
 use async_trait::async_trait;
 use futures::StreamExt;
 use std::collections::HashMap;

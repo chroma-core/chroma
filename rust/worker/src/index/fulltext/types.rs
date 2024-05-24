@@ -2,9 +2,13 @@ use crate::blockstore::positional_posting_list_value::PositionalPostingListBuild
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
+
 use arrow::array::Int32Array;
+use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
@@ -23,15 +27,16 @@ impl ChromaError for FullTextIndexError {
 pub(crate) struct FullTextIndexWriter {
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
-    tokenizer: Box<dyn ChromaTokenizer>,
+    // This is a crime.
+    tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 
     // term -> positional posting list builder for that term
-    uncommitted: HashMap<String, PositionalPostingListBuilder>,
-    uncommitted_frequencies: HashMap<String, i32>,
+    uncommitted: Arc<Mutex<HashMap<String, PositionalPostingListBuilder>>>,
+    uncommitted_frequencies: Arc<Mutex<HashMap<String, i32>>>,
 }
 
 impl FullTextIndexWriter {
-    fn new(
+    pub fn new(
         posting_lists_blockfile_writer: BlockfileWriter,
         frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: Box<dyn ChromaTokenizer>,
@@ -39,21 +44,23 @@ impl FullTextIndexWriter {
         FullTextIndexWriter {
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
-            tokenizer,
-            uncommitted: HashMap::new(),
-            uncommitted_frequencies: HashMap::new(),
+            tokenizer: Arc::new(Mutex::new(tokenizer)),
+            uncommitted: Arc::new(Mutex::new(HashMap::new())),
+            uncommitted_frequencies: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    fn add_document(&mut self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
-        let tokens = self.tokenizer.encode(document);
+    pub fn add_document(&self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
+        let mut tokenizer = self.tokenizer.lock();
+        let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
-            self.uncommitted_frequencies
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+            uncommitted_frequencies
                 .entry(token.text.to_string())
                 .and_modify(|e| *e += 1)
                 .or_insert(1);
-            let builder = self
-                .uncommitted
+            let mut uncommitted = self.uncommitted.lock();
+            let builder = uncommitted
                 .entry(token.text.to_string())
                 .or_insert(PositionalPostingListBuilder::new());
 
@@ -80,8 +87,9 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        for (key, mut value) in self.uncommitted.drain() {
+    pub async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        let mut uncommitted = self.uncommitted.lock();
+        for (key, mut value) in uncommitted.drain() {
             let built_list = value.build();
             for doc_id in built_list.doc_ids.iter() {
                 match doc_id {
@@ -102,7 +110,8 @@ impl FullTextIndexWriter {
                 }
             }
         }
-        for (key, value) in self.uncommitted_frequencies.drain() {
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+        for (key, value) in uncommitted_frequencies.drain() {
             // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
             let res = self
                 .frequencies_blockfile_writer
@@ -115,7 +124,7 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
+    pub fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
@@ -135,7 +144,7 @@ pub(crate) struct FullTextIndexFlusher {
 }
 
 impl FullTextIndexFlusher {
-    async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
         let res = self
             .posting_lists_blockfile_flusher
             .flush::<u32, &Int32Array>()
@@ -152,16 +161,24 @@ impl FullTextIndexFlusher {
         }
         Ok(())
     }
+
+    pub fn pls_id(&self) -> Uuid {
+        self.posting_lists_blockfile_flusher.id()
+    }
+
+    pub fn freqs_id(&self) -> Uuid {
+        self.frequencies_blockfile_flusher.id()
+    }
 }
 
 pub(crate) struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
     frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
-    tokenizer: Box<dyn ChromaTokenizer>,
+    tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 }
 
 impl<'me> FullTextIndexReader<'me> {
-    fn new(
+    pub fn new(
         posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
         frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
         tokenizer: Box<dyn ChromaTokenizer>,
@@ -169,12 +186,13 @@ impl<'me> FullTextIndexReader<'me> {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
             frequencies_blockfile_reader,
-            tokenizer,
+            tokenizer: Arc::new(Mutex::new(tokenizer)),
         }
     }
 
-    async fn search(&mut self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
-        let binding = self.tokenizer.encode(query);
+    pub async fn search(&self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+        let mut tokenizer = self.tokenizer.lock();
+        let binding = tokenizer.encode(query);
         let tokens = binding.get_tokens();
 
         // Get query tokens sorted by frequency.
@@ -317,7 +335,7 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -346,7 +364,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -385,7 +403,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("helo", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -419,7 +437,7 @@ mod tests {
         index_writer.add_document("aaa", 1).unwrap();
         index_writer.add_document("aaaaa", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -452,7 +470,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -485,7 +503,7 @@ mod tests {
             FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -519,7 +537,7 @@ mod tests {
         index_writer.add_document("hello world hello", 1).unwrap();
         index_writer.add_document("    hello ", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -557,7 +575,7 @@ mod tests {
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.add_document("hello", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -597,7 +615,7 @@ mod tests {
         index_writer.add_document("world", 3).unwrap();
         index_writer.add_document("world hello", 4).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -647,7 +665,7 @@ mod tests {
         index_writer.add_document("aaabbb", 4).unwrap();
         index_writer.add_document("aabbbbaaaaabbb", 5).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
@@ -691,7 +709,7 @@ mod tests {
         index_writer.add_document("hello world!!!", 2).unwrap();
         index_writer.add_document(".!.!.!", 3).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
