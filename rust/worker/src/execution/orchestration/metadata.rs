@@ -13,6 +13,7 @@ use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, Handler};
 use crate::types::{Collection, LogRecord, Metadata, SegmentType};
+use crate::types::{Where, WhereDocument};
 use crate::{
     blockstore::provider::BlockfileProvider,
     execution::operator::TaskMessage,
@@ -59,6 +60,9 @@ pub(crate) struct MetadataQueryOrchestrator {
     sysdb: Box<dyn SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
+    // Query params
+    where_clause: Option<Where>,
+    where_document_clause: Option<WhereDocument>,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<MetadataQueryOrchestratorResult>>,
 }
@@ -439,6 +443,8 @@ impl MetadataQueryOrchestrator {
         sysdb: Box<dyn SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
+        where_clause: Option<Where>,
+        where_document_clause: Option<WhereDocument>,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
@@ -453,6 +459,8 @@ impl MetadataQueryOrchestrator {
             sysdb,
             dispatcher,
             blockfile_provider,
+            where_clause,
+            where_document_clause,
             result_channel: None,
         }
     }

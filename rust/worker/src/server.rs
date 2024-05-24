@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto::{
-    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+    self, where_document, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest,
+    QueryMetadataResponse,
 };
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
@@ -243,17 +244,31 @@ impl WorkerServer {
         if request.limit.is_some() || request.offset.is_some() {
             return Err(Status::unimplemented("Limit and offset not supported"));
         }
-        if request.where_document.is_some() {
-            return Err(Status::unimplemented("Where document not supported"));
-        }
-        if request.r#where.is_some() {
-            return Err(Status::unimplemented("Where not supported"));
-        }
 
         // If no ids are provided, pass None to the orchestrator
         let query_ids = match request.ids.len() {
             0 => None,
             _ => Some(request.ids),
+        };
+
+        let where_clause = match request.r#where {
+            Some(where_clause) => match where_clause.try_into() {
+                Ok(where_clause) => Some(where_clause),
+                Err(_) => return Err(Status::internal(format!("Error converting where clause",))),
+            },
+            None => None,
+        };
+
+        let where_document_clause = match request.where_document {
+            Some(where_document_clause) => match where_document_clause.try_into() {
+                Ok(where_document_clause) => Some(where_document_clause),
+                Err(_) => {
+                    return Err(Status::internal(format!(
+                        "Error converting where document clause",
+                    )))
+                }
+            },
+            None => None,
         };
 
         let orchestrator = MetadataQueryOrchestrator::new(
@@ -264,6 +279,8 @@ impl WorkerServer {
             self.sysdb.clone(),
             dispatcher.clone(),
             self.blockfile_provider.clone(),
+            where_clause,
+            where_document_clause,
         );
 
         let result = orchestrator.run().await;
