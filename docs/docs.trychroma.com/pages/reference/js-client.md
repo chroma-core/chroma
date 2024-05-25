@@ -20,36 +20,6 @@ const client = new ChromaClient({
 });
 ```
 
-##### Basic authentication (username & password)
-```javascript
-const client = new ChromaClient({
-  path: "http://localhost:8000"
-  auth: { provider: "basic", credentials: "admin:admin" },
-});
-```
-
-##### Token authentication
-In this method, we use the Bearer scheme. Namely, the token is sent as: `Authorization: Bearer test-token`
-```javascript
-const client = new ChromaClient({
-  path: "http://localhost:8000",
-  auth: { provider: "token", credentials: "test-token" },
-});
-```
-
-##### Token authentication (custom header)
-In this method, we send the token in a custom header. The header is `X-Chroma-Token`.
-```javascript
-const client = new ChromaClient({
-  path: URL,
-  auth: {
-    provider: "token",
-    credentials: "test-token",
-    tokenHeaderType: "X_CHROMA_TOKEN",
-  },
-});
-```
-
 #### Parameters
 
 | Name | Type | Description |
