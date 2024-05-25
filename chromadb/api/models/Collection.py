@@ -154,11 +154,7 @@ class Collection(BaseModel):
                 embeddings = self._embed(input=documents)
             elif images is not None:
                 embeddings = self._embed(input=images)
-            else:
-                if uris is None:
-                    raise ValueError(
-                        "You must provide either embeddings, documents, images, or uris."
-                    )
+            elif uris is not None:
                 if self._data_loader is None:
                     raise ValueError(
                         "You must set a data loader on the collection if loading from URIs."
@@ -434,11 +430,19 @@ class Collection(BaseModel):
             require_embeddings_or_data=False,
         )
 
+        # We need to compute the embeddings if they're not provided
         if embeddings is None:
+            # At this point, we know that one of documents or images are provided from the validation above
             if documents is not None:
                 embeddings = self._embed(input=documents)
             elif images is not None:
                 embeddings = self._embed(input=images)
+            elif uris is not None:
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                embeddings = self._embed(self._data_loader(uris))
 
         self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
 
@@ -479,11 +483,19 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents, images, uris
         )
 
+        # We need to compute the embeddings if they're not provided
         if embeddings is None:
+            # At this point, we know that one of documents or images are provided from the validation above
             if documents is not None:
                 embeddings = self._embed(input=documents)
-            else:
+            elif images is not None:
                 embeddings = self._embed(input=images)
+            elif uris is not None:
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                embeddings = self._embed(self._data_loader(uris))
 
         self._client._upsert(
             collection_id=self.id,
