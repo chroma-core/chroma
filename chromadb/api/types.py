@@ -1,8 +1,9 @@
-from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast, Sequence
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
+from chromadb.config import get_fqn
 from chromadb.types import (
     Metadata,
     UpdateMetadata,
@@ -478,18 +479,18 @@ def validate_n_results(n_results: int) -> int:
 
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
-    if not isinstance(embeddings, list):
+    if not isinstance(embeddings, (list, Sequence)):
         raise ValueError(
-            f"Expected embeddings to be a list, got {type(embeddings).__name__}"
+            f"Expected embeddings to be a list or Sequence, got {get_fqn(type(embeddings))}"
         )
     if len(embeddings) == 0:
         raise ValueError(
             f"Expected embeddings to be a list with at least one item, got {len(embeddings)} embeddings"
         )
-    if not all([isinstance(e, list) for e in embeddings]):
+    if not all(isinstance(e, (list, Sequence)) for e in embeddings):
+        types = {get_fqn(type(e)) for e in embeddings}
         raise ValueError(
-            "Expected each embedding in the embeddings to be a list, got "
-            f"{list(set([type(e).__name__ for e in embeddings]))}"
+            f"Expected each embedding to be a list or Sequence, got {types}"
         )
     for i, embedding in enumerate(embeddings):
         if len(embedding) == 0:
@@ -502,9 +503,10 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
                 for value in embedding
             ]
         ):
+            types = {get_fqn(type(value)) for value in embedding}
             raise ValueError(
                 "Expected each value in the embedding to be a int or float, got an embedding with "
-                f"{list(set([type(value).__name__ for value in embedding]))} - {embedding}"
+                f"{types} - {embedding}"
             )
     return embeddings
 
