@@ -9,7 +9,9 @@ use crate::execution::operators::merge_metadata_results::{
     MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput,
 };
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
+use crate::index::metadata::types::MetadataIndexError;
 use crate::log::log::PullLogsError;
+use crate::segment::metadata_segment::MetadataSegmentReader;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, Handler};
 use crate::types::{Collection, LogRecord, Metadata, SegmentType};
@@ -50,7 +52,6 @@ pub(crate) struct MetadataQueryOrchestrator {
     metadata_segment_id: Uuid,
     query_ids: Option<Vec<String>>,
     // State fetched or created for query execution
-    metadata_segment: Option<Segment>,
     record_segment: Option<Segment>,
     collection: Option<Collection>,
     // State machine management
@@ -451,7 +452,6 @@ impl MetadataQueryOrchestrator {
             system,
             metadata_segment_id: *metadata_segment_id,
             query_ids,
-            metadata_segment: None,
             record_segment: None,
             collection: None,
             merge_dependency_count: 2,
@@ -514,7 +514,6 @@ impl MetadataQueryOrchestrator {
             }
         };
 
-        self.metadata_segment = Some(metadata_segment);
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
     }
@@ -564,13 +563,48 @@ impl MetadataQueryOrchestrator {
         println!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
-        // TODO: Implement filtering and searching metadata segment
-        // for now we just proxy the items through on the request thread
-        // since in the server we disallow where/where document.
-        // When we implement this we can move it to an operator
+        let metdata_segment = self
+            .get_metadata_segment_from_id(self.sysdb.clone(), &self.metadata_segment_id)
+            .await;
+        let metadata_segment = match metdata_segment {
+            Ok(segment) => segment,
+            Err(e) => {
+                self.terminate_with_error(e, ctx);
+                return;
+            }
+        };
 
-        // TODO: If we were to search the metadata segment we would do it here
-        let filtered_index_offset_ids = None;
+        // TODO create segment in this method instead of constructor
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &self.blockfile_provider).await;
+
+        let filtered_index_offset_ids = match metadata_segment_reader {
+            Ok(reader) => {
+                reader
+                    .query(
+                        self.where_clause.as_ref(),
+                        self.where_document_clause.as_ref(),
+                        Some(&vec![]),
+                        0,
+                        0,
+                    )
+                    .await
+            }
+            Err(e) => {
+                self.terminate_with_error(Box::new(e), ctx);
+                return;
+            }
+        };
+        let filtered_index_offset_ids = match filtered_index_offset_ids {
+            Ok(filtered_index_offset_ids) => {
+                let filtered_index_offset_ids = filtered_index_offset_ids
+                    .into_iter()
+                    .map(|index| index as u32)
+                    .collect();
+                Some(filtered_index_offset_ids)
+            }
+            Err(_) => None,
+        };
 
         if self.query_ids.is_some() {
             // Build a query_id set
