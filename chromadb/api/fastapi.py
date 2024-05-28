@@ -427,7 +427,7 @@ class FastAPI(ServerAPI):
             documents=body.get("documents", None),
             data=None,
             uris=body.get("uris", None),
-            included=body["included"],
+            included=body.get("included", None),
         )
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
