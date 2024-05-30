@@ -216,11 +216,18 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                             }
                         },
                     };
-                    // hnsw index behavior is to treat add() as upsert so this
-                    // will update the embedding if it exists.
+                    // HNSW index behavior is to treat add() as upsert so this
+                    // will update the embedding if it exists. It does not
+                    // perform any validation on its own and assumes that the
+                    // offset ids are correct (i.e. pertaining to records that
+                    // are actually meant to be updated).
                     self.index.read().add(record.offset_id as usize, embedding);
                 }
                 Operation::Delete => {
+                    // HNSW segment does not perform validation of any sort. So,
+                    // the assumption here is that the materialized log records
+                    // contain the correct offset ids pertaining to records that
+                    // are actually meant to be deleted.
                     self.index.read().delete(record.offset_id as usize);
                 }
             }

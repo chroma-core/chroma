@@ -75,8 +75,8 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     pub(super) final_embedding: Option<&'referred_data [f32]>,
 }
 
-impl<'a> From<(DataRecord<'a>, u32)> for MaterializedLogRecord<'a> {
-    fn from(data_record_info: (DataRecord<'a>, u32)) -> Self {
+impl<'referred_data> From<(DataRecord<'referred_data>, u32)> for MaterializedLogRecord<'referred_data> {
+    fn from(data_record_info: (DataRecord<'referred_data>, u32)) -> Self {
         let data_record = data_record_info.0;
         let offset_id = data_record_info.1;
         Self {
@@ -94,11 +94,11 @@ impl<'a> From<(DataRecord<'a>, u32)> for MaterializedLogRecord<'a> {
 // Creates a materialized log record from the corresponding entry
 // in the log (OperationRecord), offset id in storage where it will be stored (u32)
 // and user id (str).
-impl<'a> TryFrom<(&'a OperationRecord, u32, &'a str)> for MaterializedLogRecord<'a> {
+impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)> for MaterializedLogRecord<'referred_data> {
     type Error = LogMaterializerError;
 
     fn try_from(
-        log_operation_info: (&'a OperationRecord, u32, &'a str),
+        log_operation_info: (&'referred_data OperationRecord, u32, &'referred_data str),
     ) -> Result<Self, Self::Error> {
         let log_record = log_operation_info.0;
         let offset_id = log_operation_info.1;
@@ -137,16 +137,16 @@ impl<'a> TryFrom<(&'a OperationRecord, u32, &'a str)> for MaterializedLogRecord<
     }
 }
 
-pub(crate) struct LogMaterializer<'a> {
+pub(crate) struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
-    record_segment_reader: Option<RecordSegmentReader<'a>>,
+    record_segment_reader: Option<RecordSegmentReader<'me>>,
     logs: Chunk<LogRecord>,
     curr_max_offset_id: Arc<AtomicU32>,
 }
 
-impl<'a> LogMaterializer<'a> {
+impl<'me> LogMaterializer<'me> {
     pub(crate) fn new(
-        record_segment_reader: Option<RecordSegmentReader<'a>>,
+        record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
         curr_max_offset_id: Arc<AtomicU32>,
     ) -> Self {
@@ -157,8 +157,8 @@ impl<'a> LogMaterializer<'a> {
         }
     }
     pub(crate) async fn materialize(
-        &'a self,
-    ) -> Result<Chunk<MaterializedLogRecord<'a>>, LogMaterializerError> {
+        &'me self,
+    ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
