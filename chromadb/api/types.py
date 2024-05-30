@@ -144,7 +144,7 @@ WhereDocumentOperator = WhereDocumentOperator
 
 Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
-
+C = TypeVar("C", bound=Embeddable)  # C is for chunkable
 
 Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
@@ -197,8 +197,10 @@ class EmbeddingFunction(Protocol[D]):
 
         setattr(cls, "__call__", __call__)
 
-    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
-        return retry(**retry_kwargs)(self.__call__)(input)
+    def embed_with_retries(
+        self, input: D, **retry_kwargs: Dict[Any, Any]
+    ) -> Embeddings:
+        return retry(**retry_kwargs)(self.__call__)(input)  # type: ignore
 
 
 def validate_embedding_function(
@@ -219,6 +221,12 @@ def validate_embedding_function(
 
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
+        ...
+
+
+class Chunker(Protocol[C]):
+    # A chunker splits each item in a list of items into one or more chunks
+    def __call__(self, input: C) -> List[C]:
         ...
 
 
