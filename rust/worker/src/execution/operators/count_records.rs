@@ -272,10 +272,12 @@ mod tests {
                             record_segment_reader = None;
                         }
                         RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            assert!(1 == 1, "Error creating record segment reader");
+                            panic!("Error creating record segment reader. Blockfile open error.");
                         }
                         RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            assert!(1 == 1, "Error creating record segment reader");
+                            panic!(
+                                "Error creating record segment reader. Invalid number of files."
+                            );
                         }
                     };
                 }

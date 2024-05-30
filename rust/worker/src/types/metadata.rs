@@ -645,7 +645,7 @@ impl TryFrom<chroma_proto::WhereDocumentOperator> for WhereDocumentOperator {
 pub(crate) fn merge_update_metadata(
     base_metadata: &Option<Metadata>,
     update_metadata: &Option<UpdateMetadata>,
-) -> Option<Metadata> {
+) -> Result<Option<Metadata>, MetadataValueConversionError> {
     let mut merged_metadata = HashMap::new();
     if base_metadata.is_some() {
         for (key, value) in base_metadata.as_ref().unwrap() {
@@ -659,13 +659,15 @@ pub(crate) fn merge_update_metadata(
                     merged_metadata.insert(key, value);
                 }
             }
-            Err(e) => panic!("Should not panic. TODO"),
+            Err(e) => {
+                return Err(e);
+            }
         };
     }
     if merged_metadata.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(merged_metadata)
+    Ok(Some(merged_metadata))
 }
 
 #[cfg(test)]

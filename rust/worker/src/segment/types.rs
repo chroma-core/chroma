@@ -34,10 +34,10 @@ impl ChromaError for LogMaterializerError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MaterializedLogRecord<'a> {
+pub(crate) struct MaterializedLogRecord<'referred_data> {
     // This is the data record read from the record segment for this id.
     // None if the record exists only in the log.
-    pub(super) data_record: Option<DataRecord<'a>>,
+    pub(super) data_record: Option<DataRecord<'referred_data>>,
     // If present in the record segment then it is the offset id
     // in the record segment at which the record was found.
     // If not present in the segment then it is the offset id
@@ -46,7 +46,7 @@ pub(crate) struct MaterializedLogRecord<'a> {
     // Set only for the records that are being inserted for the first time
     // in the log since data_record will be None in such cases. For other
     // cases, just read from data record.
-    pub(super) user_id: Option<&'a str>,
+    pub(super) user_id: Option<&'referred_data str>,
     // There can be several entries in the log for an id. This is the final
     // operation that needs to be done on it. For e.g.
     // If log has [Update, Update, Delete] then final operation is Delete.
@@ -54,7 +54,7 @@ pub(crate) struct MaterializedLogRecord<'a> {
     // If log has [Insert, Update, Update] then final operation is Insert.
     // If log has [Update, Update] then final operation is Update.
     // All Upserts are converted to Update or Insert as the final operation.
-    // For e.g. if log has [Insert, Upsert] then final operation is update.
+    // For e.g. if log has [Insert, Upsert] then final operation is insert.
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
     pub(super) final_operation: Operation,
@@ -67,12 +67,12 @@ pub(crate) struct MaterializedLogRecord<'a> {
     // This is the final document obtained from the last non null operation.
     // E.g. if log has [Insert(str0), Update(str1), Update(str2), Update()] then this will contain
     // str2. None if final operation is Delete.
-    pub(super) final_document: Option<&'a str>,
+    pub(super) final_document: Option<&'referred_data str>,
     // Similar to above, this is the final embedding obtained
     // from the last non null operation.
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
-    pub(super) final_embedding: Option<&'a [f32]>,
+    pub(super) final_embedding: Option<&'referred_data [f32]>,
 }
 
 impl<'a> From<(DataRecord<'a>, u32)> for MaterializedLogRecord<'a> {
@@ -91,6 +91,9 @@ impl<'a> From<(DataRecord<'a>, u32)> for MaterializedLogRecord<'a> {
     }
 }
 
+// Creates a materialized log record from the corresponding entry
+// in the log (OperationRecord), offset id in storage where it will be stored (u32)
+// and user id (str).
 impl<'a> TryFrom<(&'a OperationRecord, u32, &'a str)> for MaterializedLogRecord<'a> {
     type Error = LogMaterializerError;
 
@@ -159,43 +162,40 @@ impl<'a> LogMaterializer<'a> {
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-        // If record segment is uninitialized then there's nothing in the record segment
-        // yet.
-        if self.record_segment_reader.is_some() {
-            for (log_record, _) in self.logs.iter() {
-                let mut exists: bool = false;
-                match self
-                    .record_segment_reader
-                    .as_ref()
-                    .unwrap()
-                    .data_exists_for_user_id(log_record.record.id.as_str())
-                    .await
-                {
-                    Ok(res) => exists = res,
-                    Err(e) => {
-                        return Err(LogMaterializerError::RecordSegmentError(e));
-                    }
-                };
-                if exists {
-                    match self
-                        .record_segment_reader
-                        .as_ref()
-                        .unwrap()
-                        .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
+        match &self.record_segment_reader {
+            Some(reader) => {
+                for (log_record, _) in self.logs.iter() {
+                    let mut exists = false;
+                    match reader
+                        .data_exists_for_user_id(log_record.record.id.as_str())
                         .await
                     {
-                        Ok((data_record, offset_id)) => {
-                            existing_id_to_materialized.insert(
-                                log_record.record.id.as_str(),
-                                MaterializedLogRecord::from((data_record, offset_id)),
-                            );
-                        }
+                        Ok(res) => exists = res,
                         Err(e) => {
                             return Err(LogMaterializerError::RecordSegmentError(e));
+                        }
+                    };
+                    if exists {
+                        match reader
+                            .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
+                            .await
+                        {
+                            Ok((data_record, offset_id)) => {
+                                existing_id_to_materialized.insert(
+                                    log_record.record.id.as_str(),
+                                    MaterializedLogRecord::from((data_record, offset_id)),
+                                );
+                            }
+                            Err(e) => {
+                                return Err(LogMaterializerError::RecordSegmentError(e));
+                            }
                         }
                     }
                 }
             }
+            // If record segment is uninitialized then there's nothing
+            // in the record segment yet.
+            None => (),
         }
         // Populate updates to these and fresh records that are being
         // inserted for the first time.
@@ -268,10 +268,15 @@ impl<'a> LogMaterializer<'a> {
                         },
                     };
 
-                    record_from_map.metadata_to_be_merged = merge_update_metadata(
+                    record_from_map.metadata_to_be_merged = match merge_update_metadata(
                         &record_from_map.metadata_to_be_merged,
                         &log_record.record.metadata,
-                    );
+                    ) {
+                        Ok(meta) => meta,
+                        Err(e) => {
+                            return Err(LogMaterializerError::MetadataMaterializationError(e));
+                        }
+                    };
                     if log_record.record.document.is_some() {
                         record_from_map.final_document =
                             Some(log_record.record.document.as_ref().unwrap().as_str());
@@ -292,10 +297,15 @@ impl<'a> LogMaterializer<'a> {
                         let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
-                        record_from_map.metadata_to_be_merged = merge_update_metadata(
+                        record_from_map.metadata_to_be_merged = match merge_update_metadata(
                             &record_from_map.metadata_to_be_merged,
                             &log_record.record.metadata,
-                        );
+                        ) {
+                            Ok(meta) => meta,
+                            Err(e) => {
+                                return Err(LogMaterializerError::MetadataMaterializationError(e));
+                            }
+                        };
                         if log_record.record.document.is_some() {
                             record_from_map.final_document =
                                 Some(log_record.record.document.as_ref().unwrap().as_str());
@@ -312,10 +322,15 @@ impl<'a> LogMaterializer<'a> {
                         let record_from_map = new_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
-                        record_from_map.metadata_to_be_merged = merge_update_metadata(
+                        record_from_map.metadata_to_be_merged = match merge_update_metadata(
                             &record_from_map.metadata_to_be_merged,
                             &log_record.record.metadata,
-                        );
+                        ) {
+                            Ok(meta) => meta,
+                            Err(e) => {
+                                return Err(LogMaterializerError::MetadataMaterializationError(e));
+                            }
+                        };
                         if log_record.record.document.is_some() {
                             record_from_map.final_document =
                                 Some(log_record.record.document.as_ref().unwrap().as_str());
@@ -355,6 +370,7 @@ impl<'a> LogMaterializer<'a> {
         for (_key, value) in new_id_to_materialized {
             res.push(value);
         }
+        res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
         Ok(Chunk::new(res.into()))
     }
 }

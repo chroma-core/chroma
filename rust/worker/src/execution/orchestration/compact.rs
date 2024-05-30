@@ -88,6 +88,7 @@ pub struct CompactOrchestrator {
     hnsw_index_provider: HnswIndexProvider,
     // State we hold across the execution
     pulled_log_offset: Option<i64>,
+    record_segment: Option<Segment>,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // number of write segments tasks
@@ -95,7 +96,6 @@ pub struct CompactOrchestrator {
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
-    record_segment: Option<Segment>,
 }
 
 #[derive(Error, Debug)]
@@ -250,7 +250,7 @@ impl CompactOrchestrator {
                 self.blockfile_provider.clone(),
                 self.record_segment
                     .as_ref()
-                    .expect("Expect segment")
+                    .expect("WriteSegmentsInput: Record segment not set in the input")
                     .clone(),
             );
             let task = wrap(operator, input, self_address.clone());

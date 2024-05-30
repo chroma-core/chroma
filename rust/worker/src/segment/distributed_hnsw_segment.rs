@@ -216,6 +216,8 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                             }
                         },
                     };
+                    // hnsw index behavior is to treat add() as upsert so this
+                    // will update the embedding if it exists.
                     self.index.read().add(record.offset_id as usize, embedding);
                 }
                 Operation::Delete => {

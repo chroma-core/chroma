@@ -130,7 +130,6 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                 return Err(WriteSegmentsOperatorError::LogMaterializationError(e));
             }
         };
-        tracing::trace!("Materialized records {:?}", res);
         // Apply materialized records.
         match input
             .record_segment_writer
