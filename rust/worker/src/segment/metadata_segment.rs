@@ -481,7 +481,210 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             None => {}
                         },
                         None => {}
+                    };
+                }
+                Operation::Delete => match &record.0.data_record {
+                    Some(data_record) => {
+                        match &data_record.metadata {
+                            Some(metadata) => {
+                                for (key, value) in metadata.iter() {
+                                    match value {
+                                        MetadataValue::Str(value) => {
+                                            match &self.string_metadata_index_writer {
+                                                Some(writer) => {
+                                                    let _ = writer.delete(
+                                                        key,
+                                                        value.as_str(),
+                                                        segment_offset_id,
+                                                    );
+                                                }
+                                                None => {}
+                                            }
+                                        }
+                                        MetadataValue::Float(value) => {
+                                            match &self.f32_metadata_index_writer {
+                                                Some(writer) => {
+                                                    let _ = writer.delete(
+                                                        key,
+                                                        *value as f32,
+                                                        segment_offset_id,
+                                                    );
+                                                }
+                                                None => {}
+                                            }
+                                        }
+                                        MetadataValue::Int(value) => {
+                                            match &self.u32_metadata_index_writer {
+                                                Some(writer) => {
+                                                    let _ = writer.delete(
+                                                        key,
+                                                        *value as u32,
+                                                        segment_offset_id,
+                                                    );
+                                                }
+                                                None => {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            None => {}
+                        };
+                        match &data_record.document {
+                            Some(document) => match &self.full_text_index_writer {
+                                Some(writer) => {
+                                    let _ = writer.delete_document(document, segment_offset_id);
+                                }
+                                None => {}
+                            },
+                            None => {}
+                        };
                     }
+                    None => {}
+                },
+                Operation::Update => {
+                    // TODO figure out how to not do this without adding another
+                    // layer of `match`ing.
+                    let empty_hashmap = HashMap::new();
+                    let old_metadata = match &record.0.data_record {
+                        Some(data_record) => match &data_record.metadata {
+                            Some(metadata) => metadata,
+                            None => &empty_hashmap,
+                        },
+                        None => &empty_hashmap,
+                    };
+                    match &record.0.data_record {
+                        Some(data_record) => match &data_record.metadata {
+                            Some(metadata) => {
+                                for (key, value) in metadata.iter() {
+                                    match value {
+                                        MetadataValue::Str(value) => {
+                                            match &self.string_metadata_index_writer {
+                                                Some(writer) => {
+                                                    match old_metadata.get(key) {
+                                                        Some(old_value) => match old_value {
+                                                            MetadataValue::Str(old_value) => {
+                                                                match writer
+                                                                    .update(
+                                                                        key,
+                                                                        old_value.as_str().into(),
+                                                                        value.as_str().into(),
+                                                                        segment_offset_id,
+                                                                    )
+                                                                    .await
+                                                                {
+                                                                    Ok(_) => {}
+                                                                    Err(e) => {
+                                                                        tracing::error!(
+                                                                                "Error updating string metadata index: {}",
+                                                                                e
+                                                                            )
+                                                                    }
+                                                                }
+                                                            }
+                                                            _ => {
+                                                                tracing::error!(
+                                                                    "Invariant violation: previous value is not a string"
+                                                                );
+                                                            }
+                                                        },
+                                                        None => {}
+                                                    };
+                                                }
+                                                None => {
+                                                    tracing::error!(
+                                                        "No writer found for string metadata index"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        MetadataValue::Int(value) => {
+                                            match &self.u32_metadata_index_writer {
+                                                Some(writer) => {
+                                                    match old_metadata.get(key) {
+                                                        Some(old_value) => match old_value {
+                                                            MetadataValue::Int(old_value) => {
+                                                                match writer
+                                                                    .update(
+                                                                        key,
+                                                                        (*old_value as u32).into(),
+                                                                        (*value as u32).into(),
+                                                                        segment_offset_id,
+                                                                    )
+                                                                    .await
+                                                                {
+                                                                    Ok(_) => {}
+                                                                    Err(e) => {
+                                                                        tracing::error!(
+                                                                            "Error updating u32 metadata index: {}",
+                                                                            e
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                            _ => {
+                                                                tracing::error!(
+                                                                    "Invariant violation: previous value is not an int"
+                                                                );
+                                                            }
+                                                        },
+                                                        None => {}
+                                                    };
+                                                }
+                                                None => {
+                                                    tracing::error!(
+                                                        "No writer found for u32 metadata index"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        MetadataValue::Float(value) => {
+                                            match &self.f32_metadata_index_writer {
+                                                Some(writer) => {
+                                                    match old_metadata.get(key) {
+                                                        Some(old_value) => match old_value {
+                                                            MetadataValue::Float(old_value) => {
+                                                                match writer
+                                                                    .update(
+                                                                        key,
+                                                                        (*old_value as f32).into(),
+                                                                        (*value as f32).into(),
+                                                                        segment_offset_id,
+                                                                    )
+                                                                    .await
+                                                                {
+                                                                    Ok(_) => {}
+                                                                    Err(e) => {
+                                                                        tracing::error!(
+                                                                            "Error updating f32 metadata index: {}",
+                                                                            e
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                            _ => {
+                                                                tracing::error!(
+                                                                    "Invariant violation: previous value is not a float"
+                                                                );
+                                                            }
+                                                        },
+                                                        None => {}
+                                                    };
+                                                }
+                                                None => {
+                                                    tracing::error!(
+                                                        "No writer found for f32 metadata index"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            None => {}
+                        },
+                        None => {}
+                    };
                 }
                 _ => todo!(),
             }
