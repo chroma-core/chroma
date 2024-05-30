@@ -308,6 +308,16 @@ pub(crate) enum WhereComparison {
     DoubleListComparison(Vec<f64>, WhereClauseListOperator),
 }
 
+#[derive(Debug)]
+pub(crate) enum MetadataType {
+    StringType,
+    IntType,
+    DoubleType,
+    StringListType,
+    IntListType,
+    DoubleListType,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereClauseComparator {
     Equal,
