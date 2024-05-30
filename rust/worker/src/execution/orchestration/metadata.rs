@@ -152,6 +152,7 @@ impl CountQueryOrchestrator {
         let metadata_segment = match metdata_segment {
             Ok(segment) => segment,
             Err(e) => {
+                tracing::error!("Error getting metadata segment: {:?}", e);
                 self.terminate_with_error(e, ctx);
                 return;
             }
@@ -160,6 +161,7 @@ impl CountQueryOrchestrator {
         let collection_id = match metadata_segment.collection {
             Some(collection_id) => collection_id,
             None => {
+                tracing::error!("Metadata segment has no collection");
                 self.terminate_with_error(
                     Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
                     ctx,
@@ -175,6 +177,7 @@ impl CountQueryOrchestrator {
         let record_segment = match record_segment {
             Ok(segment) => segment,
             Err(e) => {
+                tracing::error!("Error getting record segment: {:?}", e);
                 self.terminate_with_error(e, ctx);
                 return;
             }
@@ -186,6 +189,7 @@ impl CountQueryOrchestrator {
         {
             Ok(collection) => collection,
             Err(e) => {
+                tracing::error!("Error getting collection: {:?}", e);
                 self.terminate_with_error(e, ctx);
                 return;
             }
@@ -203,6 +207,7 @@ impl CountQueryOrchestrator {
         let end_timestamp = match end_timestamp {
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
+                tracing::error!("Error getting system time: {:?}", e);
                 self.terminate_with_error(
                     Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
                     ctx,
@@ -569,6 +574,7 @@ impl MetadataQueryOrchestrator {
         let metadata_segment = match metdata_segment {
             Ok(segment) => segment,
             Err(e) => {
+                tracing::error!("Error getting metadata segment: {:?}", e);
                 self.terminate_with_error(e, ctx);
                 return;
             }
@@ -591,6 +597,7 @@ impl MetadataQueryOrchestrator {
                     .await
             }
             Err(e) => {
+                tracing::error!("Error querying metadata segment: {:?}", e);
                 self.terminate_with_error(Box::new(e), ctx);
                 return;
             }
@@ -823,6 +830,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
                 self.filter(logs, ctx).await;
             }
             Err(e) => {
+                tracing::error!("Error pulling logs: {:?}", e);
                 self.terminate_with_error(Box::new(e), ctx);
             }
         }
@@ -842,6 +850,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
         let output = match message {
             Ok(output) => output,
             Err(e) => {
+                tracing::error!("Error merging metadata results: {:?}", e);
                 return self.terminate_with_error(Box::new(e), ctx);
             }
         };

@@ -222,6 +222,7 @@ impl WorkerServer {
         let segment_uuid = match Uuid::parse_str(&request.segment_id) {
             Ok(uuid) => uuid,
             Err(_) => {
+                tracing::error!("Invalid Segment UUID");
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
@@ -229,6 +230,7 @@ impl WorkerServer {
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
+                tracing::error!("No dispatcher found");
                 return Err(Status::internal("No dispatcher found"));
             }
         };
@@ -236,12 +238,14 @@ impl WorkerServer {
         let system = match self.system {
             Some(ref system) => system,
             None => {
+                tracing::error!("No system found");
                 return Err(Status::internal("No system found"));
             }
         };
 
         // For now we don't support limit/offset/where/where document
         if request.limit.is_some() || request.offset.is_some() {
+            tracing::error!("Limit and offset not supported");
             return Err(Status::unimplemented("Limit and offset not supported"));
         }
 
@@ -254,7 +258,10 @@ impl WorkerServer {
         let where_clause = match request.r#where {
             Some(where_clause) => match where_clause.try_into() {
                 Ok(where_clause) => Some(where_clause),
-                Err(_) => return Err(Status::internal(format!("Error converting where clause",))),
+                Err(_) => {
+                    tracing::error!("Error converting where clause");
+                    return Err(Status::internal(format!("Error converting where clause",)));
+                }
             },
             None => None,
         };
@@ -263,9 +270,10 @@ impl WorkerServer {
             Some(where_document_clause) => match where_document_clause.try_into() {
                 Ok(where_document_clause) => Some(where_document_clause),
                 Err(_) => {
+                    tracing::error!("Error converting where document clause");
                     return Err(Status::internal(format!(
                         "Error converting where document clause",
-                    )))
+                    )));
                 }
             },
             None => None,
@@ -287,10 +295,11 @@ impl WorkerServer {
         let result = match result {
             Ok(result) => result,
             Err(e) => {
+                tracing::error!("Error running orchestrator: {}", e);
                 return Err(Status::internal(format!(
                     "Error running orchestrator: {}",
                     e
-                )))
+                )));
             }
         };
 
