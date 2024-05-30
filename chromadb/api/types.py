@@ -226,7 +226,7 @@ class DataLoader(Protocol[L]):
 
 class Chunker(Protocol[C]):
     # A chunker splits each item in a list of items into one or more chunks
-    def __call__(self, input: C) -> List[C]:
+    def __call__(self, input: C, **kwargs: Any) -> List[C]:
         ...
 
 

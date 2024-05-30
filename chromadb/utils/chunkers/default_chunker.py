@@ -1,5 +1,5 @@
 import re
-from typing import Iterable, Literal, Optional, List, Union
+from typing import Iterable, Literal, Optional, List, Union, Any
 from chromadb.api.types import Chunker, Document, Documents
 
 import logging
@@ -166,23 +166,21 @@ class DefaultTextChunker(Chunker[Documents]):
     def __call__(
         self,
         input: Documents,
-        #        **kwargs: Any,
+        **kwargs: Any,
     ) -> List[Documents]:
-        # max_chunk_size = kwargs.get("max_chunk_size", 1024)
-        # chunk_overlap = kwargs.get("chunk_overlap", 0)
-        # separators = kwargs.get("separators", None)
+        max_chunk_size = kwargs.get("max_chunk_size", 1024)
+        chunk_overlap = kwargs.get("chunk_overlap", 0)
+        separators = kwargs.get("separators", None)
 
-        # if separators is None:
-        #     separators = ["\n\n", "\n", " ", ""]
+        if separators is None:
+            separators = ["\n\n", "\n", " ", ""]
 
-        return [input]
-
-        # return [
-        #     self._split_document(
-        #         document=doc,
-        #         separators=separators,
-        #         max_chunk_size=max_chunk_size,
-        #         chunk_overlap=chunk_overlap,
-        #     )
-        #     for doc in input
-        # ]
+        return [
+            self._split_document(
+                document=doc,
+                separators=separators,
+                max_chunk_size=max_chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            for doc in input
+        ]
