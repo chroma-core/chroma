@@ -24,10 +24,11 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
-pub(crate) struct FullTextIndexWriter {
+pub(crate) struct FullTextIndexWriter<'me> {
+    // We use this to implement updates which require read-then-write semantics.
+    full_text_index_reader: Option<FullTextIndexReader<'me>>,
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
-    // This is a crime.
     tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 
     // term -> positional posting list builder for that term
@@ -35,13 +36,15 @@ pub(crate) struct FullTextIndexWriter {
     uncommitted_frequencies: Arc<Mutex<HashMap<String, i32>>>,
 }
 
-impl FullTextIndexWriter {
+impl<'me> FullTextIndexWriter<'me> {
     pub fn new(
+        full_text_index_reader: Option<FullTextIndexReader<'me>>,
         posting_lists_blockfile_writer: BlockfileWriter,
         frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: Box<dyn ChromaTokenizer>,
     ) -> Self {
         FullTextIndexWriter {
+            full_text_index_reader,
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
             tokenizer: Arc::new(Mutex::new(tokenizer)),
@@ -318,7 +321,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let _index =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
     }
 
     #[tokio::test]
@@ -333,7 +336,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -361,7 +364,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
@@ -400,7 +403,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("helo", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
@@ -433,7 +436,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("aaa", 1).unwrap();
         index_writer.add_document("aaaaa", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
@@ -467,7 +470,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
@@ -500,7 +503,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
@@ -533,7 +536,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world hello", 1).unwrap();
         index_writer.add_document("    hello ", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
@@ -571,7 +574,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.add_document("hello", 2).unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
@@ -609,7 +612,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).unwrap();
         index_writer.add_document("hello", 2).unwrap();
         index_writer.add_document("world", 3).unwrap();
@@ -658,7 +661,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("aaa", 1).unwrap();
         index_writer.add_document("aaaa", 2).unwrap();
         index_writer.add_document("bbb", 3).unwrap();
@@ -704,7 +707,7 @@ mod tests {
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
         let mut index_writer =
-            FullTextIndexWriter::new(pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("!!!!!", 1).unwrap();
         index_writer.add_document("hello world!!!", 2).unwrap();
         index_writer.add_document(".!.!.!", 3).unwrap();

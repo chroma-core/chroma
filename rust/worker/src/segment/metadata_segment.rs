@@ -37,7 +37,7 @@ const F32_METADATA: &str = "f32_metadata";
 const U32_METADATA: &str = "u32_metadata";
 
 pub(crate) struct MetadataSegmentWriter<'me> {
-    pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
+    pub(crate) full_text_index_writer: Option<FullTextIndexWriter<'me>>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -111,7 +111,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 (*FULL_TEXT_FREQS).to_string(),
             ));
         }
-        let pls_writer = match segment.file_path.get(FULL_TEXT_PLS) {
+        let (pls_writer, pls_reader) = match segment.file_path.get(FULL_TEXT_PLS) {
             Some(pls_path) => match pls_path.get(0) {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
@@ -125,16 +125,21 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(writer) => writer,
                             Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                         };
-                    pls_writer
+                    let pls_reader =
+                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
+                            Ok(reader) => reader,
+                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                        };
+                    (pls_writer, Some(pls_reader))
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
             None => match blockfile_provider.create::<u32, &Int32Array>() {
-                Ok(writer) => writer,
+                Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let freqs_writer = match segment.file_path.get(FULL_TEXT_FREQS) {
+        let (freqs_writer, freqs_reader) = match segment.file_path.get(FULL_TEXT_FREQS) {
             Some(freqs_path) => match freqs_path.get(0) {
                 Some(freqs_uuid) => {
                     let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
@@ -150,20 +155,44 @@ impl<'me> MetadataSegmentWriter<'me> {
                         Ok(writer) => writer,
                         Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                     };
-                    freqs_writer
+                    let freqs_reader = match blockfile_provider.open::<u32, u32>(&freqs_uuid).await
+                    {
+                        Ok(reader) => reader,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
+                    (freqs_writer, Some(freqs_reader))
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
             None => match blockfile_provider.create::<u32, u32>() {
-                Ok(writer) => writer,
+                Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let full_text_tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let full_text_index_reader = match (pls_reader, freqs_reader) {
+            (Some(pls_reader), Some(freqs_reader)) => {
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                    NgramTokenizer::new(1, 3, false).unwrap(),
+                )));
+                Some(FullTextIndexReader::new(
+                    pls_reader,
+                    freqs_reader,
+                    tokenizer,
+                ))
+            }
+            (None, None) => None,
+            _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+        };
+
+        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 3, false).unwrap(),
         )));
-        let full_text_index_writer =
-            FullTextIndexWriter::new(pls_writer, freqs_writer, full_text_tokenizer);
+        let full_text_index_writer = FullTextIndexWriter::new(
+            full_text_index_reader,
+            pls_writer,
+            freqs_writer,
+            full_text_writer_tokenizer,
+        );
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
