@@ -301,7 +301,7 @@ impl<'me> FullTextIndexReader<'me> {
     }
 
     pub async fn search(&self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
-        let mut tokenizer = self.tokenizer.lock();
+        let tokenizer = self.tokenizer.lock();
         let binding = tokenizer.encode(query);
         let tokens = binding.get_tokens();
 
@@ -520,7 +520,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
@@ -559,7 +559,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
@@ -593,7 +593,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("aaaa").await.unwrap();
@@ -626,7 +626,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("helo").await.unwrap();
@@ -659,7 +659,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("chroma").await;
@@ -696,7 +696,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let mut res = index_reader.search("hello").await.unwrap();
@@ -734,7 +734,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let mut res = index_reader.search("hello").await.unwrap();
@@ -774,7 +774,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let mut res = index_reader.search("hello").await.unwrap();
@@ -827,7 +827,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let mut res = index_reader.search("aaa").await.unwrap();

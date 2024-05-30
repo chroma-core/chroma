@@ -286,19 +286,19 @@ Metadata queries
 ===========================================
 */
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Where {
     DirectWhereComparison(DirectComparison),
     WhereChildren(WhereChildren),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DirectComparison {
     pub key: String,
     pub comparison: WhereComparison,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereComparison {
     SingleStringComparison(String, WhereClauseComparator),
     SingleIntComparison(u32, WhereClauseComparator),
@@ -308,7 +308,7 @@ pub(crate) enum WhereComparison {
     DoubleListComparison(Vec<f64>, WhereClauseListOperator),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereClauseComparator {
     Equal,
     NotEqual,
@@ -318,49 +318,49 @@ pub(crate) enum WhereClauseComparator {
     LessThanOrEqual,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereClauseListOperator {
     In,
     NotIn,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct WhereChildren {
     pub children: Vec<Where>,
     pub operator: BooleanOperator,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanOperator {
     And,
     Or,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereDocument {
     DirectWhereDocumentComparison(DirectDocumentComparison),
     WhereDocumentChildren(WhereDocumentChildren),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DirectDocumentComparison {
     pub document: String,
     pub operator: WhereDocumentOperator,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereDocumentOperator {
     Contains,
     NotContains,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct WhereDocumentChildren {
     pub children: Vec<WhereDocument>,
     pub operator: BooleanOperator,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereConversionError {
     InvalidWhere,
     InvalidWhereComparison,
@@ -640,6 +640,34 @@ impl TryFrom<chroma_proto::WhereDocumentOperator> for WhereDocumentOperator {
             }
         }
     }
+}
+
+pub(crate) fn merge_update_metadata(
+    base_metadata: &Option<Metadata>,
+    update_metadata: &Option<UpdateMetadata>,
+) -> Result<Option<Metadata>, MetadataValueConversionError> {
+    let mut merged_metadata = HashMap::new();
+    if base_metadata.is_some() {
+        for (key, value) in base_metadata.as_ref().unwrap() {
+            merged_metadata.insert(key.clone(), value.clone());
+        }
+    }
+    if update_metadata.is_some() {
+        match update_metdata_to_metdata(update_metadata.as_ref().unwrap()) {
+            Ok(metadata) => {
+                for (key, value) in metadata {
+                    merged_metadata.insert(key, value);
+                }
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+    }
+    if merged_metadata.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(merged_metadata))
 }
 
 #[cfg(test)]
