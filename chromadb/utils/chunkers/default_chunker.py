@@ -110,7 +110,7 @@ class DefaultTextChunker(Chunker[Documents]):
         separators: List[str],
         max_chunk_size: int,
         chunk_overlap: int,
-        keep_separator: bool = True,
+        keep_separator: Union[bool, Literal["start", "end"]],
     ) -> Documents:
         """Split incoming text and return chunks."""
         final_chunks = []
@@ -182,7 +182,7 @@ class DefaultTextChunker(Chunker[Documents]):
             chunk_overlap = self.chunk_overlap
 
         if separators is None:
-            separators = ["\n\n", "\n", " ", ""]
+            separators = ["\n\n", "\n", ".", " ", ""]
 
         return [
             self._split_document(
@@ -190,6 +190,7 @@ class DefaultTextChunker(Chunker[Documents]):
                 separators=separators,
                 max_chunk_size=max_chunk_size,
                 chunk_overlap=chunk_overlap,
+                keep_separator="end",
             )
             for doc in input
         ]
