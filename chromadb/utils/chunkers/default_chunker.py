@@ -8,6 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 class DefaultTextChunker(Chunker[Documents]):
+    def __init__(self, max_chunk_size: int = 1024, chunk_overlap: int = 0):
+        self.max_chunk_size = max_chunk_size
+        self.chunk_overlap = chunk_overlap
+
     def _split_text_with_regex(
         self,
         text: str,
@@ -168,9 +172,14 @@ class DefaultTextChunker(Chunker[Documents]):
         input: Documents,
         **kwargs: Any,
     ) -> List[Documents]:
-        max_chunk_size = kwargs.get("max_chunk_size", 1024)
-        chunk_overlap = kwargs.get("chunk_overlap", 0)
+        max_chunk_size = kwargs.get("max_chunk_size", None)
+        chunk_overlap = kwargs.get("chunk_overlap", None)
         separators = kwargs.get("separators", None)
+
+        if max_chunk_size is None:
+            max_chunk_size = self.max_chunk_size
+        if chunk_overlap is None:
+            chunk_overlap = self.chunk_overlap
 
         if separators is None:
             separators = ["\n\n", "\n", " ", ""]
