@@ -75,7 +75,9 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     pub(super) final_embedding: Option<&'referred_data [f32]>,
 }
 
-impl<'referred_data> From<(DataRecord<'referred_data>, u32)> for MaterializedLogRecord<'referred_data> {
+impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
+    for MaterializedLogRecord<'referred_data>
+{
     fn from(data_record_info: (DataRecord<'referred_data>, u32)) -> Self {
         let data_record = data_record_info.0;
         let offset_id = data_record_info.1;
@@ -94,7 +96,9 @@ impl<'referred_data> From<(DataRecord<'referred_data>, u32)> for MaterializedLog
 // Creates a materialized log record from the corresponding entry
 // in the log (OperationRecord), offset id in storage where it will be stored (u32)
 // and user id (str).
-impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)> for MaterializedLogRecord<'referred_data> {
+impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)>
+    for MaterializedLogRecord<'referred_data>
+{
     type Error = LogMaterializerError;
 
     fn try_from(
