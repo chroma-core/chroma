@@ -140,7 +140,11 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
-    pub async fn delete(&self, document: &str, offset_id: u32) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn delete_document(
+        &self,
+        document: &str,
+        offset_id: u32,
+    ) -> Result<(), Box<dyn ChromaError>> {
         let mut tokenizer = self.tokenizer.lock();
         let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
@@ -179,6 +183,17 @@ impl<'me> FullTextIndexWriter<'me> {
                 }
             }
         }
+        Ok(())
+    }
+
+    pub async fn update_document(
+        &self,
+        old_document: &str,
+        new_document: &str,
+        offset_id: u32,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.delete_document(old_document, offset_id).await?;
+        self.add_document(new_document, offset_id as i32).await?;
         Ok(())
     }
 
@@ -957,5 +972,88 @@ mod tests {
 
         let res = index_reader.get_all_results_for_token("l").await.unwrap();
         assert_eq!(res.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_update_document() {
+        let provider = BlockfileProvider::new_memory();
+        let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let freq_blockfile_id = freq_blockfile_writer.id();
+
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
+        let mut index_writer =
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+
+        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer.add_document("hello", 2).await.unwrap();
+        index_writer.add_document("world", 3).await.unwrap();
+        index_writer
+            .update_document("world", "hello", 3)
+            .await
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
+        flusher.flush().await.unwrap();
+
+        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let pl_blockfile_reader = provider
+            .open::<u32, Int32Array>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
+        let index_reader =
+            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+
+        let mut res = index_reader.search("hello").await.unwrap();
+        res.sort();
+        assert_eq!(res, vec![1, 2, 3]);
+
+        let res = index_reader.search("world").await.unwrap();
+        assert_eq!(res, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_delete_document() {
+        let provider = BlockfileProvider::new_memory();
+        let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let freq_blockfile_id = freq_blockfile_writer.id();
+
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
+        let mut index_writer =
+            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+
+        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer.add_document("hello", 2).await.unwrap();
+        index_writer.add_document("world", 3).await.unwrap();
+        index_writer.delete_document("world", 3).await.unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().unwrap();
+        flusher.flush().await.unwrap();
+
+        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let pl_blockfile_reader = provider
+            .open::<u32, Int32Array>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+            NgramTokenizer::new(1, 1, false).unwrap(),
+        )));
+        let index_reader =
+            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+
+        let res = index_reader.search("world").await.unwrap();
+        assert_eq!(res, vec![1]);
     }
 }
