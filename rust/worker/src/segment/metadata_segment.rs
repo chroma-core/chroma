@@ -17,7 +17,8 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 use crate::index::fulltext::types::{
-    FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader, FullTextIndexWriter,
+    process_where_document_clause, FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader,
+    FullTextIndexWriter,
 };
 use crate::index::metadata::types::{
     process_where_clause, MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader,
@@ -770,10 +771,7 @@ impl MetadataSegmentReader<'_> {
 
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
-                match self
-                    .process_where_document_clause(where_document_clause)
-                    .await
-                {
+                match self.process_where_document_clause(where_document_clause) {
                     Ok(results) => results,
                     Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
                 }
@@ -854,9 +852,9 @@ impl MetadataSegmentReader<'_> {
                     }
                     WhereClauseComparator::LessThan => {
                         let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.lt(metadata_key, metadata_value),
-                            ),
+                            Some(reader) => {
+                                futures::executor::block_on(reader.lt(metadata_key, metadata_value))
+                            }
                             None => Ok(RoaringBitmap::new()),
                         };
                         match result {
@@ -886,9 +884,9 @@ impl MetadataSegmentReader<'_> {
                     }
                     WhereClauseComparator::GreaterThan => {
                         let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.gt(metadata_key, metadata_value),
-                            ),
+                            Some(reader) => {
+                                futures::executor::block_on(reader.gt(metadata_key, metadata_value))
+                            }
                             None => Ok(RoaringBitmap::new()),
                         };
                         match result {
@@ -939,9 +937,9 @@ impl MetadataSegmentReader<'_> {
                     }
                     WhereClauseComparator::LessThan => {
                         let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.lt(metadata_key, metadata_value),
-                            ),
+                            Some(reader) => {
+                                futures::executor::block_on(reader.lt(metadata_key, metadata_value))
+                            }
                             None => Ok(RoaringBitmap::new()),
                         };
                         match result {
@@ -971,9 +969,9 @@ impl MetadataSegmentReader<'_> {
                     }
                     WhereClauseComparator::GreaterThan => {
                         let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.gt(metadata_key, metadata_value),
-                            ),
+                            Some(reader) => {
+                                futures::executor::block_on(reader.gt(metadata_key, metadata_value))
+                            }
                             None => Ok(RoaringBitmap::new()),
                         };
                         match result {
@@ -1019,58 +1017,26 @@ impl MetadataSegmentReader<'_> {
     fn process_where_document_clause(
         &self,
         where_document_clause: &WhereDocument,
-    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
-        let mut results = vec![];
-        match where_document_clause {
-            WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
-                match &direct_document_comparison.operator {
-                    WhereDocumentOperator::Contains => {
-                        let result = match &self.full_text_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.search(&direct_document_comparison.document),
-                            ),
-                            None => Ok(vec![]),
-                        };
-                        match result {
-                            Ok(result) => {
-                                results = result.iter().map(|x| *x as usize).collect();
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
+    ) -> Result<Vec<usize>, MetadataIndexError> {
+        let cb = |doc: &str, comparison: WhereDocumentOperator| match comparison {
+            WhereDocumentOperator::Contains => {
+                let result = match &self.full_text_index_reader {
+                    Some(reader) => futures::executor::block_on(reader.search(doc)),
+                    None => Ok(vec![]),
+                };
+                match result {
+                    Ok(result) => {
+                        return result;
                     }
-                    WhereDocumentOperator::NotContains => {
-                        todo!();
+                    Err(_) => {
+                        panic!("Error querying metadata index")
                     }
                 }
             }
-            WhereDocument::WhereDocumentChildren(where_document_children) => {
-                let mut first_iteration = true;
-                for child in where_document_children.children.iter() {
-                    let child_results: Vec<usize> = match futures::executor::block_on(
-                        self.process_where_document_clause(&child),
-                    ) {
-                        Ok(result) => result,
-                        Err(_) => vec![],
-                    };
-                    if first_iteration {
-                        results = child_results;
-                        first_iteration = false;
-                    } else {
-                        match where_document_children.operator {
-                            BooleanOperator::And => {
-                                results = merge_sorted_vecs_conjunction(results, child_results);
-                            }
-                            BooleanOperator::Or => {
-                                results = merge_sorted_vecs_disjunction(results, child_results);
-                            }
-                        }
-                    }
-                }
+            WhereDocumentOperator::NotContains => {
+                todo!()
             }
-        }
-        results.sort();
-        return Box::pin(async { Ok(results) });
+        };
+        process_where_document_clause(where_document_clause, &cb)
     }
 }

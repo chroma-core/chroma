@@ -9,21 +9,30 @@ use std::{
 
 use futures::stream::Count;
 use roaring::RoaringBitmap;
+use thiserror::Error;
 use tonic::async_trait;
 
 use crate::{
     blockstore::{key::KeyWrapper, provider::BlockfileProvider},
     chroma_proto::r#where,
+    errors::{ChromaError, ErrorCodes},
     execution::{
         data::data_chunk::Chunk, operator::Operator,
         operators::write_segments::WriteSegmentsOperatorError,
     },
-    index::metadata::types::process_where_clause,
+    index::{
+        fulltext::types::process_where_document_clause,
+        metadata::types::{process_where_clause, MetadataIndexError},
+    },
     segment::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, MaterializedLogRecord,
+        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
     },
-    types::{LogRecord, Metadata, MetadataValue, Operation, Segment, Where, WhereClauseComparator},
+    types::{
+        LogRecord, Metadata, MetadataValue, Operation, Segment, Where, WhereClauseComparator,
+        WhereDocument, WhereDocumentOperator,
+    },
+    utils::merge_sorted_vecs_conjunction,
 };
 
 use super::count_records::CountRecordsError;
@@ -44,7 +53,7 @@ pub(crate) struct BruteForceMetadataFilteringInput {
     blockfile_provider: BlockfileProvider,
     curr_max_offset_id: Arc<AtomicU32>,
     where_clause: Where,
-    // TODO(Sanket): Add Where document.
+    where_document_clause: WhereDocument,
 }
 
 impl BruteForceMetadataFilteringInput {
@@ -53,14 +62,16 @@ impl BruteForceMetadataFilteringInput {
         record_segment: Segment,
         blockfile_provider: BlockfileProvider,
         where_clause: Where,
+        where_document_clause: WhereDocument,
         curr_max_offset_id: Arc<AtomicU32>,
     ) -> Self {
         Self {
             log_record,
             record_segment,
             blockfile_provider,
-            where_clause,
             curr_max_offset_id,
+            where_clause,
+            where_document_clause,
         }
     }
 }
@@ -71,15 +82,35 @@ pub(crate) struct BruteForceMetadataFilteringOutput {
     filtered_documents: Vec<usize>,
 }
 
+#[derive(Error, Debug)]
+pub(crate) enum BruteForceMetadataFilteringError {
+    #[error("Error creating record segment reader {0}")]
+    BruteForceMetadataRecordSegmentReaderCreationError(#[from] RecordSegmentReaderCreationError),
+    #[error("Error materializing logs {0}")]
+    BruteForceMetadataLogMaterializationError(#[from] LogMaterializerError),
+    #[error("Error filtering documents by where or where_document clauses {0}")]
+    BruteForceMetadataFilteringMetadataError(#[from] MetadataIndexError),
+}
+
+impl ChromaError for BruteForceMetadataFilteringError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BruteForceMetadataFilteringError::BruteForceMetadataRecordSegmentReaderCreationError(e) => e.code(),
+            BruteForceMetadataFilteringError::BruteForceMetadataLogMaterializationError(e) => e.code(),
+            BruteForceMetadataFilteringError::BruteForceMetadataFilteringMetadataError(e) => e.code(),
+        }
+    }
+}
+
 #[async_trait]
 impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutput>
     for BruteForceMetadataFilteringOperator
 {
-    type Error = CountRecordsError;
+    type Error = BruteForceMetadataFilteringError;
     async fn run(
         &self,
         input: &BruteForceMetadataFilteringInput,
-    ) -> Result<BruteForceMetadataFilteringOutput, CountRecordsError> {
+    ) -> Result<BruteForceMetadataFilteringOutput, BruteForceMetadataFilteringError> {
         let record_segment_reader: Option<RecordSegmentReader>;
         match RecordSegmentReader::from_segment(&input.record_segment, &input.blockfile_provider)
             .await
@@ -96,13 +127,13 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     }
                     RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
                         tracing::error!("Error creating record segment reader {}", e);
-                        return Err(CountRecordsError::RecordSegmentCreateError(
+                        return Err(BruteForceMetadataFilteringError::BruteForceMetadataRecordSegmentReaderCreationError(
                             RecordSegmentReaderCreationError::BlockfileOpenError(e),
                         ));
                     }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                         tracing::error!("Error creating record segment reader {}", e);
-                        return Err(CountRecordsError::RecordSegmentCreateError(
+                        return Err(BruteForceMetadataFilteringError::BruteForceMetadataRecordSegmentReaderCreationError(
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles,
                         ));
                     }
@@ -117,7 +148,9 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
         let mat_records = match materializer.materialize().await {
             Ok(records) => records,
             Err(e) => {
-                return Err(CountRecordsError::RecordSegmentReadError(Box::new(e)));
+                return Err(
+                    BruteForceMetadataFilteringError::BruteForceMetadataLogMaterializationError(e),
+                );
             }
         };
         let mut ids_to_metadata: HashMap<u32, HashMap<&String, &MetadataValue>> = HashMap::new();
@@ -128,9 +161,9 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
             if !ids_to_metadata.contains_key(&records.offset_id) {
                 ids_to_metadata.insert(records.offset_id, HashMap::new());
             }
-            let map_pointer = ids_to_metadata
-                .get_mut(&records.offset_id)
-                .expect("Not possible.");
+            let map_pointer = ids_to_metadata.get_mut(&records.offset_id).expect(
+                "Just inserted the key one line above so cannot happen that it does not exist now",
+            );
             match &records.data_record {
                 Some(data_record) => match &data_record.metadata {
                     Some(meta) => {
@@ -222,7 +255,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::LessThan => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key less than this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -242,7 +275,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::LessThanOrEqual => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -262,7 +295,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::GreaterThan => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -282,7 +315,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::GreaterThanOrEqual => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -327,7 +360,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::LessThan => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key < this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -347,7 +380,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::LessThanOrEqual => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -367,7 +400,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::GreaterThan => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -387,7 +420,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                     WhereClauseComparator::GreaterThanOrEqual => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
+                        // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(&metadata_key.to_string()) {
                                 match *val {
@@ -416,12 +449,67 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                 }
             }
         };
-        let res = match process_where_clause(&input.where_clause, &clo) {
+        let mtsearch_res = match process_where_clause(&input.where_clause, &clo) {
             Ok(r) => r,
-            Err(e) => panic!("Failed parsing where clause"),
+            Err(e) => {
+                return Err(
+                    BruteForceMetadataFilteringError::BruteForceMetadataFilteringMetadataError(e),
+                );
+            }
         };
+        if mtsearch_res.is_empty() {
+            return Ok(BruteForceMetadataFilteringOutput {
+                filtered_documents: mtsearch_res,
+            });
+        }
+        // AND this with where_document clause.
+        let cb = |query: &str, op: WhereDocumentOperator| {
+            match op {
+                WhereDocumentOperator::Contains => {
+                    let mut matching_contains = vec![];
+                    for (record, _) in mat_records.iter() {
+                        if record.final_operation == Operation::Delete {
+                            continue;
+                        }
+                        // The document could have been updated hence check the update
+                        // first.
+                        match record.final_document {
+                            Some(doc) => {
+                                if doc.contains(query) {
+                                    matching_contains.push(record.offset_id as i32);
+                                }
+                            }
+                            None => match &record.data_record {
+                                Some(data_record) => match data_record.document {
+                                    Some(doc) => {
+                                        if doc.contains(query) {
+                                            matching_contains.push(record.offset_id as i32);
+                                        }
+                                    }
+                                    None => (),
+                                },
+                                None => (),
+                            },
+                        }
+                    }
+                    return matching_contains;
+                }
+                WhereDocumentOperator::NotContains => {
+                    todo!()
+                }
+            }
+        };
+        let fts_result = match process_where_document_clause(&input.where_document_clause, &cb) {
+            Ok(res) => res,
+            Err(e) => {
+                return Err(
+                    BruteForceMetadataFilteringError::BruteForceMetadataFilteringMetadataError(e),
+                );
+            }
+        };
+        let merged_result = merge_sorted_vecs_conjunction(mtsearch_res, fts_result);
         return Ok(BruteForceMetadataFilteringOutput {
-            filtered_documents: res,
+            filtered_documents: merged_result,
         });
     }
 }
@@ -454,8 +542,8 @@ mod test {
         },
         storage::{local::LocalStorage, Storage},
         types::{
-            DirectComparison, LogRecord, Operation, OperationRecord, UpdateMetadataValue, Where,
-            WhereComparison,
+            DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
+            UpdateMetadataValue, Where, WhereComparison, WhereDocument,
         },
     };
 
@@ -498,7 +586,7 @@ mod test {
                         embedding: Some(vec![1.0, 2.0, 3.0]),
                         encoding: None,
                         metadata: Some(update_metadata.clone()),
-                        document: Some(String::from("doc1")),
+                        document: Some(String::from("This is a document about cats.")),
                         operation: Operation::Add,
                     },
                 },
@@ -509,7 +597,7 @@ mod test {
                         embedding: Some(vec![4.0, 5.0, 6.0]),
                         encoding: None,
                         metadata: Some(update_metadata),
-                        document: Some(String::from("doc2")),
+                        document: Some(String::from("This is a document about dogs.")),
                         operation: Operation::Add,
                     },
                 },
@@ -528,10 +616,10 @@ mod test {
                             record_segment_reader = None;
                         }
                         RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            assert!(1 == 1, "Error creating record segment reader");
+                            panic!("Error creating record segment reader");
                         }
                         RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            assert!(1 == 1, "Error creating record segment reader");
+                            panic!("Error creating record segment reader");
                         }
                     };
                 }
@@ -580,7 +668,7 @@ mod test {
                     embedding: Some(vec![7.0, 8.0, 9.0]),
                     encoding: None,
                     metadata: Some(update_metadata),
-                    document: Some(String::from("doc3")),
+                    document: Some(String::from("This is a document about dogs.")),
                     operation: Operation::Add,
                 },
             },
@@ -606,20 +694,25 @@ mod test {
                 crate::types::WhereClauseComparator::Equal,
             ),
         });
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("about dogs"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
         let input = BruteForceMetadataFilteringInput::new(
             data,
             record_segment,
             blockfile_provider,
             where_clause,
+            where_document_clause,
             curr_max_offset_id,
         );
         let mut res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
-        assert_eq!(2, res.filtered_documents.len());
+        assert_eq!(1, res.filtered_documents.len());
         res.filtered_documents.sort();
-        assert_eq!(1, *res.filtered_documents.get(0).expect("Expect not none"));
-        assert_eq!(3, *res.filtered_documents.get(1).expect("Expect not none"));
+        assert_eq!(3, *res.filtered_documents.get(0).expect("Expect not none"));
     }
 }

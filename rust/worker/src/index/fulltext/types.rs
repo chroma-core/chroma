@@ -2,9 +2,13 @@ use crate::blockstore::positional_posting_list_value::PositionalPostingListBuild
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
+use crate::index::metadata::types::MetadataIndexError;
+use crate::types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
+use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 
 use arrow::array::Int32Array;
 use parking_lot::Mutex;
+use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -300,6 +304,54 @@ impl<'me> FullTextIndexReader<'me> {
         }
         return Ok(results);
     }
+}
+
+pub(crate) fn process_where_document_clause<F: Fn(&str, WhereDocumentOperator) -> Vec<i32>>(
+    where_document_clause: &WhereDocument,
+    callback: &F,
+) -> Result<Vec<usize>, MetadataIndexError> {
+    let mut results = vec![];
+    match where_document_clause {
+        WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
+            match &direct_document_comparison.operator {
+                WhereDocumentOperator::Contains => {
+                    let result = callback(
+                        &direct_document_comparison.document,
+                        WhereDocumentOperator::Contains,
+                    );
+                    results = result.iter().map(|x| *x as usize).collect();
+                }
+                WhereDocumentOperator::NotContains => {
+                    todo!();
+                }
+            }
+        }
+        WhereDocument::WhereDocumentChildren(where_document_children) => {
+            let mut first_iteration = true;
+            for child in where_document_children.children.iter() {
+                let child_results: Vec<usize> =
+                    match process_where_document_clause(&child, callback) {
+                        Ok(result) => result,
+                        Err(_) => vec![],
+                    };
+                if first_iteration {
+                    results = child_results;
+                    first_iteration = false;
+                } else {
+                    match where_document_children.operator {
+                        BooleanOperator::And => {
+                            results = merge_sorted_vecs_conjunction(results, child_results);
+                        }
+                        BooleanOperator::Or => {
+                            results = merge_sorted_vecs_disjunction(results, child_results);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results.sort();
+    return Ok(results);
 }
 
 #[cfg(test)]
