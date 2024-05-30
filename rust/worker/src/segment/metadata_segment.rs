@@ -36,17 +36,17 @@ const BOOL_METADATA: &str = "bool_metadata";
 const F32_METADATA: &str = "f32_metadata";
 const U32_METADATA: &str = "u32_metadata";
 
-pub(crate) struct MetadataSegmentWriter {
+pub(crate) struct MetadataSegmentWriter<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
     // TODO this needs a real lifetime. However doing it breaks the commit() method
     // for some reason? This works for now.
-    pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter>,
-    pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter>,
-    pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter>,
-    pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter>,
+    pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
+    pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
+    pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
+    pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
 }
 
-impl Debug for MetadataSegmentWriter {
+impl Debug for MetadataSegmentWriter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "MetadataSegmentWriter")
     }
@@ -90,11 +90,11 @@ impl ChromaError for MetadataSegmentError {
     }
 }
 
-impl MetadataSegmentWriter {
+impl<'me> MetadataSegmentWriter<'me> {
     pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
-    ) -> Result<MetadataSegmentWriter, MetadataSegmentError> {
+    ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
         println!("Creating MetadataSegmentWriter from Segment");
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);

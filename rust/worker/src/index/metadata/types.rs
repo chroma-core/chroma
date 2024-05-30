@@ -312,6 +312,17 @@ impl<'me> MetadataIndexWriter<'me> {
         Ok(())
     }
 
+    pub async fn update(
+        &self,
+        prefix: &str,
+        old_key: KeyWrapper,
+        new_key: KeyWrapper,
+        offset_id: u32,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.delete(prefix, old_key, offset_id).await?;
+        self.set(prefix, new_key, offset_id).await
+    }
+
     pub async fn write_to_blockfile(&mut self) -> Result<(), Box<dyn ChromaError>> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(
@@ -1378,5 +1389,46 @@ mod test {
 
         let bitmap = reader.gte("key2", &6.0.into()).await;
         assert!(bitmap.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_get_set_delete() {
+        let provider = BlockfileProvider::new_memory();
+        let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
+        let writer_id = blockfile_writer.id();
+        let blockfile_reader = provider
+            .open::<u32, RoaringBitmap>(&writer_id)
+            .await
+            .unwrap();
+        let reader = MetadataIndexReader::new_u32(blockfile_reader);
+
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, reader);
+        writer.set("key1", 1, 1).await.unwrap();
+        let flusher = writer.commit().unwrap();
+        flusher.flush().await.unwrap();
+
+        let blockfile_reader = provider
+            .open::<u32, RoaringBitmap>(&writer_id)
+            .await
+            .unwrap();
+        let reader = MetadataIndexReader::new_u32(blockfile_reader);
+        let bitmap = reader.get("key1", &1.into()).await.unwrap();
+        assert_eq!(bitmap.len(), 1);
+        assert!(bitmap.contains(1));
+
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, reader);
+        writer.set("key1", 1, 2).await.unwrap();
+        let flusher = writer.commit().unwrap();
+        flusher.flush().await.unwrap();
+
+        let blockfile_reader = provider
+            .open::<u32, RoaringBitmap>(&writer_id)
+            .await
+            .unwrap();
+        let reader = MetadataIndexReader::new_u32(blockfile_reader);
+        let bitmap = reader.get("key1", &1.into()).await.unwrap();
+        assert_eq!(bitmap.len(), 2);
+        assert!(bitmap.contains(1));
+        assert!(bitmap.contains(2));
     }
 }
