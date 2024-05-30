@@ -64,6 +64,8 @@ pub enum MetadataSegmentError {
     BlockfileError(#[from] CreateError),
     #[error("Blockfile open error")]
     BlockfileOpenError(#[from] OpenError),
+    #[error("Only one of posting lists and frequencies files found")]
+    FullTextIndexFilesIntegrityError,
     #[error("Incorrect number of files")]
     IncorrectNumberOfFiles,
     #[error("Missing file {0}")]
@@ -525,11 +527,11 @@ impl SegmentFlusher for MetadataSegmentFlusher {
 }
 
 pub(crate) struct MetadataSegmentReader<'me> {
-    pub(crate) full_text_index_reader: FullTextIndexReader<'me>,
-    pub(crate) string_metadata_index_reader: MetadataIndexReader<'me>,
-    pub(crate) bool_metadata_index_reader: MetadataIndexReader<'me>,
-    pub(crate) f32_metadata_index_reader: MetadataIndexReader<'me>,
-    pub(crate) u32_metadata_index_reader: MetadataIndexReader<'me>,
+    pub(crate) full_text_index_reader: Option<FullTextIndexReader<'me>>,
+    pub(crate) string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub(crate) bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub(crate) f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub(crate) u32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
 }
 
 impl MetadataSegmentReader<'_> {
@@ -565,14 +567,14 @@ impl MetadataSegmentReader<'_> {
                     };
                     let pls_reader =
                         match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => reader,
+                            Ok(reader) => Some(reader),
                             Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                         };
                     pls_reader
                 }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
+                None => None,
             },
-            None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+            None => None,
         };
         let freqs_reader = match segment.file_path.get(FULL_TEXT_FREQS) {
             Some(freqs_path) => match freqs_path.get(0) {
@@ -587,19 +589,30 @@ impl MetadataSegmentReader<'_> {
                     };
                     let freqs_reader = match blockfile_provider.open::<u32, u32>(&freqs_uuid).await
                     {
-                        Ok(reader) => reader,
+                        Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
                     freqs_reader
                 }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
+                None => None,
             },
-            None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+            None => None,
         };
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
-            NgramTokenizer::new(1, 3, false).unwrap(),
-        )));
-        let full_text_index_reader = FullTextIndexReader::new(pls_reader, freqs_reader, tokenizer);
+        let full_text_index_reader = match (pls_reader, freqs_reader) {
+            (Some(pls_reader), Some(freqs_reader)) => {
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                    NgramTokenizer::new(1, 3, false).unwrap(),
+                )));
+                Some(FullTextIndexReader::new(
+                    pls_reader,
+                    freqs_reader,
+                    tokenizer,
+                ))
+            }
+            (Some(_), None) => return Err(MetadataSegmentError::FullTextIndexFilesIntegrityError),
+            (None, Some(_)) => return Err(MetadataSegmentError::FullTextIndexFilesIntegrityError),
+            _ => None,
+        };
 
         let string_metadata_reader = match segment.file_path.get(STRING_METADATA) {
             Some(string_metadata_path) => match string_metadata_path.get(0) {
@@ -616,16 +629,19 @@ impl MetadataSegmentReader<'_> {
                         .open::<&str, RoaringBitmap>(&string_metadata_uuid)
                         .await
                     {
-                        Ok(reader) => reader,
+                        Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
                     string_metadata_reader
                 }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
+                None => None,
             },
-            None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+            None => None,
         };
-        let string_metadata_index_reader = MetadataIndexReader::new_string(string_metadata_reader);
+        let string_metadata_index_reader = match string_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_string(reader)),
+            None => None,
+        };
 
         let bool_metadata_reader = match segment.file_path.get(BOOL_METADATA) {
             Some(bool_metadata_path) => match bool_metadata_path.get(0) {
@@ -642,16 +658,19 @@ impl MetadataSegmentReader<'_> {
                         .open::<bool, RoaringBitmap>(&bool_metadata_uuid)
                         .await
                     {
-                        Ok(reader) => reader,
+                        Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
                     bool_metadata_reader
                 }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
+                None => None,
             },
-            None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+            None => None,
         };
-        let bool_metadata_index_reader = MetadataIndexReader::new_bool(bool_metadata_reader);
+        let bool_metadata_index_reader = match bool_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_bool(reader)),
+            None => None,
+        };
 
         let u32_metadata_reader = match segment.file_path.get(U32_METADATA) {
             Some(u32_metadata_path) => match u32_metadata_path.get(0) {
@@ -668,16 +687,19 @@ impl MetadataSegmentReader<'_> {
                         .open::<u32, RoaringBitmap>(&u32_metadata_uuid)
                         .await
                     {
-                        Ok(reader) => reader,
+                        Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
                     u32_metadata_reader
                 }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
+                None => None,
             },
-            None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+            None => None,
         };
-        let u32_metadata_index_reader = MetadataIndexReader::new_u32(u32_metadata_reader);
+        let u32_metadata_index_reader = match u32_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_u32(reader)),
+            None => None,
+        };
 
         let f32_metadata_reader = match segment.file_path.get(F32_METADATA) {
             Some(f32_metadata_path) => match f32_metadata_path.get(0) {
@@ -694,16 +716,19 @@ impl MetadataSegmentReader<'_> {
                         .open::<f32, RoaringBitmap>(&f32_metadata_uuid)
                         .await
                     {
-                        Ok(reader) => reader,
+                        Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
                     f32_metadata_reader
                 }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
+                None => None,
             },
-            None => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
+            None => None,
         };
-        let f32_metadata_index_reader = MetadataIndexReader::new_f32(f32_metadata_reader);
+        let f32_metadata_index_reader = match f32_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_f32(reader)),
+            None => None,
+        };
 
         Ok(MetadataSegmentReader {
             full_text_index_reader,
@@ -782,10 +807,13 @@ impl MetadataSegmentReader<'_> {
                                 let metadata_value_keywrapper = operand.as_str().try_into();
                                 match metadata_value_keywrapper {
                                     Ok(keywrapper) => {
-                                        let result = futures::executor::block_on(
-                                            self.string_metadata_index_reader
-                                                .get(&direct_where_comparison.key, &keywrapper),
-                                        );
+                                        let result = match &self.string_metadata_index_reader {
+                                            Some(reader) => futures::executor::block_on(
+                                                reader
+                                                    .get(&direct_where_comparison.key, &keywrapper),
+                                            ),
+                                            None => Ok(RoaringBitmap::new()),
+                                        };
                                         match result {
                                             Ok(result) => {
                                                 results =
@@ -824,10 +852,12 @@ impl MetadataSegmentReader<'_> {
                             let metadata_value_keywrapper = (*operand).try_into();
                             match metadata_value_keywrapper {
                                 Ok(keywrapper) => {
-                                    let result = futures::executor::block_on(
-                                        self.u32_metadata_index_reader
-                                            .get(&direct_where_comparison.key, &keywrapper),
-                                    );
+                                    let result = match &self.u32_metadata_index_reader {
+                                        Some(reader) => futures::executor::block_on(
+                                            reader.get(&direct_where_comparison.key, &keywrapper),
+                                        ),
+                                        None => Ok(RoaringBitmap::new()),
+                                    };
                                     match result {
                                         Ok(result) => {
                                             results = result.iter().map(|x| x as usize).collect();
@@ -849,10 +879,12 @@ impl MetadataSegmentReader<'_> {
                             let metadata_value_keywrapper = (*operand).try_into();
                             match metadata_value_keywrapper {
                                 Ok(keywrapper) => {
-                                    let result = futures::executor::block_on(
-                                        self.u32_metadata_index_reader
-                                            .lt(&direct_where_comparison.key, &keywrapper),
-                                    );
+                                    let result = match &self.u32_metadata_index_reader {
+                                        Some(reader) => futures::executor::block_on(
+                                            reader.lt(&direct_where_comparison.key, &keywrapper),
+                                        ),
+                                        None => Ok(RoaringBitmap::new()),
+                                    };
                                     match result {
                                         Ok(result) => {
                                             results = result.iter().map(|x| x as usize).collect();
@@ -871,10 +903,12 @@ impl MetadataSegmentReader<'_> {
                             let metadata_value_keywrapper = (*operand).try_into();
                             match metadata_value_keywrapper {
                                 Ok(keywrapper) => {
-                                    let result = futures::executor::block_on(
-                                        self.u32_metadata_index_reader
-                                            .lte(&direct_where_comparison.key, &keywrapper),
-                                    );
+                                    let result = match &self.u32_metadata_index_reader {
+                                        Some(reader) => futures::executor::block_on(
+                                            reader.lte(&direct_where_comparison.key, &keywrapper),
+                                        ),
+                                        None => Ok(RoaringBitmap::new()),
+                                    };
                                     match result {
                                         Ok(result) => {
                                             results = result.iter().map(|x| x as usize).collect();
@@ -893,10 +927,12 @@ impl MetadataSegmentReader<'_> {
                             let metadata_value_keywrapper = (*operand).try_into();
                             match metadata_value_keywrapper {
                                 Ok(keywrapper) => {
-                                    let result = futures::executor::block_on(
-                                        self.u32_metadata_index_reader
-                                            .gt(&direct_where_comparison.key, &keywrapper),
-                                    );
+                                    let result = match &self.u32_metadata_index_reader {
+                                        Some(reader) => futures::executor::block_on(
+                                            reader.gt(&direct_where_comparison.key, &keywrapper),
+                                        ),
+                                        None => Ok(RoaringBitmap::new()),
+                                    };
                                     match result {
                                         Ok(result) => {
                                             results = result.iter().map(|x| x as usize).collect();
@@ -915,10 +951,12 @@ impl MetadataSegmentReader<'_> {
                             let metadata_value_keywrapper = (*operand).try_into();
                             match metadata_value_keywrapper {
                                 Ok(keywrapper) => {
-                                    let result = futures::executor::block_on(
-                                        self.u32_metadata_index_reader
-                                            .gte(&direct_where_comparison.key, &keywrapper),
-                                    );
+                                    let result = match &self.u32_metadata_index_reader {
+                                        Some(reader) => futures::executor::block_on(
+                                            reader.gte(&direct_where_comparison.key, &keywrapper),
+                                        ),
+                                        None => Ok(RoaringBitmap::new()),
+                                    };
                                     match result {
                                         Ok(result) => {
                                             results = result.iter().map(|x| x as usize).collect();
@@ -940,10 +978,13 @@ impl MetadataSegmentReader<'_> {
                                 let metadata_value_keywrapper = (*operand as f32).try_into();
                                 match metadata_value_keywrapper {
                                     Ok(keywrapper) => {
-                                        let result = futures::executor::block_on(
-                                            self.f32_metadata_index_reader
-                                                .get(&direct_where_comparison.key, &keywrapper),
-                                        );
+                                        let result = match &self.f32_metadata_index_reader {
+                                            Some(reader) => futures::executor::block_on(
+                                                reader
+                                                    .get(&direct_where_comparison.key, &keywrapper),
+                                            ),
+                                            None => Ok(RoaringBitmap::new()),
+                                        };
                                         match result {
                                             Ok(result) => {
                                                 results =
@@ -966,10 +1007,13 @@ impl MetadataSegmentReader<'_> {
                                 let metadata_value_keywrapper = (*operand as f32).try_into();
                                 match metadata_value_keywrapper {
                                     Ok(keywrapper) => {
-                                        let result = futures::executor::block_on(
-                                            self.f32_metadata_index_reader
-                                                .lt(&direct_where_comparison.key, &keywrapper),
-                                        );
+                                        let result = match &self.f32_metadata_index_reader {
+                                            Some(reader) => futures::executor::block_on(
+                                                reader
+                                                    .lt(&direct_where_comparison.key, &keywrapper),
+                                            ),
+                                            None => Ok(RoaringBitmap::new()),
+                                        };
                                         match result {
                                             Ok(result) => {
                                                 results =
@@ -989,10 +1033,13 @@ impl MetadataSegmentReader<'_> {
                                 let metadata_value_keywrapper = (*operand as f32).try_into();
                                 match metadata_value_keywrapper {
                                     Ok(keywrapper) => {
-                                        let result = futures::executor::block_on(
-                                            self.f32_metadata_index_reader
-                                                .lte(&direct_where_comparison.key, &keywrapper),
-                                        );
+                                        let result = match &self.f32_metadata_index_reader {
+                                            Some(reader) => futures::executor::block_on(
+                                                reader
+                                                    .lte(&direct_where_comparison.key, &keywrapper),
+                                            ),
+                                            None => Ok(RoaringBitmap::new()),
+                                        };
                                         match result {
                                             Ok(result) => {
                                                 results =
@@ -1012,10 +1059,13 @@ impl MetadataSegmentReader<'_> {
                                 let metadata_value_keywrapper = (*operand as f32).try_into();
                                 match metadata_value_keywrapper {
                                     Ok(keywrapper) => {
-                                        let result = futures::executor::block_on(
-                                            self.f32_metadata_index_reader
-                                                .gt(&direct_where_comparison.key, &keywrapper),
-                                        );
+                                        let result = match &self.f32_metadata_index_reader {
+                                            Some(reader) => futures::executor::block_on(
+                                                reader
+                                                    .gt(&direct_where_comparison.key, &keywrapper),
+                                            ),
+                                            None => Ok(RoaringBitmap::new()),
+                                        };
                                         match result {
                                             Ok(result) => {
                                                 results =
@@ -1035,10 +1085,13 @@ impl MetadataSegmentReader<'_> {
                                 let metadata_value_keywrapper = (*operand as f32).try_into();
                                 match metadata_value_keywrapper {
                                     Ok(keywrapper) => {
-                                        let result = futures::executor::block_on(
-                                            self.f32_metadata_index_reader
-                                                .gte(&direct_where_comparison.key, &keywrapper),
-                                        );
+                                        let result = match &self.f32_metadata_index_reader {
+                                            Some(reader) => futures::executor::block_on(
+                                                reader
+                                                    .gte(&direct_where_comparison.key, &keywrapper),
+                                            ),
+                                            None => Ok(RoaringBitmap::new()),
+                                        };
                                         match result {
                                             Ok(result) => {
                                                 results =
@@ -1105,10 +1158,12 @@ impl MetadataSegmentReader<'_> {
             WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
                 match &direct_document_comparison.operator {
                     WhereDocumentOperator::Contains => {
-                        let result = futures::executor::block_on(
-                            self.full_text_index_reader
-                                .search(&direct_document_comparison.document),
-                        );
+                        let result = match &self.full_text_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.search(&direct_document_comparison.document),
+                            ),
+                            None => Ok(vec![]),
+                        };
                         match result {
                             Ok(result) => {
                                 results = result.iter().map(|x| *x as usize).collect();

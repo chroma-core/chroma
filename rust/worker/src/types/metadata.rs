@@ -286,19 +286,19 @@ Metadata queries
 ===========================================
 */
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Where {
     DirectWhereComparison(DirectComparison),
     WhereChildren(WhereChildren),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DirectComparison {
     pub key: String,
     pub comparison: WhereComparison,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereComparison {
     SingleStringComparison(String, WhereClauseComparator),
     SingleIntComparison(u32, WhereClauseComparator),
@@ -308,7 +308,7 @@ pub(crate) enum WhereComparison {
     DoubleListComparison(Vec<f64>, WhereClauseListOperator),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereClauseComparator {
     Equal,
     NotEqual,
@@ -318,49 +318,49 @@ pub(crate) enum WhereClauseComparator {
     LessThanOrEqual,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereClauseListOperator {
     In,
     NotIn,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct WhereChildren {
     pub children: Vec<Where>,
     pub operator: BooleanOperator,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanOperator {
     And,
     Or,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereDocument {
     DirectWhereDocumentComparison(DirectDocumentComparison),
     WhereDocumentChildren(WhereDocumentChildren),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DirectDocumentComparison {
     pub document: String,
     pub operator: WhereDocumentOperator,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereDocumentOperator {
     Contains,
     NotContains,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct WhereDocumentChildren {
     pub children: Vec<WhereDocument>,
     pub operator: BooleanOperator,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WhereConversionError {
     InvalidWhere,
     InvalidWhereComparison,
