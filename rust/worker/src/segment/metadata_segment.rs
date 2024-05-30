@@ -10,6 +10,7 @@ use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
@@ -352,16 +353,17 @@ impl MetadataSegmentWriter {
     }
 }
 
-impl SegmentWriter for MetadataSegmentWriter {
-    fn apply_materialized_log_chunk(
+// TODO(Sanket): Implement this for updates/upserts/deletes.
+impl<'a> SegmentWriter<'a> for MetadataSegmentWriter {
+    async fn apply_materialized_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<MaterializedLogRecord>,
-    ) {
+        records: crate::execution::data::data_chunk::Chunk<MaterializedLogRecord<'a>>,
+    ) -> Result<(), ApplyMaterializedLogError> {
         for record in records.iter() {
-            let segment_offset_id = record.0.segment_offset_id;
-            match record.0.log_record.record.operation {
+            let segment_offset_id = record.0.offset_id;
+            match record.0.final_operation {
                 Operation::Add => {
-                    match &record.0.materialized_record.metadata {
+                    match &record.0.metadata_to_be_merged {
                         Some(metadata) => {
                             for (key, value) in metadata.iter() {
                                 match value {
@@ -406,7 +408,7 @@ impl SegmentWriter for MetadataSegmentWriter {
                         }
                         None => {}
                     };
-                    match &record.0.materialized_record.document {
+                    match &record.0.final_document {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer.add_document(document, segment_offset_id as i32);
@@ -419,13 +421,7 @@ impl SegmentWriter for MetadataSegmentWriter {
                 _ => todo!(),
             }
         }
-    }
-
-    fn apply_log_chunk(
-        &self,
-        _: crate::execution::data::data_chunk::Chunk<crate::types::LogRecord>,
-    ) {
-        unreachable!();
+        Ok(())
     }
 
     fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {

@@ -1,3 +1,4 @@
+use super::record_segment::ApplyMaterializedLogError;
 use super::{SegmentFlusher, SegmentWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::hnsw_provider::{
@@ -172,57 +173,66 @@ impl DistributedHNSWSegmentWriter {
     }
 }
 
-impl SegmentWriter for DistributedHNSWSegmentWriter {
-    fn apply_materialized_log_chunk(
+impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
+    async fn apply_materialized_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<super::MaterializedLogRecord>,
-    ) {
-        for record in records.iter() {
-            match record.0.log_record.record.operation {
+        records: crate::execution::data::data_chunk::Chunk<super::MaterializedLogRecord<'a>>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        for (record, _) in records.iter() {
+            match record.final_operation {
+                // If embedding is not found in case of adds it means that user
+                // did not supply them and thus we should return an error as
+                // opposed to panic.
                 Operation::Add => {
-                    let segment_offset_id = record.0.segment_offset_id;
-                    let embedding = record.0.log_record.record.embedding.as_ref().unwrap();
-                    self.index
-                        .read()
-                        .add(segment_offset_id as usize, &embedding);
+                    let embedding = match record.final_embedding {
+                        Some(e) => e,
+                        None => match record.data_record.as_ref() {
+                            Some(record) => record.embedding,
+                            None => {
+                                tracing::error!("Embedding not set for record {:?}", record);
+                                return Err(ApplyMaterializedLogError::EmbeddingNotSet);
+                            }
+                        },
+                    };
+                    self.index.read().add(record.offset_id as usize, embedding);
                 }
+                // This shouldn't be reached since materialization always derefs
+                // upserts into either updates or inserts.
                 Operation::Upsert => {
-                    // hnsw index behavior is to treat add() as upsert
-                    let segment_offset_id = record.0.segment_offset_id;
-                    // Assumption: Upserts must have embedding set
-                    let embedding = record.0.log_record.record.embedding.as_ref().unwrap();
-                    self.index
-                        .read()
-                        .add(segment_offset_id as usize, &embedding);
+                    panic!(
+                        "Invariant violation. Upserts should not be present after materialization"
+                    );
                 }
                 Operation::Update => {
-                    // hnsw index behvaior is to treat add() as upsert so this
-                    // will update the embedding
-                    // The assumption is that materialized log records only contain
-                    // valid updates.
-                    let segment_offset_id = record.0.segment_offset_id;
-                    match record.0.log_record.record.embedding.as_ref() {
-                        Some(e) => {
-                            self.index.read().add(segment_offset_id as usize, &e);
-                        }
-                        None => {
-                            // An update may not necessarily update the embedding
-                            continue;
-                        }
+                    // Should panic here if embedding is not found because it likely
+                    // means that somehow our storage is corrupt as data record on
+                    // the record segment does not contain the embedding.
+                    let embedding = match record.final_embedding {
+                        Some(e) => e,
+                        None => match record.data_record.as_ref() {
+                            Some(record) => record.embedding,
+                            None => {
+                                panic!("Invariant violation. Embedding not found on storage");
+                            }
+                        },
                     };
+                    // HNSW index behavior is to treat add() as upsert so this
+                    // will update the embedding if it exists. It does not
+                    // perform any validation on its own and assumes that the
+                    // offset ids are correct (i.e. pertaining to records that
+                    // are actually meant to be updated).
+                    self.index.read().add(record.offset_id as usize, embedding);
                 }
                 Operation::Delete => {
-                    // The assumption is that materialized log records only contain
-                    // valid deletes
-                    let segment_offset_id = record.0.segment_offset_id;
-                    self.index.read().delete(segment_offset_id as usize);
+                    // HNSW segment does not perform validation of any sort. So,
+                    // the assumption here is that the materialized log records
+                    // contain the correct offset ids pertaining to records that
+                    // are actually meant to be deleted.
+                    self.index.read().delete(record.offset_id as usize);
                 }
             }
         }
-    }
-
-    fn apply_log_chunk(&self, records: crate::execution::data::data_chunk::Chunk<LogRecord>) {
-        todo!()
+        Ok(())
     }
 
     fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {

@@ -187,7 +187,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 
 #[cfg(test)]
 mod tests {
+    use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
     use crate::segment::types::SegmentFlusher;
+    use crate::segment::LogMaterializer;
     use crate::{
         blockstore::provider::BlockfileProvider,
         execution::{
@@ -195,9 +197,11 @@ mod tests {
             operator::Operator,
             operators::count_records::{CountRecordsInput, CountRecordsOperator},
         },
-        segment::{record_segment::RecordSegmentWriter, LogMaterializer, SegmentWriter},
+        segment::{record_segment::RecordSegmentWriter, SegmentWriter},
         types::{LogRecord, Operation, OperationRecord},
     };
+    use std::sync::atomic::AtomicU32;
+    use std::sync::Arc;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
@@ -255,7 +259,40 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            segment_writer.materialize(&data).await;
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &in_memory_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader. Blockfile open error.");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!(
+                                "Error creating record segment reader. Invalid number of files."
+                            );
+                        }
+                    };
+                }
+            };
+            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
+            let materializer =
+                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materializated log failed");
             let flusher = segment_writer
                 .commit()
                 .expect("Commit for segment writer failed");

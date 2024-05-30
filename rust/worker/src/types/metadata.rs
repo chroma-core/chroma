@@ -642,6 +642,34 @@ impl TryFrom<chroma_proto::WhereDocumentOperator> for WhereDocumentOperator {
     }
 }
 
+pub(crate) fn merge_update_metadata(
+    base_metadata: &Option<Metadata>,
+    update_metadata: &Option<UpdateMetadata>,
+) -> Result<Option<Metadata>, MetadataValueConversionError> {
+    let mut merged_metadata = HashMap::new();
+    if base_metadata.is_some() {
+        for (key, value) in base_metadata.as_ref().unwrap() {
+            merged_metadata.insert(key.clone(), value.clone());
+        }
+    }
+    if update_metadata.is_some() {
+        match update_metdata_to_metdata(update_metadata.as_ref().unwrap()) {
+            Ok(metadata) => {
+                for (key, value) in metadata {
+                    merged_metadata.insert(key, value);
+                }
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+    }
+    if merged_metadata.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(merged_metadata))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
