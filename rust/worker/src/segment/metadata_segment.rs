@@ -38,8 +38,6 @@ const U32_METADATA: &str = "u32_metadata";
 
 pub(crate) struct MetadataSegmentWriter<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
-    // TODO this needs a real lifetime. However doing it breaks the commit() method
-    // for some reason? This works for now.
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -194,7 +192,8 @@ impl<'me> MetadataSegmentWriter<'me> {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let string_metadata_index_writer = MetadataIndexWriter::new_string(string_metadata_writer);
+        let string_metadata_index_writer =
+            MetadataIndexWriter::new_string(string_metadata_writer, None);
 
         let bool_metadata_writer = match segment.file_path.get(BOOL_METADATA) {
             Some(bool_metadata_path) => match bool_metadata_path.get(0) {
@@ -223,7 +222,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let bool_metadata_index_writer = MetadataIndexWriter::new_bool(bool_metadata_writer);
+        let bool_metadata_index_writer = MetadataIndexWriter::new_bool(bool_metadata_writer, None);
 
         let f32_metadata_writer = match segment.file_path.get(F32_METADATA) {
             Some(f32_metadata_path) => match f32_metadata_path.get(0) {
@@ -252,7 +251,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let f32_metadata_index_writer = MetadataIndexWriter::new_f32(f32_metadata_writer);
+        let f32_metadata_index_writer = MetadataIndexWriter::new_f32(f32_metadata_writer, None);
 
         let u32_metadata_writer = match segment.file_path.get(U32_METADATA) {
             Some(u32_metadata_path) => match u32_metadata_path.get(0) {
@@ -281,7 +280,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let u32_metadata_index_writer = MetadataIndexWriter::new_u32(u32_metadata_writer);
+        let u32_metadata_index_writer = MetadataIndexWriter::new_u32(u32_metadata_writer, None);
 
         Ok(MetadataSegmentWriter {
             full_text_index_writer: Some(full_text_index_writer),
@@ -352,7 +351,7 @@ impl<'me> MetadataSegmentWriter<'me> {
     }
 }
 
-impl SegmentWriter for MetadataSegmentWriter {
+impl SegmentWriter for MetadataSegmentWriter<'_> {
     fn apply_materialized_log_chunk(
         &self,
         records: crate::execution::data::data_chunk::Chunk<MaterializedLogRecord>,
