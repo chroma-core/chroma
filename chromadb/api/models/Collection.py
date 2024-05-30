@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Any, Union, cast
 
 import numpy as np
 from pydantic import BaseModel, PrivateAttr
@@ -8,6 +8,7 @@ import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     URI,
+    Chunker,
     CollectionMetadata,
     DataLoader,
     Embedding,
@@ -114,6 +115,7 @@ class Collection(BaseModel):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
+        chunker: Optional[Chunker[Embeddable]] = None,
     ) -> None:
         """Add embeddings to the data store.
         Args:
@@ -123,6 +125,7 @@ class Collection(BaseModel):
             documents: The documents to associate with the embeddings. Optional.
             images: The images to associate with the embeddings. Optional.
             uris: The uris of the images to associate with the embeddings. Optional.
+            chunker: Convert the input into chunks before embedding. Optional.
 
         Returns:
             None
@@ -150,9 +153,30 @@ class Collection(BaseModel):
         # We need to compute the embeddings if they're not provided
         if embeddings is None:
             # At this point, we know that one of documents or images are provided from the validation above
+
+            def chunk_and_assign_ids(
+                input: Embeddable, ids: IDs, chunker: Chunker[Embeddable]
+            ) -> Tuple[List[Embeddable], List[IDs]]:
+                chunks = chunker(input)
+                chunk_ids = []
+                for chunk, id in zip(chunks, ids):
+                    chunk_ids.append([f"{id}_{i}" for i in range(len(chunk))])
+                return chunks, chunk_ids
+
             if documents is not None:
+                if chunker is not None:
+                    chunks, chunk_ids = chunk_and_assign_ids(documents, ids, chunker)
+                    # Flatten chunk_ids and chunks, and assign them as the new values
+                    ids = [id for chunk_id in chunk_ids for id in chunk_id]
+                    documents = [
+                        cast(Document, doc) for chunk in chunks for doc in chunk
+                    ]
+
                 embeddings = self._embed(input=documents)
             elif images is not None:
+                if chunker is not None:
+                    # Image chunking is not supported yet
+                    raise NotImplementedError("Image chunking is not supported yet.")
                 embeddings = self._embed(input=images)
             else:
                 if uris is None:
