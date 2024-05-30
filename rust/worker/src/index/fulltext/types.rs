@@ -16,6 +16,8 @@ pub enum FullTextIndexError {
     MultipleTokenFrequencies,
     #[error("Empty value in positional posting list")]
     EmptyValueInPositionalPostingList,
+    #[error("Invariant violation")]
+    InvariantViolation,
 }
 
 impl ChromaError for FullTextIndexError {
@@ -53,15 +55,63 @@ impl<'me> FullTextIndexWriter<'me> {
         }
     }
 
-    pub fn add_document(&self, document: &str, offset_id: i32) -> Result<(), Box<dyn ChromaError>> {
+    async fn populate_frequencies_and_posting_lists_from_previous_version(
+        &self,
+        token: &str,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+        match uncommitted_frequencies.get(token) {
+            Some(_) => return Ok(()),
+            None => {
+                let frequency = match &self.full_text_index_reader {
+                    None => 0,
+                    Some(reader) => reader.get_frequencies_for_token(token).await?,
+                };
+                uncommitted_frequencies.insert(token.to_string(), frequency as i32);
+            }
+        }
+        let mut uncommitted = self.uncommitted.lock();
+        match uncommitted.get(token) {
+            Some(_) => {
+                // This should never happen -- if uncommitted has the token, then
+                // uncommitted_frequencies should have had it as well.
+                tracing::error!(
+                    "Error populating frequencies and posting lists from previous version"
+                );
+                return Err(Box::new(FullTextIndexError::InvariantViolation));
+            }
+            None => {
+                let mut builder = PositionalPostingListBuilder::new();
+                let results = match &self.full_text_index_reader {
+                    None => vec![],
+                    Some(reader) => reader.get_all_results_for_token(token).await?,
+                };
+                for (doc_id, positions) in results {
+                    let res = builder.add_doc_id_and_positions(doc_id as i32, positions);
+                    if res.is_err() {
+                        return res;
+                    }
+                }
+                uncommitted.insert(token.to_string(), builder);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn add_document(
+        &self,
+        document: &str,
+        offset_id: i32,
+    ) -> Result<(), Box<dyn ChromaError>> {
         let mut tokenizer = self.tokenizer.lock();
         let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
+            self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
+                .await?;
             let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
             uncommitted_frequencies
                 .entry(token.text.to_string())
-                .and_modify(|e| *e += 1)
-                .or_insert(1);
+                .and_modify(|e| *e += 1);
             let mut uncommitted = self.uncommitted.lock();
             let builder = uncommitted
                 .entry(token.text.to_string())
@@ -84,6 +134,48 @@ impl<'me> FullTextIndexWriter<'me> {
                     builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]);
                 if res.is_err() {
                     return res;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn delete(&self, document: &str, offset_id: u32) -> Result<(), Box<dyn ChromaError>> {
+        let mut tokenizer = self.tokenizer.lock();
+        let tokens = tokenizer.encode(document);
+        for token in tokens.get_tokens() {
+            self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
+                .await?;
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+            match uncommitted_frequencies.get_mut(token.text.as_str()) {
+                Some(frequency) => {
+                    *frequency -= 1;
+                }
+                None => {
+                    // Invariant violation -- we just populated this.
+                    tracing::error!("Error decrementing frequency for token: {:?}", token.text);
+                    return Err(Box::new(FullTextIndexError::InvariantViolation));
+                }
+            }
+            let mut uncommitted = self.uncommitted.lock();
+            match uncommitted.get_mut(token.text.as_str()) {
+                Some(builder) => match builder.delete_doc_id(offset_id as i32) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // This is a fatal invariant violation: we've been asked to
+                        // delete a document which doesn't appear in the positional posting list.
+                        // It probably indicates data corruption of some sort.
+                        tracing::error!(
+                            "Error deleting doc ID from positional posting list: {:?}",
+                            e
+                        );
+                        return Err(e);
+                    }
+                },
+                None => {
+                    // Invariant violation -- we just populated this.
+                    tracing::error!("Error deleting doc ID from positional posting list");
+                    return Err(Box::new(FullTextIndexError::InvariantViolation));
                 }
             }
         }
@@ -400,7 +492,7 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).unwrap();
+        index_writer.add_document("hello world", 1).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -439,7 +531,7 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("helo", 1).unwrap();
+        index_writer.add_document("helo", 1).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -472,8 +564,8 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("aaa", 1).unwrap();
-        index_writer.add_document("aaaaa", 2).unwrap();
+        index_writer.add_document("aaa", 1).await.unwrap();
+        index_writer.add_document("aaaaa", 2).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -506,7 +598,7 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello", 1).unwrap();
+        index_writer.add_document("hello", 1).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -539,7 +631,7 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).unwrap();
+        index_writer.add_document("hello world", 1).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -572,8 +664,11 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world hello", 1).unwrap();
-        index_writer.add_document("    hello ", 2).unwrap();
+        index_writer
+            .add_document("hello world hello", 1)
+            .await
+            .unwrap();
+        index_writer.add_document("    hello ", 2).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -610,8 +705,8 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).unwrap();
-        index_writer.add_document("hello", 2).unwrap();
+        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer.add_document("hello", 2).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -648,10 +743,10 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).unwrap();
-        index_writer.add_document("hello", 2).unwrap();
-        index_writer.add_document("world", 3).unwrap();
-        index_writer.add_document("world hello", 4).unwrap();
+        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer.add_document("hello", 2).await.unwrap();
+        index_writer.add_document("world", 3).await.unwrap();
+        index_writer.add_document("world hello", 4).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -697,11 +792,14 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("aaa", 1).unwrap();
-        index_writer.add_document("aaaa", 2).unwrap();
-        index_writer.add_document("bbb", 3).unwrap();
-        index_writer.add_document("aaabbb", 4).unwrap();
-        index_writer.add_document("aabbbbaaaaabbb", 5).unwrap();
+        index_writer.add_document("aaa", 1).await.unwrap();
+        index_writer.add_document("aaaa", 2).await.unwrap();
+        index_writer.add_document("bbb", 3).await.unwrap();
+        index_writer.add_document("aaabbb", 4).await.unwrap();
+        index_writer
+            .add_document("aabbbbaaaaabbb", 5)
+            .await
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -743,9 +841,12 @@ mod tests {
         )));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("!!!!!", 1).unwrap();
-        index_writer.add_document("hello world!!!", 2).unwrap();
-        index_writer.add_document(".!.!.!", 3).unwrap();
+        index_writer.add_document("!!!!!", 1).await.unwrap();
+        index_writer
+            .add_document("hello world!!!", 2)
+            .await
+            .unwrap();
+        index_writer.add_document(".!.!.!", 3).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -786,9 +887,9 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
-        index_writer.add_document("hello world", 1).unwrap();
-        index_writer.add_document("hello", 2).unwrap();
-        index_writer.add_document("world", 3).unwrap();
+        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer.add_document("hello", 2).await.unwrap();
+        index_writer.add_document("world", 3).await.unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();
@@ -829,9 +930,9 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
-        index_writer.add_document("hello world", 1).unwrap();
-        index_writer.add_document("hello", 2).unwrap();
-        index_writer.add_document("world", 3).unwrap();
+        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer.add_document("hello", 2).await.unwrap();
+        index_writer.add_document("world", 3).await.unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().unwrap();

@@ -89,6 +89,18 @@ impl PositionalPostingListBuilder {
         Ok(())
     }
 
+    pub(crate) fn delete_doc_id(&mut self, doc_id: i32) -> Result<(), Box<dyn ChromaError>> {
+        if !self.doc_ids.contains(&doc_id) {
+            return Err(Box::new(
+                PositionalPostingListBuilderError::DocIdDoesNotExist,
+            ));
+        }
+
+        self.doc_ids.remove(&doc_id);
+        self.positions.remove(&doc_id);
+        Ok(())
+    }
+
     pub(crate) fn contains_doc_id(&self, doc_id: i32) -> bool {
         self.doc_ids.contains(&doc_id)
     }
@@ -215,6 +227,22 @@ mod tests {
         assert_eq!(
             list.get_positions_for_doc_id(1).unwrap(),
             Int32Array::from(vec![1, 2, 3, 4, 5, 6])
+        );
+    }
+
+    #[test]
+    fn test_positional_posting_list_delete_doc_id() {
+        let mut builder = PositionalPostingListBuilder::new();
+
+        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
+        let _res = builder.delete_doc_id(1);
+
+        let list = builder.build();
+        assert_eq!(list.get_doc_ids().values()[0], 2);
+        assert_eq!(
+            list.get_positions_for_doc_id(2).unwrap(),
+            Int32Array::from(vec![4, 5, 6])
         );
     }
 
