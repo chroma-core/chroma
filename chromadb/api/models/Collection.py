@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
+import json
 import numpy as np
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
@@ -49,6 +50,7 @@ from chromadb.api.types import (
 # stored / retrieved / transmitted.
 from chromadb.types import Collection as CollectionModel
 import logging
+from chromadb.utils.the_registry import _get
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,19 @@ class Collection:
         # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
+
+        if embedding_function is None:
+            if metadata is not None and "_ef_metadata" in metadata.keys():
+                ef_metadata = json.loads(metadata["_ef_metadata"])
+                ef_name = ef_metadata["name"]
+
+                ef_init_args = json.loads(ef_metadata["init_args"])
+                pos_args_ = ef_init_args["args"]
+                kwargs_ = ef_init_args["kwargs"]
+
+                ef_type = _get(ef_name)
+
+                embedding_function = ef_type(*pos_args_, **kwargs_)
 
         self._embedding_function = embedding_function
         self._data_loader = data_loader
