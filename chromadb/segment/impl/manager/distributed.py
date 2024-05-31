@@ -68,7 +68,9 @@ class DistributedSegmentManager(SegmentManager):
         metadata_segment = _segment(
             SegmentType.BLOCKFILE_METADATA, SegmentScope.METADATA, collection
         )
-        record_segment = _segment(SegmentType.RECORD, SegmentScope.RECORD, collection)
+        record_segment = _segment(
+            SegmentType.BLOCKFILE_RECORD, SegmentScope.RECORD, collection
+        )
         return [vector_segment, record_segment, metadata_segment]
 
     @override
