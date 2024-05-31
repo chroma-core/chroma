@@ -2,13 +2,13 @@ import os
 from typing import cast, ClassVar
 from chromadb.telemetry.product import ProductTelemetryEvent
 from chromadb.utils.embedding_functions import get_builtins
-from chromadb import IN_COLAB
+from chromadb import is_in_colab
 
 
 class ClientStartEvent(ProductTelemetryEvent):
     def __init__(self) -> None:
         super().__init__()
-        self.in_colab = IN_COLAB
+        self.in_colab = is_in_colab()
 
 
 class ServerStartEvent(ProductTelemetryEvent):
