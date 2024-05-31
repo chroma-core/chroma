@@ -301,10 +301,11 @@ pub(crate) fn process_where_clause_with_callback<
             // This feels like a crime.
             let mut first_iteration = true;
             for child in where_children.children.iter() {
-                let child_results: Vec<usize> = match process_where_clause_with_callback(&child, callback) {
-                    Ok(result) => result,
-                    Err(_) => vec![],
-                };
+                let child_results: Vec<usize> =
+                    match process_where_clause_with_callback(&child, callback) {
+                        Ok(result) => result,
+                        Err(_) => vec![],
+                    };
                 if first_iteration {
                     results = child_results;
                     first_iteration = false;

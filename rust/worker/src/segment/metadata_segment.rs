@@ -17,12 +17,12 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 use crate::index::fulltext::types::{
-    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader,
-    FullTextIndexWriter,
+    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher,
+    FullTextIndexReader, FullTextIndexWriter,
 };
 use crate::index::metadata::types::{
-    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader,
-    MetadataIndexWriter,
+    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher,
+    MetadataIndexReader, MetadataIndexWriter,
 };
 use crate::types::SegmentType;
 use crate::types::{
