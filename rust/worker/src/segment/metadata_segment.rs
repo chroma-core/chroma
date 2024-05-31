@@ -17,11 +17,11 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 use crate::index::fulltext::types::{
-    process_where_document_clause, FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader,
+    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader,
     FullTextIndexWriter,
 };
 use crate::index::metadata::types::{
-    process_where_clause, MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader,
+    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader,
     MetadataIndexWriter,
 };
 use crate::types::SegmentType;
@@ -1011,7 +1011,7 @@ impl MetadataSegmentReader<'_> {
                 }
             }
         };
-        return process_where_clause(where_clause, &clo);
+        return process_where_clause_with_callback(where_clause, &clo);
     }
 
     fn process_where_document_clause(
@@ -1037,6 +1037,6 @@ impl MetadataSegmentReader<'_> {
                 todo!()
             }
         };
-        process_where_document_clause(where_document_clause, &cb)
+        process_where_document_clause_with_callback(where_document_clause, &cb)
     }
 }

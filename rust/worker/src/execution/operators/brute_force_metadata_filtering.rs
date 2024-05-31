@@ -14,23 +14,19 @@ use tonic::async_trait;
 
 use crate::{
     blockstore::{key::KeyWrapper, provider::BlockfileProvider},
-    chroma_proto::r#where,
     errors::{ChromaError, ErrorCodes},
-    execution::{
-        data::data_chunk::Chunk, operator::Operator,
-        operators::write_segments::WriteSegmentsOperatorError,
-    },
+    execution::{data::data_chunk::Chunk, operator::Operator},
     index::{
-        fulltext::types::process_where_document_clause,
-        metadata::types::{process_where_clause, MetadataIndexError},
+        fulltext::types::process_where_document_clause_with_callback,
+        metadata::types::{process_where_clause_with_callback, MetadataIndexError},
     },
     segment::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
+        LogMaterializer, LogMaterializerError,
     },
     types::{
-        LogRecord, Metadata, MetadataValue, Operation, Segment, Where, WhereClauseComparator,
-        WhereDocument, WhereDocumentOperator,
+        LogRecord, MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
+        WhereDocumentOperator,
     },
     utils::merge_sorted_vecs_conjunction,
 };
@@ -449,7 +445,7 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                 }
             }
         };
-        let mtsearch_res = match process_where_clause(&input.where_clause, &clo) {
+        let mtsearch_res = match process_where_clause_with_callback(&input.where_clause, &clo) {
             Ok(r) => r,
             Err(e) => {
                 return Err(
@@ -499,14 +495,17 @@ impl Operator<BruteForceMetadataFilteringInput, BruteForceMetadataFilteringOutpu
                 }
             }
         };
-        let fts_result = match process_where_document_clause(&input.where_document_clause, &cb) {
-            Ok(res) => res,
-            Err(e) => {
-                return Err(
-                    BruteForceMetadataFilteringError::BruteForceMetadataFilteringMetadataError(e),
-                );
-            }
-        };
+        let fts_result =
+            match process_where_document_clause_with_callback(&input.where_document_clause, &cb) {
+                Ok(res) => res,
+                Err(e) => {
+                    return Err(
+                        BruteForceMetadataFilteringError::BruteForceMetadataFilteringMetadataError(
+                            e,
+                        ),
+                    );
+                }
+            };
         let merged_result = merge_sorted_vecs_conjunction(mtsearch_res, fts_result);
         return Ok(BruteForceMetadataFilteringOutput {
             filtered_documents: merged_result,

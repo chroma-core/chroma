@@ -59,7 +59,7 @@ pub(crate) enum MetadataIndexWriter {
     ),
 }
 
-pub(crate) fn process_where_clause<
+pub(crate) fn process_where_clause_with_callback<
     F: Fn(&str, &KeyWrapper, MetadataType, WhereClauseComparator) -> RoaringBitmap,
 >(
     where_clause: &Where,
@@ -301,7 +301,7 @@ pub(crate) fn process_where_clause<
             // This feels like a crime.
             let mut first_iteration = true;
             for child in where_children.children.iter() {
-                let child_results: Vec<usize> = match process_where_clause(&child, callback) {
+                let child_results: Vec<usize> = match process_where_clause_with_callback(&child, callback) {
                     Ok(result) => result,
                     Err(_) => vec![],
                 };

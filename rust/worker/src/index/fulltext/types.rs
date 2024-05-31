@@ -306,7 +306,7 @@ impl<'me> FullTextIndexReader<'me> {
     }
 }
 
-pub(crate) fn process_where_document_clause<F: Fn(&str, WhereDocumentOperator) -> Vec<i32>>(
+pub(crate) fn process_where_document_clause_with_callback<F: Fn(&str, WhereDocumentOperator) -> Vec<i32>>(
     where_document_clause: &WhereDocument,
     callback: &F,
 ) -> Result<Vec<usize>, MetadataIndexError> {
@@ -330,7 +330,7 @@ pub(crate) fn process_where_document_clause<F: Fn(&str, WhereDocumentOperator) -
             let mut first_iteration = true;
             for child in where_document_children.children.iter() {
                 let child_results: Vec<usize> =
-                    match process_where_document_clause(&child, callback) {
+                    match process_where_document_clause_with_callback(&child, callback) {
                         Ok(result) => result,
                         Err(_) => vec![],
                     };
