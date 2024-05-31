@@ -4,7 +4,8 @@ mod tests {
         blockstore::arrow::provider::ArrowBlockfileProvider,
         storage::{local::LocalStorage, Storage},
     };
-    use shuttle::{check_random, future, thread};
+    use rand::Rng;
+    use shuttle::{future, thread};
 
     #[test]
     fn test_blockfile_shuttle() {
@@ -17,8 +18,12 @@ mod tests {
                 let id = writer.id();
 
                 // Generate N datapoints and then have T threads write them to the blockfile
-                let n = 1000;
-                let t = 5;
+                let range_min = 10;
+                let range_max = 10000;
+                let n = shuttle::rand::thread_rng().gen_range(range_min..range_max);
+                // Make the max threads the number of cores * 2
+                let max_threads = num_cpus::get() * 2;
+                let t = shuttle::rand::thread_rng().gen_range(2..max_threads);
                 let mut join_handles = Vec::with_capacity(t);
                 for i in 0..t {
                     let writer = writer.clone();
