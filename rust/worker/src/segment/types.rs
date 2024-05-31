@@ -2,13 +2,19 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
+use crate::blockstore::key::KeyWrapper;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
+use crate::index::metadata::types::MetadataIndexError;
 use crate::types::{
-    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata,
-    MetadataValueConversionError, Operation, OperationRecord,
+    merge_update_metadata, update_metdata_to_metdata, BooleanOperator, LogRecord, Metadata,
+    MetadataType, MetadataValueConversionError, Operation, OperationRecord, Where,
+    WhereClauseComparator, WhereComparison,
 };
+use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use async_trait::async_trait;
+use futures::future::BoxFuture;
+use roaring::RoaringBitmap;
 use thiserror::Error;
 
 use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
@@ -37,16 +43,16 @@ impl ChromaError for LogMaterializerError {
 pub(crate) struct MaterializedLogRecord<'referred_data> {
     // This is the data record read from the record segment for this id.
     // None if the record exists only in the log.
-    pub(super) data_record: Option<DataRecord<'referred_data>>,
+    pub(crate) data_record: Option<DataRecord<'referred_data>>,
     // If present in the record segment then it is the offset id
     // in the record segment at which the record was found.
     // If not present in the segment then it is the offset id
     // at which it should be inserted.
-    pub(super) offset_id: u32,
+    pub(crate) offset_id: u32,
     // Set only for the records that are being inserted for the first time
     // in the log since data_record will be None in such cases. For other
     // cases, just read from data record.
-    pub(super) user_id: Option<&'referred_data str>,
+    pub(crate) user_id: Option<&'referred_data str>,
     // There can be several entries in the log for an id. This is the final
     // operation that needs to be done on it. For e.g.
     // If log has [Update, Update, Delete] then final operation is Delete.
@@ -57,25 +63,27 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     // For e.g. if log has [Insert, Upsert] then final operation is insert.
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
-    pub(super) final_operation: Operation,
+    pub(crate) final_operation: Operation,
     // This is the metadata obtained by combining all the operations
     // present in the log for this id.
     // E.g. if has log has [Insert(a: h), Update(a: b, c: d), Update(a: e, f: g)] then this
     // will contain (a: e, c: d, f: g). This is None if the final operation
     // above is Delete.
-    pub(super) metadata_to_be_merged: Option<Metadata>,
+    pub(crate) metadata_to_be_merged: Option<Metadata>,
     // This is the final document obtained from the last non null operation.
     // E.g. if log has [Insert(str0), Update(str1), Update(str2), Update()] then this will contain
     // str2. None if final operation is Delete.
-    pub(super) final_document: Option<&'referred_data str>,
+    pub(crate) final_document: Option<&'referred_data str>,
     // Similar to above, this is the final embedding obtained
     // from the last non null operation.
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
-    pub(super) final_embedding: Option<&'referred_data [f32]>,
+    pub(crate) final_embedding: Option<&'referred_data [f32]>,
 }
 
-impl<'referred_data> From<(DataRecord<'referred_data>, u32)> for MaterializedLogRecord<'referred_data> {
+impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
+    for MaterializedLogRecord<'referred_data>
+{
     fn from(data_record_info: (DataRecord<'referred_data>, u32)) -> Self {
         let data_record = data_record_info.0;
         let offset_id = data_record_info.1;
@@ -94,7 +102,9 @@ impl<'referred_data> From<(DataRecord<'referred_data>, u32)> for MaterializedLog
 // Creates a materialized log record from the corresponding entry
 // in the log (OperationRecord), offset id in storage where it will be stored (u32)
 // and user id (str).
-impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)> for MaterializedLogRecord<'referred_data> {
+impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)>
+    for MaterializedLogRecord<'referred_data>
+{
     type Error = LogMaterializerError;
 
     fn try_from(
@@ -139,9 +149,9 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
 
 pub(crate) struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
-    record_segment_reader: Option<RecordSegmentReader<'me>>,
-    logs: Chunk<LogRecord>,
-    curr_max_offset_id: Arc<AtomicU32>,
+    pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
+    pub(crate) logs: Chunk<LogRecord>,
+    pub(crate) curr_max_offset_id: Arc<AtomicU32>,
 }
 
 impl<'me> LogMaterializer<'me> {
