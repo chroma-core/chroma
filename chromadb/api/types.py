@@ -396,6 +396,7 @@ def validate_where(where: Where) -> Where:
                     raise ValueError(
                         f"Expected where operand value to be a str, int, float, or list of those type, got {get_fqn(type(operand))}"
                     )
+
                 if isinstance(operand, list) and (
                     len(operand) == 0
                     or not all(isinstance(x, type(operand[0])) for x in operand)
