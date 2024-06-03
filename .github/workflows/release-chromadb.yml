@@ -23,6 +23,9 @@ jobs:
         run: |
           if [[ ${{ github.event.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "tag_matches=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag does not match the release tag pattern ([0-9]+\.[0-9]+\.[0-9]+), exiting workflow"
+            echo "tag_matches=false" >> $GITHUB_OUTPUT
           fi
 
   get-version:

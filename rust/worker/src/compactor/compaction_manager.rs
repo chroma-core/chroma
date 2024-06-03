@@ -26,12 +26,9 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::path::Path;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
-use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -39,7 +36,7 @@ pub(crate) struct CompactionManager {
     // Dependencies
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
-    storage: Box<Storage>,
+    storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
     // Dispatcher
@@ -68,7 +65,7 @@ impl CompactionManager {
         scheduler: Scheduler,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
-        storage: Box<Storage>,
+        storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
         compaction_manager_queue_size: usize,
@@ -111,6 +108,7 @@ impl CompactionManager {
                     self.blockfile_provider.clone(),
                     self.hnsw_index_provider.clone(),
                     dispatcher.clone(),
+                    None,
                     None,
                 );
 
@@ -193,7 +191,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             }
         };
 
-        let my_ip = config.my_ip.clone();
+        let my_ip = config.my_member_id.clone();
         let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
@@ -236,17 +234,20 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
 // ============== Component Implementation ==============
 #[async_trait]
 impl Component for CompactionManager {
+    fn get_name() -> &'static str {
+        "Compaction manager"
+    }
+
     fn queue_size(&self) -> usize {
         self.compaction_manager_queue_size
     }
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
-        ctx.scheduler.schedule_interval(
+        ctx.scheduler.schedule(
             ctx.sender.clone(),
             ScheduleMessage {},
             self.compaction_interval,
-            None,
             ctx,
         );
     }
@@ -264,10 +265,17 @@ impl Handler<ScheduleMessage> for CompactionManager {
     async fn handle(
         &mut self,
         _message: ScheduleMessage,
-        _ctx: &ComponentContext<CompactionManager>,
+        ctx: &ComponentContext<CompactionManager>,
     ) {
         println!("CompactionManager: Performing compaction");
         self.compact_batch().await;
+        // Compaction is done, schedule the next compaction
+        ctx.scheduler.schedule(
+            ctx.sender.clone(),
+            ScheduleMessage {},
+            self.compaction_interval,
+            ctx,
+        );
     }
 }
 
@@ -295,14 +303,14 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use crate::types::Segment;
+    use std::str::FromStr;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_compaction_manager() {
         let mut log = Box::new(InMemoryLog::new());
         let tmpdir = tempfile::tempdir().unwrap();
-        let storage = Box::new(Storage::Local(LocalStorage::new(
-            tmpdir.path().to_str().unwrap(),
-        )));
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         log.add_log(
@@ -318,6 +326,7 @@ mod tests {
                         embedding: Some(vec![1.0, 2.0, 3.0]),
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
@@ -338,6 +347,7 @@ mod tests {
                         embedding: Some(vec![4.0, 5.0, 6.0]),
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
@@ -354,7 +364,7 @@ mod tests {
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
-            log_position: 0,
+            log_position: -1,
             version: 0,
         };
 
@@ -366,7 +376,7 @@ mod tests {
             dimension: Some(1),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
-            log_position: 0,
+            log_position: -1,
             version: 0,
         };
         sysdb.add_collection(collection_1);
@@ -418,17 +428,17 @@ mod tests {
         let last_compaction_time_2 = 1;
         sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
 
-        let my_ip = "127.0.0.1".to_string();
+        let my_member_id = "1".to_string();
         let compaction_manager_queue_size = 1000;
         let max_concurrent_jobs = 10;
         let compaction_interval = Duration::from_secs(1);
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
-        assignment_policy.set_members(vec![my_ip.clone()]);
+        assignment_policy.set_members(vec![my_member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_ip.clone(),
+            my_member_id.clone(),
             log.clone(),
             sysdb.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
@@ -436,7 +446,7 @@ mod tests {
             assignment_policy,
         );
         // Set memberlist
-        scheduler.set_memberlist(vec![my_ip.clone()]);
+        scheduler.set_memberlist(vec![my_member_id.clone()]);
 
         let mut manager = CompactionManager::new(
             scheduler,

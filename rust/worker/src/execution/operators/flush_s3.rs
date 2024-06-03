@@ -6,8 +6,8 @@ use crate::types::SegmentFlushInfo;
 use crate::{
     execution::operator::Operator,
     segment::{
-        distributed_hnsw_segment::DistributedHNSWSegment, record_segment::RecordSegmentWriter,
-        SegmentWriter,
+        distributed_hnsw_segment::DistributedHNSWSegmentWriter,
+        record_segment::RecordSegmentWriter, SegmentWriter,
     },
 };
 use async_trait::async_trait;
@@ -24,13 +24,13 @@ impl FlushS3Operator {
 #[derive(Debug)]
 pub struct FlushS3Input {
     record_segment_writer: RecordSegmentWriter,
-    hnsw_segment_writer: Box<DistributedHNSWSegment>,
+    hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
 }
 
 impl FlushS3Input {
     pub fn new(
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegment>,
+        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
     ) -> Self {
         Self {
             record_segment_writer,
@@ -44,13 +44,11 @@ pub struct FlushS3Output {
     pub(crate) segment_flush_info: Arc<[SegmentFlushInfo]>,
 }
 
-pub type FlushS3Result = Result<FlushS3Output, Box<dyn ChromaError>>;
-
 #[async_trait]
 impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
     type Error = Box<dyn ChromaError>;
 
-    async fn run(&self, input: &FlushS3Input) -> FlushS3Result {
+    async fn run(&self, input: &FlushS3Input) -> Result<FlushS3Output, Self::Error> {
         let record_segment_flusher = input.record_segment_writer.clone().commit();
         let record_segment_flush_info = match record_segment_flusher {
             Ok(flusher) => {

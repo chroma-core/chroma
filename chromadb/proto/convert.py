@@ -203,6 +203,7 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         else None,
         database=collection.database,
         tenant=collection.tenant,
+        version=collection.version,
     )
 
 
@@ -216,6 +217,7 @@ def to_proto_collection(collection: Collection) -> proto.Collection:
         dimension=collection["dimension"],
         tenant=collection["tenant"],
         database=collection["database"],
+        version=collection["version"],
     )
 
 

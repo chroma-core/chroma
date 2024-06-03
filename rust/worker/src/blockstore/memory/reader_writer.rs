@@ -11,6 +11,16 @@ pub(crate) struct MemoryBlockfileWriter {
     id: uuid::Uuid,
 }
 
+pub(crate) struct MemoryBlockfileFlusher {
+    id: uuid::Uuid,
+}
+
+impl MemoryBlockfileFlusher {
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        self.id
+    }
+}
+
 impl MemoryBlockfileWriter {
     pub(super) fn new(storage_manager: StorageManager) -> Self {
         let builder = storage_manager.create();
@@ -22,9 +32,9 @@ impl MemoryBlockfileWriter {
         }
     }
 
-    pub(crate) fn commit(&self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(&self) -> Result<MemoryBlockfileFlusher, Box<dyn ChromaError>> {
         self.storage_manager.commit(self.builder.id);
-        Ok(())
+        Ok(MemoryBlockfileFlusher { id: self.id })
     }
 
     pub(crate) fn set<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
@@ -38,19 +48,32 @@ impl MemoryBlockfileWriter {
         Ok(())
     }
 
+    pub(crate) fn delete<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let key = key.into();
+        V::remove_from_storage(prefix, key, &self.builder);
+        Ok(())
+    }
+
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.id
     }
 }
 
-pub(crate) struct HashMapBlockfileReader<K: Key, V: Value> {
+pub(crate) struct MemoryBlockfileReader<K: Key, V: Value> {
     storage_manager: StorageManager,
     storage: Storage,
     marker: std::marker::PhantomData<(K, V)>,
 }
 
-impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
-    HashMapBlockfileReader<K, V>
+impl<
+        'storage,
+        K: Key + Into<KeyWrapper> + From<&'storage KeyWrapper>,
+        V: Value + Readable<'storage>,
+    > MemoryBlockfileReader<K, V>
 {
     pub(crate) fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
         // TODO: don't unwrap
@@ -72,42 +95,106 @@ impl<'storage, K: Key + Into<KeyWrapper>, V: Value + Readable<'storage>>
     }
 
     pub(crate) fn get_by_prefix(
-        &self,
-        prefix: String,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+        &'storage self,
+        prefix: &str,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let values = V::get_by_prefix_from_storage(prefix, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_gt(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_gt_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_lt(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_lt_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_gte(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_gte_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
     }
 
     pub(crate) fn get_lte(
-        &self,
-        prefix: String,
+        &'storage self,
+        prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, &K, &V)>, Box<dyn ChromaError>> {
-        todo!()
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let key = key.into();
+        let values = V::read_lte_from_storage(prefix, key, &self.storage);
+        if values.is_empty() {
+            return Err(Box::new(BlockfileError::NotFoundError));
+        }
+        let values = values
+            .iter()
+            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .collect();
+        Ok(values)
+    }
+
+    pub(crate) fn get_at_index(
+        &'storage self,
+        index: usize,
+    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+        let res = V::get_at_index(&self.storage, index);
+        let (key, value) = match res {
+            Some((key, value)) => (key, value),
+            None => return Err(Box::new(BlockfileError::NotFoundError)),
+        };
+        Ok((key.prefix.as_str(), K::from(&key.key), value))
+    }
+
+    pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+        V::count(&self.storage)
+    }
+
+    pub(crate) fn contains(&'storage self, prefix: &str, key: K) -> bool {
+        V::contains(prefix, key.into(), &self.storage)
     }
 
     pub(crate) fn id(&self) -> uuid::Uuid {
@@ -125,21 +212,40 @@ mod tests {
     #[test]
     fn test_blockfile_string() {
         let storage_manager = StorageManager::new();
-        let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let _ = writer.set("prefix", "key1", "value1");
         let _ = writer.commit();
 
-        let reader: HashMapBlockfileReader<&str, &str> =
-            HashMapBlockfileReader::open(writer.id, storage_manager);
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", "key1").unwrap();
         assert_eq!(value, "value1");
     }
 
     #[test]
-    fn test_data_record() {
+    fn test_string_key_rbm_value() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let mut bitmap = roaring::RoaringBitmap::new();
+        bitmap.insert(1);
+        bitmap.insert(2);
+        bitmap.insert(3);
+        let _ = writer.set("prefix", "bitmap1", &bitmap);
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, roaring::RoaringBitmap> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let value = reader.get("prefix", "bitmap1").unwrap();
+        assert!(value.contains(1));
+        assert!(value.contains(2));
+        assert!(value.contains(3));
+    }
+
+    #[test]
+    fn test_string_key_data_record_value() {
         // TODO: cleanup this test
         let storage_manager = StorageManager::new();
-        let mut writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let id = uuid::Uuid::new_v4().to_string();
         let embedding = vec![1.0, 2.0, 3.0];
         let record = DataRecord {
@@ -157,6 +263,7 @@ mod tests {
                     embedding: Some(vec![1.0, 2.0, 3.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -167,6 +274,7 @@ mod tests {
                     embedding: Some(vec![4.0, 5.0, 6.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -177,6 +285,7 @@ mod tests {
                     embedding: Some(vec![7.0, 8.0, 9.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -199,252 +308,599 @@ mod tests {
 
         writer.commit().unwrap();
 
-        let reader: HashMapBlockfileReader<&str, DataRecord> =
-            HashMapBlockfileReader::open(id, storage_manager);
+        let reader: MemoryBlockfileReader<&str, DataRecord> =
+            MemoryBlockfileReader::open(id, storage_manager);
         let record = reader.get("prefix", "embedding_id_1").unwrap();
         assert_eq!(record.id, "embedding_id_1");
         assert_eq!(record.embedding, vec![1.0, 2.0, 3.0]);
     }
 
-    // #[test]
-    // fn test_blockfile_set_get() {
-    //     let mut blockfile_writer = HashMapBlockfileWriter::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: "key1".to_string(),
-    //     };
-    //     let _res = blockfile_writer
-    //         .set(key.clone(), &Int32Array::from(vec![1, 2, 3]))
-    //         .unwrap();
+    #[test]
+    fn test_bool_key() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", true, "value1");
+        let _ = writer.commit();
 
-    //     let blockfile_reader = blockfile_writer.to_reader();
-    //     let value = blockfile_reader.get(key).unwrap();
-    //     assert_eq!(value, Int32Array::from(vec![1, 2, 3]));
-    // }
+        let reader: MemoryBlockfileReader<bool, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let value = reader.get("prefix", true).unwrap();
+        assert_eq!(value, "value1");
+    }
 
-    // #[test]
-    // fn test_data_record_key() {
-    //     let mut blockfile_writer = HashMapBlockfileWriter::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: "key1".to_string(),
-    //     };
-    //     let id = "id1".to_string();
-    //     let embedding = vec![1.0, 2.0, 3.0];
-    //     let mut metadata = HashMap::new();
-    //     metadata.insert("key".to_string(), MetadataValue::Str("value".to_string()));
-    //     let record = DataRecord {
-    //         id: &id,
-    //         embedding: &embedding,
-    //         metadata: &Some(metadata),
-    //         document: &None,
-    //         serialized_metadata: None,
-    //     };
-    //     let _res = blockfile_writer.set(key.clone(), &record).unwrap();
+    #[test]
+    fn test_u32_key() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.commit();
 
-    //     let blockfile_reader = blockfile_writer.to_reader();
-    //     let value = blockfile_reader.get(key).unwrap();
-    //     assert_eq!(value.id, "id1");
-    //     assert_eq!(value.embedding, vec![1.0, 2.0, 3.0]);
-    //     assert_eq!(value.metadata.as_ref().unwrap().len(), 1);
-    //     assert_eq!(
-    //         *value.metadata.as_ref().unwrap().get("key").unwrap(),
-    //         MetadataValue::Str("value".to_string())
-    //     );
-    //     assert!(value.document.is_none());
-    // }
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let value = reader.get("prefix", 1).unwrap();
+        assert_eq!(value, "value1");
+    }
 
-    // #[test]
-    // fn test_blockfile_get_by_prefix() {
-    //     let mut blockfile = HashMapBlockfile::new();
-    //     let key1 = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("key1".to_string()),
-    //     };
-    //     let key2 = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("key2".to_string()),
-    //     };
-    //     let _res = blockfile
-    //         .set(
-    //             key1.clone(),
-    //             &Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
-    //         )
-    //         .unwrap();
-    //     let _res = blockfile
-    //         .set(
-    //             key2.clone(),
-    //             &Value::Int32ArrayValue(Int32Array::from(vec![4, 5, 6])),
-    //         )
-    //         .unwrap();
-    //     let values = blockfile.get_by_prefix("text_prefix".to_string()).unwrap();
-    //     assert_eq!(values.len(), 2);
-    //     // May return values in any order
-    //     match &values[0].1 {
-    //         Value::Int32ArrayValue(arr) => assert!(
-    //             arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
-    //         ),
-    //         _ => panic!("Value is not a string"),
-    //     }
-    //     match &values[1].1 {
-    //         Value::Int32ArrayValue(arr) => assert!(
-    //             arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
-    //         ),
-    //         _ => panic!("Value is not a string"),
-    //     }
-    // }
+    #[test]
+    fn test_float32_key() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.commit();
 
-    // #[test]
-    // fn test_bool_key() {
-    //     let mut blockfile = HashMapBlockfileWriter::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: true,
-    //     };
-    //     let _res = blockfile.set(key.clone(), &Int32Array::from(vec![1]));
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let value = reader.get("prefix", 1.0).unwrap();
+        assert_eq!(value, "value1");
+    }
 
-    //     let blockfile = blockfile.to_reader();
-    //     let value = blockfile.get(key).unwrap();
-    //     assert_eq!(value, Int32Array::from(vec![1]));
-    // }
+    #[test]
+    fn test_get_by_prefix() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", "key1", "value1");
+        let _ = writer.set("prefix", "key2", "value2");
+        let _ = writer.set("different_prefix", "key3", "value3");
+        let _ = writer.commit();
 
-    // #[test]
-    // fn test_string_value() {
-    //     let mut blockfile = HashMapBlockfileWriter::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: "key1".to_string(),
-    //     };
-    //     let _res = blockfile.set(key.clone(), &"value1".to_string());
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_by_prefix("prefix").unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values.iter().any(|(prefix, key, value)| *prefix == "prefix"
+            && *key == "key1"
+            && *value == "value1"));
+        assert!(values.iter().any(|(prefix, key, value)| *prefix == "prefix"
+            && *key == "key2"
+            && *value == "value2"));
+    }
 
-    //     let blockfile = blockfile.to_reader();
-    //     let value = blockfile.get(key).unwrap();
-    //     assert_eq!(value, "value1".to_string());
-    // }
+    #[test]
+    fn test_get_gt_int_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
 
-    // #[test]
-    // fn test_storing_arrow_in_blockfile() {
-    //     let mut blockfile = HashMapBlockfile::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("key1".to_string()),
-    //     };
-    //     let array = Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3]));
-    //     let _res = blockfile.set(key.clone(), &array).unwrap();
-    //     let value = blockfile.get(key).unwrap();
-    //     match value {
-    //         Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
-    //         _ => panic!("Value is not an arrow int32 array"),
-    //     }
-    // }
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gt("prefix", 3);
+        assert!(values.is_err());
+    }
 
-    // #[test]
-    // fn test_blockfile_get_gt() {
-    //     let mut blockfile = HashMapBlockfile::new();
-    //     let key1 = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("key1".to_string()),
-    //     };
-    //     let key2 = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("key2".to_string()),
-    //     };
-    //     let key3 = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("key3".to_string()),
-    //     };
-    //     let _res = blockfile.set(
-    //         key1.clone(),
-    //         &Value::Int32ArrayValue(Int32Array::from(vec![1])),
-    //     );
-    //     let _res = blockfile.set(
-    //         key2.clone(),
-    //         &Value::Int32ArrayValue(Int32Array::from(vec![2])),
-    //     );
-    //     let _res = blockfile.set(
-    //         key3.clone(),
-    //         &Value::Int32ArrayValue(Int32Array::from(vec![3])),
-    //     );
-    //     let values = blockfile
-    //         .get_gt("text_prefix".to_string(), Key::String("key1".to_string()))
-    //         .unwrap();
-    //     assert_eq!(values.len(), 2);
-    //     match &values[0].0.key {
-    //         Key::String(s) => assert!(s == "key2" || s == "key3"),
-    //         _ => panic!("Key is not a string"),
-    //     }
-    //     match &values[1].0.key {
-    //         Key::String(s) => assert!(s == "key2" || s == "key3"),
-    //         _ => panic!("Key is not a string"),
-    //     }
-    // }
+    #[test]
+    fn test_get_gt_int_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
 
-    // #[test]
-    // fn test_learning_arrow_struct() {
-    //     let mut builder = PositionalPostingListBuilder::new();
-    //     let _res = builder.add_doc_id_and_positions(1, vec![0]);
-    //     let _res = builder.add_doc_id_and_positions(2, vec![0, 1]);
-    //     let _res = builder.add_doc_id_and_positions(3, vec![0, 1, 2]);
-    //     let list_term_1 = builder.build();
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gt("prefix", 0).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+    }
 
-    //     // Example of how to use the struct array, which is one value for a term
-    //     let mut blockfile = HashMapBlockfile::new();
-    //     let key = BlockfileKey {
-    //         prefix: "text_prefix".to_string(),
-    //         key: Key::String("term1".to_string()),
-    //     };
-    //     let _res = blockfile
-    //         .set(key.clone(), &Value::PositionalPostingListValue(list_term_1))
-    //         .unwrap();
-    //     let posting_list = blockfile.get(key).unwrap();
-    //     let posting_list = match posting_list {
-    //         Value::PositionalPostingListValue(arr) => arr,
-    //         _ => panic!("Value is not an arrow struct array"),
-    //     };
+    #[test]
+    fn test_get_gt_int_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
 
-    //     let ids = posting_list.get_doc_ids();
-    //     let ids = ids.as_any().downcast_ref::<Int32Array>().unwrap();
-    //     // find index of target id
-    //     let target_id = 2;
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gt("prefix", 1).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+    }
 
-    //     // imagine this is binary search instead of linear
-    //     for i in 0..ids.len() {
-    //         if ids.is_null(i) {
-    //             continue;
-    //         }
-    //         if ids.value(i) == target_id {
-    //             let pos_list = posting_list.get_positions_for_doc_id(target_id).unwrap();
-    //             let pos_list = pos_list.as_any().downcast_ref::<Int32Array>().unwrap();
-    //             assert_eq!(pos_list.len(), 2);
-    //             assert_eq!(pos_list.value(0), 0);
-    //             assert_eq!(pos_list.value(1), 1);
-    //             break;
-    //         }
-    //     }
-    // }
+    #[test]
+    fn test_get_gt_float_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
 
-    // #[test]
-    // fn test_roaring_bitmap_example() {
-    //     let mut bitmap = RoaringBitmap::new();
-    //     bitmap.insert(1);
-    //     bitmap.insert(2);
-    //     bitmap.insert(3);
-    //     let mut blockfile = HashMapBlockfile::new();
-    //     let key = BlockfileKey::new(
-    //         "text_prefix".to_string(),
-    //         Key::String("bitmap1".to_string()),
-    //     );
-    //     let _res = blockfile
-    //         .set(key.clone(), &Value::RoaringBitmapValue(bitmap))
-    //         .unwrap();
-    //     let value = blockfile.get(key).unwrap();
-    //     match value {
-    //         Value::RoaringBitmapValue(bitmap) => {
-    //             assert!(bitmap.contains(1));
-    //             assert!(bitmap.contains(2));
-    //             assert!(bitmap.contains(3));
-    //         }
-    //         _ => panic!("Value is not a roaring bitmap"),
-    //     }
-    // }
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gt("prefix", 3.0);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_gt_float_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gt("prefix", 0.0).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_gt_float_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gt("prefix", 1.0).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_gte_int_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gte("prefix", 4);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_gte_int_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gte("prefix", 1).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_gte_int_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gte("prefix", 2).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_gte_float_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gte("prefix", 3.5);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_gte_float_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gte("prefix", 0.5).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_gte_float_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_gte("prefix", 1.5).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_lt_int_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lt("prefix", 1);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_lt_int_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lt("prefix", 4).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_lt_int_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lt("prefix", 3).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+    }
+
+    #[test]
+    fn test_get_lt_float_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lt("prefix", 0.5);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_lt_float_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lt("prefix", 3.5).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_lt_float_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lt("prefix", 2.5).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+    }
+
+    #[test]
+    fn test_get_lte_int_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lte("prefix", 0);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_lte_int_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lte("prefix", 3).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_lte_int_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 2, "value2");
+        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<u32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lte("prefix", 2).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+    }
+
+    #[test]
+    fn test_get_lte_float_none_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lte("prefix", 0.5);
+        assert!(values.is_err());
+    }
+
+    #[test]
+    fn test_get_lte_float_all_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lte("prefix", 3.0).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+    }
+
+    #[test]
+    fn test_get_lte_float_some_returned() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 2.0, "value2");
+        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<f32, &str> =
+            MemoryBlockfileReader::open(writer.id, storage_manager);
+        let values = reader.get_lte("prefix", 2.0).unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+    }
+
+    #[test]
+    fn test_delete() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+        let _ = writer.set("prefix", "key1", "value1");
+        let _ = writer.set("prefix", "key2", "value2");
+        let _ = writer.set("different_prefix", "key3", "value3");
+        // delete
+        let _ = writer.delete::<&str, &str>("prefix", "key1");
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        let key_2 = reader.get("prefix", "key2").unwrap();
+        assert_eq!(key_2, "value2");
+        let key_3 = reader.get("different_prefix", "key3").unwrap();
+        assert_eq!(key_3, "value3");
+
+        let key_1 = reader.get("prefix", "key1");
+        assert!(key_1.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_by_index() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("key{:04}", i);
+            let value = format!("value{:04}", i);
+            let _ = writer.set("prefix", key.as_str(), value.as_str());
+        }
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        for i in 0..n {
+            let expected_key = format!("key{:04}", i);
+            let expected_value = format!("value{:04}", i);
+            let (prefix, key, value) = reader.get_at_index(i).unwrap();
+            assert_eq!(prefix, "prefix");
+            assert_eq!(key, expected_key.as_str());
+            assert_eq!(value, expected_value.as_str());
+        }
+    }
 }

@@ -629,6 +629,6 @@ class Collection(BaseModel):
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
-                "https://docs.trychroma.com/embeddings"
+                "https://docs.trychroma.com/guides/embeddings"
             )
         return self._embedding_function(input=input)

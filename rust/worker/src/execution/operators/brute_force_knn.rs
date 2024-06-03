@@ -1,10 +1,12 @@
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::operators::normalize_vectors::normalize;
 use crate::types::LogRecord;
+use crate::types::Operation;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -30,7 +32,7 @@ pub struct BruteForceKnnOperatorInput {
 /// The output of the brute force k-nearest neighbors operator.
 /// # Parameters
 /// * `data` - The vectors to query against. Only the vectors that are nearest neighbors are visible.
-/// * `indices` - The indices of the nearest neighbors. This is a mask against the `query_vecs` input.
+/// * `indices` - The indices of the nearest neighbors. This is a mask against the `data` input.
 /// One row for each query vector.
 /// * `distances` - The distances of the nearest neighbors.
 /// One row for each query vector.
@@ -40,8 +42,6 @@ pub struct BruteForceKnnOperatorOutput {
     pub indices: Vec<usize>,
     pub distances: Vec<f32>,
 }
-
-pub type BruteForceKnnOperatorResult = Result<BruteForceKnnOperatorOutput, ()>;
 
 #[derive(Debug)]
 struct Entry {
@@ -81,21 +81,48 @@ impl Eq for Entry {}
 impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for BruteForceKnnOperator {
     type Error = ();
 
-    async fn run(&self, input: &BruteForceKnnOperatorInput) -> BruteForceKnnOperatorResult {
+    async fn run(
+        &self,
+        input: &BruteForceKnnOperatorInput,
+    ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
+        let should_normalize = match input.distance_metric {
+            DistanceFunction::Cosine => true,
+            _ => false,
+        };
+
+        let normalized_query = match should_normalize {
+            true => Some(normalize(&input.query)),
+            false => None,
+        };
+
         let mut heap = BinaryHeap::with_capacity(input.k);
         let data_chunk = &input.data;
         for data in data_chunk.iter() {
             let log_record = data.0;
             let index = data.1;
 
+            if log_record.record.operation == Operation::Delete {
+                // Explicitly skip deleted records.
+                continue;
+            }
             let embedding = match &log_record.record.embedding {
                 Some(embedding) => embedding,
                 None => {
+                    // implies that the record is a delete or update of irrelevant field
                     continue;
                 }
             };
-            let distance = input.distance_metric.distance(&embedding[..], &input.query);
-            heap.push(Entry { index, distance });
+            if should_normalize {
+                let normalized_query = normalized_query.as_ref().expect("Invariant violation. Should have set normalized query if should_normalize is true.");
+                let normalized_embedding = normalize(&embedding[..]);
+                let distance = input
+                    .distance_metric
+                    .distance(&normalized_embedding[..], &normalized_query[..]);
+                heap.push(Entry { index, distance });
+            } else {
+                let distance = input.distance_metric.distance(&embedding[..], &input.query);
+                heap.push(Entry { index, distance });
+            }
         }
 
         let mut visibility = vec![false; data_chunk.total_len()];
@@ -149,6 +176,7 @@ mod tests {
                     embedding: Some(vec![0.0, 0.0, 0.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -159,6 +187,7 @@ mod tests {
                     embedding: Some(vec![0.0, 1.0, 1.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -169,6 +198,7 @@ mod tests {
                     embedding: Some(vec![7.0, 8.0, 9.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -207,6 +237,7 @@ mod tests {
                     embedding: Some(vec![0.0, 1.0, 0.0]),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -217,6 +248,7 @@ mod tests {
                     embedding: Some(data_1.clone()),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -227,6 +259,7 @@ mod tests {
                     embedding: Some(data_2.clone()),
                     encoding: None,
                     metadata: None,
+                    document: None,
                     operation: Operation::Add,
                 },
             },
@@ -261,6 +294,7 @@ mod tests {
                 embedding: Some(vec![0.0, 0.0, 0.0]),
                 encoding: None,
                 metadata: None,
+                document: None,
                 operation: Operation::Add,
             },
         }];
@@ -277,5 +311,60 @@ mod tests {
         assert_eq!(output.indices, vec![0]);
         assert_eq!(output.distances, vec![0.0]);
         assert_eq!(output.data.get_visibility(0), Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_skip_deleted_records() {
+        let operator = BruteForceKnnOperator {};
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![0.0, 0.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let data_chunk = Chunk::new(data.into());
+
+        let input = BruteForceKnnOperatorInput {
+            data: data_chunk,
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+        };
+        let output = operator.run(&input).await.unwrap();
+        assert_eq!(output.indices, vec![0, 2]);
+        let distance_1 = 7.0_f32.powi(2) + 8.0_f32.powi(2) + 9.0_f32.powi(2);
+        assert_eq!(output.distances, vec![0.0, distance_1]);
+        assert_eq!(output.data.get_visibility(0), Some(true));
+        assert_eq!(output.data.get_visibility(1), Some(false));
+        assert_eq!(output.data.get_visibility(2), Some(true));
     }
 }

@@ -45,7 +45,7 @@ pub(crate) struct MemberListCrd {
 // Define the structure for items in the members array
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub(crate) struct Member {
-    pub(crate) url: String,
+    pub(crate) member_id: String,
 }
 
 /* =========== CR Provider ============== */
@@ -182,6 +182,10 @@ impl CustomResourceMemberlistProvider {
 
 #[async_trait]
 impl Component for CustomResourceMemberlistProvider {
+    fn get_name() -> &'static str {
+        "Custom resource member list provider"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }
@@ -214,7 +218,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                 let memberlist = memberlist.spec.members;
                 let memberlist = memberlist
                     .iter()
-                    .map(|member| member.url.clone())
+                    .map(|member| member.member_id.clone())
                     .collect::<Vec<String>>();
                 {
                     let curr_memberlist_handle = self.current_memberlist.write();

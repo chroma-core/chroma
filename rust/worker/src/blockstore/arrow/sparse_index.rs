@@ -18,7 +18,7 @@ use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
 /// it easier to handle the case where the first block is split into two and also makes
 /// determining the target block for a given key easier
 #[derive(Clone, Debug)]
-enum SparseIndexDelimiter {
+pub(super) enum SparseIndexDelimiter {
     Start,
     Key(CompositeKey),
 }
@@ -76,7 +76,7 @@ impl Ord for SparseIndexDelimiter {
 /// - `is_valid` - Check if the sparse index is valid, useful for debugging and testing
 #[derive(Clone)]
 pub(super) struct SparseIndex {
-    forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
+    pub(super) forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
     reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
     pub(super) id: Uuid,
 }
@@ -115,6 +115,209 @@ impl SparseIndex {
             }
         }
         panic!("No blocks in the sparse index");
+    }
+
+    pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
+            let non_start_curr_key: Option<&CompositeKey>;
+            match curr_key {
+                SparseIndexDelimiter::Start => non_start_curr_key = None,
+                SparseIndexDelimiter::Key(k) => non_start_curr_key = Some(k),
+            }
+            if let Some((next_key, _)) = next_iter.next() {
+                // This can't be a start key but we still need to extract it.
+                let non_start_next_key: Option<&CompositeKey>;
+                match next_key {
+                    SparseIndexDelimiter::Start => {
+                        panic!("Invariant violation. Sparse index is not valid.");
+                    }
+                    SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k),
+                }
+                // If delimeter starts with the same prefix then there will be keys inside the
+                // block with this prefix.
+                if non_start_curr_key.is_some()
+                    && prefix == non_start_curr_key.unwrap().prefix.as_str()
+                {
+                    block_ids.push(*curr_uuid);
+                }
+                // If prefix is between the current delim and next delim then there could
+                // be keys in this block that have this prefix.
+                if (non_start_curr_key.is_none()
+                    || prefix > non_start_curr_key.unwrap().prefix.as_str())
+                    && (prefix <= non_start_next_key.unwrap().prefix.as_str())
+                {
+                    block_ids.push(*curr_uuid);
+                }
+            } else {
+                // Last block.
+                if non_start_curr_key.is_none()
+                    || prefix >= non_start_curr_key.unwrap().prefix.as_str()
+                {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_gt<'a, K: ArrowReadableKey<'a> + Into<KeyWrapper>>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+            let curr_key = match curr_delim {
+                SparseIndexDelimiter::Start => None,
+                SparseIndexDelimiter::Key(k) => Some(k),
+            };
+            let mut next_key: Option<&CompositeKey> = None;
+            if let Some((next_delim, _)) = next_iter.next() {
+                next_key = match next_delim {
+                    SparseIndexDelimiter::Start => {
+                        panic!("Invariant violation. Sparse index is not valid.")
+                    }
+                    SparseIndexDelimiter::Key(k) => Some(k),
+                };
+            }
+            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
+                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
+                if curr_key.unwrap().key > key.clone().into() {
+                    block_ids.push(*curr_uuid);
+                } else {
+                    if next_key.is_none() || next_key.unwrap().key > key.clone().into() {
+                        block_ids.push(*curr_uuid);
+                    }
+                }
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_lt<'a, K: ArrowReadableKey<'a> + Into<KeyWrapper>>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+            let curr_key = match curr_delim {
+                SparseIndexDelimiter::Start => None,
+                SparseIndexDelimiter::Key(k) => Some(k),
+            };
+            let mut next_key: Option<&CompositeKey> = None;
+            if let Some((next_delim, _)) = next_iter.next() {
+                next_key = match next_delim {
+                    SparseIndexDelimiter::Start => {
+                        panic!("Invariant violation. Sparse index is not valid.")
+                    }
+                    SparseIndexDelimiter::Key(k) => Some(k),
+                };
+            }
+            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
+                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
+                if curr_key.unwrap().key < key.clone().into() {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_gte<'a, K: ArrowReadableKey<'a> + Into<KeyWrapper>>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+            let curr_key = match curr_delim {
+                SparseIndexDelimiter::Start => None,
+                SparseIndexDelimiter::Key(k) => Some(k),
+            };
+            let mut next_key: Option<&CompositeKey> = None;
+            if let Some((next_delim, _)) = next_iter.next() {
+                next_key = match next_delim {
+                    SparseIndexDelimiter::Start => {
+                        panic!("Invariant violation. Sparse index is not valid.")
+                    }
+                    SparseIndexDelimiter::Key(k) => Some(k),
+                };
+            }
+            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
+                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
+                if curr_key.unwrap().key >= key.clone().into() {
+                    block_ids.push(*curr_uuid);
+                } else {
+                    if next_key.is_none() || next_key.unwrap().key >= key.clone().into() {
+                        block_ids.push(*curr_uuid);
+                    }
+                }
+            }
+        }
+        block_ids
+    }
+
+    pub(super) fn get_block_ids_lte<'a, K: ArrowReadableKey<'a> + Into<KeyWrapper>>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Vec<Uuid> {
+        let lock_guard = self.forward.lock();
+        let mut curr_iter = lock_guard.iter();
+        let mut next_iter = lock_guard.iter().skip(1);
+        let mut block_ids = vec![];
+        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+            let curr_key = match curr_delim {
+                SparseIndexDelimiter::Start => None,
+                SparseIndexDelimiter::Key(k) => Some(k),
+            };
+            let mut next_key: Option<&CompositeKey> = None;
+            if let Some((next_delim, _)) = next_iter.next() {
+                next_key = match next_delim {
+                    SparseIndexDelimiter::Start => {
+                        panic!("Invariant violation. Sparse index is not valid.")
+                    }
+                    SparseIndexDelimiter::Key(k) => Some(k),
+                };
+            }
+            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
+                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
+                if curr_key.unwrap().key <= key.clone().into() {
+                    block_ids.push(*curr_uuid);
+                }
+            }
+        }
+        block_ids
     }
 
     pub(super) fn add_block(&self, start_key: CompositeKey, block_id: Uuid) {
@@ -203,17 +406,17 @@ impl SparseIndex {
                 }
                 SparseIndexDelimiter::Key(k) => match &k.key {
                     KeyWrapper::String(s) => {
-                        delta.add("KEY", s.as_str(), block_id.to_string().as_str());
+                        delta.add(&k.prefix, s.as_str(), block_id.to_string().as_str());
                     }
                     KeyWrapper::Float32(f) => {
-                        delta.add("KEY", *f, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *f, block_id.to_string().as_str());
                     }
                     KeyWrapper::Bool(b) => {
                         unimplemented!();
                         // delta.add("KEY", b, block_id.to_string().as_str());
                     }
                     KeyWrapper::Uint32(u) => {
-                        delta.add("KEY", *u, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *u, block_id.to_string().as_str());
                     }
                 },
             }
@@ -239,7 +442,7 @@ impl SparseIndex {
                         Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
                     }
                 }
-                "KEY" => {
+                _ => {
                     let block_id = Uuid::parse_str(value);
                     match block_id {
                         Ok(block_id) => (
@@ -249,7 +452,6 @@ impl SparseIndex {
                         Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
                     }
                 }
-                _ => panic!("Invalid key"), // TODO: error here
             };
             forward.insert(delimiter.clone(), block_id);
             reverse.insert(block_id, delimiter);
@@ -315,5 +517,45 @@ mod tests {
         // b should fall into the first block
         blockfile_key = CompositeKey::new("prefix".to_string(), "b");
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
+    }
+
+    #[test]
+    fn test_to_from_block() {
+        let file_id = uuid::Uuid::new_v4();
+        let block_id_0 = uuid::Uuid::new_v4();
+
+        // Add an initial block to the sparse index
+        let sparse_index = SparseIndex::new(file_id);
+        sparse_index.add_initial_block(block_id_0);
+
+        // Add some more blocks
+        let blockfile_key = CompositeKey::new("prefix".to_string(), "a");
+        let block_id_1 = uuid::Uuid::new_v4();
+        sparse_index.add_block(blockfile_key.clone(), block_id_1);
+
+        let blockfile_key = CompositeKey::new("prefix".to_string(), "c");
+        let block_id_2 = uuid::Uuid::new_v4();
+        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+
+        let block = sparse_index.to_block::<&str>().unwrap();
+        let new_sparse_index = SparseIndex::from_block::<&str>(&block).unwrap();
+
+        let old_forward = sparse_index.forward.lock();
+        let new_forward = new_sparse_index.forward.lock();
+
+        assert_eq!(old_forward.len(), new_forward.len());
+        for (old_key, old_block_id) in old_forward.iter() {
+            let new_block_id = new_forward.get(old_key).unwrap();
+            assert_eq!(old_block_id, new_block_id);
+        }
+
+        let old_reverse = sparse_index.reverse.lock();
+        let new_reverse = new_sparse_index.reverse.lock();
+
+        assert_eq!(old_reverse.len(), new_reverse.len());
+        for (old_block_id, old_key) in old_reverse.iter() {
+            let new_key = new_reverse.get(old_block_id).unwrap();
+            assert_eq!(old_key, new_key);
+        }
     }
 }

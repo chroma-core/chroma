@@ -42,6 +42,8 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
+MEMBERLIST_SLEEP = 5
+COMPACTION_SLEEP = 120
 
 
 def skip_if_not_cluster() -> pytest.MarkDecorator:

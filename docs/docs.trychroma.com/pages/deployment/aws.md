@@ -1,5 +1,5 @@
 ---
-title: "☁️ Deployment"
+title: "☁️ AWS Deployment"
 ---
 
 {% note type="caution" title="Alpha" %}

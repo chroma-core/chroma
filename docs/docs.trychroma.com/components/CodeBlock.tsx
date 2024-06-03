@@ -8,6 +8,7 @@ import Prism from 'prismjs';
 require(`prismjs/components/prism-python.min.js`);
 require(`prismjs/components/prism-bash.min.js`);
 require(`prismjs/components/prism-javascript.min.js`);
+require(`prismjs/components/prism-yaml.js`);
 require(`prismjs/components/prism-json.min.js`);
 
 Prism.languages.python = {
@@ -52,6 +53,18 @@ export function CodeBlock({children, 'data-language': language, filename, codeta
   }
 
   const [highlightedCode, setHighlightedCode] = React.useState('');
+  const [codeWithoutSyntax, setCodeWithoutSyntax] = React.useState('');
+  var code$Regex = /^(.*?)#\s*\[\!code\s*\$\]\s*(.*)$/;
+
+  // children without code$Regex
+  // iterate over the children and remove the code$Regex
+  let newChildren = children.split('\n').map((line) => {
+    let match = line.match(code$Regex);
+    if (match) {
+      return match[1].trim()
+    }
+    return line
+  }).join('\n')
 
   React.useEffect(() => {
     async function highlight() {
@@ -66,8 +79,8 @@ export function CodeBlock({children, 'data-language': language, filename, codeta
 
         var wrappedLines = lines.map(function(line) {
           // Regex to match the marker with flexible whitespace
-          var regex = /^(.*?)#\s*\[\!code\s*\$\]\s*(.*)$/;
-          var match = line.match(regex);
+
+          var match = line.match(code$Regex);
           if (match) {
             // If it does, remove the marker and wrap the line with div.line and add the class
             // `match[1]` contains the line without the marker
@@ -76,6 +89,7 @@ export function CodeBlock({children, 'data-language': language, filename, codeta
             // Otherwise, just wrap the line with div.line
             return '<div class="line">' + line + '</div>';
           }
+
         }).join('');
 
         // Replace the highlightedCode with the wrapped lines
@@ -121,7 +135,7 @@ export function CodeBlock({children, 'data-language': language, filename, codeta
     <div className="rounded-md code reset text-sm" aria-live="polite"
       style={{borderRadius: '0.5rem', position: 'relative', marginBottom: marginBottom}}
     >
-      <CopyToClipboardButton className={`absolute ${copyIconColor} border-0 right-3 p-0.5`} textToCopy={children} customStyle={{top: copyButtonTop}}/>
+      <CopyToClipboardButton className={`absolute ${copyIconColor} border-0 right-3 p-0.5`} textToCopy={newChildren} customStyle={{top: copyButtonTop}}/>
       <CustomHeader language={language} filename={filename} codetab={codetab}/>
       <pre className='py-4 px-6 overflow-x-scroll'>
         <code className={`language-${language}`} dangerouslySetInnerHTML={{ __html: highlightedCode }}>

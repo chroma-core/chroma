@@ -4,7 +4,6 @@ use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::types::LogRecord;
 use async_trait::async_trait;
-use tracing::debug;
 use tracing::trace;
 use uuid::Uuid;
 
@@ -86,13 +85,11 @@ impl PullLogsOutput {
     }
 }
 
-pub type PullLogsResult = Result<PullLogsOutput, PullLogsError>;
-
 #[async_trait]
 impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
     type Error = PullLogsError;
 
-    async fn run(&self, input: &PullLogsInput) -> PullLogsResult {
+    async fn run(&self, input: &PullLogsInput) -> Result<PullLogsOutput, PullLogsError> {
         // We expect the log to be cheaply cloneable, we need to clone it since we need
         // a mutable reference to it. Not necessarily the best, but it works for our needs.
         let mut client_clone = self.client.clone();
@@ -173,6 +170,7 @@ mod tests {
                         embedding: None,
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },
@@ -191,6 +189,7 @@ mod tests {
                         embedding: None,
                         encoding: None,
                         metadata: None,
+                        document: None,
                         operation: Operation::Add,
                     },
                 },

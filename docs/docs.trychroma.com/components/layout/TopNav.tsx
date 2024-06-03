@@ -18,7 +18,7 @@ export function TopNav({ children }: TopNavProps) {
             <img src='/img/chroma.svg' alt='Chroma Logo' className='h-8 w-auto' />
             <p className='ml-3 mb-0 text-lg font-semibold'>Chroma</p>
           </Link>
-          {/* <Search/> */}
+          <Search/>
           </div>
           <section className={'flex gap-x-4 items-center'}>
             {children}
@@ -36,6 +36,7 @@ function Search() {
       appId={process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}
       apiKey={process.env.NEXT_PUBLIC_ALGOLIA_API_KEY}
       indexName={process.env.NEXT_PUBLIC_ALGOLIA_INDEX_NAME}
+      insights={true}
     />
   );
 }

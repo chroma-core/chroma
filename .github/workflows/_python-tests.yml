@@ -25,6 +25,10 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
+        include:
+          - test-globs: "chromadb/test/property/test_embeddings.py"
+            parallelized: true
+
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -33,7 +37,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest ${{ matrix.test-globs }}
+        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }}  ${{ matrix.test-globs }}
         shell: bash
 
   # todo: break out stress integration tests
@@ -75,6 +79,7 @@ jobs:
         platform: ["16core-64gb-ubuntu-latest"]
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",

@@ -1,31 +1,33 @@
 use super::super::operator::{wrap, TaskMessage};
-use super::hnsw;
 use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::CompactionJob;
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::operator::TaskResult;
 use crate::execution::operators::flush_s3::FlushS3Input;
 use crate::execution::operators::flush_s3::FlushS3Operator;
-use crate::execution::operators::flush_s3::FlushS3Result;
+use crate::execution::operators::flush_s3::FlushS3Output;
+use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
-use crate::execution::operators::partition::PartitionResult;
+use crate::execution::operators::partition::PartitionOutput;
 use crate::execution::operators::pull_log::PullLogsInput;
 use crate::execution::operators::pull_log::PullLogsOperator;
-use crate::execution::operators::pull_log::PullLogsResult;
+use crate::execution::operators::pull_log::PullLogsOutput;
+use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
-use crate::execution::operators::register::RegisterResult;
+use crate::execution::operators::register::RegisterOutput;
 use crate::execution::operators::write_segments::WriteSegmentsInput;
 use crate::execution::operators::write_segments::WriteSegmentsOperator;
-use crate::execution::operators::write_segments::WriteSegmentsResult;
+use crate::execution::operators::write_segments::WriteSegmentsOperatorError;
+use crate::execution::operators::write_segments::WriteSegmentsOutput;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
-use crate::segment::distributed_hnsw_segment::DistributedHNSWSegment;
+use crate::log::log::PullLogsError;
+use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
+use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::LogMaterializer;
-use crate::segment::SegmentFlusher;
-use crate::segment::SegmentWriter;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -34,6 +36,7 @@ use crate::system::Handler;
 use crate::system::Receiver;
 use crate::system::System;
 use crate::types::LogRecord;
+use crate::types::Segment;
 use crate::types::SegmentFlushInfo;
 use crate::types::SegmentType;
 use async_trait::async_trait;
@@ -85,6 +88,7 @@ pub struct CompactOrchestrator {
     hnsw_index_provider: HnswIndexProvider,
     // State we hold across the execution
     pulled_log_offset: Option<i64>,
+    record_segment: Option<Segment>,
     // Dispatcher
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     // number of write segments tasks
@@ -141,6 +145,7 @@ impl CompactOrchestrator {
         result_channel: Option<
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
         >,
+        record_segment: Option<Segment>,
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
@@ -156,14 +161,17 @@ impl CompactOrchestrator {
             dispatcher,
             num_write_tasks: 0,
             result_channel,
+            record_segment,
         }
     }
 
     // TODO: It is possible that the offset_id from the compaction job is wrong since the log service
     // can have an outdated view of the offset. We should filter out entries from the log based on the start offset
     // of the segment, and not fully respect the offset_id from the compaction job
-
-    async fn pull_logs(&mut self, self_address: Box<dyn Receiver<PullLogsResult>>) {
+    async fn pull_logs(
+        &mut self,
+        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+    ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
         let collection_id = self.collection_id;
@@ -197,7 +205,7 @@ impl CompactOrchestrator {
     async fn partition(
         &mut self,
         records: Chunk<LogRecord>,
-        self_address: Box<dyn Receiver<PartitionResult>>,
+        self_address: Box<dyn Receiver<TaskResult<PartitionOutput, PartitionError>>>,
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
@@ -217,7 +225,9 @@ impl CompactOrchestrator {
     async fn write(
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
-        self_address: Box<dyn Receiver<WriteSegmentsResult>>,
+        self_address: Box<
+            dyn Receiver<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
+        >,
     ) {
         self.state = ExecutionState::Write;
 
@@ -237,6 +247,11 @@ impl CompactOrchestrator {
                 record_segment_writer.clone(),
                 hnsw_segment_writer.clone(),
                 parition.clone(),
+                self.blockfile_provider.clone(),
+                self.record_segment
+                    .as_ref()
+                    .expect("WriteSegmentsInput: Record segment not set in the input")
+                    .clone(),
             );
             let task = wrap(operator, input, self_address.clone());
             match self.dispatcher.send(task, Some(Span::current())).await {
@@ -251,8 +266,8 @@ impl CompactOrchestrator {
     async fn flush_s3(
         &mut self,
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegment>,
-        self_address: Box<dyn Receiver<FlushS3Result>>,
+        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+        self_address: Box<dyn Receiver<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
     ) {
         self.state = ExecutionState::Flush;
 
@@ -268,11 +283,11 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn flush_sysdb(
+    async fn register(
         &mut self,
         log_position: i64,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-        self_address: Box<dyn Receiver<RegisterResult>>,
+        self_address: Box<dyn Receiver<TaskResult<RegisterOutput, RegisterError>>>,
     ) {
         self.state = ExecutionState::Register;
         let operator = RegisterOperator::new();
@@ -297,7 +312,8 @@ impl CompactOrchestrator {
 
     async fn get_segment_writers(
         &mut self,
-    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegment>), Box<dyn ChromaError>> {
+    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegmentWriter>), Box<dyn ChromaError>>
+    {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -309,7 +325,7 @@ impl CompactOrchestrator {
             .get_segments(None, None, None, Some(self.collection_id))
             .await;
 
-        println!("Retrived segments: {:?}", segments);
+        tracing::debug!("Retrived segments: {:?}", segments);
 
         let segments = match segments {
             Ok(segments) => {
@@ -328,7 +344,7 @@ impl CompactOrchestrator {
             .iter()
             .find(|segment| segment.r#type == SegmentType::Record);
 
-        println!("Found Record Segment: {:?}", record_segment);
+        tracing::debug!("Found Record Segment: {:?}", record_segment);
 
         if record_segment.is_none() {
             return Err(Box::new(GetSegmentWritersError::NoRecordSegmentFound));
@@ -345,7 +361,8 @@ impl CompactOrchestrator {
                 }
             };
 
-        println!("Record Segment Writer created");
+        tracing::debug!("Record Segment Writer created");
+        self.record_segment = Some(record_segment.clone()); // auto deref.
 
         // Create a hnsw segment writer
         let collection_res = self
@@ -377,7 +394,7 @@ impl CompactOrchestrator {
             .dimension
             .expect("Dimension is required in the compactor");
 
-        let hnsw_segment_writer = match DistributedHNSWSegment::from_segment(
+        let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
             hnsw_segment,
             dimension as usize,
             self.hnsw_index_provider.clone(),
@@ -409,6 +426,10 @@ impl CompactOrchestrator {
 
 #[async_trait]
 impl Component for CompactOrchestrator {
+    fn get_name() -> &'static str {
+        "Compaction orchestrator"
+    }
+
     fn queue_size(&self) -> usize {
         1000 // TODO: make configurable
     }
@@ -420,12 +441,13 @@ impl Component for CompactOrchestrator {
 
 // ============== Handlers ==============
 #[async_trait]
-impl Handler<PullLogsResult> for CompactOrchestrator {
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CompactOrchestrator {
     async fn handle(
         &mut self,
-        message: PullLogsResult,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
+        let message = message.into_inner();
         let records = match message {
             Ok(result) => result.logs(),
             Err(e) => {
@@ -458,12 +480,13 @@ impl Handler<PullLogsResult> for CompactOrchestrator {
 }
 
 #[async_trait]
-impl Handler<PartitionResult> for CompactOrchestrator {
+impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrator {
     async fn handle(
         &mut self,
-        message: PartitionResult,
+        message: TaskResult<PartitionOutput, PartitionError>,
         _ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
+        let message = message.into_inner();
         let records = match message {
             Ok(result) => result.records,
             Err(e) => {
@@ -484,12 +507,13 @@ impl Handler<PartitionResult> for CompactOrchestrator {
 }
 
 #[async_trait]
-impl Handler<WriteSegmentsResult> for CompactOrchestrator {
+impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for CompactOrchestrator {
     async fn handle(
         &mut self,
-        message: WriteSegmentsResult,
+        message: TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>,
         _ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
+        let message = message.into_inner();
         println!("Write Segments Result: {:?}", message);
         let output = match message {
             Ok(output) => {
@@ -513,16 +537,17 @@ impl Handler<WriteSegmentsResult> for CompactOrchestrator {
 }
 
 #[async_trait]
-impl Handler<FlushS3Result> for CompactOrchestrator {
+impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchestrator {
     async fn handle(
         &mut self,
-        message: FlushS3Result,
+        message: TaskResult<FlushS3Output, Box<dyn ChromaError>>,
         _ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
+        let message = message.into_inner();
         match message {
             Ok(msg) => {
                 // Unwrap should be safe here as we are guaranteed to have a value by construction
-                self.flush_sysdb(
+                self.register(
                     self.pulled_log_offset.unwrap(),
                     msg.segment_flush_info,
                     _ctx.sender.as_receiver(),
@@ -537,12 +562,13 @@ impl Handler<FlushS3Result> for CompactOrchestrator {
 }
 
 #[async_trait]
-impl Handler<RegisterResult> for CompactOrchestrator {
+impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator {
     async fn handle(
         &mut self,
-        message: RegisterResult,
+        message: TaskResult<RegisterOutput, RegisterError>,
         _ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
+        let message = message.into_inner();
         // Return execution state to the compaction manager
         let result_channel = match self.result_channel.take() {
             Some(tx) => tx,

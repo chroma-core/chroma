@@ -17,7 +17,7 @@ def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Membe
     config.load_config()
     api_instance = client.CustomObjectsApi()
 
-    members = [{"url": f"10.0.0.{i}"} for i in range(1, n + 1)]
+    members = [{"member_id": f"test-{i}"} for i in range(1, n + 1)]
 
     body = {
         "kind": "MemberList",
@@ -34,7 +34,7 @@ def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Membe
         body=body,
     )
 
-    return [m["url"] for m in members]
+    return [m["member_id"] for m in members]
 
 
 def compare_memberlists(m1: Memberlist, m2: Memberlist) -> bool:

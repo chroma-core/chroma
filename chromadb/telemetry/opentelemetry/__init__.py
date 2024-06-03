@@ -71,7 +71,7 @@ def otel_init(
     """Initializes module-level state for OpenTelemetry.
 
     Parameters match the environment variables which configure OTel as documented
-    at https://docs.trychroma.com/observability.
+    at https://docs.trychroma.com/deployment/observability.
     - otel_service_name: The name of the service for OTel tagging and aggregation.
     - otel_collection_endpoint: The endpoint to which OTel spans are sent
         (e.g. api.honeycomb.com).

@@ -1,4 +1,4 @@
-use crate::distance::DistanceFunction;
+use crate::distance::{DistanceFunction, DistanceFunctionError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::types::{MetadataValue, Segment};
 use thiserror::Error;
@@ -12,14 +12,14 @@ pub(crate) struct IndexConfig {
 
 #[derive(Error, Debug)]
 pub(crate) enum IndexConfigFromSegmentError {
-    #[error("No space defined")]
-    NoSpaceDefined,
+    #[error("Invalid distance function")]
+    InvalidDistanceFunction(#[from] DistanceFunctionError),
 }
 
 impl ChromaError for IndexConfigFromSegmentError {
     fn code(&self) -> ErrorCodes {
         match self {
-            IndexConfigFromSegmentError::NoSpaceDefined => ErrorCodes::InvalidArgument,
+            IndexConfigFromSegmentError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -28,7 +28,7 @@ impl IndexConfig {
     pub(crate) fn from_segment(
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<Self, Box<IndexConfigFromSegmentError>> {
         let space = match segment.metadata {
             Some(ref metadata) => match metadata.get("hnsw:space") {
                 Some(MetadataValue::Str(space)) => space,
@@ -38,10 +38,12 @@ impl IndexConfig {
         };
         match DistanceFunction::try_from(space) {
             Ok(distance_function) => Ok(IndexConfig {
-                dimensionality: dimensionality,
-                distance_function: distance_function,
+                dimensionality,
+                distance_function,
             }),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(Box::new(
+                IndexConfigFromSegmentError::InvalidDistanceFunction(e),
+            )),
         }
     }
 }
@@ -52,6 +54,7 @@ impl IndexConfig {
 /// # Methods
 /// - `init` - Initialize the index with a given dimension and distance function.
 /// - `add` - Add a vector to the index.
+/// - `delete` - Delete a vector from the index.
 /// - `query` - Query the index for the K nearest neighbors of a given vector.
 pub(crate) trait Index<C> {
     fn init(
@@ -62,7 +65,14 @@ pub(crate) trait Index<C> {
     where
         Self: Sized;
     fn add(&self, id: usize, vector: &[f32]);
-    fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>);
+    fn delete(&self, id: usize);
+    fn query(
+        &self,
+        vector: &[f32],
+        k: usize,
+        allowed_ids: &[usize],
+        disallow_ids: &[usize],
+    ) -> (Vec<usize>, Vec<f32>);
     fn get(&self, id: usize) -> Option<Vec<f32>>;
 }
 

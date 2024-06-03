@@ -97,13 +97,11 @@ impl ChromaError for RegisterError {
     }
 }
 
-pub type RegisterResult = Result<RegisterOutput, RegisterError>;
-
 #[async_trait]
 impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
     type Error = RegisterError;
 
-    async fn run(&self, input: &RegisterInput) -> RegisterResult {
+    async fn run(&self, input: &RegisterInput) -> Result<RegisterOutput, RegisterError> {
         let mut sysdb = input.sysdb.clone();
         let mut log = input.log.clone();
         let result = sysdb
@@ -115,6 +113,10 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 input.segment_flush_info.clone(),
             )
             .await;
+
+        // We must make sure that the log postion in sysdb is always greater than or equal to the log position
+        // in the log service. If the log position in sysdb is less than the log position in the log service,
+        // the we may lose data in compaction.
         let sysdb_registration_result = match result {
             Ok(response) => response,
             Err(error) => return Err(RegisterError::FlushCompactionError(error)),

@@ -11,14 +11,13 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 
 |              | Python | JS |
 |--------------|-----------|---------------|
-| [OpenAI](/embeddings/openai) | ✅  | ✅ |
-| [Google Generative AI](/embeddings/google-gemini) | ✅  | ✅ |
-| [Cohere](/embeddings/cohere) | ✅  | ✅ |
-| [Google PaLM](/embeddings/google-palm) | ✅  | ➖ |
-| [Hugging Face](/embeddings/hugging-face) | ✅  | ➖ |
-| [Instructor](/embeddings/instructor) | ✅  | ➖ |
-| [Hugging Face Embedding Server](/embeddings/hugging-face-embedding-server) | ✅  | ✅ |
-| [Jina AI](/embeddings/jinaai) | ✅  | ✅ |
+| [OpenAI](/integrations/openai) | ✅  | ✅ |
+| [Google Generative AI](/integrations/google-gemini) | ✅  | ✅ |
+| [Cohere](/integrations/cohere) | ✅  | ✅ |
+| [Hugging Face](/integrations/hugging-face) | ✅  | ➖ |
+| [Instructor](/integrations/instructor) | ✅  | ➖ |
+| [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
+| [Jina AI](/integrations/jinaai) | ✅  | ✅ |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
@@ -34,7 +33,7 @@ default_ef = embedding_functions.DefaultEmbeddingFunction()
 ```
 
 {% note type="default" %}
-Embedding functions can linked to a collection, which are used whenever you call `add`, `update`, `upsert` or `query`. You can also be use them directly which can be handy for debugging.
+Embedding functions can be linked to a collection and used whenever you call `add`, `update`, `upsert` or `query`. You can also use them directly which can be handy for debugging.
 ```py
 val = default_ef(["foo"])
 ```

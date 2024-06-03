@@ -1,13 +1,15 @@
-use super::types::{LogMaterializer, MaterializedLogRecord, SegmentWriter};
+use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::{DataRecord, SegmentFlusher};
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
-    update_metdata_to_metdata, LogRecord, Metadata, Operation, Segment, SegmentType,
+    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata, MetadataValue,
+    Operation, Segment, SegmentType,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -61,6 +63,69 @@ pub enum RecordSegmentWriterCreationError {
 }
 
 impl RecordSegmentWriter {
+    async fn construct_and_set_data_record<'a>(
+        &self,
+        mat_record: &MaterializedLogRecord<'a>,
+        user_id: &str,
+        offset_id: u32,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        // Merge data record with updates.
+        let updated_document = match mat_record.final_document {
+            Some(doc) => Some(doc),
+            None => match mat_record.data_record.as_ref() {
+                Some(data_record) => data_record.document,
+                None => None,
+            },
+        };
+        let updated_embeddings = match mat_record.final_embedding {
+            Some(embed) => embed,
+            None => match mat_record.data_record.as_ref() {
+                Some(data_record) => data_record.embedding,
+                None => panic!("Expected at least one source of embedding"),
+            },
+        };
+        let mut final_metadata = match mat_record.data_record.as_ref() {
+            Some(data_record) => match data_record.metadata {
+                Some(ref map) => map.clone(), // auto deref here.
+                None => HashMap::new(),
+            },
+            None => HashMap::new(),
+        };
+        if mat_record.metadata_to_be_merged.as_ref().is_some() {
+            for (key, value) in mat_record.metadata_to_be_merged.as_ref().unwrap() {
+                final_metadata.insert(key.clone(), value.clone()); // auto deref here.
+            }
+        }
+        let mut final_metadata_opt = None;
+        if !final_metadata.is_empty() {
+            final_metadata_opt = Some(final_metadata);
+        }
+        // Time to create a data record now.
+        let data_record = DataRecord {
+            id: user_id,
+            embedding: updated_embeddings,
+            metadata: final_metadata_opt,
+            document: updated_document,
+        };
+        match self
+            .id_to_data
+            .as_ref()
+            .unwrap()
+            .set("", offset_id, &data_record)
+            .await
+        {
+            Ok(_) => (),
+            Err(_) => {
+                return Err(ApplyMaterializedLogError::BlockfileSetError);
+            }
+        };
+        Ok(())
+    }
+
+    pub(crate) fn get_curr_max_offset_id(&self) -> Arc<AtomicU32> {
+        self.curr_max_offset_id.clone()
+    }
+
     pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
@@ -269,13 +334,172 @@ impl RecordSegmentWriter {
     }
 }
 
-impl SegmentWriter for RecordSegmentWriter {
-    fn apply_materialized_log_chunk(&self, records: Chunk<MaterializedLogRecord>) {
-        todo!()
-    }
+#[derive(Error, Debug)]
+// TODO(Sanket): Should compose errors here but can't currently because
+// of Box<dyn ChromaError>.
+// Since blockfile does not support read then write semantics natively
+// all write operations to it are either set or delete.
+pub enum ApplyMaterializedLogError {
+    #[error("Error setting to blockfile")]
+    BlockfileSetError,
+    #[error("Error deleting from blockfile")]
+    BlockfileDeleteError,
+    #[error("Embedding not set in the user write")]
+    EmbeddingNotSet,
+}
 
-    fn apply_log_chunk(&self, records: Chunk<LogRecord>) {
-        todo!()
+impl ChromaError for ApplyMaterializedLogError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        match self {
+            ApplyMaterializedLogError::BlockfileSetError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
+    async fn apply_materialized_log_chunk(
+        &self,
+        records: Chunk<MaterializedLogRecord<'a>>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        for (log_record, _) in records.iter() {
+            match log_record.final_operation {
+                Operation::Add => {
+                    // Set all four.
+                    // Set user id to offset id.
+                    match self
+                        .user_id_to_id
+                        .as_ref()
+                        .unwrap()
+                        .set::<&str, u32>("", log_record.user_id.unwrap(), log_record.offset_id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileSetError);
+                        }
+                    };
+                    // Set offset id to user id.
+                    match self
+                        .id_to_user_id
+                        .as_ref()
+                        .unwrap()
+                        .set::<u32, &str>("", log_record.offset_id, log_record.user_id.unwrap())
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileSetError);
+                        }
+                    };
+                    // Set data record.
+                    match self
+                        .construct_and_set_data_record(
+                            log_record,
+                            log_record.user_id.unwrap(),
+                            log_record.offset_id,
+                        )
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+                    // Set max offset id.
+                    match self
+                        .max_offset_id
+                        .as_ref()
+                        .unwrap()
+                        .set("", MAX_OFFSET_ID, log_record.offset_id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileSetError);
+                        }
+                    }
+                }
+                Operation::Update => {
+                    // Offset id and user id do not need to change. Only data
+                    // needs to change. Blockfile does not have Read then write
+                    // semantics so we'll delete and insert.
+                    match self
+                        .id_to_data
+                        .as_ref()
+                        .unwrap()
+                        .delete::<u32, &DataRecord>("", log_record.offset_id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                        }
+                    }
+                    match self
+                        .construct_and_set_data_record(
+                            log_record,
+                            log_record.data_record.as_ref().unwrap().id,
+                            log_record.offset_id,
+                        )
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+                }
+                Operation::Upsert => {
+                    // MaterializedLogRecord already converts upserts into either updates or inserts
+                    // so here we expect to not have any records of this type.
+                    panic!("Invariant violation. After log materialization there shouldn't be any upserts.");
+                }
+                Operation::Delete => {
+                    // Delete user id to offset id.
+                    match self
+                        .user_id_to_id
+                        .as_ref()
+                        .unwrap()
+                        .delete::<&str, u32>("", log_record.data_record.as_ref().unwrap().id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                        }
+                    };
+                    // Delete offset id to user id.
+                    match self
+                        .id_to_user_id
+                        .as_ref()
+                        .unwrap()
+                        .delete::<u32, &str>("", log_record.offset_id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                        }
+                    };
+                    // Delete data record.
+                    match self
+                        .id_to_data
+                        .as_ref()
+                        .unwrap()
+                        .delete::<u32, &DataRecord>("", log_record.offset_id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
@@ -402,82 +626,6 @@ impl SegmentFlusher for RecordSegmentFlusher {
     }
 }
 
-// TODO: remove log materializer, its needless abstraction and complexity
-#[async_trait]
-impl LogMaterializer for RecordSegmentWriter {
-    async fn materialize<'chunk>(
-        &self,
-        log_records: &'chunk Chunk<LogRecord>,
-    ) -> Chunk<MaterializedLogRecord<'chunk>> {
-        let mut materialized_records = Vec::new();
-        for (log_entry, index) in log_records.iter() {
-            match log_entry.record.operation {
-                Operation::Add => {
-                    let next_offset_id = self
-                        .curr_max_offset_id
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-                    let metadata = match &log_entry.record.metadata {
-                        Some(metadata) => match update_metdata_to_metdata(&metadata) {
-                            Ok(metadata) => Some(metadata),
-                            Err(e) => {
-                                // TODO: this should error out and return an error
-                                panic!("Error converting metadata: {}", e);
-                            }
-                        },
-                        None => None,
-                    };
-                    let data_record = DataRecord {
-                        id: &log_entry.record.id,
-                        // TODO: don't unwrap here, it should never happen as Adds always have embeddings
-                        // but we should handle this gracefully
-                        embedding: log_entry.record.embedding.as_ref().unwrap(),
-                        document: None, // TODO: document
-                        metadata: metadata,
-                    };
-                    let materialized =
-                        MaterializedLogRecord::new(next_offset_id, log_entry, data_record);
-                    println!("Writing to id_to_data");
-                    let res = self
-                        .id_to_data
-                        .as_ref()
-                        .unwrap()
-                        .set("", index as u32, &materialized.materialized_record)
-                        .await;
-                    println!("Writing to user_id_to_id");
-                    let res = self
-                        .user_id_to_id
-                        .as_ref()
-                        .unwrap()
-                        .set::<&str, u32>("", log_entry.record.id.as_str(), next_offset_id)
-                        .await;
-                    println!("Writing to id_to_user_id");
-                    let res = self
-                        .id_to_user_id
-                        .as_ref()
-                        .unwrap()
-                        .set("", next_offset_id, log_entry.record.id.as_str())
-                        .await;
-                    println!("Writing to max_offset_id: {}", next_offset_id);
-                    let res = self
-                        .max_offset_id
-                        .as_ref()
-                        .unwrap()
-                        .set("", MAX_OFFSET_ID, next_offset_id)
-                        .await;
-                    // TODO: use res
-                    materialized_records.push(materialized);
-                }
-                Operation::Delete => {}
-                Operation::Update => {}
-                Operation::Upsert => {}
-            }
-        }
-
-        Chunk::new(materialized_records.into())
-    }
-}
-
 pub(crate) struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
@@ -577,5 +725,75 @@ impl RecordSegmentReader<'_> {
         offset_id: u32,
     ) -> Result<&str, Box<dyn ChromaError>> {
         self.id_to_user_id.get("", offset_id).await
+    }
+
+    pub(crate) async fn get_offset_id_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<u32, Box<dyn ChromaError>> {
+        self.user_id_to_id.get("", user_id).await
+    }
+
+    pub(crate) async fn get_data_for_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<DataRecord, Box<dyn ChromaError>> {
+        self.id_to_data.get("", offset_id).await
+    }
+
+    pub(crate) async fn get_data_and_offset_id_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<(DataRecord, u32), Box<dyn ChromaError>> {
+        let offset_id = match self.user_id_to_id.get("", user_id).await {
+            Ok(id) => id,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        match self.id_to_data.get("", offset_id).await {
+            Ok(data_record) => Ok((data_record, offset_id)),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub(crate) async fn data_exists_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<bool, Box<dyn ChromaError>> {
+        if !self.user_id_to_id.contains("", user_id).await {
+            return Ok(false);
+        }
+        let offset_id = match self.user_id_to_id.get("", user_id).await {
+            Ok(id) => id,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        Ok(self.id_to_data.contains("", offset_id).await)
+    }
+
+    /// Returns all data in the record segment, sorted by
+    /// embedding id
+    pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
+        let mut data = Vec::new();
+        let max_size = self.user_id_to_id.count().await?;
+        for i in 0..max_size {
+            let res = self.user_id_to_id.get_at_index(i).await;
+            match res {
+                Ok((_, _, offset_id)) => {
+                    let data_record = self.id_to_data.get("", offset_id).await?;
+                    data.push(data_record);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(data)
+    }
+
+    pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+        self.id_to_data.count().await
     }
 }
