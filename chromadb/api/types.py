@@ -197,24 +197,38 @@ class IndexMetadata(TypedDict):
 # region: They told me I was mad. Well who's mad now?!
 
 
-def _serialize_args_kwargs(*args: Any, **kwargs: Any) -> str:
-    args_list = list(args)
-    try:
-        serialized = json.dumps({"args": args_list, "kwargs": kwargs})
-    except Exception as e:
-        raise ValueError(f"Failed to serialize args and kwargs: {e}")
-    return serialized
-
-
 class StoreInitArgsMeta(type):
+    @staticmethod
+    def _serialize_args_kwargs(*args: Any, **kwargs: Any) -> str:
+        args_list = list(args)
+        try:
+            serialized = json.dumps({"args": args_list, "kwargs": kwargs})
+        except Exception as e:
+            raise ValueError(f"Failed to serialize args and kwargs: {e}")
+        return serialized
+
+    @staticmethod
+    def _deserialize_args_kwargs(
+        serialized: str,
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        try:
+            deserialized = json.loads(serialized)
+            return tuple(deserialized["args"]), deserialized["kwargs"]
+        except Exception as e:
+            raise ValueError(f"Failed to deserialize args and kwargs: {e}")
+
     def __call__(cls: Type[T], *args: Any, **kwargs: Any) -> T:
         instance: T = super().__call__(*args, **kwargs)  # type: ignore[misc]
         setattr(
             instance,
             "_init_args",
-            _serialize_args_kwargs(*args, **kwargs),
+            StoreInitArgsMeta._serialize_args_kwargs(*args, **kwargs),
         )
         return instance
+
+    def from_init_args(cls: Type[T], init_args: str) -> T:
+        args, kwargs = StoreInitArgsMeta._deserialize_args_kwargs(init_args)
+        return cls(*args, **kwargs)
 
 
 Ty = TypeVar("Ty", bound=type)

@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Type, Union
 import json
 import numpy as np
 from uuid import UUID
@@ -84,18 +84,9 @@ class Collection:
 
         if embedding_function is None:
             if metadata is not None and "_ef_metadata" in metadata.keys():
-                ef_metadata = json.loads(metadata["_ef_metadata"])
-                ef_name = ef_metadata["name"]
-
-                ef_init_args = json.loads(ef_metadata["init_args"])
-                pos_args_ = ef_init_args["args"]
-                kwargs_ = ef_init_args["kwargs"]
-
-                ef_type = _get(ef_name)
-
-                embedding_function = ef_type(*pos_args_, **kwargs_)
-
-        self._embedding_function = embedding_function
+                self._embedding_function = self._ef_from_metadata()
+            else:
+                self._embedding_function = None
         self._data_loader = data_loader
 
     def __repr__(self) -> str:
@@ -689,3 +680,15 @@ class Collection:
                 "https://docs.trychroma.com/guides/embeddings"
             )
         return self._embedding_function(input=input)
+
+    def _ef_from_metadata(self) -> EmbeddingFunction[Embeddable]:
+        if self.metadata is not None and "_ef_metadata" in self.metadata.keys():
+            ef_metadata = json.loads(self.metadata["_ef_metadata"])
+            ef_name: str = ef_metadata["name"]
+            ef_type: Type[EmbeddingFunction[Embeddable]] = _get(ef_name)
+            ef_init_args: str = ef_metadata["init_args"]
+            return ef_type.from_init_args(ef_init_args)
+        else:
+            raise ValueError(
+                f"Cannot load stored embedding function from metadata. key '_ef_metadata' not found in collection metadata for collection {self.name}."
+            )
