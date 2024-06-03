@@ -1,4 +1,6 @@
-use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
+use crate::blockstore::positional_posting_list_value::{
+    PositionalPostingListBuilder, PositionalPostingListBuilderError,
+};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
@@ -18,6 +20,10 @@ pub enum FullTextIndexError {
     EmptyValueInPositionalPostingList,
     #[error("Invariant violation")]
     InvariantViolation,
+    #[error("Positional posting list error: {0}")]
+    PositionalPostingListError(#[from] PositionalPostingListBuilderError),
+    #[error("Blockfile write error: {0}")]
+    BlockfileWriteError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for FullTextIndexError {
@@ -58,14 +64,17 @@ impl<'me> FullTextIndexWriter<'me> {
     async fn populate_frequencies_and_posting_lists_from_previous_version(
         &self,
         token: &str,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), FullTextIndexError> {
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
         match uncommitted_frequencies.get(token) {
             Some(_) => return Ok(()),
             None => {
                 let frequency = match &self.full_text_index_reader {
                     None => 0,
-                    Some(reader) => reader.get_frequencies_for_token(token).await?,
+                    Some(reader) => match reader.get_frequencies_for_token(token).await {
+                        Ok(frequency) => frequency,
+                        Err(_) => 0,
+                    },
                 };
                 uncommitted_frequencies.insert(token.to_string(), frequency as i32);
             }
@@ -78,18 +87,24 @@ impl<'me> FullTextIndexWriter<'me> {
                 tracing::error!(
                     "Error populating frequencies and posting lists from previous version"
                 );
-                return Err(Box::new(FullTextIndexError::InvariantViolation));
+                return Err(FullTextIndexError::InvariantViolation);
             }
             None => {
                 let mut builder = PositionalPostingListBuilder::new();
                 let results = match &self.full_text_index_reader {
                     None => vec![],
-                    Some(reader) => reader.get_all_results_for_token(token).await?,
+                    Some(reader) => match reader.get_all_results_for_token(token).await {
+                        Ok(results) => results,
+                        Err(_) => vec![],
+                    },
                 };
                 for (doc_id, positions) in results {
                     let res = builder.add_doc_id_and_positions(doc_id as i32, positions);
-                    if res.is_err() {
-                        return res;
+                    match res {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(FullTextIndexError::PositionalPostingListError(e));
+                        }
                     }
                 }
                 uncommitted.insert(token.to_string(), builder);
@@ -102,8 +117,8 @@ impl<'me> FullTextIndexWriter<'me> {
         &self,
         document: &str,
         offset_id: i32,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        let mut tokenizer = self.tokenizer.lock();
+    ) -> Result<(), FullTextIndexError> {
+        let tokenizer = self.tokenizer.lock();
         let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
@@ -124,16 +139,18 @@ impl<'me> FullTextIndexWriter<'me> {
             // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
             if !builder.contains_doc_id(offset_id) {
                 // Casting to i32 is safe since we limit the size of the document.
-                let res =
-                    builder.add_doc_id_and_positions(offset_id, vec![token.offset_from as i32]);
-                if res.is_err() {
-                    return res;
+                match builder.add_doc_id_and_positions(offset_id, vec![token.offset_from as i32]) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        return Err(FullTextIndexError::PositionalPostingListError(e));
+                    }
                 }
             } else {
-                let res =
-                    builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]);
-                if res.is_err() {
-                    return res;
+                match builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        return Err(FullTextIndexError::PositionalPostingListError(e));
+                    }
                 }
             }
         }
@@ -144,8 +161,8 @@ impl<'me> FullTextIndexWriter<'me> {
         &self,
         document: &str,
         offset_id: u32,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        let mut tokenizer = self.tokenizer.lock();
+    ) -> Result<(), FullTextIndexError> {
+        let tokenizer = self.tokenizer.lock();
         let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
@@ -158,7 +175,7 @@ impl<'me> FullTextIndexWriter<'me> {
                 None => {
                     // Invariant violation -- we just populated this.
                     tracing::error!("Error decrementing frequency for token: {:?}", token.text);
-                    return Err(Box::new(FullTextIndexError::InvariantViolation));
+                    return Err(FullTextIndexError::InvariantViolation);
                 }
             }
             let mut uncommitted = self.uncommitted.lock();
@@ -173,13 +190,13 @@ impl<'me> FullTextIndexWriter<'me> {
                             "Error deleting doc ID from positional posting list: {:?}",
                             e
                         );
-                        return Err(e);
+                        return Err(FullTextIndexError::PositionalPostingListError(e));
                     }
                 },
                 None => {
                     // Invariant violation -- we just populated this.
                     tracing::error!("Error deleting doc ID from positional posting list");
-                    return Err(Box::new(FullTextIndexError::InvariantViolation));
+                    return Err(FullTextIndexError::InvariantViolation);
                 }
             }
         }
@@ -191,13 +208,13 @@ impl<'me> FullTextIndexWriter<'me> {
         old_document: &str,
         new_document: &str,
         offset_id: u32,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), FullTextIndexError> {
         self.delete_document(old_document, offset_id).await?;
         self.add_document(new_document, offset_id as i32).await?;
         Ok(())
     }
 
-    pub async fn write_to_blockfiles(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
         let mut uncommitted = self.uncommitted.lock();
         for (key, mut value) in uncommitted.drain() {
             let built_list = value.build();
@@ -206,12 +223,15 @@ impl<'me> FullTextIndexWriter<'me> {
                     Some(doc_id) => {
                         let positional_posting_list =
                             built_list.get_positions_for_doc_id(doc_id).unwrap();
-                        let res = self
+                        match self
                             .posting_lists_blockfile_writer
                             .set(key.as_str(), doc_id as u32, &positional_posting_list)
-                            .await;
-                        if res.is_err() {
-                            return res;
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(FullTextIndexError::BlockfileWriteError(e));
+                            }
                         }
                     }
                     None => {
@@ -223,12 +243,15 @@ impl<'me> FullTextIndexWriter<'me> {
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
         for (key, value) in uncommitted_frequencies.drain() {
             // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
-            let res = self
+            match self
                 .frequencies_blockfile_writer
                 .set(key.as_str(), value as u32, 0)
-                .await;
-            if res.is_err() {
-                return res;
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(FullTextIndexError::BlockfileWriteError(e));
+                }
             }
         }
         Ok(())

@@ -82,6 +82,8 @@ pub enum MetadataSegmentError {
     LimitOffsetNotSupported,
     #[error("Could not query metadata index {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
+    #[error("Attempted to delete a document that does not exist")]
+    DocumentDoesNotExist,
 }
 
 impl ChromaError for MetadataSegmentError {
@@ -418,7 +420,6 @@ impl<'me> MetadataSegmentWriter<'me> {
     }
 }
 
-// TODO(Sanket): Implement this for updates/upserts/deletes.
 impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
     async fn apply_materialized_log_chunk(
         &self,

@@ -6,8 +6,6 @@ use thiserror::Error;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::errors::{ChromaError, ErrorCodes};
-
 #[derive(Debug, Clone)]
 pub(crate) struct PositionalPostingList {
     pub(crate) doc_ids: Int32Array,
@@ -50,16 +48,6 @@ pub(crate) enum PositionalPostingListBuilderError {
     UnsortedPosition,
 }
 
-impl ChromaError for PositionalPostingListBuilderError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            PositionalPostingListBuilderError::DocIdAlreadyExists => ErrorCodes::AlreadyExists,
-            PositionalPostingListBuilderError::DocIdDoesNotExist => ErrorCodes::InvalidArgument,
-            PositionalPostingListBuilderError::UnsortedPosition => ErrorCodes::InvalidArgument,
-        }
-    }
-}
-
 pub(crate) struct PositionalPostingListBuilder {
     doc_ids: HashSet<i32>,
     positions: HashMap<i32, Vec<i32>>,
@@ -77,11 +65,9 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), PositionalPostingListBuilderError> {
         if self.doc_ids.contains(&doc_id) {
-            return Err(Box::new(
-                PositionalPostingListBuilderError::DocIdAlreadyExists,
-            ));
+            return Err(PositionalPostingListBuilderError::DocIdAlreadyExists);
         }
 
         self.doc_ids.insert(doc_id);
@@ -89,11 +75,12 @@ impl PositionalPostingListBuilder {
         Ok(())
     }
 
-    pub(crate) fn delete_doc_id(&mut self, doc_id: i32) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn delete_doc_id(
+        &mut self,
+        doc_id: i32,
+    ) -> Result<(), PositionalPostingListBuilderError> {
         if !self.doc_ids.contains(&doc_id) {
-            return Err(Box::new(
-                PositionalPostingListBuilderError::DocIdDoesNotExist,
-            ));
+            return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
         }
 
         self.doc_ids.remove(&doc_id);
@@ -109,11 +96,9 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), PositionalPostingListBuilderError> {
         if !self.doc_ids.contains(&doc_id) {
-            return Err(Box::new(
-                PositionalPostingListBuilderError::DocIdDoesNotExist,
-            ));
+            return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
         }
 
         self.positions.get_mut(&doc_id).unwrap().extend(positions);

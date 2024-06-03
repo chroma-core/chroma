@@ -36,11 +36,13 @@ impl ChromaError for MetadataIndexError {
 pub(crate) enum MetadataIndexWriter<'me> {
     StringMetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, HashMap<String, RoaringBitmap>>>>,
     ),
     U32MetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, HashMap<u32, RoaringBitmap>>>>,
     ),
@@ -51,11 +53,13 @@ pub(crate) enum MetadataIndexWriter<'me> {
     // and the expected case is much less than that.
     F32MetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, Vec<(f32, RoaringBitmap)>>>>,
     ),
     BoolMetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
     ),
@@ -106,6 +110,10 @@ impl<'me> MetadataIndexWriter<'me> {
         )
     }
 
+    // This is a helper function to make sure a key exists in the uncommitted_rbs
+    // map. If `uncommitted` doesn't have an entry at (prefix, key), this function
+    // will populate it from the blockfile reader. If the blockfile reader doesn't
+    // have an entry, it will insert an empty RoaringBitmap.
     async fn look_up_key_and_populate_uncommitted_rbms(
         &self,
         prefix: &str,
