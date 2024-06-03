@@ -1,12 +1,11 @@
 import logging
-import multiprocessing
-from multiprocessing.connection import Connection
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
 import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api.segment import SegmentAPI
 from chromadb.config import Settings, System
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -129,27 +128,30 @@ def load_and_check(
     settings: Settings,
     collection_name: str,
     record_set: strategies.RecordSet,
-    conn: Connection,
 ) -> None:
-    try:
-        system = System(settings)
-        api = system.instance(ServerAPI)
-        system.start()
+    system = System(settings)
+    segment = system.instance(SegmentAPI)
+    api = system.instance(ServerAPI)
+    system.start()
 
-        coll = api.get_collection(
-            name=collection_name,
-            embedding_function=strategies.not_implemented_embedding_function(),
-        )
-        invariants.count(coll, record_set)
-        invariants.metadatas_match(coll, record_set)
-        invariants.documents_match(coll, record_set)
-        invariants.ids_match(coll, record_set)
-        invariants.ann_accuracy(coll, record_set)
+    # assert that the collection is not currently cached
+    # (if the collection is cached, it defeats the purpose of this test)
+    cached_collection_names = list(
+        map(lambda x: x["name"], segment._collection_cache.values())
+    )
+    assert collection_name not in cached_collection_names
 
-        system.stop()
-    except Exception as e:
-        conn.send(e)
-        raise e
+    coll = api.get_collection(
+        name=collection_name,
+        embedding_function=strategies.not_implemented_embedding_function(),
+    )
+    invariants.count(coll, record_set)
+    invariants.metadatas_match(coll, record_set)
+    invariants.documents_match(coll, record_set)
+    invariants.ids_match(coll, record_set)
+    invariants.ann_accuracy(coll, record_set)
+
+    system.stop()
 
 
 class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
@@ -190,22 +192,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
-        # Create a new process and then inside the process run the invariants
-        # TODO: Once we switch off of duckdb and onto sqlite we can remove this
-        ctx = multiprocessing.get_context("spawn")
-        conn1, conn2 = multiprocessing.Pipe()
-        p = ctx.Process(
-            target=load_and_check,
-            args=(self.settings, collection_name, self.record_set_state, conn2),
-        )
-        p.start()
-        p.join()
-
-        if conn1.poll():
-            e = conn1.recv()
-            raise e
-
-        p.close()
+        load_and_check(self.settings, collection_name, self.record_set_state)  # type: ignore
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
