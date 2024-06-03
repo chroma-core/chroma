@@ -5,6 +5,7 @@ import hypothesis.strategies as st
 import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api.segment import SegmentAPI
 from chromadb.config import Settings, System
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -129,8 +130,16 @@ def load_and_check(
     record_set: strategies.RecordSet,
 ) -> None:
     system = System(settings)
+    segment = system.instance(SegmentAPI)
     api = system.instance(ServerAPI)
     system.start()
+
+    # assert that the collection is not currently cached
+    # (if the collection is cached, it defeats the purpose of this test)
+    cached_collection_names = list(
+        map(lambda x: x["name"], segment._collection_cache.values())
+    )
+    assert collection_name not in cached_collection_names
 
     coll = api.get_collection(
         name=collection_name,
@@ -183,7 +192,6 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
-
         load_and_check(self.settings, collection_name, self.record_set_state)  # type: ignore
 
     def on_state_change(self, new_state: str) -> None:
