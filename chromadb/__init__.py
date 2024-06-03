@@ -46,13 +46,18 @@ __settings = Settings()
 
 __version__ = "0.5.0"
 
-# Workaround to deal with Colab's old sqlite3 version
-try:
-    import google.colab  # noqa: F401
 
-    IN_COLAB = True
-except ImportError:
-    IN_COLAB = False
+# Workaround to deal with Colab's old sqlite3 version
+def is_in_colab() -> bool:
+    try:
+        import google.colab  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+IN_COLAB = is_in_colab()
 
 is_client = False
 try:

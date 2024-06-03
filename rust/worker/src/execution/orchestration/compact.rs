@@ -342,7 +342,7 @@ impl CompactOrchestrator {
 
         let record_segment = segments
             .iter()
-            .find(|segment| segment.r#type == SegmentType::Record);
+            .find(|segment| segment.r#type == SegmentType::BlockfileRecord);
 
         tracing::debug!("Found Record Segment: {:?}", record_segment);
 

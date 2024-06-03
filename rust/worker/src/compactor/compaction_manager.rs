@@ -384,7 +384,7 @@ mod tests {
 
         let collection_1_record_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(collection_uuid_1),
             metadata: None,
@@ -393,7 +393,7 @@ mod tests {
 
         let collection_2_record_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(collection_uuid_2),
             metadata: None,

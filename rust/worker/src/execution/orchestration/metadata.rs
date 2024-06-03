@@ -280,7 +280,7 @@ impl CountQueryOrchestrator {
         let segments = sysdb
             .get_segments(
                 None,
-                Some(SegmentType::Record.into()),
+                Some(SegmentType::BlockfileRecord.into()),
                 None,
                 Some(*collection_id),
             )
@@ -720,7 +720,7 @@ impl MetadataQueryOrchestrator {
         let segments = sysdb
             .get_segments(
                 None,
-                Some(SegmentType::Record.into()),
+                Some(SegmentType::BlockfileRecord.into()),
                 None,
                 Some(*collection_id),
             )

@@ -131,7 +131,7 @@ impl RecordSegmentWriter {
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, RecordSegmentWriterCreationError> {
         println!("Creating RecordSegmentWriter from Segment");
-        if segment.r#type != SegmentType::Record {
+        if segment.r#type != SegmentType::BlockfileRecord {
             return Err(RecordSegmentWriterCreationError::InvalidSegmentType);
         }
 
