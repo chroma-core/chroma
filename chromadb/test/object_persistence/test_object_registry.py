@@ -7,10 +7,6 @@ from chromadb.utils.the_registry import (
     _chroma_object_registry,
 )
 
-# Tests for the object registry
-# Note that the object registry is a singleton, so we need to be careful that
-# we teardown correctly between tests
-
 
 @pytest.fixture(autouse=True)
 def reset_registry() -> Generator[None, None, None]:
