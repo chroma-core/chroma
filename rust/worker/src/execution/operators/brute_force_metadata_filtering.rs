@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     collections::HashMap,
     sync::{
@@ -6,11 +5,6 @@ use std::{
         Arc,
     },
 };
-
-use futures::stream::Count;
-use roaring::RoaringBitmap;
-use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     blockstore::{key::KeyWrapper, provider::BlockfileProvider},
@@ -30,9 +24,9 @@ use crate::{
     },
     utils::merge_sorted_vecs_conjunction,
 };
-
-use super::count_records::CountRecordsError;
-
+use roaring::RoaringBitmap;
+use thiserror::Error;
+use tonic::async_trait;
 #[derive(Debug)]
 pub(crate) struct BruteForceMetadataFilteringOperator {}
 
@@ -555,7 +549,7 @@ mod test {
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
