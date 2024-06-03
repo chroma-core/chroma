@@ -44,3 +44,5 @@ def test_persist_protocol() -> None:
     )
 
     # Crate a new instance from the args string
+    instance_from_args = ANewConcreteClass.from_init_args(instance._init_args)  # type: ignore[attr-defined]
+    assert instance.instance_member == instance_from_args.instance_member
