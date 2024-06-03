@@ -1,5 +1,7 @@
 use crate::blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::types::{BooleanOperator, MetadataType, Where, WhereClauseComparator, WhereComparison};
+use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -55,6 +57,273 @@ pub(crate) enum MetadataIndexWriter {
         BlockfileWriter,
         Arc<Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
     ),
+}
+
+pub(crate) fn process_where_clause_with_callback<
+    F: Fn(&str, &KeyWrapper, MetadataType, WhereClauseComparator) -> RoaringBitmap,
+>(
+    where_clause: &Where,
+    callback: &F,
+) -> Result<Vec<usize>, MetadataIndexError> {
+    let mut results = vec![];
+    match where_clause {
+        Where::DirectWhereComparison(direct_where_comparison) => {
+            match &direct_where_comparison.comparison {
+                WhereComparison::SingleStringComparison(operand, comparator) => {
+                    match comparator {
+                        WhereClauseComparator::Equal => {
+                            let metadata_value_keywrapper = operand.as_str().try_into();
+                            match metadata_value_keywrapper {
+                                Ok(keywrapper) => {
+                                    let result = callback(
+                                        &direct_where_comparison.key,
+                                        &keywrapper,
+                                        MetadataType::StringType,
+                                        WhereClauseComparator::Equal,
+                                    );
+                                    results = result.iter().map(|x| x as usize).collect();
+                                }
+                                Err(_) => {
+                                    panic!("Error converting string to keywrapper")
+                                }
+                            }
+                        }
+                        WhereClauseComparator::NotEqual => {
+                            todo!();
+                        }
+                        // We don't allow these comparators for strings.
+                        WhereClauseComparator::LessThan => {
+                            unimplemented!();
+                        }
+                        WhereClauseComparator::LessThanOrEqual => {
+                            unimplemented!();
+                        }
+                        WhereClauseComparator::GreaterThan => {
+                            unimplemented!();
+                        }
+                        WhereClauseComparator::GreaterThanOrEqual => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                WhereComparison::SingleIntComparison(operand, comparator) => match comparator {
+                    WhereClauseComparator::Equal => {
+                        let metadata_value_keywrapper = (*operand).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::IntType,
+                                    WhereClauseComparator::Equal,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting int to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::NotEqual => {
+                        todo!();
+                    }
+                    WhereClauseComparator::LessThan => {
+                        let metadata_value_keywrapper = (*operand).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::IntType,
+                                    WhereClauseComparator::LessThan,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting int to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::LessThanOrEqual => {
+                        let metadata_value_keywrapper = (*operand).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::IntType,
+                                    WhereClauseComparator::LessThanOrEqual,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting int to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThan => {
+                        let metadata_value_keywrapper = (*operand).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::IntType,
+                                    WhereClauseComparator::GreaterThan,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting int to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThanOrEqual => {
+                        let metadata_value_keywrapper = (*operand).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::IntType,
+                                    WhereClauseComparator::GreaterThanOrEqual,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting int to keywrapper")
+                            }
+                        }
+                    }
+                },
+                WhereComparison::SingleDoubleComparison(operand, comparator) => match comparator {
+                    WhereClauseComparator::Equal => {
+                        let metadata_value_keywrapper = (*operand as f32).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::DoubleType,
+                                    WhereClauseComparator::Equal,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting double to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::NotEqual => {
+                        todo!();
+                    }
+                    WhereClauseComparator::LessThan => {
+                        let metadata_value_keywrapper = (*operand as f32).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::DoubleType,
+                                    WhereClauseComparator::LessThan,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting double to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::LessThanOrEqual => {
+                        let metadata_value_keywrapper = (*operand as f32).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::DoubleType,
+                                    WhereClauseComparator::LessThanOrEqual,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting double to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThan => {
+                        let metadata_value_keywrapper = (*operand as f32).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::DoubleType,
+                                    WhereClauseComparator::GreaterThan,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting double to keywrapper")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThanOrEqual => {
+                        let metadata_value_keywrapper = (*operand as f32).try_into();
+                        match metadata_value_keywrapper {
+                            Ok(keywrapper) => {
+                                let result = callback(
+                                    &direct_where_comparison.key,
+                                    &keywrapper,
+                                    MetadataType::DoubleType,
+                                    WhereClauseComparator::GreaterThanOrEqual,
+                                );
+                                results = result.iter().map(|x| x as usize).collect();
+                            }
+                            Err(_) => {
+                                panic!("Error converting double to keywrapper")
+                            }
+                        }
+                    }
+                },
+                WhereComparison::StringListComparison(operand, list_operator) => {
+                    todo!();
+                }
+                WhereComparison::IntListComparison(..) => {
+                    todo!();
+                }
+                WhereComparison::DoubleListComparison(..) => {
+                    todo!();
+                }
+            }
+        }
+        Where::WhereChildren(where_children) => {
+            // This feels like a crime.
+            let mut first_iteration = true;
+            for child in where_children.children.iter() {
+                let child_results: Vec<usize> =
+                    match process_where_clause_with_callback(&child, callback) {
+                        Ok(result) => result,
+                        Err(_) => vec![],
+                    };
+                if first_iteration {
+                    results = child_results;
+                    first_iteration = false;
+                } else {
+                    match where_children.operator {
+                        BooleanOperator::And => {
+                            results = merge_sorted_vecs_conjunction(results, child_results);
+                        }
+                        BooleanOperator::Or => {
+                            results = merge_sorted_vecs_disjunction(results, child_results);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results.sort();
+    return Ok(results);
 }
 
 impl MetadataIndexWriter {
