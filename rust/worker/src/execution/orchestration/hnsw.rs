@@ -463,7 +463,7 @@ impl HnswQueryOrchestrator {
         let segments = sysdb
             .get_segments(
                 None,
-                Some(SegmentType::Record.into()),
+                Some(SegmentType::BlockfileRecord.into()),
                 None,
                 Some(*collection_id),
             )
@@ -483,7 +483,7 @@ impl HnswQueryOrchestrator {
             }
         };
 
-        if segment.r#type != SegmentType::Record {
+        if segment.r#type != SegmentType::BlockfileRecord {
             return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
                 *collection_id,
             )));

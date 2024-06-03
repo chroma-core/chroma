@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub(crate) enum SegmentType {
     HnswDistributed,
     BlockfileMetadata,
-    Record,
+    BlockfileRecord,
     Sqlite,
 }
 
@@ -21,7 +21,7 @@ impl From<SegmentType> for String {
             SegmentType::HnswDistributed => {
                 "urn:chroma:segment/vector/hnsw-distributed".to_string()
             }
-            SegmentType::Record => "urn:chroma:segment/record".to_string(),
+            SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
             SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
         }
@@ -93,7 +93,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
         let segment_type = match proto_segment.r#type.as_str() {
             "urn:chroma:segment/vector/hnsw-distributed" => SegmentType::HnswDistributed,
-            "urn:chroma:segment/record" => SegmentType::Record,
+            "urn:chroma:segment/record/blockfile" => SegmentType::BlockfileRecord,
             "urn:chroma:segment/metadata/sqlite" => SegmentType::Sqlite,
             "urn:chroma:segment/metadata/blockfile" => SegmentType::BlockfileMetadata,
             _ => {
