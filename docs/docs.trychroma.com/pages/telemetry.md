@@ -35,7 +35,7 @@ ANONYMIZED_TELEMETRY=False
 
 We will only track usage details that help us make product decisions, specifically:
 
-- Chroma version and environment
+- Chroma version and environment details (e.g. OS, Python version, is it running in a container, or in a jupyter notebook)
 - Usage of embedding functions that ship with Chroma and aggregated usage of custom embeddings (we collect no information about the custom embeddings themselves)
 - Collection commands. We track the anonymized uuid of a collection as well as the number of items
   - `add`
