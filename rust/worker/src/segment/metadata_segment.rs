@@ -17,10 +17,12 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 use crate::index::fulltext::types::{
-    FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader, FullTextIndexWriter,
+    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher,
+    FullTextIndexReader, FullTextIndexWriter,
 };
 use crate::index::metadata::types::{
-    MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
+    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher,
+    MetadataIndexReader, MetadataIndexWriter,
 };
 use crate::types::SegmentType;
 use crate::types::{
@@ -1020,12 +1022,10 @@ impl MetadataSegmentReader<'_> {
         // TODO we can do lots of clever query planning here. For now, just
         // run through the Where and WhereDocument clauses sequentially.
         let where_results = match where_clause {
-            Some(where_clause) => {
-                match self.process_where_clause(where_clause).await.map_err(|e| e) {
-                    Ok(results) => results,
-                    Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
-                }
-            }
+            Some(where_clause) => match self.process_where_clause(where_clause).map_err(|e| e) {
+                Ok(results) => results,
+                Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
+            },
             None => {
                 vec![]
             }
@@ -1038,10 +1038,7 @@ impl MetadataSegmentReader<'_> {
 
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
-                match self
-                    .process_where_document_clause(where_document_clause)
-                    .await
-                {
+                match self.process_where_document_clause(where_document_clause) {
                     Ok(results) => results,
                     Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
                 }
@@ -1060,417 +1057,253 @@ impl MetadataSegmentReader<'_> {
         ))
     }
 
-    fn process_where_clause(
-        &self,
-        where_clause: &Where,
-    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
-        let mut results = vec![];
-        match where_clause {
-            Where::DirectWhereComparison(direct_where_comparison) => {
-                match &direct_where_comparison.comparison {
-                    WhereComparison::SingleStringComparison(operand, comparator) => {
-                        match comparator {
-                            WhereClauseComparator::Equal => {
-                                let metadata_value_keywrapper = operand.as_str().try_into();
-                                match metadata_value_keywrapper {
-                                    Ok(keywrapper) => {
-                                        let result = match &self.string_metadata_index_reader {
-                                            Some(reader) => futures::executor::block_on(
-                                                reader
-                                                    .get(&direct_where_comparison.key, &keywrapper),
-                                            ),
-                                            None => Ok(RoaringBitmap::new()),
-                                        };
-                                        match result {
-                                            Ok(result) => {
-                                                results =
-                                                    result.iter().map(|x| x as usize).collect();
-                                            }
-                                            Err(_) => {
-                                                panic!("Error querying metadata index")
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        panic!("Error converting string to keywrapper")
-                                    }
-                                }
-                            }
-                            WhereClauseComparator::NotEqual => {
-                                todo!();
-                            }
-                            // We don't allow these comparators for strings.
-                            WhereClauseComparator::LessThan => {
-                                unimplemented!();
-                            }
-                            WhereClauseComparator::LessThanOrEqual => {
-                                unimplemented!();
-                            }
-                            WhereClauseComparator::GreaterThan => {
-                                unimplemented!();
-                            }
-                            WhereClauseComparator::GreaterThanOrEqual => {
-                                unimplemented!();
-                            }
-                        }
-                    }
-                    WhereComparison::SingleIntComparison(operand, comparator) => match comparator {
-                        WhereClauseComparator::Equal => {
-                            let metadata_value_keywrapper = (*operand).try_into();
-                            match metadata_value_keywrapper {
-                                Ok(keywrapper) => {
-                                    let result = match &self.u32_metadata_index_reader {
-                                        Some(reader) => futures::executor::block_on(
-                                            reader.get(&direct_where_comparison.key, &keywrapper),
-                                        ),
-                                        None => Ok(RoaringBitmap::new()),
-                                    };
-                                    match result {
-                                        Ok(result) => {
-                                            results = result.iter().map(|x| x as usize).collect();
-                                        }
-                                        Err(_) => {
-                                            panic!("Error querying metadata index")
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    panic!("Error converting int to keywrapper")
-                                }
-                            }
-                        }
-                        WhereClauseComparator::NotEqual => {
-                            todo!();
-                        }
-                        WhereClauseComparator::LessThan => {
-                            let metadata_value_keywrapper = (*operand).try_into();
-                            match metadata_value_keywrapper {
-                                Ok(keywrapper) => {
-                                    let result = match &self.u32_metadata_index_reader {
-                                        Some(reader) => futures::executor::block_on(
-                                            reader.lt(&direct_where_comparison.key, &keywrapper),
-                                        ),
-                                        None => Ok(RoaringBitmap::new()),
-                                    };
-                                    match result {
-                                        Ok(result) => {
-                                            results = result.iter().map(|x| x as usize).collect();
-                                        }
-                                        Err(_) => {
-                                            panic!("Error querying metadata index")
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    panic!("Error converting int to keywrapper")
-                                }
-                            }
-                        }
-                        WhereClauseComparator::LessThanOrEqual => {
-                            let metadata_value_keywrapper = (*operand).try_into();
-                            match metadata_value_keywrapper {
-                                Ok(keywrapper) => {
-                                    let result = match &self.u32_metadata_index_reader {
-                                        Some(reader) => futures::executor::block_on(
-                                            reader.lte(&direct_where_comparison.key, &keywrapper),
-                                        ),
-                                        None => Ok(RoaringBitmap::new()),
-                                    };
-                                    match result {
-                                        Ok(result) => {
-                                            results = result.iter().map(|x| x as usize).collect();
-                                        }
-                                        Err(_) => {
-                                            panic!("Error querying metadata index")
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    panic!("Error converting int to keywrapper")
-                                }
-                            }
-                        }
-                        WhereClauseComparator::GreaterThan => {
-                            let metadata_value_keywrapper = (*operand).try_into();
-                            match metadata_value_keywrapper {
-                                Ok(keywrapper) => {
-                                    let result = match &self.u32_metadata_index_reader {
-                                        Some(reader) => futures::executor::block_on(
-                                            reader.gt(&direct_where_comparison.key, &keywrapper),
-                                        ),
-                                        None => Ok(RoaringBitmap::new()),
-                                    };
-                                    match result {
-                                        Ok(result) => {
-                                            results = result.iter().map(|x| x as usize).collect();
-                                        }
-                                        Err(_) => {
-                                            panic!("Error querying metadata index")
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    panic!("Error converting int to keywrapper")
-                                }
-                            }
-                        }
-                        WhereClauseComparator::GreaterThanOrEqual => {
-                            let metadata_value_keywrapper = (*operand).try_into();
-                            match metadata_value_keywrapper {
-                                Ok(keywrapper) => {
-                                    let result = match &self.u32_metadata_index_reader {
-                                        Some(reader) => futures::executor::block_on(
-                                            reader.gte(&direct_where_comparison.key, &keywrapper),
-                                        ),
-                                        None => Ok(RoaringBitmap::new()),
-                                    };
-                                    match result {
-                                        Ok(result) => {
-                                            results = result.iter().map(|x| x as usize).collect();
-                                        }
-                                        Err(_) => {
-                                            panic!("Error querying metadata index")
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    panic!("Error converting int to keywrapper")
-                                }
-                            }
-                        }
-                    },
-                    WhereComparison::SingleDoubleComparison(operand, comparator) => {
-                        match comparator {
-                            WhereClauseComparator::Equal => {
-                                let metadata_value_keywrapper = (*operand as f32).try_into();
-                                match metadata_value_keywrapper {
-                                    Ok(keywrapper) => {
-                                        let result = match &self.f32_metadata_index_reader {
-                                            Some(reader) => futures::executor::block_on(
-                                                reader
-                                                    .get(&direct_where_comparison.key, &keywrapper),
-                                            ),
-                                            None => Ok(RoaringBitmap::new()),
-                                        };
-                                        match result {
-                                            Ok(result) => {
-                                                results =
-                                                    result.iter().map(|x| x as usize).collect();
-                                            }
-                                            Err(_) => {
-                                                panic!("Error querying metadata index")
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        panic!("Error converting double to keywrapper")
-                                    }
-                                }
-                            }
-                            WhereClauseComparator::NotEqual => {
-                                todo!();
-                            }
-                            WhereClauseComparator::LessThan => {
-                                let metadata_value_keywrapper = (*operand as f32).try_into();
-                                match metadata_value_keywrapper {
-                                    Ok(keywrapper) => {
-                                        let result = match &self.f32_metadata_index_reader {
-                                            Some(reader) => futures::executor::block_on(
-                                                reader
-                                                    .lt(&direct_where_comparison.key, &keywrapper),
-                                            ),
-                                            None => Ok(RoaringBitmap::new()),
-                                        };
-                                        match result {
-                                            Ok(result) => {
-                                                results =
-                                                    result.iter().map(|x| x as usize).collect();
-                                            }
-                                            Err(_) => {
-                                                panic!("Error querying metadata index")
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        panic!("Error converting double to keywrapper")
-                                    }
-                                }
-                            }
-                            WhereClauseComparator::LessThanOrEqual => {
-                                let metadata_value_keywrapper = (*operand as f32).try_into();
-                                match metadata_value_keywrapper {
-                                    Ok(keywrapper) => {
-                                        let result = match &self.f32_metadata_index_reader {
-                                            Some(reader) => futures::executor::block_on(
-                                                reader
-                                                    .lte(&direct_where_comparison.key, &keywrapper),
-                                            ),
-                                            None => Ok(RoaringBitmap::new()),
-                                        };
-                                        match result {
-                                            Ok(result) => {
-                                                results =
-                                                    result.iter().map(|x| x as usize).collect();
-                                            }
-                                            Err(_) => {
-                                                panic!("Error querying metadata index")
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        panic!("Error converting double to keywrapper")
-                                    }
-                                }
-                            }
-                            WhereClauseComparator::GreaterThan => {
-                                let metadata_value_keywrapper = (*operand as f32).try_into();
-                                match metadata_value_keywrapper {
-                                    Ok(keywrapper) => {
-                                        let result = match &self.f32_metadata_index_reader {
-                                            Some(reader) => futures::executor::block_on(
-                                                reader
-                                                    .gt(&direct_where_comparison.key, &keywrapper),
-                                            ),
-                                            None => Ok(RoaringBitmap::new()),
-                                        };
-                                        match result {
-                                            Ok(result) => {
-                                                results =
-                                                    result.iter().map(|x| x as usize).collect();
-                                            }
-                                            Err(_) => {
-                                                panic!("Error querying metadata index")
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        panic!("Error converting double to keywrapper")
-                                    }
-                                }
-                            }
-                            WhereClauseComparator::GreaterThanOrEqual => {
-                                let metadata_value_keywrapper = (*operand as f32).try_into();
-                                match metadata_value_keywrapper {
-                                    Ok(keywrapper) => {
-                                        let result = match &self.f32_metadata_index_reader {
-                                            Some(reader) => futures::executor::block_on(
-                                                reader
-                                                    .gte(&direct_where_comparison.key, &keywrapper),
-                                            ),
-                                            None => Ok(RoaringBitmap::new()),
-                                        };
-                                        match result {
-                                            Ok(result) => {
-                                                results =
-                                                    result.iter().map(|x| x as usize).collect();
-                                            }
-                                            Err(_) => {
-                                                panic!("Error querying metadata index")
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        panic!("Error converting double to keywrapper")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    WhereComparison::StringListComparison(operand, list_operator) => {
-                        todo!();
-                    }
-                    WhereComparison::IntListComparison(..) => {
-                        todo!();
-                    }
-                    WhereComparison::DoubleListComparison(..) => {
-                        todo!();
-                    }
-                }
-            }
-            Where::WhereChildren(where_children) => {
-                // This feels like a crime.
-                let mut first_iteration = true;
-                for child in where_children.children.iter() {
-                    let child_results: Vec<usize> =
-                        match futures::executor::block_on(self.process_where_clause(&child)) {
-                            Ok(result) => result,
-                            Err(_) => vec![],
-                        };
-                    if first_iteration {
-                        results = child_results;
-                        first_iteration = false;
-                    } else {
-                        match where_children.operator {
-                            BooleanOperator::And => {
-                                results = merge_sorted_vecs_conjunction(results, child_results);
-                            }
-                            BooleanOperator::Or => {
-                                results = merge_sorted_vecs_disjunction(results, child_results);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        results.sort();
-        return Box::pin(async { Ok(results) });
-    }
-
-    fn process_where_document_clause(
-        &self,
-        where_document_clause: &WhereDocument,
-    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
-        let mut results = vec![];
-        match where_document_clause {
-            WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
-                match &direct_document_comparison.operator {
-                    WhereDocumentOperator::Contains => {
-                        let result = match &self.full_text_index_reader {
+    fn process_where_clause(&self, where_clause: &Where) -> Result<Vec<usize>, MetadataIndexError> {
+        let clo = |metadata_key: &str,
+                   metadata_value: &crate::blockstore::key::KeyWrapper,
+                   metadata_type: crate::types::MetadataType,
+                   comparator: WhereClauseComparator| {
+            match metadata_type {
+                crate::types::MetadataType::StringType => match comparator {
+                    WhereClauseComparator::Equal => {
+                        let result = match &self.string_metadata_index_reader {
                             Some(reader) => futures::executor::block_on(
-                                reader.search(&direct_document_comparison.document),
+                                reader.get(metadata_key, metadata_value),
                             ),
-                            None => Ok(vec![]),
+                            None => Ok(RoaringBitmap::new()),
                         };
                         match result {
                             Ok(result) => {
-                                results = result.iter().map(|x| *x as usize).collect();
+                                return result;
                             }
                             Err(_) => {
                                 panic!("Error querying metadata index")
                             }
                         }
                     }
-                    WhereDocumentOperator::NotContains => {
+                    WhereClauseComparator::NotEqual => {
                         todo!();
                     }
-                }
-            }
-            WhereDocument::WhereDocumentChildren(where_document_children) => {
-                let mut first_iteration = true;
-                for child in where_document_children.children.iter() {
-                    let child_results: Vec<usize> = match futures::executor::block_on(
-                        self.process_where_document_clause(&child),
-                    ) {
-                        Ok(result) => result,
-                        Err(_) => vec![],
-                    };
-                    if first_iteration {
-                        results = child_results;
-                        first_iteration = false;
-                    } else {
-                        match where_document_children.operator {
-                            BooleanOperator::And => {
-                                results = merge_sorted_vecs_conjunction(results, child_results);
+                    // We don't allow these comparators for strings.
+                    WhereClauseComparator::LessThan => {
+                        unimplemented!();
+                    }
+                    WhereClauseComparator::LessThanOrEqual => {
+                        unimplemented!();
+                    }
+                    WhereClauseComparator::GreaterThan => {
+                        unimplemented!();
+                    }
+                    WhereClauseComparator::GreaterThanOrEqual => {
+                        unimplemented!();
+                    }
+                },
+                crate::types::MetadataType::IntType => match comparator {
+                    WhereClauseComparator::Equal => {
+                        let result = match &self.u32_metadata_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.get(metadata_key, metadata_value),
+                            ),
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
                             }
-                            BooleanOperator::Or => {
-                                results = merge_sorted_vecs_disjunction(results, child_results);
+                            Err(_) => {
+                                panic!("Error querying metadata index")
                             }
                         }
                     }
+                    WhereClauseComparator::NotEqual => {
+                        todo!();
+                    }
+                    WhereClauseComparator::LessThan => {
+                        let result = match &self.u32_metadata_index_reader {
+                            Some(reader) => {
+                                futures::executor::block_on(reader.lt(metadata_key, metadata_value))
+                            }
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::LessThanOrEqual => {
+                        let result = match &self.u32_metadata_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.lte(metadata_key, metadata_value),
+                            ),
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThan => {
+                        let result = match &self.u32_metadata_index_reader {
+                            Some(reader) => {
+                                futures::executor::block_on(reader.gt(metadata_key, metadata_value))
+                            }
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThanOrEqual => {
+                        let result = match &self.u32_metadata_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.gte(metadata_key, metadata_value),
+                            ),
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                },
+                crate::types::MetadataType::DoubleType => match comparator {
+                    WhereClauseComparator::Equal => {
+                        let result = match &self.f32_metadata_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.get(metadata_key, metadata_value),
+                            ),
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::NotEqual => {
+                        todo!();
+                    }
+                    WhereClauseComparator::LessThan => {
+                        let result = match &self.f32_metadata_index_reader {
+                            Some(reader) => {
+                                futures::executor::block_on(reader.lt(metadata_key, metadata_value))
+                            }
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::LessThanOrEqual => {
+                        let result = match &self.f32_metadata_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.lte(metadata_key, metadata_value),
+                            ),
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThan => {
+                        let result = match &self.f32_metadata_index_reader {
+                            Some(reader) => {
+                                futures::executor::block_on(reader.gt(metadata_key, metadata_value))
+                            }
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                    WhereClauseComparator::GreaterThanOrEqual => {
+                        let result = match &self.f32_metadata_index_reader {
+                            Some(reader) => futures::executor::block_on(
+                                reader.gte(metadata_key, metadata_value),
+                            ),
+                            None => Ok(RoaringBitmap::new()),
+                        };
+                        match result {
+                            Ok(result) => {
+                                return result;
+                            }
+                            Err(_) => {
+                                panic!("Error querying metadata index")
+                            }
+                        }
+                    }
+                },
+                crate::types::MetadataType::StringListType => {
+                    todo!();
+                }
+                crate::types::MetadataType::IntListType => {
+                    todo!();
+                }
+                crate::types::MetadataType::DoubleListType => {
+                    todo!();
                 }
             }
-        }
-        results.sort();
-        return Box::pin(async { Ok(results) });
+        };
+        return process_where_clause_with_callback(where_clause, &clo);
+    }
+
+    fn process_where_document_clause(
+        &self,
+        where_document_clause: &WhereDocument,
+    ) -> Result<Vec<usize>, MetadataIndexError> {
+        let cb = |doc: &str, comparison: WhereDocumentOperator| match comparison {
+            WhereDocumentOperator::Contains => {
+                let result = match &self.full_text_index_reader {
+                    Some(reader) => futures::executor::block_on(reader.search(doc)),
+                    None => Ok(vec![]),
+                };
+                match result {
+                    Ok(result) => {
+                        return result;
+                    }
+                    Err(_) => {
+                        panic!("Error querying metadata index")
+                    }
+                }
+            }
+            WhereDocumentOperator::NotContains => {
+                todo!()
+            }
+        };
+        process_where_document_clause_with_callback(where_document_clause, &cb)
     }
 }
