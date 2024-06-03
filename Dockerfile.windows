@@ -1,20 +1,16 @@
-FROM python:3.11 AS builder
+FROM python:3.11
 ARG REBUILD_HNSWLIB
 
-SHELL ["powershell", "-Command"]
-
-WORKDIR C:\\install
-
-COPY ./requirements.txt requirements.txt
-
-RUN pip install --no-cache-dir --upgrade --prefix="C:\\install" -r requirements.txt
-RUN if ($env:REBUILD_HNSWLIB -eq 'true') { pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="C:\\install" chroma-hnswlib }
-
-FROM python:3.11 AS final
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; `Invoke-WebRequest "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "vc_redist.x64.exe"; `Start-Process -filepath C:\vc_redist.x64.exe -ArgumentList "/install", "/passive", "/norestart" -Passthru | Wait-Process; `Remove-Item -Force vc_redist.x64.exe;
 
 WORKDIR C:\\chroma
 
-COPY --from=builder ["C:\\\\install", "C:\\\\Program Files\\Python"]
+COPY ./requirements.txt requirements.txt
+
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
+RUN if ($env:REBUILD_HNSWLIB -eq 'true') { pip install --no-binary :all: --force-reinstall --no-cache-dir chroma-hnswlib }
+
 COPY ./bin/docker_entrypoint.ps1 C:\\docker_entrypoint.ps1
 COPY ./ C:\\chroma
 
@@ -26,5 +22,5 @@ ENV CHROMA_TIMEOUT_KEEP_ALIVE 30
 
 EXPOSE 8000
 
-ENTRYPOINT ["C:\\\\docker_entrypoint.ps1"]
-CMD [ "--workers ${CHROMA_WORKERS} --host ${CHROMA_HOST_ADDR} --port ${CHROMA_HOST_PORT} --proxy-headers --log-config ${CHROMA_LOG_CONFIG} --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE}"]
+ENTRYPOINT ["powershell", "C:\\\\docker_entrypoint.ps1"]
+CMD [ "--workers %CHROMA_WORKERS% --host %CHROMA_HOST_ADDR% --port %CHROMA_HOST_PORT% --proxy-headers --log-config %CHROMA_LOG_CONFIG% --timeout-keep-alive %CHROMA_TIMEOUT_KEEP_ALIVE%"]
