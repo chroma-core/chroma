@@ -63,10 +63,10 @@ hypothesis.settings.load_profile(CURRENT_PRESET)
 
 
 def override_hypothesis_profile(
-    fast: hypothesis.settings | None = None,
-    normal: hypothesis.settings | None = None,
-    slow: hypothesis.settings | None = None,
-) -> hypothesis.settings | None:
+    fast: Optional[hypothesis.settings] = None,
+    normal: Optional[hypothesis.settings] = None,
+    slow: Optional[hypothesis.settings] = None,
+) -> Optional[hypothesis.settings]:
     """Override Hypothesis settings for specific profiles.
 
     For example, to override max_examples only when the current profile is 'fast':
