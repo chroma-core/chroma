@@ -34,8 +34,8 @@ hypothesis.settings.register_profile(
     "dev",
     deadline=45000,
     suppress_health_check=[
-        hypothesis.HealthCheck.data_too_large,
-        hypothesis.HealthCheck.large_base_example,
+        # hypothesis.HealthCheck.data_too_large,
+        # hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
 )
