@@ -117,11 +117,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                 };
             }
         };
-        let materializer = LogMaterializer::new(
-            record_segment_reader,
-            input.chunk.clone(),
-            input.record_segment_writer.get_curr_max_offset_id(),
-        );
+        let materializer = LogMaterializer::new(record_segment_reader, input.chunk.clone());
         // Materialize the logs.
         let res = match materializer.materialize().await {
             Ok(records) => records,

@@ -1,8 +1,3 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU32, Arc},
-};
-
 use crate::{
     blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
@@ -18,6 +13,10 @@ use crate::{
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use async_trait::async_trait;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{atomic::AtomicU32, Arc},
+};
 use thiserror::Error;
 use tracing::{error, trace};
 
@@ -105,13 +104,12 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             input.record_segment_definition.id.to_string()
         );
 
-        let mut merged_offset_ids: Option<HashSet<u32>> = match &input.user_offset_ids {
+        let merged_offset_ids: Option<HashSet<u32>> = match &input.user_offset_ids {
             Some(user_ids) => {
                 match &input.filtered_offset_ids {
                     // Intersect with ids filtered from the where clause.
                     Some(filtered_ids) => {
-                        let merged_vecs =
-                            merge_sorted_vecs_conjunction(user_ids.clone(), filtered_ids.clone());
+                        let merged_vecs = merge_sorted_vecs_conjunction(user_ids, filtered_ids);
                         Some(HashSet::from_iter(merged_vecs.iter().cloned()))
                     }
                     // This means that there was no where clause.
@@ -126,6 +124,10 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                 }
             }
         };
+        trace!(
+            "[MergeMetadataResultsOperator] Merged offset ids: {:?}",
+            merged_offset_ids
+        );
 
         // Materialize logs.
         let record_segment_reader: Option<RecordSegmentReader>;
@@ -164,22 +166,9 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                 };
             }
         };
-        // Step 0.5: Get the current max offset id for materialization.
-        // Offset Ids start from 1.
-        let mut curr_max_offset_id = Arc::new(AtomicU32::new(1));
-        match &record_segment_reader {
-            Some(reader) => {
-                curr_max_offset_id = reader.get_current_max_offset_id();
-                curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            None => (),
-        };
+
         // Step 1: Materialize the logs.
-        let materializer = LogMaterializer::new(
-            record_segment_reader,
-            input.filtered_log.clone(),
-            curr_max_offset_id,
-        );
+        let materializer = LogMaterializer::new(record_segment_reader, input.filtered_log.clone());
         let mat_records = match materializer.materialize().await {
             Ok(records) => records,
             Err(e) => {
@@ -189,57 +178,29 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             }
         };
 
+        // Step 2: Hydrate data.
         let mut ids: Vec<String> = Vec::new();
         let mut metadata = Vec::new();
         let mut documents = Vec::new();
         let mut visited_ids: HashSet<u32> = HashSet::new();
         match merged_offset_ids {
             Some(merged_ids) => {
-                // Hydrate from the logs.
+                // Hydrate from the logs first.
                 for (log, _) in mat_records.iter() {
                     if merged_ids.contains(&log.offset_id) {
+                        // It's important to account for the records that are
+                        // deleted also here so that we can subsequently ignore
+                        // them when reading the record segment.
                         visited_ids.insert(log.offset_id);
                         if log.final_operation != Operation::Delete {
-                            // Push the final document.
-                            match log.final_document {
-                                Some(doc) => documents.push(Some(doc.to_string())),
-                                None => match log.data_record.as_ref() {
-                                    Some(data_record) => match data_record.document {
-                                        Some(doc) => documents.push(Some(doc.to_string())),
-                                        None => documents.push(None),
-                                    },
-                                    None => documents.push(None),
-                                },
-                            };
-                            // Final metadata.
-                            let mut final_metadata = match log.data_record.as_ref() {
-                                Some(data_record) => match data_record.metadata {
-                                    Some(ref map) => map.clone(), // auto deref here.
-                                    None => HashMap::new(),
-                                },
-                                None => HashMap::new(),
-                            };
-                            if log.metadata_to_be_merged.as_ref().is_some() {
-                                for (key, value) in log.metadata_to_be_merged.as_ref().unwrap() {
-                                    final_metadata.insert(key.clone(), value.clone());
-                                    // auto deref here.
-                                }
-                            }
+                            documents.push(log.merged_document());
+                            let final_metadata = log.merged_metadata();
                             if !final_metadata.is_empty() {
                                 metadata.push(Some(final_metadata));
                             } else {
                                 metadata.push(None);
                             }
-                            // Final id.
-                            match log.user_id {
-                                Some(id) => ids.push(id.to_string()),
-                                None => match &log.data_record {
-                                    Some(data_record) => {
-                                        ids.push(data_record.id.to_string());
-                                    }
-                                    None => panic!("Expected at least one user id to be set"),
-                                },
-                            }
+                            ids.push(log.merged_user_id());
                         }
                     }
                 }
@@ -315,63 +276,28 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     }
                 }
             }
-            // Full scan.
+            // Full scan over the log record and segment.
             None => {
+                // ids_in_log is used to ignore processing the records
+                // present in log when reading from the segment.
                 let mut ids_in_log = HashSet::new();
-                // Log record.
+                // First: full scan over the log record.
                 for (log, _) in mat_records.iter() {
-                    // Final id.
-                    let res = match log.user_id {
-                        Some(id) => ids_in_log.insert(id.to_string()),
-                        None => match &log.data_record {
-                            Some(data_record) => ids_in_log.insert(data_record.id.to_string()),
-                            None => panic!("Expected at least one user id to be set"),
-                        },
-                    };
+                    // It's important to insert even the deleted records here
+                    // so that they can be ignored when reading from the segment.
+                    ids_in_log.insert(log.merged_user_id());
                     if log.final_operation != Operation::Delete {
-                        // Push the final document.
-                        match log.final_document {
-                            Some(doc) => documents.push(Some(doc.to_string())),
-                            None => match log.data_record.as_ref() {
-                                Some(data_record) => match data_record.document {
-                                    Some(doc) => documents.push(Some(doc.to_string())),
-                                    None => documents.push(None),
-                                },
-                                None => documents.push(None),
-                            },
-                        };
-                        // Final metadata.
-                        let mut final_metadata = match log.data_record.as_ref() {
-                            Some(data_record) => match data_record.metadata {
-                                Some(ref map) => map.clone(), // auto deref here.
-                                None => HashMap::new(),
-                            },
-                            None => HashMap::new(),
-                        };
-                        if log.metadata_to_be_merged.as_ref().is_some() {
-                            for (key, value) in log.metadata_to_be_merged.as_ref().unwrap() {
-                                final_metadata.insert(key.clone(), value.clone());
-                                // auto deref here.
-                            }
-                        }
+                        documents.push(log.merged_document());
+                        let final_metadata = log.merged_metadata();
                         if !final_metadata.is_empty() {
                             metadata.push(Some(final_metadata));
                         } else {
                             metadata.push(None);
                         }
-                        // Final id.
-                        match log.user_id {
-                            Some(id) => ids.push(id.to_string()),
-                            None => match &log.data_record {
-                                Some(data_record) => {
-                                    ids.push(data_record.id.to_string());
-                                }
-                                None => panic!("Expected at least one user id to be set"),
-                            },
-                        }
+                        ids.push(log.merged_user_id());
                     }
                 }
-                // Hydrate remaining from record segment.
+                // Second: Hydrate remaining records from record segment.
                 let record_segment_reader = match RecordSegmentReader::from_segment(
                     &input.record_segment_definition,
                     &input.blockfile_provider,
@@ -559,9 +485,7 @@ mod test {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let materializer = LogMaterializer::new(record_segment_reader, data);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -849,9 +773,7 @@ mod test {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let materializer = LogMaterializer::new(record_segment_reader, data);
             let mat_records = materializer
                 .materialize()
                 .await

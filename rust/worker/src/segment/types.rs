@@ -8,7 +8,7 @@ use crate::execution::data::data_chunk::Chunk;
 use crate::index::metadata::types::MetadataIndexError;
 use crate::types::{
     merge_update_metadata, update_metdata_to_metdata, BooleanOperator, LogRecord, Metadata,
-    MetadataType, MetadataValueConversionError, Operation, OperationRecord, Where,
+    MetadataType, MetadataValue, MetadataValueConversionError, Operation, OperationRecord, Where,
     WhereClauseComparator, WhereComparison,
 };
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
@@ -81,6 +81,115 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     pub(crate) final_embedding: Option<&'referred_data [f32]>,
 }
 
+impl<'referred_data> MaterializedLogRecord<'referred_data> {
+    // Performs a deep copy of the document so only use it if really
+    // needed. If you only need a reference then use merged_document_ref
+    // defined below.
+    pub(crate) fn merged_document(&self) -> Option<String> {
+        return match self.final_document {
+            Some(doc) => Some(doc.to_string()),
+            None => match self.data_record.as_ref() {
+                Some(data_record) => match data_record.document {
+                    Some(doc) => Some(doc.to_string()),
+                    None => None,
+                },
+                None => None,
+            },
+        };
+    }
+
+    pub(crate) fn merged_document_ref(&self) -> Option<&str> {
+        return match self.final_document {
+            Some(doc) => Some(doc),
+            None => match self.data_record.as_ref() {
+                Some(data_record) => match data_record.document {
+                    Some(doc) => Some(doc),
+                    None => None,
+                },
+                None => None,
+            },
+        };
+    }
+
+    // Performs a deep copy of the user id so only use it if really
+    // needed. If you only need reference then use merged_user_id_ref below.
+    pub(crate) fn merged_user_id(&self) -> String {
+        return match self.user_id {
+            Some(id) => id.to_string(),
+            None => match &self.data_record {
+                Some(data_record) => data_record.id.to_string(),
+                None => panic!("Expected at least one user id to be set"),
+            },
+        };
+    }
+
+    pub(crate) fn merged_user_id_ref(&self) -> &str {
+        return match self.user_id {
+            Some(id) => id,
+            None => match &self.data_record {
+                Some(data_record) => data_record.id,
+                None => panic!("Expected at least one user id to be set"),
+            },
+        };
+    }
+
+    // Performs a deep copy of the metadata so only use it if really
+    // needed. If you only need reference then use merged_metadata_ref below.
+    pub(crate) fn merged_metadata(&self) -> HashMap<String, MetadataValue> {
+        let mut final_metadata = match self.data_record.as_ref() {
+            Some(data_record) => match data_record.metadata {
+                Some(ref map) => map.clone(), // auto deref here.
+                None => HashMap::new(),
+            },
+            None => HashMap::new(),
+        };
+        match self.metadata_to_be_merged.as_ref() {
+            Some(metadata) => {
+                for (key, value) in metadata {
+                    final_metadata.insert(key.clone(), value.clone());
+                }
+            }
+            None => {}
+        }
+        final_metadata
+    }
+
+    // Returns references to metadata present in the materialized log record.
+    pub(crate) fn merged_metadata_ref(&self) -> HashMap<&String, &MetadataValue> {
+        let mut final_metadata: HashMap<&String, &MetadataValue> = HashMap::new();
+        match &self.data_record {
+            Some(data_record) => match &data_record.metadata {
+                Some(meta) => {
+                    for (meta_key, meta_val) in meta {
+                        final_metadata.insert(meta_key, meta_val);
+                    }
+                }
+                None => (),
+            },
+            None => (),
+        };
+        match &self.metadata_to_be_merged {
+            Some(meta) => {
+                for (meta_key, meta_val) in meta {
+                    final_metadata.insert(meta_key, meta_val);
+                }
+            }
+            None => (),
+        };
+        final_metadata
+    }
+
+    pub(crate) fn merged_embeddings(&self) -> &[f32] {
+        return match self.final_embedding {
+            Some(embed) => embed,
+            None => match self.data_record.as_ref() {
+                Some(data_record) => data_record.embedding,
+                None => panic!("Expected at least one source of embedding"),
+            },
+        };
+    }
+}
+
 impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
     for MaterializedLogRecord<'referred_data>
 {
@@ -151,24 +260,32 @@ pub(crate) struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
     pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
     pub(crate) logs: Chunk<LogRecord>,
-    pub(crate) curr_max_offset_id: Arc<AtomicU32>,
 }
 
 impl<'me> LogMaterializer<'me> {
     pub(crate) fn new(
         record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
-        curr_max_offset_id: Arc<AtomicU32>,
     ) -> Self {
         Self {
             record_segment_reader,
             logs,
-            curr_max_offset_id,
         }
     }
     pub(crate) async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
+        // Get the current max offset id.
+        // Offset Ids start from 1.
+        let mut curr_max_offset_id = Arc::new(AtomicU32::new(1));
+        match &self.record_segment_reader {
+            Some(reader) => {
+                curr_max_offset_id = reader.get_current_max_offset_id();
+                curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            None => (),
+        };
+
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
@@ -218,9 +335,8 @@ impl<'me> LogMaterializer<'me> {
                     if !existing_id_to_materialized.contains_key(log_record.record.id.as_str())
                         && !new_id_to_materialized.contains_key(log_record.record.id.as_str())
                     {
-                        let next_offset_id = self
-                            .curr_max_offset_id
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let next_offset_id =
+                            curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset_id,
@@ -354,9 +470,8 @@ impl<'me> LogMaterializer<'me> {
                         record_from_map.final_operation = Operation::Add;
                     } else {
                         // Insert.
-                        let next_offset_id = self
-                            .curr_max_offset_id
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let next_offset_id =
+                            curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset_id,
@@ -510,9 +625,7 @@ mod tests {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let materializer = LogMaterializer::new(record_segment_reader, data);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -574,11 +687,9 @@ mod tests {
         let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
             .await
             .expect("Error creating segment reader");
-        let curr_max_offset_id = Arc::new(AtomicU32::new(3));
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
-            curr_max_offset_id,
         };
         let res = materializer
             .materialize()

@@ -1,17 +1,3 @@
-use core::panic;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU16, AtomicU32},
-        Arc,
-    },
-};
-
-use futures::stream::Count;
-use roaring::RoaringBitmap;
-use thiserror::Error;
-use tonic::async_trait;
-
 use crate::{
     blockstore::{key::KeyWrapper, provider::BlockfileProvider},
     errors::{ChromaError, ErrorCodes},
@@ -31,6 +17,18 @@ use crate::{
     },
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
+use core::panic;
+use futures::stream::Count;
+use roaring::RoaringBitmap;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicU16, AtomicU32},
+        Arc,
+    },
+};
+use thiserror::Error;
+use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringOperator {}
@@ -153,22 +151,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 };
             }
         };
-        // Step 0.5: Get the current max offset id for materialization.
-        // Offset Ids start from 1.
-        let mut curr_max_offset_id = Arc::new(AtomicU32::new(1));
-        match &record_segment_reader {
-            Some(reader) => {
-                curr_max_offset_id = reader.get_current_max_offset_id();
-                curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            None => (),
-        };
         // Step 1: Materialize the logs.
-        let materializer = LogMaterializer::new(
-            record_segment_reader,
-            input.log_record.clone(),
-            curr_max_offset_id,
-        );
+        let materializer = LogMaterializer::new(record_segment_reader, input.log_record.clone());
         let mat_records = match materializer.materialize().await {
             Ok(records) => records,
             Err(e) => {
@@ -179,36 +163,14 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         let mut ids_to_metadata: HashMap<u32, HashMap<&String, &MetadataValue>> = HashMap::new();
         let mut ids_in_mat_log = HashSet::new();
         for (records, _) in mat_records.iter() {
+            // It's important to account for even the deleted records here
+            // so that they can be ignored when reading from the segment later.
             ids_in_mat_log.insert(records.offset_id);
             // Skip deleted records.
             if records.final_operation == Operation::Delete {
                 continue;
             }
-            if !ids_to_metadata.contains_key(&records.offset_id) {
-                ids_to_metadata.insert(records.offset_id, HashMap::new());
-            }
-            let map_pointer = ids_to_metadata.get_mut(&records.offset_id).expect(
-                "Just inserted the key one line above so cannot happen that it does not exist now",
-            );
-            match &records.data_record {
-                Some(data_record) => match &data_record.metadata {
-                    Some(meta) => {
-                        for (meta_key, meta_val) in meta {
-                            map_pointer.insert(&meta_key, &meta_val);
-                        }
-                    }
-                    None => (),
-                },
-                None => (),
-            };
-            match &records.metadata_to_be_merged {
-                Some(meta) => {
-                    for (meta_key, meta_val) in meta {
-                        map_pointer.insert(meta_key, meta_val);
-                    }
-                }
-                None => (),
-            };
+            ids_to_metadata.insert(records.offset_id, records.merged_metadata_ref());
         }
         let clo = |metadata_key: &str,
                    metadata_value: &crate::blockstore::key::KeyWrapper,
@@ -474,6 +436,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 }
             }
         };
+        // This will be sorted by offset ids since rbms.insert() insert in sorted order.
         let mtsearch_res = match &input.where_clause {
             Some(where_clause) => match process_where_clause_with_callback(where_clause, &clo) {
                 Ok(r) => {
@@ -493,30 +456,20 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     // Note matching_contains is sorted (which is needed for correctness)
                     // because materialized log record is sorted by offset id.
                     let mut matching_contains = vec![];
+                    // Upstream sorts materialized records by offset id so matching_contains
+                    // will be sorted.
                     for (record, _) in mat_records.iter() {
                         if record.final_operation == Operation::Delete {
                             continue;
                         }
-                        // The document could have been updated hence check the update
-                        // first.
-                        match record.final_document {
+                        match record.merged_document_ref() {
                             Some(doc) => {
                                 if doc.contains(query) {
                                     matching_contains.push(record.offset_id as i32);
                                 }
                             }
-                            None => match &record.data_record {
-                                Some(data_record) => match data_record.document {
-                                    Some(doc) => {
-                                        if doc.contains(query) {
-                                            matching_contains.push(record.offset_id as i32);
-                                        }
-                                    }
-                                    None => (),
-                                },
-                                None => (),
-                            },
-                        }
+                            None => {}
+                        };
                     }
                     return matching_contains;
                 }
@@ -525,6 +478,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 }
             }
         };
+        // fts_result will be sorted by offset id.
         let fts_result = match &input.where_document_clause {
             Some(where_doc_clause) => {
                 match process_where_document_clause_with_callback(where_doc_clause, &cb) {
@@ -547,8 +501,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             merged_result = mtsearch_res;
         } else if mtsearch_res.is_some() && fts_result.is_some() {
             merged_result = Some(merge_sorted_vecs_conjunction(
-                mtsearch_res.expect("Already validated that it is not none"),
-                fts_result.expect("Already validated that it is not none"),
+                &mtsearch_res.expect("Already validated that it is not none"),
+                &fts_result.expect("Already validated that it is not none"),
             ));
         }
         // Get offset ids that satisfy where conditions from storage.
@@ -573,6 +527,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 return Err(MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e));
             }
         };
+        // This will be sorted by offset id.
         let filter_from_mt_segment = match filtered_index_offset_ids {
             Ok(res) => {
                 match res {
@@ -607,8 +562,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         let mut where_condition_filtered_offset_ids = None;
         if filter_from_mt_segment.is_some() && merged_result.is_some() {
             where_condition_filtered_offset_ids = Some(merge_sorted_vecs_disjunction(
-                filter_from_mt_segment.expect("Already checked that should be some"),
-                merged_result.expect("Already checked that should be some"),
+                &filter_from_mt_segment.expect("Already checked that should be some"),
+                &merged_result.expect("Already checked that should be some"),
             ));
         }
 
@@ -623,26 +578,12 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 query_ids_present = true;
                 remaining_id_set = query_ids.iter().cloned().collect();
                 for (log_records, _) in mat_records.iter() {
-                    match log_records.user_id {
-                        Some(id) => {
-                            if query_ids_set.contains(id) {
-                                remaining_id_set.remove(id);
-                                if log_records.final_operation != Operation::Delete {
-                                    user_supplied_offset_ids.push(log_records.offset_id);
-                                }
-                            }
+                    let user_id = log_records.merged_user_id_ref();
+                    if query_ids_set.contains(user_id) {
+                        remaining_id_set.remove(user_id);
+                        if log_records.final_operation != Operation::Delete {
+                            user_supplied_offset_ids.push(log_records.offset_id);
                         }
-                        None => match &log_records.data_record {
-                            Some(data_record) => {
-                                if query_ids_set.contains(data_record.id) {
-                                    remaining_id_set.remove(data_record.id);
-                                    if log_records.final_operation != Operation::Delete {
-                                        user_supplied_offset_ids.push(log_records.offset_id);
-                                    }
-                                }
-                            }
-                            None => panic!("Invariant violation. Expected at least one user id to be set in materialized record"),
-                        },
                     }
                 }
                 let record_segment_reader_2: Option<RecordSegmentReader>;
@@ -702,6 +643,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 query_ids_present = false;
             }
         }
+        // need to sort user_supplied_offset_ids by offset id.
         user_supplied_offset_ids.sort();
         let mut filtered_offset_ids = None;
         if query_ids_present {
@@ -838,9 +780,7 @@ mod test {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let materializer = LogMaterializer::new(record_segment_reader, data);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -1052,9 +992,7 @@ mod test {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let materializer = LogMaterializer::new(record_segment_reader, data);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -1237,9 +1175,7 @@ mod test {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+            let materializer = LogMaterializer::new(record_segment_reader, data);
             let mat_records = materializer
                 .materialize()
                 .await

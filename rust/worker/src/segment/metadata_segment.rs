@@ -1169,8 +1169,8 @@ impl MetadataSegmentReader<'_> {
             return Ok(where_results);
         } else {
             return Ok(Some(merge_sorted_vecs_conjunction(
-                where_results.expect("Checked just now that it is not none"),
-                where_document_results.expect("Checked just now that it is not none"),
+                &where_results.expect("Checked just now that it is not none"),
+                &where_document_results.expect("Checked just now that it is not none"),
             )));
         }
     }
