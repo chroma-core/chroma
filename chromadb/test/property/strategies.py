@@ -197,10 +197,16 @@ def create_embeddings_ndarray(
     ).astype(dtype)
 
 
-class hashing_embedding_function(types.EmbeddingFunction[Documents]):
-    def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
+class hashing_document_embedding_function(types.EmbeddingFunction[Documents]):
+    def __init__(
+        self,
+        dim: int,
+        dtype_str: str = np.dtype(np.float32).name,
+        normalize: bool = False,
+    ) -> None:
         self.dim = dim
-        self.dtype = dtype
+        self.dtype = np.dtype(dtype_str)
+        self.normalize = normalize
 
     def __call__(self, input: types.Documents) -> types.Embeddings:
         # Hash the texts and convert to hex strings
@@ -219,7 +225,30 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
             dtype=self.dtype,
         ).tolist()
 
+        if self.normalize:
+            np_embeddings = np.array(embeddings)
+            embeddings = (
+                np_embeddings / np.linalg.norm(np_embeddings, axis=1, keepdims=True)
+            ).tolist()
+
         return embeddings
+
+
+# A 'standard' multimodal embedding function, which converts inputs to strings
+# then hashes them to a fixed dimension.
+class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
+    def __init__(
+        self, dim: int = 10, dtype_str: str = np.dtype(np.float32).name
+    ) -> None:
+        # Normalize the embeddings
+        # This is so we can generate random unit vectors and have them be close to the embeddings
+        self._hef = hashing_document_embedding_function(
+            dim=dim, dtype_str=dtype_str, normalize=True
+        )
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        to_texts = [str(i) for i in input]
+        return self._hef(to_texts)
 
 
 class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
@@ -231,7 +260,10 @@ def embedding_function_strategy(
     dim: int, dtype: npt.DTypeLike
 ) -> st.SearchStrategy[types.EmbeddingFunction[Embeddable]]:
     return st.just(
-        cast(EmbeddingFunction[Embeddable], hashing_embedding_function(dim, dtype))
+        cast(
+            EmbeddingFunction[Embeddable],
+            hashing_document_embedding_function(dim, dtype_str=np.dtype(dtype).name),
+        )
     )
 
 

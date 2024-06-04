@@ -1,31 +1,15 @@
-from typing import Generator, cast
+from typing import Generator
 import numpy as np
 import pytest
 import chromadb
 from chromadb.api.types import (
     Embeddable,
     EmbeddingFunction,
-    Embeddings,
     Image,
     Document,
 )
-from chromadb.test.property.strategies import hashing_embedding_function
+from chromadb.test.property.strategies import hashing_multimodal_ef
 from chromadb.test.property.invariants import _exact_distances
-
-
-# A 'standard' multimodal embedding function, which converts inputs to strings
-# then hashes them to a fixed dimension.
-class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
-    def __init__(self) -> None:
-        self._hef = hashing_embedding_function(dim=10, dtype=np.float_)
-
-    def __call__(self, input: Embeddable) -> Embeddings:
-        to_texts = [str(i) for i in input]
-        embeddings = np.array(self._hef(to_texts))
-        # Normalize the embeddings
-        # This is so we can generate random unit vectors and have them be close to the embeddings
-        embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
-        return cast(Embeddings, embeddings.tolist())
 
 
 def random_image() -> Image:

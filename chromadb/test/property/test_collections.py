@@ -15,8 +15,8 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 from typing import Any, Dict, Mapping, Optional
-import numpy
-from chromadb.test.property.strategies import hashing_embedding_function
+
+from chromadb.test.property.strategies import hashing_document_embedding_function
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
@@ -265,7 +265,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
         coll=strategies.ExternalCollection(
             name="jjn2yjLW1zp2T\n",
             metadata=None,
-            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),
+            embedding_function=hashing_document_embedding_function(dim=863),
         ),
         new_metadata=None,
     )
@@ -273,7 +273,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
         coll=strategies.ExternalCollection(
             name="jjn2yjLW1zp2T\n",
             metadata=None,
-            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),
+            embedding_function=hashing_document_embedding_function(dim=863),
         ),
         new_metadata=None,
     )
@@ -291,7 +291,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
         coll=strategies.ExternalCollection(
             name="C1030",
             metadata={},
-            embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32),
+            embedding_function=hashing_document_embedding_function(dim=2),
         ),
         new_metadata=None,
     )
@@ -317,9 +317,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
                 "B3DSaP": False,
                 "6H533K": 1.192092896e-07,
             },
-            embedding_function=hashing_embedding_function(
-                dim=1915, dtype=numpy.float32
-            ),
+            embedding_function=hashing_document_embedding_function(dim=1915),
         ),
         new_metadata={
             "xVW09xUpDZA": 31734,
@@ -337,7 +335,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
         coll=strategies.ExternalCollection(
             name="VS0QGh",
             metadata=None,
-            embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16),
+            embedding_function=hashing_document_embedding_function(dim=326),
         ),
         new_metadata=None,
     )
