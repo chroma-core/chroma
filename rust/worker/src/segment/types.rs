@@ -155,8 +155,8 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     }
 
     // Returns references to metadata present in the materialized log record.
-    pub(crate) fn merged_metadata_ref(&self) -> HashMap<&String, &MetadataValue> {
-        let mut final_metadata: HashMap<&String, &MetadataValue> = HashMap::new();
+    pub(crate) fn merged_metadata_ref(&self) -> HashMap<&str, &MetadataValue> {
+        let mut final_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
         match &self.data_record {
             Some(data_record) => match &data_record.metadata {
                 Some(meta) => {

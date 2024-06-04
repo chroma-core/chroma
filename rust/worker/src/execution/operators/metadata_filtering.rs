@@ -160,7 +160,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             }
         };
         // Step 2: Apply where and where_document clauses on the materialized logs.
-        let mut ids_to_metadata: HashMap<u32, HashMap<&String, &MetadataValue>> = HashMap::new();
+        let mut ids_to_metadata: HashMap<u32, HashMap<&str, &MetadataValue>> = HashMap::new();
         let mut ids_in_mat_log = HashSet::new();
         for (records, _) in mat_records.iter() {
             // It's important to account for even the deleted records here
@@ -183,7 +183,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Str(string_value) => {
                                         if let KeyWrapper::String(where_value) = metadata_value {
@@ -221,7 +221,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Int(int_value) => {
                                         if let KeyWrapper::Uint32(where_value) = metadata_value {
@@ -244,7 +244,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key less than this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Int(int_value) => {
                                         if let KeyWrapper::Uint32(where_value) = metadata_value {
@@ -264,7 +264,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Int(int_value) => {
                                         if let KeyWrapper::Uint32(where_value) = metadata_value {
@@ -284,7 +284,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Int(int_value) => {
                                         if let KeyWrapper::Uint32(where_value) = metadata_value {
@@ -304,7 +304,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Int(int_value) => {
                                         if let KeyWrapper::Uint32(where_value) = metadata_value {
@@ -326,7 +326,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Float(float_value) => {
                                         if let KeyWrapper::Float32(where_value) = metadata_value {
@@ -349,7 +349,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key < this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Float(float_value) => {
                                         if let KeyWrapper::Float32(where_value) = metadata_value {
@@ -369,7 +369,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Float(float_value) => {
                                         if let KeyWrapper::Float32(where_value) = metadata_value {
@@ -389,7 +389,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Float(float_value) => {
                                         if let KeyWrapper::Float32(where_value) = metadata_value {
@@ -409,7 +409,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // Construct a bitmap consisting of all offset ids
                         // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(&metadata_key.to_string()) {
+                            if let Some(val) = meta_map.get(metadata_key) {
                                 match *val {
                                     MetadataValue::Float(float_value) => {
                                         if let KeyWrapper::Float32(where_value) = metadata_value {
