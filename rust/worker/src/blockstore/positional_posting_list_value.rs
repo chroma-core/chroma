@@ -4,9 +4,9 @@ use arrow::{
 };
 use thiserror::Error;
 
-use std::collections::{HashMap, HashSet};
-
 use crate::errors::{ChromaError, ErrorCodes};
+
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PositionalPostingList {
@@ -77,15 +77,26 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), PositionalPostingListBuilderError> {
         if self.doc_ids.contains(&doc_id) {
-            return Err(Box::new(
-                PositionalPostingListBuilderError::DocIdAlreadyExists,
-            ));
+            return Err(PositionalPostingListBuilderError::DocIdAlreadyExists);
         }
 
         self.doc_ids.insert(doc_id);
         self.positions.insert(doc_id, positions);
+        Ok(())
+    }
+
+    pub(crate) fn delete_doc_id(
+        &mut self,
+        doc_id: i32,
+    ) -> Result<(), PositionalPostingListBuilderError> {
+        if !self.doc_ids.contains(&doc_id) {
+            return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
+        }
+
+        self.doc_ids.remove(&doc_id);
+        self.positions.remove(&doc_id);
         Ok(())
     }
 
@@ -97,11 +108,9 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), PositionalPostingListBuilderError> {
         if !self.doc_ids.contains(&doc_id) {
-            return Err(Box::new(
-                PositionalPostingListBuilderError::DocIdDoesNotExist,
-            ));
+            return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
         }
 
         self.positions.get_mut(&doc_id).unwrap().extend(positions);
@@ -215,6 +224,22 @@ mod tests {
         assert_eq!(
             list.get_positions_for_doc_id(1).unwrap(),
             Int32Array::from(vec![1, 2, 3, 4, 5, 6])
+        );
+    }
+
+    #[test]
+    fn test_positional_posting_list_delete_doc_id() {
+        let mut builder = PositionalPostingListBuilder::new();
+
+        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
+        let _res = builder.delete_doc_id(1);
+
+        let list = builder.build();
+        assert_eq!(list.get_doc_ids().values()[0], 2);
+        assert_eq!(
+            list.get_positions_for_doc_id(2).unwrap(),
+            Int32Array::from(vec![4, 5, 6])
         );
     }
 
