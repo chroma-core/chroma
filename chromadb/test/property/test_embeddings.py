@@ -86,7 +86,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
-    @rule(target=embedding_ids, record_set=strategies.recordsets(collection_st))
+    @rule(
+        target=embedding_ids,
+        record_set=strategies.recordsets(collection_st, min_size=1),
+    )
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
