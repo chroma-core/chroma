@@ -16,6 +16,8 @@ use std::sync::Arc;
 pub(crate) enum MetadataIndexError {
     #[error("Invalid key type")]
     InvalidKeyType,
+    #[error("Blockfile error: {0}")]
+    BlockfileError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for MetadataIndexError {
@@ -35,13 +37,17 @@ impl ChromaError for MetadataIndexError {
 // - We could do the Arrow pattern of having keys know how to write themselves
 //  into MetadataIndexWriter store and long term we probably want to. But for now
 //  this gets the job done.
-pub(crate) enum MetadataIndexWriter {
+pub(crate) enum MetadataIndexWriter<'me> {
     StringMetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
+        Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, HashMap<String, RoaringBitmap>>>>,
     ),
     U32MetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
+        Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, HashMap<u32, RoaringBitmap>>>>,
     ),
     // We use a Vec<(KeyWrapper, RoaringBitmap)> instead of a HashMap because
@@ -51,10 +57,14 @@ pub(crate) enum MetadataIndexWriter {
     // and the expected case is much less than that.
     F32MetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
+        Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, Vec<(f32, RoaringBitmap)>>>>,
     ),
     BoolMetadataIndexWriter(
         BlockfileWriter,
+        // We use this to implement updates which require read-then-write semantics.
+        Option<MetadataIndexReader<'me>>,
         Arc<Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
     ),
 }
@@ -326,55 +336,84 @@ pub(crate) fn process_where_clause_with_callback<
     return Ok(results);
 }
 
-impl MetadataIndexWriter {
-    pub fn new_string(init_blockfile_writer: BlockfileWriter) -> Self {
+impl<'me> MetadataIndexWriter<'me> {
+    pub fn new_string(
+        init_blockfile_writer: BlockfileWriter,
+        string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    ) -> Self {
         MetadataIndexWriter::StringMetadataIndexWriter(
             init_blockfile_writer,
+            string_metadata_index_reader,
             Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
-    pub fn new_u32(init_blockfile_writer: BlockfileWriter) -> Self {
+    pub fn new_u32(
+        init_blockfile_writer: BlockfileWriter,
+        int_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    ) -> Self {
         MetadataIndexWriter::U32MetadataIndexWriter(
             init_blockfile_writer,
+            int_metadata_index_reader,
             Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
-    pub fn new_f32(init_blockfile_writer: BlockfileWriter) -> Self {
+    pub fn new_f32(
+        init_blockfile_writer: BlockfileWriter,
+        f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    ) -> Self {
         MetadataIndexWriter::F32MetadataIndexWriter(
             init_blockfile_writer,
+            f32_metadata_index_reader,
             Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
-    pub fn new_bool(init_blockfile_writer: BlockfileWriter) -> Self {
+    pub fn new_bool(
+        init_blockfile_writer: BlockfileWriter,
+        bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    ) -> Self {
         MetadataIndexWriter::BoolMetadataIndexWriter(
             init_blockfile_writer,
+            bool_metadata_index_reader,
             Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
-    fn look_up_key_and_populate_uncommitted_rbms(
+    // This is a helper function to make sure a key exists in the uncommitted_rbs
+    // map. If `uncommitted` doesn't have an entry at (prefix, key), this function
+    // will populate it from the blockfile reader. If the blockfile reader doesn't
+    // have an entry, it will insert an empty RoaringBitmap.
+    async fn look_up_key_and_populate_uncommitted_rbms(
         &self,
         prefix: &str,
         key: &KeyWrapper,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), MetadataIndexError> {
         match self {
-            MetadataIndexWriter::StringMetadataIndexWriter(_, uncommitted_rbms) => match key {
-                KeyWrapper::String(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
-                    if !uncommitted_rbms.contains_key(prefix) {
-                        uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
+            MetadataIndexWriter::StringMetadataIndexWriter(_, reader, uncommitted_rbms) => {
+                match key {
+                    KeyWrapper::String(k) => {
+                        let mut uncommitted_rbms = uncommitted_rbms.lock();
+                        if !uncommitted_rbms.contains_key(prefix) {
+                            uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
+                        }
+                        let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
+                        if !rbms.contains_key(k) {
+                            let written_state = match reader {
+                                Some(reader) => match reader.get(prefix, key).await {
+                                    Ok(rbm) => rbm,
+                                    Err(_) => RoaringBitmap::new(),
+                                },
+                                None => RoaringBitmap::new(),
+                            };
+                            rbms.insert(k.to_string(), written_state);
+                        }
                     }
-                    let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
-                    if !rbms.contains_key(k) {
-                        rbms.insert(k.to_string(), RoaringBitmap::new());
-                    }
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
-            },
-            MetadataIndexWriter::U32MetadataIndexWriter(_, uncommitted_rbms) => match key {
+            }
+            MetadataIndexWriter::U32MetadataIndexWriter(_, reader, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
                     let mut uncommitted_rbms = uncommitted_rbms.lock();
                     if !uncommitted_rbms.contains_key(prefix) {
@@ -382,123 +421,225 @@ impl MetadataIndexWriter {
                     }
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     if !rbms.contains_key(k) {
-                        rbms.insert(*k, RoaringBitmap::new());
+                        let written_state = match reader {
+                            Some(reader) => match reader.get(prefix, key).await {
+                                Ok(rbm) => rbm,
+                                Err(_) => RoaringBitmap::new(),
+                            },
+                            None => RoaringBitmap::new(),
+                        };
+                        rbms.insert(*k, written_state);
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            MetadataIndexWriter::F32MetadataIndexWriter(_, uncommitted_rbms) => match key {
+            MetadataIndexWriter::F32MetadataIndexWriter(_, reader, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
                     let mut uncommitted_rbms = uncommitted_rbms.lock();
                     if !uncommitted_rbms.contains_key(prefix) {
-                        uncommitted_rbms.insert(prefix.to_string(), vec![]);
+                        uncommitted_rbms.insert(prefix.to_string(), Vec::new());
                     }
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     if !rbms.iter().any(|(rbm_k, _)| rbm_k == k) {
-                        rbms.push((*k, RoaringBitmap::new()));
+                        let written_state = match reader {
+                            Some(reader) => match reader.get(prefix, key).await {
+                                Ok(rbm) => rbm,
+                                Err(_) => RoaringBitmap::new(),
+                            },
+                            None => RoaringBitmap::new(),
+                        };
+                        rbms.push((*k, written_state));
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            MetadataIndexWriter::BoolMetadataIndexWriter(_, uncommitted_rbms) => match key {
-                KeyWrapper::Bool(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
-                    if !uncommitted_rbms.contains_key(prefix) {
-                        uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
+            MetadataIndexWriter::BoolMetadataIndexWriter(_, reader, uncommitted_rbms) => {
+                match key {
+                    KeyWrapper::Bool(k) => {
+                        let mut uncommitted_rbms = uncommitted_rbms.lock();
+                        if !uncommitted_rbms.contains_key(prefix) {
+                            uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
+                        }
+                        let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
+                        if !rbms.contains_key(k) {
+                            let written_state = match reader {
+                                Some(reader) => match reader.get(prefix, key).await {
+                                    Ok(rbm) => rbm,
+                                    Err(_) => RoaringBitmap::new(),
+                                },
+                                None => RoaringBitmap::new(),
+                            };
+                            rbms.insert(*k, written_state);
+                        }
                     }
-                    let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
-                    if !rbms.contains_key(k) {
-                        rbms.insert(*k, RoaringBitmap::new());
-                    }
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
-            },
+            }
         }
         Ok(())
     }
 
-    pub fn set<K: Into<KeyWrapper>>(
+    pub async fn set<K: Into<KeyWrapper>>(
         &self,
         prefix: &str,
         key: K,
         offset_id: u32,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), MetadataIndexError> {
         let key = key.into();
-        self.look_up_key_and_populate_uncommitted_rbms(prefix, &key)?;
+        self.look_up_key_and_populate_uncommitted_rbms(prefix, &key)
+            .await?;
         match self {
-            MetadataIndexWriter::StringMetadataIndexWriter(_, uncommitted_rbms) => match key {
+            MetadataIndexWriter::StringMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::String(k) => {
                     let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            MetadataIndexWriter::BoolMetadataIndexWriter(_, uncommitted_rbms) => match key {
+            MetadataIndexWriter::BoolMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
                     let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            MetadataIndexWriter::U32MetadataIndexWriter(_, uncommitted_rbms) => match key {
+            MetadataIndexWriter::U32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
                     let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            MetadataIndexWriter::F32MetadataIndexWriter(_, uncommitted_rbms) => match key {
+            MetadataIndexWriter::F32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
                     let mut uncommitted_rbms = uncommitted_rbms.lock();
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
                     rbm.1.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
         }
         Ok(())
     }
 
-    pub async fn write_to_blockfile(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn delete<K: Into<KeyWrapper>>(
+        &self,
+        prefix: &str,
+        key: K,
+        offset_id: u32,
+    ) -> Result<(), MetadataIndexError> {
+        let key = key.into();
+        self.look_up_key_and_populate_uncommitted_rbms(prefix, &key)
+            .await?;
         match self {
-            MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+            MetadataIndexWriter::StringMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
+                KeyWrapper::String(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
+                    let rbm = rbms.get_mut(&k).unwrap();
+                    rbm.remove(offset_id);
+                }
+                _ => return Err(MetadataIndexError::InvalidKeyType),
+            },
+            MetadataIndexWriter::BoolMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
+                KeyWrapper::Bool(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
+                    let rbm = rbms.get_mut(&k).unwrap();
+                    rbm.remove(offset_id);
+                }
+                _ => return Err(MetadataIndexError::InvalidKeyType),
+            },
+            MetadataIndexWriter::U32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
+                KeyWrapper::Uint32(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
+                    let rbm = rbms.get_mut(&k).unwrap();
+                    rbm.remove(offset_id);
+                }
+                _ => return Err(MetadataIndexError::InvalidKeyType),
+            },
+            MetadataIndexWriter::F32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
+                KeyWrapper::Float32(k) => {
+                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
+                    let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
+                    rbm.1.remove(offset_id);
+                }
+                _ => return Err(MetadataIndexError::InvalidKeyType),
+            },
+        }
+        Ok(())
+    }
+
+    pub async fn update(
+        &self,
+        prefix: &str,
+        old_key: KeyWrapper,
+        new_key: KeyWrapper,
+        offset_id: u32,
+    ) -> Result<(), MetadataIndexError> {
+        self.delete(prefix, old_key, offset_id).await?;
+        self.set(prefix, new_key, offset_id).await
+    }
+
+    pub async fn write_to_blockfile(&mut self) -> Result<(), MetadataIndexError> {
+        match self {
+            MetadataIndexWriter::StringMetadataIndexWriter(
+                blockfile_writer,
+                _,
+                uncommitted_rbms,
+            ) => {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer
+                        match blockfile_writer
                             .set(prefix.as_str(), key.as_str(), rbm)
-                            .await?
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
-            MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+            MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _, uncommitted_rbms) => {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer.set(prefix.as_str(), *key, rbm).await?
+                        match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
-            MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+            MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _, uncommitted_rbms) => {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer.set(prefix.as_str(), *key, rbm).await?
+                        match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
-            MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, uncommitted_rbms) => {
+            MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _, uncommitted_rbms) => {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer.set(prefix.as_str(), *key, rbm).await?
+                        match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
@@ -506,27 +647,31 @@ impl MetadataIndexWriter {
         Ok(())
     }
 
-    pub fn commit(self) -> Result<MetadataIndexFlusher, Box<dyn ChromaError>> {
+    pub fn commit(self) -> Result<MetadataIndexFlusher, MetadataIndexError> {
         match self {
-            MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, _) => {
-                Ok(MetadataIndexFlusher::StringMetadataIndexFlusher(
-                    blockfile_writer.commit::<&str, &RoaringBitmap>()?,
-                ))
+            MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, _, _) => {
+                match blockfile_writer.commit::<&str, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::StringMetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
-            MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _) => {
-                Ok(MetadataIndexFlusher::U32MetadataIndexFlusher(
-                    blockfile_writer.commit::<u32, &RoaringBitmap>()?,
-                ))
+            MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _, _) => {
+                match blockfile_writer.commit::<u32, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::U32MetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
-            MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _) => {
-                Ok(MetadataIndexFlusher::F32MetadataIndexFlusher(
-                    blockfile_writer.commit::<f32, &RoaringBitmap>()?,
-                ))
+            MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _, _) => {
+                match blockfile_writer.commit::<f32, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::F32MetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
-            MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _) => {
-                Ok(MetadataIndexFlusher::BoolMetadataIndexFlusher(
-                    blockfile_writer.commit::<bool, &RoaringBitmap>()?,
-                ))
+            MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _, _) => {
+                match blockfile_writer.commit::<bool, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::BoolMetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
         }
     }
@@ -540,19 +685,31 @@ pub(crate) enum MetadataIndexFlusher {
 }
 
 impl MetadataIndexFlusher {
-    pub async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<(), MetadataIndexError> {
         match self {
             MetadataIndexFlusher::StringMetadataIndexFlusher(flusher) => {
-                flusher.flush::<&str, &RoaringBitmap>().await
+                match flusher.flush::<&str, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexFlusher::U32MetadataIndexFlusher(flusher) => {
-                flusher.flush::<u32, &RoaringBitmap>().await
+                match flusher.flush::<u32, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexFlusher::F32MetadataIndexFlusher(flusher) => {
-                flusher.flush::<f32, &RoaringBitmap>().await
+                match flusher.flush::<f32, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexFlusher::BoolMetadataIndexFlusher(flusher) => {
-                flusher.flush::<bool, &RoaringBitmap>().await
+                match flusher.flush::<bool, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
         }
     }
@@ -597,7 +754,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
@@ -605,10 +762,10 @@ impl<'me> MetadataIndexReader<'me> {
                         let rbm = blockfile_reader.get(metadata_key, k).await;
                         match rbm {
                             Ok(rbm) => Ok(rbm),
-                            Err(e) => Err(e),
+                            Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
@@ -616,20 +773,20 @@ impl<'me> MetadataIndexReader<'me> {
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
@@ -637,10 +794,10 @@ impl<'me> MetadataIndexReader<'me> {
                         let rbm = blockfile_reader.get(metadata_key, *k).await;
                         match rbm {
                             Ok(rbm) => Ok(rbm),
-                            Err(e) => Err(e),
+                            Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
         }
@@ -650,7 +807,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -663,10 +820,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -679,12 +836,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -692,7 +849,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -705,10 +862,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -721,12 +878,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -734,7 +891,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -747,10 +904,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -763,12 +920,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -776,7 +933,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -789,10 +946,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -805,12 +962,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 }
@@ -820,32 +977,32 @@ mod test {
     use super::*;
     use crate::blockstore::provider::BlockfileProvider;
 
-    #[test]
-    fn test_new_string_writer() {
+    #[tokio::test]
+    async fn test_new_string_writer() {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<&str, &RoaringBitmap>().unwrap();
-        let _writer = MetadataIndexWriter::new_string(blockfile_writer);
+        let _writer = MetadataIndexWriter::new_string(blockfile_writer, None);
     }
 
-    #[test]
-    fn test_new_u32_writer() {
+    #[tokio::test]
+    async fn test_new_u32_writer() {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
-        let _writer = MetadataIndexWriter::new_u32(blockfile_writer);
+        let _writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
     }
 
-    #[test]
-    fn test_new_f32_writer() {
+    #[tokio::test]
+    async fn test_new_f32_writer() {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
-        let _writer = MetadataIndexWriter::new_f32(blockfile_writer);
+        let _writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
     }
 
-    #[test]
-    fn test_new_bool_writer() {
+    #[tokio::test]
+    async fn test_new_bool_writer() {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<bool, &RoaringBitmap>().unwrap();
-        let _writer = MetadataIndexWriter::new_bool(blockfile_writer);
+        let _writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
     }
 
     #[tokio::test]
@@ -853,7 +1010,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<&str, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-        let mut md_writer = MetadataIndexWriter::new_string(blockfile_writer);
+        let mut md_writer = MetadataIndexWriter::new_string(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
         let flusher = md_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -870,7 +1027,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-        let mut md_writer = MetadataIndexWriter::new_u32(blockfile_writer);
+        let mut md_writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
         let flusher = md_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -887,7 +1044,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-        let mut md_writer = MetadataIndexWriter::new_f32(blockfile_writer);
+        let mut md_writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
         let flusher = md_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -904,7 +1061,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<bool, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-        let mut md_writer = MetadataIndexWriter::new_bool(blockfile_writer);
+        let mut md_writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
         let flusher = md_writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -921,9 +1078,8 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<&str, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_string(blockfile_writer);
-        writer.set("key", "value", 1).unwrap();
+        let mut writer = MetadataIndexWriter::new_string(blockfile_writer, None);
+        writer.set("key", "value", 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -943,9 +1099,8 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer);
-        writer.set("key", 1, 1).unwrap();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        writer.set("key", 1, 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -965,9 +1120,8 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer);
-        writer.set("key", 1.0, 1).unwrap();
+        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
+        writer.set("key", 1.0, 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -987,9 +1141,8 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<bool, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_bool(blockfile_writer);
-        writer.set("key", true, 1).unwrap();
+        let mut writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
+        writer.set("key", true, 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1009,12 +1162,11 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<&str, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_string(blockfile_writer);
-        writer.set("key1", "value", 1).unwrap();
-        writer.set("key1", "value", 2).unwrap();
-        writer.set("key2", "value", 3).unwrap();
-        writer.set("key2", "value2", 4).unwrap();
+        let mut writer = MetadataIndexWriter::new_string(blockfile_writer, None);
+        writer.set("key1", "value", 1).await.unwrap();
+        writer.set("key1", "value", 2).await.unwrap();
+        writer.set("key2", "value", 3).await.unwrap();
+        writer.set("key2", "value2", 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1039,12 +1191,11 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer);
-        writer.set("key1", 1, 1).unwrap();
-        writer.set("key1", 1, 2).unwrap();
-        writer.set("key2", 1, 3).unwrap();
-        writer.set("key2", 2, 4).unwrap();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        writer.set("key1", 1, 1).await.unwrap();
+        writer.set("key1", 1, 2).await.unwrap();
+        writer.set("key2", 1, 3).await.unwrap();
+        writer.set("key2", 2, 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1069,12 +1220,11 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer);
-        writer.set("key1", 1.0, 1).unwrap();
-        writer.set("key1", 1.0, 2).unwrap();
-        writer.set("key2", 1.0, 3).unwrap();
-        writer.set("key2", 2.0, 4).unwrap();
+        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
+        writer.set("key1", 1.0, 1).await.unwrap();
+        writer.set("key1", 1.0, 2).await.unwrap();
+        writer.set("key2", 1.0, 3).await.unwrap();
+        writer.set("key2", 2.0, 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1099,12 +1249,11 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<bool, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_bool(blockfile_writer);
-        writer.set("key1", true, 1).unwrap();
-        writer.set("key1", true, 2).unwrap();
-        writer.set("key2", true, 3).unwrap();
-        writer.set("key2", false, 4).unwrap();
+        let mut writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
+        writer.set("key1", true, 1).await.unwrap();
+        writer.set("key1", true, 2).await.unwrap();
+        writer.set("key2", true, 3).await.unwrap();
+        writer.set("key2", false, 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1129,13 +1278,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer);
-        writer.set("key1", 1, 1).unwrap();
-        writer.set("key1", 2, 2).unwrap();
-        writer.set("key1", 3, 3).unwrap();
-        writer.set("key1", 4, 4).unwrap();
-        writer.set("key2", 5, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        writer.set("key1", 1, 1).await.unwrap();
+        writer.set("key1", 2, 2).await.unwrap();
+        writer.set("key1", 3, 3).await.unwrap();
+        writer.set("key1", 4, 4).await.unwrap();
+        writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1163,13 +1311,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer);
-        writer.set("key1", 1, 1).unwrap();
-        writer.set("key1", 2, 2).unwrap();
-        writer.set("key1", 3, 3).unwrap();
-        writer.set("key1", 4, 4).unwrap();
-        writer.set("key2", 5, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        writer.set("key1", 1, 1).await.unwrap();
+        writer.set("key1", 2, 2).await.unwrap();
+        writer.set("key1", 3, 3).await.unwrap();
+        writer.set("key1", 4, 4).await.unwrap();
+        writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1198,13 +1345,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer);
-        writer.set("key1", 1, 1).unwrap();
-        writer.set("key1", 2, 2).unwrap();
-        writer.set("key1", 3, 3).unwrap();
-        writer.set("key1", 4, 4).unwrap();
-        writer.set("key2", 5, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        writer.set("key1", 1, 1).await.unwrap();
+        writer.set("key1", 2, 2).await.unwrap();
+        writer.set("key1", 3, 3).await.unwrap();
+        writer.set("key1", 4, 4).await.unwrap();
+        writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1232,13 +1378,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer);
-        writer.set("key1", 1, 1).unwrap();
-        writer.set("key1", 2, 2).unwrap();
-        writer.set("key1", 3, 3).unwrap();
-        writer.set("key1", 4, 4).unwrap();
-        writer.set("key2", 5, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        writer.set("key1", 1, 1).await.unwrap();
+        writer.set("key1", 2, 2).await.unwrap();
+        writer.set("key1", 3, 3).await.unwrap();
+        writer.set("key1", 4, 4).await.unwrap();
+        writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1267,13 +1412,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer);
-        writer.set("key1", 1.0, 1).unwrap();
-        writer.set("key1", 2.0, 2).unwrap();
-        writer.set("key1", 3.0, 3).unwrap();
-        writer.set("key1", 4.0, 4).unwrap();
-        writer.set("key2", 5.0, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
+        writer.set("key1", 1.0, 1).await.unwrap();
+        writer.set("key1", 2.0, 2).await.unwrap();
+        writer.set("key1", 3.0, 3).await.unwrap();
+        writer.set("key1", 4.0, 4).await.unwrap();
+        writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1302,13 +1446,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer);
-        writer.set("key1", 1.0, 1).unwrap();
-        writer.set("key1", 2.0, 2).unwrap();
-        writer.set("key1", 3.0, 3).unwrap();
-        writer.set("key1", 4.0, 4).unwrap();
-        writer.set("key2", 5.0, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
+        writer.set("key1", 1.0, 1).await.unwrap();
+        writer.set("key1", 2.0, 2).await.unwrap();
+        writer.set("key1", 3.0, 3).await.unwrap();
+        writer.set("key1", 4.0, 4).await.unwrap();
+        writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1338,13 +1481,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer);
-        writer.set("key1", 1.0, 1).unwrap();
-        writer.set("key1", 2.0, 2).unwrap();
-        writer.set("key1", 3.0, 3).unwrap();
-        writer.set("key1", 4.0, 4).unwrap();
-        writer.set("key2", 5.0, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
+        writer.set("key1", 1.0, 1).await.unwrap();
+        writer.set("key1", 2.0, 2).await.unwrap();
+        writer.set("key1", 3.0, 3).await.unwrap();
+        writer.set("key1", 4.0, 4).await.unwrap();
+        writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1372,13 +1514,12 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let blockfile_writer = provider.create::<f32, &RoaringBitmap>().unwrap();
         let writer_id = blockfile_writer.id();
-
-        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer);
-        writer.set("key1", 1.0, 1).unwrap();
-        writer.set("key1", 2.0, 2).unwrap();
-        writer.set("key1", 3.0, 3).unwrap();
-        writer.set("key1", 4.0, 4).unwrap();
-        writer.set("key2", 5.0, 5).unwrap();
+        let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
+        writer.set("key1", 1.0, 1).await.unwrap();
+        writer.set("key1", 2.0, 2).await.unwrap();
+        writer.set("key1", 3.0, 3).await.unwrap();
+        writer.set("key1", 4.0, 4).await.unwrap();
+        writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
         let flusher = writer.commit().unwrap();
         flusher.flush().await.unwrap();
@@ -1401,4 +1542,46 @@ mod test {
         let bitmap = reader.gte("key2", &6.0.into()).await;
         assert!(bitmap.is_err());
     }
+
+    // TODO enable this test once fork() is enabled for MemoryBlockfiles.
+    // #[tokio::test]
+    // async fn test_set_get_set_delete() {
+    //     let provider = BlockfileProvider::new_memory();
+    //     let blockfile_writer = provider.create::<u32, &RoaringBitmap>().unwrap();
+    //     let writer_id = blockfile_writer.id();
+    //     let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+    //     writer.set("key1", 1, 1).await.unwrap();
+    //     writer.write_to_blockfile().await.unwrap();
+    //     let flusher = writer.commit().unwrap();
+    //     flusher.flush().await.unwrap();
+
+    //     let blockfile_reader = provider
+    //         .open::<u32, RoaringBitmap>(&writer_id)
+    //         .await
+    //         .unwrap();
+    //     let reader = MetadataIndexReader::new_u32(blockfile_reader);
+    //     let bitmap = reader.get("key1", &1.into()).await.unwrap();
+    //     assert_eq!(bitmap.len(), 1);
+    //     assert!(bitmap.contains(1));
+
+    //     let blockfile_writer = provider
+    //         .fork::<u32, &RoaringBitmap>(&writer_id)
+    //         .await
+    //         .unwrap();
+    //     let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, Some(reader));
+    //     writer.set("key1", 1, 2).await.unwrap();
+    //     writer.write_to_blockfile().await.unwrap();
+    //     let flusher = writer.commit().unwrap();
+    //     flusher.flush().await.unwrap();
+
+    //     let blockfile_reader = provider
+    //         .open::<u32, RoaringBitmap>(&writer_id)
+    //         .await
+    //         .unwrap();
+    //     let reader = MetadataIndexReader::new_u32(blockfile_reader);
+    //     let bitmap = reader.get("key1", &1.into()).await.unwrap();
+    //     assert_eq!(bitmap.len(), 2);
+    //     assert!(bitmap.contains(1));
+    //     assert!(bitmap.contains(2));
+    // }
 }
