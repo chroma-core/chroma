@@ -1120,7 +1120,7 @@ impl MetadataSegmentReader<'_> {
         _allowed_ids: Option<&Vec<usize>>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<usize>, MetadataSegmentError> {
+    ) -> Result<Option<Vec<usize>>, MetadataSegmentError> {
         if limit != 0 || offset != 0 {
             return Err(MetadataSegmentError::LimitOffsetNotSupported);
         }
@@ -1128,38 +1128,51 @@ impl MetadataSegmentReader<'_> {
         // run through the Where and WhereDocument clauses sequentially.
         let where_results = match where_clause {
             Some(where_clause) => match self.process_where_clause(where_clause).map_err(|e| e) {
-                Ok(results) => results,
+                Ok(results) => Some(results),
                 Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
             },
-            None => {
-                vec![]
-            }
+            None => None,
         };
         // Where and WhereDocument are implicitly ANDed, so if we have nothing
         // for the Where query we can just return.
-        if where_results.is_empty() {
-            return Ok(where_results);
-        }
-
+        match &where_results {
+            Some(results) => {
+                if results.is_empty() {
+                    return Ok(where_results);
+                }
+            }
+            None => (),
+        };
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
                 match self.process_where_document_clause(where_document_clause) {
-                    Ok(results) => results,
+                    Ok(results) => Some(results),
                     Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
                 }
             }
-            None => {
-                vec![]
-            }
+            None => None,
         };
-        if where_document_results.is_empty() {
-            return Ok(where_document_results);
-        }
+        match &where_document_results {
+            Some(results) => {
+                if results.is_empty() {
+                    return Ok(where_document_results);
+                }
+            }
+            None => (),
+        };
 
-        Ok(merge_sorted_vecs_conjunction(
-            where_results,
-            where_document_results,
-        ))
+        if where_results.is_none() && where_document_results.is_none() {
+            return Ok(None);
+        } else if where_results.is_none() && where_document_results.is_some() {
+            return Ok(where_document_results);
+        } else if where_results.is_some() && where_document_results.is_none() {
+            return Ok(where_results);
+        } else {
+            return Ok(Some(merge_sorted_vecs_conjunction(
+                where_results.expect("Checked just now that it is not none"),
+                where_document_results.expect("Checked just now that it is not none"),
+            )));
+        }
     }
 
     fn process_where_clause(&self, where_clause: &Where) -> Result<Vec<usize>, MetadataIndexError> {

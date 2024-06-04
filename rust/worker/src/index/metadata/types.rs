@@ -759,6 +759,9 @@ impl<'me> MetadataIndexReader<'me> {
             MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
                     KeyWrapper::String(k) => {
+                        if !blockfile_reader.contains(metadata_key, k).await {
+                            return Ok(RoaringBitmap::new());
+                        }
                         let rbm = blockfile_reader.get(metadata_key, k).await;
                         match rbm {
                             Ok(rbm) => Ok(rbm),
@@ -770,6 +773,9 @@ impl<'me> MetadataIndexReader<'me> {
             }
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
+                    if !blockfile_reader.contains(metadata_key, *k).await {
+                        return Ok(RoaringBitmap::new());
+                    }
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
@@ -780,6 +786,9 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
+                    if !blockfile_reader.contains(metadata_key, *k).await {
+                        return Ok(RoaringBitmap::new());
+                    }
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
@@ -791,6 +800,9 @@ impl<'me> MetadataIndexReader<'me> {
             MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
                     KeyWrapper::Bool(k) => {
+                        if !blockfile_reader.contains(metadata_key, *k).await {
+                            return Ok(RoaringBitmap::new());
+                        }
                         let rbm = blockfile_reader.get(metadata_key, *k).await;
                         match rbm {
                             Ok(rbm) => Ok(rbm),

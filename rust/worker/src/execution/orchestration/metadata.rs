@@ -8,6 +8,10 @@ use crate::execution::operators::merge_metadata_results::{
     MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
     MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput,
 };
+use crate::execution::operators::metadata_filtering::{
+    MetadataFilteringError, MetadataFilteringInput, MetadataFilteringOperator,
+    MetadataFilteringOutput,
+};
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
 use crate::index::metadata::types::MetadataIndexError;
 use crate::log::log::PullLogsError;
@@ -53,6 +57,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     query_ids: Option<Vec<String>>,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
+    metadata_segment: Option<Segment>,
     collection: Option<Collection>,
     // State machine management
     merge_dependency_count: u32,
@@ -458,6 +463,7 @@ impl MetadataQueryOrchestrator {
             metadata_segment_id: *metadata_segment_id,
             query_ids,
             record_segment: None,
+            metadata_segment: None,
             collection: None,
             merge_dependency_count: 2,
             log,
@@ -471,7 +477,7 @@ impl MetadataQueryOrchestrator {
     }
 
     async fn start(&mut self, ctx: &ComponentContext<Self>) {
-        println!("Starting Metadata Query Orchestrator");
+        tracing::info!("Starting Metadata Query Orchestrator");
         // Populate the orchestrator with the initial state - The Metadata Segment, The Record Segment and the Collection
         let metdata_segment = self
             .get_metadata_segment_from_id(self.sysdb.clone(), &self.metadata_segment_id)
@@ -495,6 +501,7 @@ impl MetadataQueryOrchestrator {
                 return;
             }
         };
+        self.metadata_segment = Some(metadata_segment);
 
         let record_segment = self
             .get_record_segment_from_collection_id(self.sysdb.clone(), &collection_id)
@@ -568,108 +575,24 @@ impl MetadataQueryOrchestrator {
         println!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
-        let metdata_segment = self
-            .get_metadata_segment_from_id(self.sysdb.clone(), &self.metadata_segment_id)
-            .await;
-        let metadata_segment = match metdata_segment {
-            Ok(segment) => segment,
-            Err(e) => {
-                tracing::error!("Error getting metadata segment: {:?}", e);
-                self.terminate_with_error(e, ctx);
-                return;
-            }
-        };
-
-        // TODO create segment in this method instead of constructor
-        let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&metadata_segment, &self.blockfile_provider).await;
-
-        let filtered_index_offset_ids = match metadata_segment_reader {
-            Ok(reader) => {
-                reader
-                    .query(
-                        self.where_clause.as_ref(),
-                        self.where_document_clause.as_ref(),
-                        Some(&vec![]),
-                        0,
-                        0,
-                    )
-                    .await
-            }
-            Err(e) => {
-                tracing::error!("Error querying metadata segment: {:?}", e);
-                self.terminate_with_error(Box::new(e), ctx);
-                return;
-            }
-        };
-        let filtered_index_offset_ids = match filtered_index_offset_ids {
-            Ok(filtered_index_offset_ids) => {
-                let filtered_index_offset_ids = filtered_index_offset_ids
-                    .into_iter()
-                    .map(|index| index as u32)
-                    .collect();
-                Some(filtered_index_offset_ids)
-            }
-            Err(_) => None,
-        };
-
-        if self.query_ids.is_some() {
-            // Build a query_id set
-            let query_id_set: HashSet<String> =
-                self.query_ids.as_ref().unwrap().iter().cloned().collect();
-            // The query ids that are not present in the log
-            let mut remaining_query_ids = query_id_set.clone();
-
-            // Build the list of ids in the log to indices in the chunk
-            let mut new_visibility = Vec::new();
-            for (log_entry, _) in logs.iter() {
-                if query_id_set.contains(&log_entry.record.id) {
-                    new_visibility.push(true);
-                    remaining_query_ids.remove(&log_entry.record.id);
-                } else {
-                    new_visibility.push(false);
-                }
-            }
-            logs.set_visibility(new_visibility);
-
-            let remaining_query_ids = remaining_query_ids.into_iter().collect();
-            self.merge_results(
-                logs,
-                Some(remaining_query_ids),
-                filtered_index_offset_ids,
-                ctx,
-            )
-            .await;
-        } else {
-            // No query ids to filter on
-            self.merge_results(logs, None, filtered_index_offset_ids, ctx)
-                .await;
-        }
-    }
-
-    async fn merge_results(
-        &mut self,
-        logs: Chunk<LogRecord>,
-        remaining_query_ids: Option<Vec<String>>,
-        filtered_index_offset_ids: Option<Vec<u32>>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        println!("Merging metadata results");
-        self.state = ExecutionState::MergeResults;
-
-        let operator = MergeMetadataResultsOperator::new();
-        let input = MergeMetadataResultsOperatorInput::new(
+        let input = MetadataFilteringInput::new(
             logs,
-            remaining_query_ids,
-            filtered_index_offset_ids,
             self.record_segment
                 .as_ref()
-                .expect("Invariant violation. Record segment is not set.")
+                .expect("Expected record segment to be set")
+                .clone(),
+            self.metadata_segment
+                .as_ref()
+                .expect("Expected metadata segment to be set")
                 .clone(),
             self.blockfile_provider.clone(),
+            self.where_clause.clone(),
+            self.where_document_clause.clone(),
+            self.query_ids.clone(),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let op = MetadataFilteringOperator::new();
+        let task = wrap(op, input, ctx.sender.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -832,6 +755,51 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
             Err(e) => {
                 tracing::error!("Error pulling logs: {:?}", e);
                 self.terminate_with_error(Box::new(e), ctx);
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
+    for MetadataQueryOrchestrator
+{
+    async fn handle(
+        &mut self,
+        message: TaskResult<MetadataFilteringOutput, MetadataFilteringError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
+        let output = match message {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::error!("Error merging metadata results: {:?}", e);
+                return self.terminate_with_error(Box::new(e), ctx);
+            }
+        };
+
+        tracing::info!("MetadataFiltering output {:?}", output);
+        self.state = ExecutionState::MergeResults;
+
+        let operator = MergeMetadataResultsOperator::new();
+        let input = MergeMetadataResultsOperatorInput::new(
+            output.log_records,
+            output.user_supplied_filtered_offset_ids,
+            output.where_condition_filtered_offset_ids,
+            self.record_segment
+                .as_ref()
+                .expect("Invariant violation. Record segment is not set.")
+                .clone(),
+            self.blockfile_provider.clone(),
+        );
+
+        let task = wrap(operator, input, ctx.sender.as_receiver());
+        match self.dispatcher.send(task, Some(Span::current())).await {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error - this implies the dispatcher was dropped somehow
+                // and is likely fatal
+                println!("Error sending Metadata Query task: {:?}", e);
             }
         }
     }
