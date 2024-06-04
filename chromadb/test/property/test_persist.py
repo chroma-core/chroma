@@ -1,4 +1,6 @@
 import logging
+import multiprocessing
+from multiprocessing.connection import Connection
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
@@ -127,22 +129,27 @@ def load_and_check(
     settings: Settings,
     collection_name: str,
     record_set: strategies.RecordSet,
+    conn: Connection,
 ) -> None:
-    system = System(settings)
-    api = system.instance(ServerAPI)
-    system.start()
+    try:
+        system = System(settings)
+        api = system.instance(ServerAPI)
+        system.start()
 
-    coll = api.get_collection(
-        name=collection_name,
-        embedding_function=strategies.not_implemented_embedding_function(),
-    )
-    invariants.count(coll, record_set)
-    invariants.metadatas_match(coll, record_set)
-    invariants.documents_match(coll, record_set)
-    invariants.ids_match(coll, record_set)
-    invariants.ann_accuracy(coll, record_set)
+        coll = api.get_collection(
+            name=collection_name,
+            embedding_function=strategies.not_implemented_embedding_function(),
+        )
+        invariants.count(coll, record_set)
+        invariants.metadatas_match(coll, record_set)
+        invariants.documents_match(coll, record_set)
+        invariants.ids_match(coll, record_set)
+        invariants.ann_accuracy(coll, record_set)
 
-    system.stop()
+        system.stop()
+    except Exception as e:
+        conn.send(e)
+        raise e
 
 
 class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
@@ -183,8 +190,22 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
+        # Create a new process and then inside the process run the invariants
+        # TODO: Once we switch off of duckdb and onto sqlite we can remove this
+        ctx = multiprocessing.get_context("spawn")
+        conn1, conn2 = multiprocessing.Pipe()
+        p = ctx.Process(
+            target=load_and_check,
+            args=(self.settings, collection_name, self.record_set_state, conn2),
+        )
+        p.start()
+        p.join()
 
-        load_and_check(self.settings, collection_name, self.record_set_state)  # type: ignore
+        if conn1.poll():
+            e = conn1.recv()
+            raise e
+
+        p.close()
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
