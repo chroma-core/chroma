@@ -15,7 +15,7 @@ function cleanup {
 
 trap cleanup EXIT
 
-docker compose -f docker-compose.test.yml up --build
+docker compose -f docker-compose.test.yml up --build -d
 
 export CHROMA_INTEGRATION_TEST_ONLY=1
 export CHROMA_API_IMPL=chromadb.api.fastapi.FastAPI
