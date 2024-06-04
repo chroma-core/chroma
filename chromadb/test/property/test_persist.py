@@ -8,6 +8,7 @@ import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
+from chromadb.test.conftest import override_hypothesis_profile
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
@@ -22,6 +23,7 @@ from hypothesis.stateful import (
     precondition,
     initialize,
 )
+import hypothesis
 import os
 import shutil
 import tempfile
@@ -235,5 +237,9 @@ def test_persist_embeddings_state(
     caplog.set_level(logging.ERROR)
     api = chromadb.Client(settings)
     run_state_machine_as_test(
-        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
+        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api),
+        # For small max_example values, the test may not generate any examples that pass the precondition for persist().
+        # This value makes it much more likely that the precondition will be satisfied and thus the rule will be exercised.
+        _min_steps=10,
+        settings=override_hypothesis_profile(fast=hypothesis.settings(max_examples=10)),
     )  # type: ignore
