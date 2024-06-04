@@ -10,7 +10,6 @@ use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction}
 
 use arrow::array::Int32Array;
 use parking_lot::Mutex;
-use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -261,7 +260,7 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
-    pub fn commit(self) -> Result<FullTextIndexFlusher, Box<dyn ChromaError>> {
+    pub fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
@@ -281,21 +280,27 @@ pub(crate) struct FullTextIndexFlusher {
 }
 
 impl FullTextIndexFlusher {
-    pub async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
-        let res = self
+    pub async fn flush(self) -> Result<(), FullTextIndexError> {
+        match self
             .posting_lists_blockfile_flusher
             .flush::<u32, &Int32Array>()
-            .await;
-        if res.is_err() {
-            return res;
-        }
-        let res = self
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(FullTextIndexError::BlockfileWriteError(e));
+            }
+        };
+        match self
             .frequencies_blockfile_flusher
             .flush::<u32, &str>()
-            .await;
-        if res.is_err() {
-            return res;
-        }
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(FullTextIndexError::BlockfileWriteError(e));
+            }
+        };
         Ok(())
     }
 
@@ -327,7 +332,7 @@ impl<'me> FullTextIndexReader<'me> {
         }
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<i32>, Box<dyn ChromaError>> {
+    pub async fn search(&self, query: &str) -> Result<Vec<i32>, FullTextIndexError> {
         let tokenizer = self.tokenizer.lock();
         let binding = tokenizer.encode(query);
         let tokens = binding.get_tokens();
@@ -344,7 +349,7 @@ impl<'me> FullTextIndexReader<'me> {
                 return Ok(vec![]);
             }
             if res.len() > 1 {
-                return Err(Box::new(FullTextIndexError::MultipleTokenFrequencies));
+                return Err(FullTextIndexError::MultipleTokenFrequencies);
             }
             let res = res[0];
             // Throw away the "value" since we store frequencies in the keys.
@@ -408,9 +413,9 @@ impl<'me> FullTextIndexReader<'me> {
                                 None => {
                                     // This should never happen since we only store positions for the doc_id
                                     // in the positional posting list.
-                                    return Err(Box::new(
+                                    return Err(
                                         FullTextIndexError::EmptyValueInPositionalPostingList,
-                                    ));
+                                    );
                                 }
                                 Some(pos) => {
                                     if pos == position + token_offset {
@@ -444,7 +449,7 @@ impl<'me> FullTextIndexReader<'me> {
     async fn get_all_results_for_token(
         &self,
         token: &str,
-    ) -> Result<Vec<(u32, Vec<i32>)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(u32, Vec<i32>)>, FullTextIndexError> {
         let positional_posting_list = self
             .posting_lists_blockfile_reader
             .get_by_prefix(token)
@@ -459,7 +464,7 @@ impl<'me> FullTextIndexReader<'me> {
 
     // Also used to implement deletes in the Writer. When we delete a document,
     // we have to decrement the frequencies of all its tokens.
-    async fn get_frequencies_for_token(&self, token: &str) -> Result<u32, Box<dyn ChromaError>> {
+    async fn get_frequencies_for_token(&self, token: &str) -> Result<u32, FullTextIndexError> {
         let res = self
             .frequencies_blockfile_reader
             .get_by_prefix(token)
@@ -468,7 +473,7 @@ impl<'me> FullTextIndexReader<'me> {
             return Ok(0);
         }
         if res.len() > 1 {
-            return Err(Box::new(FullTextIndexError::MultipleTokenFrequencies));
+            return Err(FullTextIndexError::MultipleTokenFrequencies);
         }
         Ok(res[0].1)
     }

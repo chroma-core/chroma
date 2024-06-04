@@ -16,6 +16,8 @@ use std::sync::Arc;
 pub(crate) enum MetadataIndexError {
     #[error("Invalid key type")]
     InvalidKeyType,
+    #[error("Blockfile error: {0}")]
+    BlockfileError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for MetadataIndexError {
@@ -387,7 +389,7 @@ impl<'me> MetadataIndexWriter<'me> {
         &self,
         prefix: &str,
         key: &KeyWrapper,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), MetadataIndexError> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(_, reader, uncommitted_rbms) => {
                 match key {
@@ -408,7 +410,7 @@ impl<'me> MetadataIndexWriter<'me> {
                             rbms.insert(k.to_string(), written_state);
                         }
                     }
-                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
             MetadataIndexWriter::U32MetadataIndexWriter(_, reader, uncommitted_rbms) => match key {
@@ -429,7 +431,7 @@ impl<'me> MetadataIndexWriter<'me> {
                         rbms.insert(*k, written_state);
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, reader, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
@@ -449,7 +451,7 @@ impl<'me> MetadataIndexWriter<'me> {
                         rbms.push((*k, written_state));
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, reader, uncommitted_rbms) => {
                 match key {
@@ -470,7 +472,7 @@ impl<'me> MetadataIndexWriter<'me> {
                             rbms.insert(*k, written_state);
                         }
                     }
-                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
         }
@@ -482,7 +484,7 @@ impl<'me> MetadataIndexWriter<'me> {
         prefix: &str,
         key: K,
         offset_id: u32,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), MetadataIndexError> {
         let key = key.into();
         self.look_up_key_and_populate_uncommitted_rbms(prefix, &key)
             .await?;
@@ -494,7 +496,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
@@ -503,7 +505,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::U32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
@@ -512,7 +514,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
@@ -521,7 +523,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
                     rbm.1.insert(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
         }
         Ok(())
@@ -532,7 +534,7 @@ impl<'me> MetadataIndexWriter<'me> {
         prefix: &str,
         key: K,
         offset_id: u32,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), MetadataIndexError> {
         let key = key.into();
         self.look_up_key_and_populate_uncommitted_rbms(prefix, &key)
             .await?;
@@ -544,7 +546,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.remove(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
@@ -553,7 +555,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.remove(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::U32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
@@ -562,7 +564,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.remove(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
@@ -571,7 +573,7 @@ impl<'me> MetadataIndexWriter<'me> {
                     let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
                     rbm.1.remove(offset_id);
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
         }
         Ok(())
@@ -583,12 +585,12 @@ impl<'me> MetadataIndexWriter<'me> {
         old_key: KeyWrapper,
         new_key: KeyWrapper,
         offset_id: u32,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), MetadataIndexError> {
         self.delete(prefix, old_key, offset_id).await?;
         self.set(prefix, new_key, offset_id).await
     }
 
-    pub async fn write_to_blockfile(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn write_to_blockfile(&mut self) -> Result<(), MetadataIndexError> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(
                 blockfile_writer,
@@ -598,9 +600,13 @@ impl<'me> MetadataIndexWriter<'me> {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer
+                        match blockfile_writer
                             .set(prefix.as_str(), key.as_str(), rbm)
-                            .await?
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
@@ -608,7 +614,10 @@ impl<'me> MetadataIndexWriter<'me> {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer.set(prefix.as_str(), *key, rbm).await?
+                        match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
@@ -616,7 +625,10 @@ impl<'me> MetadataIndexWriter<'me> {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer.set(prefix.as_str(), *key, rbm).await?
+                        match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
@@ -624,7 +636,10 @@ impl<'me> MetadataIndexWriter<'me> {
                 let mut uncommitted_rbms = uncommitted_rbms.lock();
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
-                        blockfile_writer.set(prefix.as_str(), *key, rbm).await?
+                        match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
+                            Ok(_) => {}
+                            Err(e) => return Err(MetadataIndexError::BlockfileError(e)),
+                        }
                     }
                 }
             }
@@ -632,27 +647,31 @@ impl<'me> MetadataIndexWriter<'me> {
         Ok(())
     }
 
-    pub fn commit(self) -> Result<MetadataIndexFlusher, Box<dyn ChromaError>> {
+    pub fn commit(self) -> Result<MetadataIndexFlusher, MetadataIndexError> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, _, _) => {
-                Ok(MetadataIndexFlusher::StringMetadataIndexFlusher(
-                    blockfile_writer.commit::<&str, &RoaringBitmap>()?,
-                ))
+                match blockfile_writer.commit::<&str, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::StringMetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _, _) => {
-                Ok(MetadataIndexFlusher::U32MetadataIndexFlusher(
-                    blockfile_writer.commit::<u32, &RoaringBitmap>()?,
-                ))
+                match blockfile_writer.commit::<u32, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::U32MetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _, _) => {
-                Ok(MetadataIndexFlusher::F32MetadataIndexFlusher(
-                    blockfile_writer.commit::<f32, &RoaringBitmap>()?,
-                ))
+                match blockfile_writer.commit::<f32, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::F32MetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _, _) => {
-                Ok(MetadataIndexFlusher::BoolMetadataIndexFlusher(
-                    blockfile_writer.commit::<bool, &RoaringBitmap>()?,
-                ))
+                match blockfile_writer.commit::<bool, &RoaringBitmap>() {
+                    Ok(flusher) => Ok(MetadataIndexFlusher::BoolMetadataIndexFlusher(flusher)),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
         }
     }
@@ -666,19 +685,31 @@ pub(crate) enum MetadataIndexFlusher {
 }
 
 impl MetadataIndexFlusher {
-    pub async fn flush(self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<(), MetadataIndexError> {
         match self {
             MetadataIndexFlusher::StringMetadataIndexFlusher(flusher) => {
-                flusher.flush::<&str, &RoaringBitmap>().await
+                match flusher.flush::<&str, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexFlusher::U32MetadataIndexFlusher(flusher) => {
-                flusher.flush::<u32, &RoaringBitmap>().await
+                match flusher.flush::<u32, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexFlusher::F32MetadataIndexFlusher(flusher) => {
-                flusher.flush::<f32, &RoaringBitmap>().await
+                match flusher.flush::<f32, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
             MetadataIndexFlusher::BoolMetadataIndexFlusher(flusher) => {
-                flusher.flush::<bool, &RoaringBitmap>().await
+                match flusher.flush::<bool, &RoaringBitmap>().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(MetadataIndexError::BlockfileError(e)),
+                }
             }
         }
     }
@@ -723,7 +754,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
@@ -731,10 +762,10 @@ impl<'me> MetadataIndexReader<'me> {
                         let rbm = blockfile_reader.get(metadata_key, k).await;
                         match rbm {
                             Ok(rbm) => Ok(rbm),
-                            Err(e) => Err(e),
+                            Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
@@ -742,20 +773,20 @@ impl<'me> MetadataIndexReader<'me> {
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
                         Ok(rbm) => Ok(rbm),
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
@@ -763,10 +794,10 @@ impl<'me> MetadataIndexReader<'me> {
                         let rbm = blockfile_reader.get(metadata_key, *k).await;
                         match rbm {
                             Ok(rbm) => Ok(rbm),
-                            Err(e) => Err(e),
+                            Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
         }
@@ -776,7 +807,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -789,10 +820,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -805,12 +836,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -818,7 +849,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -831,10 +862,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -847,12 +878,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -860,7 +891,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -873,10 +904,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -889,12 +920,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -902,7 +933,7 @@ impl<'me> MetadataIndexReader<'me> {
         &'me self,
         metadata_key: &str,
         metadata_value: &'me KeyWrapper,
-    ) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
@@ -915,10 +946,10 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -931,12 +962,12 @@ impl<'me> MetadataIndexReader<'me> {
                             }
                             Ok(result)
                         }
-                        Err(e) => Err(e),
+                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(Box::new(MetadataIndexError::InvalidKeyType)),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 }

@@ -4,6 +4,8 @@ use arrow::{
 };
 use thiserror::Error;
 
+use crate::errors::{ChromaError, ErrorCodes};
+
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,16 @@ pub(crate) enum PositionalPostingListBuilderError {
     DocIdDoesNotExist,
     #[error("Incremental positions must be sorted")]
     UnsortedPosition,
+}
+
+impl ChromaError for PositionalPostingListBuilderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PositionalPostingListBuilderError::DocIdAlreadyExists => ErrorCodes::AlreadyExists,
+            PositionalPostingListBuilderError::DocIdDoesNotExist => ErrorCodes::InvalidArgument,
+            PositionalPostingListBuilderError::UnsortedPosition => ErrorCodes::InvalidArgument,
+        }
+    }
 }
 
 pub(crate) struct PositionalPostingListBuilder {

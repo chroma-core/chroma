@@ -1,7 +1,6 @@
 use arrow::array::Int32Array;
 use async_trait::async_trait;
 use core::panic;
-use futures::future::BoxFuture;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -26,11 +25,10 @@ use crate::index::metadata::types::{
 };
 use crate::types::SegmentType;
 use crate::types::{
-    BooleanOperator, DirectComparison, MetadataValue, Operation, Segment, Where, WhereChildren,
-    WhereClauseComparator, WhereClauseListOperator, WhereComparison, WhereDocument,
+    MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
     WhereDocumentOperator,
 };
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
+use crate::utils::merge_sorted_vecs_conjunction;
 
 const FULL_TEXT_PLS: &str = "full_text_pls";
 const FULL_TEXT_FREQS: &str = "full_text_freqs";
@@ -776,27 +774,42 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
 
     fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
         let full_text_flusher = match self.full_text_index_writer {
-            Some(flusher) => flusher.commit()?,
+            Some(flusher) => match flusher.commit() {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let string_metadata_flusher = match self.string_metadata_index_writer {
-            Some(flusher) => flusher.commit()?,
+            Some(flusher) => match flusher.commit() {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let bool_metadata_flusher = match self.bool_metadata_index_writer {
-            Some(flusher) => flusher.commit()?,
+            Some(flusher) => match flusher.commit() {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let f32_metadata_flusher = match self.f32_metadata_index_writer {
-            Some(flusher) => flusher.commit()?,
+            Some(flusher) => match flusher.commit() {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let u32_metadata_flusher = match self.u32_metadata_index_writer {
-            Some(flusher) => flusher.commit()?,
+            Some(flusher) => match flusher.commit() {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
@@ -830,7 +843,10 @@ impl SegmentFlusher for MetadataSegmentFlusher {
 
         let mut flushed = HashMap::new();
 
-        self.full_text_index_flusher.flush().await.map_err(|e| e)?;
+        match self.full_text_index_flusher.flush().await.map_err(|e| e) {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
+        }
         flushed.insert(
             FULL_TEXT_PLS.to_string(),
             vec![full_text_pls_id.to_string()],
@@ -840,31 +856,41 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             vec![full_text_freqs_id.to_string()],
         );
 
-        self.bool_metadata_index_flusher
+        match self
+            .bool_metadata_index_flusher
             .flush()
             .await
-            .map_err(|e| e)?;
+            .map_err(|e| e)
+        {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
+        }
         flushed.insert(
             BOOL_METADATA.to_string(),
             vec![bool_metadata_id.to_string()],
         );
 
-        self.f32_metadata_index_flusher
-            .flush()
-            .await
-            .map_err(|e| e)?;
+        match self.f32_metadata_index_flusher.flush().await.map_err(|e| e) {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
+        }
         flushed.insert(F32_METADATA.to_string(), vec![f32_metadata_id.to_string()]);
 
-        self.u32_metadata_index_flusher
-            .flush()
-            .await
-            .map_err(|e| e)?;
+        match self.u32_metadata_index_flusher.flush().await.map_err(|e| e) {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
+        }
         flushed.insert(U32_METADATA.to_string(), vec![u32_metadata_id.to_string()]);
 
-        self.string_metadata_index_flusher
+        match self
+            .string_metadata_index_flusher
             .flush()
             .await
-            .map_err(|e| e)?;
+            .map_err(|e| e)
+        {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
+        }
         flushed.insert(
             STRING_METADATA.to_string(),
             vec![string_metadata_id.to_string()],
@@ -1091,7 +1117,7 @@ impl MetadataSegmentReader<'_> {
         &self,
         where_clause: Option<&Where>,
         where_document_clause: Option<&WhereDocument>,
-        allowed_ids: Option<&Vec<usize>>,
+        _allowed_ids: Option<&Vec<usize>>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<usize>, MetadataSegmentError> {
