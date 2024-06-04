@@ -277,9 +277,7 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -287,6 +285,11 @@ class FastAPI(ServerAPI):
         """Returns a collection"""
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
+
+        if embedding_function is not None:
+            raise NotImplementedError(
+                "Embedding functions should no longer be passed to get_collection. Please see the documentation for more information: https://docs.trychroma.com"
+            )
 
         _params = {"tenant": tenant, "database": database}
         if id is not None:

@@ -229,9 +229,7 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         model = self._server.get_collection(
