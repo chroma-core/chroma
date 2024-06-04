@@ -152,6 +152,20 @@ def load_and_check(
         raise e
 
 
+def get_multiprocessing_context():
+    try:
+        # Run the invariants in a new process to bypass any shared state/caching (which would defeat the purpose of the test)
+        # (forkserver is used because it's much faster than spawn—it will spawn a new, minimal singleton process and then fork that singleton)
+        ctx = multiprocessing.get_context("forkserver")
+        # This is like running `import chromadb` in the single process that is forked rather than importing it in each forked process.
+        # Gives a ~3x speedup since importing chromadb is fairly expensive.
+        ctx.set_forkserver_preload(["chromadb"])
+        return ctx
+    except Exception:
+        # forkserver/fork is not available on Windows
+        return multiprocessing.get_context("spawn")
+
+
 class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
     persist = "persist"
 
@@ -190,10 +204,8 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
-        # Create a new process and then inside the process run the invariants
-        # TODO: Once we switch off of duckdb and onto sqlite we can remove this
-        ctx = multiprocessing.get_context("spawn")
         conn1, conn2 = multiprocessing.Pipe()
+        ctx = get_multiprocessing_context()
         p = ctx.Process(
             target=load_and_check,
             args=(self.settings, collection_name, self.record_set_state, conn2),
