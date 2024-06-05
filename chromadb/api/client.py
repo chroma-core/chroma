@@ -1,7 +1,6 @@
 from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
 import uuid
-import json
 
 from overrides import override
 import requests
@@ -203,11 +202,8 @@ class Client(SharedSystemClient, ClientAPI):
             if metadata is None:
                 metadata = {}
 
-            ef_name = type(embedding_function).__name__
-            init_args = embedding_function._init_args  # type: ignore[attr-defined]
-
-            metadata["_ef_metadata"] = json.dumps(
-                {"name": ef_name, "init_args": init_args}
+            metadata["_ef_metadata"] = ef._serialize_embedding_function(
+                ef=embedding_function
             )
 
         model = self._server.create_collection(

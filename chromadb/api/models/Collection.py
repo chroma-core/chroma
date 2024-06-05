@@ -81,6 +81,7 @@ class Collection:
         # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
+            self._embedding_function = embedding_function
 
         if embedding_function is None:
             if metadata is not None and "_ef_metadata" in metadata.keys():
