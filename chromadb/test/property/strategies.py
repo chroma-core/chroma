@@ -197,7 +197,7 @@ def create_embeddings_ndarray(
     ).astype(dtype)
 
 
-class hashing_document_embedding_function(types.EmbeddingFunction[Documents]):
+class hashing_document_embedding_function(EmbeddingFunction[Documents]):
     def __init__(
         self,
         dim: int,
