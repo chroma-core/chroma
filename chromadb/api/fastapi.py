@@ -10,7 +10,8 @@ import chromadb.errors as errors
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
-from chromadb.api.models.Collection import Collection
+
+# from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     DataLoader,
     Documents,
@@ -194,7 +195,7 @@ class FastAPI(ServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[CollectionModel]:
         """Returns a list of all collections"""
         resp = self._session.get(
             self._api_url + "/collections",
@@ -206,10 +207,9 @@ class FastAPI(ServerAPI):
             },
         )
         raise_chroma_error(resp)
-        json_collections = json.loads(resp.text)
-        collections = []
-        for json_collection in json_collections:
-            model = CollectionModel(
+        json_collection_models = json.loads(resp.text)
+        collection_models = [
+            CollectionModel(
                 id=json_collection["id"],
                 name=json_collection["name"],
                 metadata=json_collection["metadata"],
@@ -218,9 +218,10 @@ class FastAPI(ServerAPI):
                 database=json_collection["database"],
                 version=json_collection["version"],
             )
-            collections.append(Collection(self, model=model))
+            for json_collection in json_collection_models
+        ]
 
-        return collections
+        return collection_models
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
@@ -248,7 +249,7 @@ class FastAPI(ServerAPI):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         """Creates a collection"""
         resp = self._session.post(
             self._api_url + "/collections",
@@ -272,12 +273,7 @@ class FastAPI(ServerAPI):
             database=resp_json["database"],
             version=resp_json["version"],
         )
-        return Collection(
-            client=self,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -291,7 +287,7 @@ class FastAPI(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         """Returns a collection"""
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
@@ -313,12 +309,7 @@ class FastAPI(ServerAPI):
             database=resp_json["database"],
             version=resp_json["version"],
         )
-        return Collection(
-            client=self,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return model
 
     @trace_method(
         "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
@@ -334,9 +325,9 @@ class FastAPI(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         return cast(
-            Collection,
+            CollectionModel,
             self.create_collection(
                 name=name,
                 metadata=metadata,
