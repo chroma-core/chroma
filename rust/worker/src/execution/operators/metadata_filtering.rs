@@ -1186,7 +1186,8 @@ mod test {
                     };
                 }
             };
-            let materializer = LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
+            let materializer =
+                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
             let mat_records = materializer
                 .materialize()
                 .await

@@ -436,11 +436,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     MetadataValue::Str(value) => {
                                         match &self.string_metadata_index_writer {
                                             Some(writer) => {
-                                                let _ = writer.set(
-                                                    key,
-                                                    value.as_str(),
-                                                    segment_offset_id,
-                                                );
+                                                let a = writer
+                                                    .set(key, value.as_str(), segment_offset_id)
+                                                    .await;
                                             }
                                             None => {}
                                         }
@@ -448,11 +446,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     MetadataValue::Float(value) => {
                                         match &self.f32_metadata_index_writer {
                                             Some(writer) => {
-                                                let _ = writer.set(
-                                                    key,
-                                                    *value as f32,
-                                                    segment_offset_id,
-                                                );
+                                                let _ = writer
+                                                    .set(key, *value as f32, segment_offset_id)
+                                                    .await;
                                             }
                                             None => {}
                                         }
@@ -460,11 +456,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     MetadataValue::Int(value) => {
                                         match &self.u32_metadata_index_writer {
                                             Some(writer) => {
-                                                let _ = writer.set(
-                                                    key,
-                                                    *value as u32,
-                                                    segment_offset_id,
-                                                );
+                                                let _ = writer
+                                                    .set(key, *value as u32, segment_offset_id)
+                                                    .await;
                                             }
                                             None => {}
                                         }
@@ -477,7 +471,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                     match &record.0.final_document {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
-                                let _ = writer.add_document(document, segment_offset_id as i32);
+                                let _ = writer
+                                    .add_document(document, segment_offset_id as i32)
+                                    .await;
                             }
                             None => {}
                         },
@@ -493,11 +489,13 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         MetadataValue::Str(value) => {
                                             match &self.string_metadata_index_writer {
                                                 Some(writer) => {
-                                                    let _ = writer.delete(
-                                                        key,
-                                                        value.as_str(),
-                                                        segment_offset_id,
-                                                    );
+                                                    let _ = writer
+                                                        .delete(
+                                                            key,
+                                                            value.as_str(),
+                                                            segment_offset_id,
+                                                        )
+                                                        .await;
                                                 }
                                                 None => {
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
@@ -507,11 +505,13 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         MetadataValue::Float(value) => {
                                             match &self.f32_metadata_index_writer {
                                                 Some(writer) => {
-                                                    let _ = writer.delete(
-                                                        key,
-                                                        *value as f32,
-                                                        segment_offset_id,
-                                                    );
+                                                    let _ = writer
+                                                        .delete(
+                                                            key,
+                                                            *value as f32,
+                                                            segment_offset_id,
+                                                        )
+                                                        .await;
                                                 }
                                                 None => {
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
@@ -521,11 +521,13 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         MetadataValue::Int(value) => {
                                             match &self.u32_metadata_index_writer {
                                                 Some(writer) => {
-                                                    let _ = writer.delete(
-                                                        key,
-                                                        *value as u32,
-                                                        segment_offset_id,
-                                                    );
+                                                    let _ = writer
+                                                        .delete(
+                                                            key,
+                                                            *value as u32,
+                                                            segment_offset_id,
+                                                        )
+                                                        .await;
                                                 }
                                                 None => {
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
@@ -540,7 +542,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         match &data_record.document {
                             Some(document) => match &self.full_text_index_writer {
                                 Some(writer) => {
-                                    let _ = writer.delete_document(document, segment_offset_id);
+                                    let _ =
+                                        writer.delete_document(document, segment_offset_id).await;
                                 }
                                 None => {
                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
