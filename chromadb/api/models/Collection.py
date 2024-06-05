@@ -42,6 +42,11 @@ from chromadb.api.types import (
     validate_embeddings,
     validate_embedding_function,
 )
+
+# TODO: We should rename the types in chromadb.types to be Models where
+# appropriate. This will help to distinguish between manipulation objects
+# which are essentially API views. And the actual data models which are
+# stored / retrieved / transmitted.
 from chromadb.types import Collection as CollectionModel
 import logging
 
@@ -421,6 +426,7 @@ class Collection:
 
         # Note there is a race condition here where the metadata can be updated
         # but another thread sees the cached local metadata.
+        # TODO: fixme
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
             self._model["name"] = name
