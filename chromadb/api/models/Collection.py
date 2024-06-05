@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Type, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Type, Union, cast
 import json
 import numpy as np
 from uuid import UUID
@@ -84,7 +84,10 @@ class Collection:
             self._embedding_function = embedding_function
 
         if embedding_function is None:
-            if metadata is not None and "_ef_metadata" in metadata.keys():
+            if (
+                model["metadata"] is not None
+                and "_ef_metadata" in model["metadata"].keys()
+            ):
                 self._embedding_function = self._ef_from_metadata()
             else:
                 self._embedding_function = None
@@ -687,6 +690,10 @@ class Collection:
             ef_metadata = json.loads(self.metadata["_ef_metadata"])
             ef_name: str = ef_metadata["name"]
             ef_type: Type[EmbeddingFunction[Embeddable]] = _get(ef_name)
+            if ef_type is None:
+                raise ValueError(
+                    f"Cannot load stored embedding function from metadata. Embedding function with name {ef_name} not registered."
+                )
             ef_init_args: str = ef_metadata["init_args"]
             return ef_type.from_init_args(ef_init_args)
         else:
