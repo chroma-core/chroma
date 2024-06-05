@@ -25,3 +25,5 @@ tqdm>=4.65.0
 typer>=0.9.0
 typing_extensions>=4.5.0
 uvicorn[standard]>=0.18.3
+mlx>=0.0.5
+transformers

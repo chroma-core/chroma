@@ -1,9 +1,7 @@
 import hashlib
 import logging
 from functools import cached_property
-
 from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
-
 from chromadb.api.types import (
     Document,
     Documents,
@@ -29,6 +27,10 @@ import inspect
 import json
 import sys
 import base64
+from ..utils.mlx_model import load_model
+import mlx.core as mx
+
+
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -1015,6 +1017,53 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
                 if "embedding" in embedding
             ],
         )
+
+
+
+
+class MlXEmbeddingFunction(EmbeddingFunction):
+
+    def __init__(
+            self,
+            bert_model,
+            weights_path,
+            ) -> None:
+        """
+        Use local mlx model to get embeddings for a list of texts.
+        Args:
+            bert_model (str): The path to the BERT model.
+            weights_path (str): The path to the model weights.
+        """
+        self.model, self.tokenizer = load_model(bert_model, weights_path)
+            
+    
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            input (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> MlX_ef = MlXEmbeddingFunction(bert_model="bert-base-uncased", weights_path="bert-base-uncased/model.npz")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = Mlx_ef(texts)
+        """
+
+        batch = list(input)
+        tokens = self.tokenizer(batch, return_tensors="np", padding=True)
+        tokens = {key: mx.array(v) for key, v in tokens.items()}
+
+        _ , pooled = self.model(**tokens)
+
+        return pooled.tolist()
+
+
+
+
 
 
 # List of all classes in this module
