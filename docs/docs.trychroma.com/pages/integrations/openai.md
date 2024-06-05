@@ -74,5 +74,19 @@ const collection = await client.getCollection({
 })
 ```
 
+To use the OpenAI embedding models on other platforms such as Azure, you can use the `api_base` and `api_type` parameters:
+```javascript
+const {OpenAIEmbeddingFunction} = require('chromadb');
+const embeddingFunction = new OpenAIEmbeddingFunction({
+    openai_api_key: "apiKey",
+    api_type: "azure",
+    api_version: "apiVersion",
+    api_base: "apiBase",
+    deployment: "deployment",
+    model: "text-embedding-3-small"
+})
+```
+
+
 {% /tab %}
 {% /tabs %}
