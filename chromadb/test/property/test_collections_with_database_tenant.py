@@ -21,8 +21,8 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     """A collection state machine test that includes tenant and database information,
     and switches between them."""
 
-    tenants: Bundle[str]
-    databases: Bundle[Tuple[str, str]]  # database to tenant it belongs to
+    tenants: Bundle  # [str]
+    databases: Bundle  # [Tuple[str, str]]  # database to tenant it belongs to
     tenant_to_database_to_model: Dict[
         str, Dict[str, Dict[str, Optional[types.CollectionMetadata]]]
     ]
@@ -49,33 +49,38 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.set_database_model_for_tenant(self.curr_tenant, self.curr_database, {})
 
     @rule(target=tenants, name=strategies.tenant_database_name)
-    def create_tenant(self, name: str) -> MultipleResults[str]:
+    def create_tenant(self, name: str) -> MultipleResults:  # [str]:
+        tenant = self.overwrite_tenant(name)
         # Check if tenant already exists
-        if self.has_tenant(name):
+        if self.has_tenant(tenant):
             with pytest.raises(Exception):
-                self.admin_client.create_tenant(name)
+                self.admin_client.create_tenant(tenant)
             return multiple()
 
-        self.admin_client.create_tenant(name)
+        self.admin_client.create_tenant(tenant)
         # When we create a tenant, create a default database for it just for testing
         # since the state machine could call collection operations before creating a
         # database
-        self.admin_client.create_database(DEFAULT_DATABASE, tenant=name)
-        self.set_tenant_model(name, {})
-        self.set_database_model_for_tenant(name, DEFAULT_DATABASE, {})
-        return multiple(name)
+        self.admin_client.create_database(DEFAULT_DATABASE, tenant=tenant)
+        self.set_tenant_model(tenant, {})
+        self.set_database_model_for_tenant(tenant, DEFAULT_DATABASE, {})
+        return multiple(tenant)
 
     @rule(target=databases, name=strategies.tenant_database_name)
-    def create_database(self, name: str) -> MultipleResults[Tuple[str, str]]:
+    def create_database(self, name: str) -> MultipleResults:  # [Tuple[str, str]]:
+        database = self.overwrite_database(name)
+        tenant = self.overwrite_tenant(self.curr_tenant)
         # If database already exists in current tenant, raise an error
-        if self.has_database_for_tenant(self.curr_tenant, name):
+        if self.has_database_for_tenant(tenant, database):
             with pytest.raises(Exception):
-                self.admin_client.create_database(name, tenant=self.curr_tenant)
+                self.admin_client.create_database(name=database, tenant=tenant)
             return multiple()
 
-        self.admin_client.create_database(name, tenant=self.curr_tenant)
-        self.set_database_model_for_tenant(self.curr_tenant, name, {})
-        return multiple((name, self.curr_tenant))
+        self.admin_client.create_database(name=database, tenant=tenant)
+        self.set_database_model_for_tenant(
+            tenant=tenant, database=database, database_model={}
+        )
+        return multiple((database, tenant))
 
     @rule(database=databases)
     def set_database_and_tenant(self, database: Tuple[str, str]) -> None:
@@ -98,6 +103,15 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     # preteds to have every key.
     def set_api_tenant_database(self, tenant: str, database: str) -> None:
         self.api.set_tenant(tenant, database)
+
+    # For calls to create_database, and create_tenant we may want to override the tenant and database
+    # This is a leaky abstraction that exists soley for the purpose of
+    # test_collections_with_database_tenant_override.py
+    def overwrite_tenant(self, tenant: str) -> str:
+        return tenant
+
+    def overwrite_database(self, database: str) -> str:
+        return database
 
     def has_tenant(self, tenant: str) -> bool:
         return tenant in self.tenant_to_database_to_model

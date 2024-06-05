@@ -1,5 +1,5 @@
 from typing import Dict, Optional, Tuple
-
+from overrides import overrides
 from hypothesis.stateful import (
     initialize,
     invariant,
@@ -8,10 +8,8 @@ from hypothesis.stateful import (
 )
 
 import uuid
-
 import logging
 import pytest
-
 from chromadb.api import AdminAPI
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import Settings, System
@@ -19,7 +17,6 @@ from chromadb.test.conftest import fastapi_fixture_admin_and_singleton_tenant_db
 from chromadb.test.property.test_collections_with_database_tenant import (
     TenantDatabaseCollectionStateMachine,
 )
-
 import chromadb.test.property.strategies as strategies
 import numpy
 import chromadb.api.types as types
@@ -76,14 +73,11 @@ class SingletonTenantDatabaseCollectionStateMachine(
             self.api = self.singleton_client
             self.admin_client = self.singleton_admin_client
 
-    def has_tenant(self, tenant: str) -> bool:
-        if self.api == self.singleton_client:
-            tenant = SINGLETON_TENANT
-        return tenant in self.tenant_to_database_to_model
-
+    @overrides
     def set_api_tenant_database(self, tenant: str, database: str) -> None:
         self.root_client.set_tenant(tenant, database)
 
+    @overrides
     def get_tenant_model(
         self, tenant: str
     ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
@@ -91,6 +85,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             tenant = SINGLETON_TENANT
         return self.tenant_to_database_to_model[tenant]
 
+    @overrides
     def set_tenant_model(
         self,
         tenant: str,
@@ -105,12 +100,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             raise ValueError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant] = model
 
-    def has_database_for_tenant(self, tenant: str, database: str) -> bool:
-        if self.api == self.singleton_client:
-            tenant = SINGLETON_TENANT
-            database = SINGLETON_DATABASE
-        return database in self.tenant_to_database_to_model[tenant]
-
+    @overrides
     def set_database_model_for_tenant(
         self,
         tenant: str,
@@ -125,6 +115,18 @@ class SingletonTenantDatabaseCollectionStateMachine(
             # when it sends the request, so shouldn't try to update the model.
             raise ValueError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant][database] = database_model
+
+    @overrides
+    def overwrite_database(self, database: str) -> str:
+        if self.api == self.singleton_client:
+            return SINGLETON_DATABASE
+        return database
+
+    @overrides
+    def overwrite_tenant(self, tenant: str) -> str:
+        if self.api == self.singleton_client:
+            return SINGLETON_TENANT
+        return tenant
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:

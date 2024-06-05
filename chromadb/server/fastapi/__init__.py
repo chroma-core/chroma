@@ -1,14 +1,12 @@
 from typing import Any, Callable, cast, Dict, List, Sequence, Optional, Tuple
 import fastapi
 import orjson
-
 from anyio import (
     to_thread,
     CapacityLimiter,
 )
 from fastapi import FastAPI as _FastAPI, Response, Request
 from fastapi.responses import JSONResponse, ORJSONResponse
-
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
@@ -43,9 +41,7 @@ from chromadb.server.fastapi.types import (
     UpdateEmbedding,
 )
 from starlette.datastructures import Headers
-
 import logging
-
 from chromadb.telemetry.product.events import ServerStartEvent
 from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
@@ -56,6 +52,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
+from chromadb.types import Collection as CollectionModel
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +89,7 @@ async def check_http_version_middleware(
     return await call_next(request)
 
 
-class ChromaAPIRouter(fastapi.APIRouter):
+class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a
     # trailing "/" the same as URLs without. Docs will only contain URLs
     # without trailing "/"s.
@@ -491,7 +488,7 @@ class FastAPI(Server):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[CollectionModel]:
         (
             maybe_tenant,
             maybe_database,
@@ -507,7 +504,7 @@ class FastAPI(Server):
         if maybe_database:
             database = maybe_database
 
-        return cast(
+        api_collections = cast(
             Sequence[Collection],
             await to_thread.run_sync(
                 self._api.list_collections,
@@ -518,6 +515,8 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
+
+        return [c.get_model() for c in api_collections]
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     async def count_collections(
@@ -557,7 +556,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> Collection:
@@ -586,7 +585,7 @@ class FastAPI(Server):
                 database=database,
             )
 
-        return cast(
+        api_collection = cast(
             Collection,
             await to_thread.run_sync(
                 process_create_collection,
@@ -597,6 +596,7 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
+        return api_collection.get_model()
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     async def get_collection(
@@ -605,7 +605,7 @@ class FastAPI(Server):
         collection_name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         (
             maybe_tenant,
             maybe_database,
@@ -621,7 +621,7 @@ class FastAPI(Server):
         if maybe_database:
             database = maybe_database
 
-        return cast(
+        api_collection = cast(
             Collection,
             await to_thread.run_sync(
                 self._api.get_collection,
@@ -634,6 +634,7 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
+        return api_collection.get_model()
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
     async def update_collection(

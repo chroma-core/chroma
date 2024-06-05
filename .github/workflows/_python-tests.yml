@@ -8,7 +8,10 @@ on:
         required: false
         default: '["3.8"]'
         type: string
-
+      property_testing_preset:
+        description: 'Property testing preset'
+        required: true
+        type: string
 
 jobs:
   test:
@@ -21,6 +24,8 @@ jobs:
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
@@ -39,6 +44,8 @@ jobs:
       - name: Test
         run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }}  ${{ matrix.test-globs }}
         shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   # todo: break out stress integration tests
   test-single-node-integration:
@@ -51,6 +58,7 @@ jobs:
                    "chromadb/test/test_cli.py",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_collections.py",
+                  "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
@@ -71,6 +79,7 @@ jobs:
       shell: bash
       env:
         ENV_FILE: ${{ matrix.env-file }}
+        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-integration:
     strategy:
@@ -81,6 +90,7 @@ jobs:
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
                    "chromadb/test/test_logservice.py",
@@ -95,6 +105,8 @@ jobs:
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
         shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-thin-client:
     strategy:
@@ -111,6 +123,8 @@ jobs:
       - name: Test
         run: clients/python/integration-test.sh
         shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-stress:
     timeout-minutes: 90
@@ -127,6 +141,8 @@ jobs:
       - name: Test
         run: python -m pytest chromadb/test/stress/
         shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-single-node-integration-stress:
     strategy:
@@ -142,3 +158,5 @@ jobs:
     - name: Integration Test
       run: bin/python-integration-test chromadb/test/stress/
       shell: bash
+      env:
+        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}

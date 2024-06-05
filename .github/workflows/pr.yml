@@ -27,6 +27,8 @@ jobs:
     needs: paths-filter
     if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-tests.yml
+    with:
+      property_testing_preset: 'fast'
 
   python-vulnerability-scan:
     name: Python vulnerability scan

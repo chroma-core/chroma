@@ -3,7 +3,6 @@ import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
 from uuid import UUID
-
 import requests
 from overrides import override
 
@@ -41,6 +40,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from urllib.parse import urlparse, urlunparse, quote
+from chromadb.types import Collection as CollectionModel
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +209,16 @@ class FastAPI(ServerAPI):
         json_collections = json.loads(resp.text)
         collections = []
         for json_collection in json_collections:
-            collections.append(Collection(self, **json_collection))
+            model = CollectionModel(
+                id=json_collection["id"],
+                name=json_collection["name"],
+                metadata=json_collection["metadata"],
+                dimension=json_collection["dimension"],
+                tenant=json_collection["tenant"],
+                database=json_collection["database"],
+                version=json_collection["version"],
+            )
+            collections.append(Collection(self, model=model))
 
         return collections
 
@@ -254,13 +263,20 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = json.loads(resp.text)
-        return Collection(
-            client=self,
+        model = CollectionModel(
             id=resp_json["id"],
             name=resp_json["name"],
+            metadata=resp_json["metadata"],
+            dimension=resp_json["dimension"],
+            tenant=resp_json["tenant"],
+            database=resp_json["database"],
+            version=resp_json["version"],
+        )
+        return Collection(
+            client=self,
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -288,13 +304,20 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = json.loads(resp.text)
+        model = CollectionModel(
+            id=resp_json["id"],
+            name=resp_json["name"],
+            metadata=resp_json["metadata"],
+            dimension=resp_json["dimension"],
+            tenant=resp_json["tenant"],
+            database=resp_json["database"],
+            version=resp_json["version"],
+        )
         return Collection(
             client=self,
-            name=resp_json["name"],
-            id=resp_json["id"],
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method(

@@ -1,5 +1,6 @@
 import pytest
 import logging
+import hypothesis
 import hypothesis.strategies as st
 from hypothesis import given
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
@@ -23,6 +24,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
+from chromadb.test.conftest import override_hypothesis_profile
 import numpy as np
 
 
@@ -297,7 +299,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: EmbeddingStateMachine(api))  # type: ignore
+    run_state_machine_as_test(
+        lambda: EmbeddingStateMachine(api),
+        settings=override_hypothesis_profile(fast=hypothesis.settings(max_examples=10)),
+    )  # type: ignore
     print_traces()
 
 
