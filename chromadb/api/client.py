@@ -88,9 +88,12 @@ class Client(SharedSystemClient, ClientAPI):
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[Collection]:
-        return self._server.list_collections(
-            limit, offset, tenant=self.tenant, database=self.database
-        )
+        return [
+            Collection(client=self._server, model=model)
+            for model in self._server.list_collections(
+                limit, offset, tenant=self.tenant, database=self.database
+            )
+        ]
 
     @override
     def count_collections(self) -> int:
@@ -109,7 +112,7 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        return self._server.create_collection(
+        model = self._server.create_collection(
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
@@ -117,6 +120,12 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -129,13 +138,19 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_collection(
+        model = self._server.get_collection(
             id=id,
             name=name,
             embedding_function=embedding_function,
             data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -148,13 +163,19 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_or_create_collection(
+        model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
             data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override

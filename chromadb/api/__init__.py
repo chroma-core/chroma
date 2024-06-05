@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import Generic, Sequence, Optional, TypeVar
 from uuid import UUID
 
 from overrides import override
@@ -26,7 +26,9 @@ from chromadb.api.types import (
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
-from chromadb.types import Collection as CollectionModel
+from chromadb.api.models.Collection import Collection
+
+T = TypeVar("T", CollectionModel, Collection)
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -37,7 +39,7 @@ from chromadb.api.async_api import (  # noqa: F401
 )
 
 
-class BaseAPI(ABC):
+class BaseAPI(ABC, Generic[T]):
     @abstractmethod
     def heartbeat(self) -> int:
         """Get the current time in nanoseconds since epoch.
@@ -58,7 +60,7 @@ class BaseAPI(ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[CollectionModel]:
+    ) -> Sequence[T]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
@@ -100,7 +102,7 @@ class BaseAPI(ABC):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
-    ) -> CollectionModel:
+    ) -> T:
         """Create a new collection with the given name and metadata.
         Args:
             name: The name of the collection to create.
@@ -137,7 +139,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> CollectionModel:
+    ) -> T:
         """Get a collection with the given name.
         Args:
             id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
@@ -169,7 +171,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> CollectionModel:
+    ) -> T:
         """Get or create a collection with the given name and metadata.
         Args:
             name: The name of the collection to get or create
@@ -448,7 +450,7 @@ class BaseAPI(ABC):
         pass
 
 
-class ClientAPI(BaseAPI, ABC):
+class ClientAPI(BaseAPI[Collection], ABC):
     tenant: str
     database: str
 
@@ -525,7 +527,7 @@ class AdminAPI(ABC):
         pass
 
 
-class ServerAPI(BaseAPI, AdminAPI, Component):
+class ServerAPI(BaseAPI[CollectionModel], AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
     in a tenant and database. This is the root component of the Chroma System"""
 
