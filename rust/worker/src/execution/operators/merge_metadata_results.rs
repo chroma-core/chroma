@@ -168,7 +168,16 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         };
 
         // Step 1: Materialize the logs.
-        let materializer = LogMaterializer::new(record_segment_reader, input.filtered_log.clone());
+        let mut offset_id = Arc::new(AtomicU32::new(1));
+        match record_segment_reader.as_ref() {
+            Some(reader) => {
+                offset_id = reader.get_current_max_offset_id();
+                offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            None => {}
+        };
+        let materializer =
+            LogMaterializer::new(record_segment_reader, input.filtered_log.clone(), offset_id);
         let mat_records = match materializer.materialize().await {
             Ok(records) => records,
             Err(e) => {
@@ -485,7 +494,8 @@ mod test {
                     };
                 }
             };
-            let materializer = LogMaterializer::new(record_segment_reader, data);
+            let materializer =
+                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
             let mat_records = materializer
                 .materialize()
                 .await
@@ -773,7 +783,8 @@ mod test {
                     };
                 }
             };
-            let materializer = LogMaterializer::new(record_segment_reader, data);
+            let materializer =
+                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
             let mat_records = materializer
                 .materialize()
                 .await

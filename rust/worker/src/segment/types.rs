@@ -260,32 +260,24 @@ pub(crate) struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
     pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
     pub(crate) logs: Chunk<LogRecord>,
+    pub(crate) offset_id: Arc<AtomicU32>,
 }
 
 impl<'me> LogMaterializer<'me> {
     pub(crate) fn new(
         record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
+        offset_id: Arc<AtomicU32>,
     ) -> Self {
         Self {
             record_segment_reader,
             logs,
+            offset_id,
         }
     }
     pub(crate) async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
-        // Get the current max offset id.
-        // Offset Ids start from 1.
-        let mut curr_max_offset_id = Arc::new(AtomicU32::new(1));
-        match &self.record_segment_reader {
-            Some(reader) => {
-                curr_max_offset_id = reader.get_current_max_offset_id();
-                curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            None => (),
-        };
-
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
@@ -335,8 +327,9 @@ impl<'me> LogMaterializer<'me> {
                     if !existing_id_to_materialized.contains_key(log_record.record.id.as_str())
                         && !new_id_to_materialized.contains_key(log_record.record.id.as_str())
                     {
-                        let next_offset_id =
-                            curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let next_offset_id = self
+                            .offset_id
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset_id,
@@ -470,8 +463,9 @@ impl<'me> LogMaterializer<'me> {
                         record_from_map.final_operation = Operation::Add;
                     } else {
                         // Insert.
-                        let next_offset_id =
-                            curr_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let next_offset_id = self
+                            .offset_id
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset_id,
@@ -625,7 +619,8 @@ mod tests {
                     };
                 }
             };
-            let materializer = LogMaterializer::new(record_segment_reader, data);
+            let materializer =
+                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
             let mat_records = materializer
                 .materialize()
                 .await
@@ -690,6 +685,7 @@ mod tests {
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
+            offset_id: Arc::new(AtomicU32::new(3)),
         };
         let res = materializer
             .materialize()
