@@ -22,6 +22,7 @@ import uvicorn
 from requests.exceptions import ConnectionError
 from typing_extensions import Protocol
 
+from chromadb.api.fastapi_async import FastAPIAsync
 import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
@@ -544,6 +545,13 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
     api = system.instance(ServerAPI)
     yield api
+
+
+@pytest.fixture(scope="function")
+async def api_async(system: System):
+    # todo: use system.instance instead?
+    async with FastAPIAsync(system) as api:
+        yield api
 
 
 @pytest.fixture(scope="function")

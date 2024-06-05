@@ -1,3 +1,4 @@
+aiohttp>=3.9.5
 bcrypt>=4.0.1
 chroma-hnswlib>=0.7.3
 fastapi>=0.95.2
