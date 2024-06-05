@@ -62,6 +62,12 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
     normalized_record_set = wrap_all(record_set)
+    if count == len(normalized_record_set["ids"]):
+        print("SUCCESS count is equal to the number of embeddings")
+    else:
+        print(
+            f"FAILURE count is not equal to the number of embeddings: {count} != {len(normalized_record_set['ids'])}"
+        )
     assert count == len(normalized_record_set["ids"])
 
 
@@ -263,15 +269,33 @@ def ann_accuracy(
                 else:
                     continue
             else:
+                if not correct_distance:
+                    print(
+                        f"FAIL distance mismatch: {distances_i[index]} != {query_results['distances'][i][j]}"
+                    )
                 assert correct_distance
 
             assert np.allclose(embeddings[index], query_results["embeddings"][i][j])
             if normalized_record_set["documents"] is not None:
+                if not (
+                    normalized_record_set["documents"][index]
+                    == query_results["documents"][i][j]
+                ):
+                    print(
+                        f"FAIL document mismatch: {normalized_record_set['documents'][index]} != {query_results['documents'][i][j]}"
+                    )
                 assert (
                     normalized_record_set["documents"][index]
                     == query_results["documents"][i][j]
                 )
             if normalized_record_set["metadatas"] is not None:
+                if not (
+                    normalized_record_set["metadatas"][index]
+                    == query_results["metadatas"][i][j]
+                ):
+                    print(
+                        f"FAIL metadata mismatch: {normalized_record_set['metadatas'][index]} != {query_results['metadatas'][i][j]}"
+                    )
                 assert (
                     normalized_record_set["metadatas"][index]
                     == query_results["metadatas"][i][j]
@@ -291,4 +315,6 @@ def ann_accuracy(
 
     # Ensure that the query results are sorted by distance
     for distance_result in query_results["distances"]:
+        if not np.allclose(np.sort(distance_result), distance_result):
+            print(f"FAIL distance_result: {distance_result}")
         assert np.allclose(np.sort(distance_result), distance_result)

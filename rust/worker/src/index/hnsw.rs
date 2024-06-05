@@ -98,10 +98,11 @@ impl HnswIndexConfig {
             }
         }
 
-        let max_elements = get_metadata_value_as::<i32>(metadata, "hsnw:max_elements")?;
-        let m = get_metadata_value_as::<i32>(metadata, "hnsw:m")?;
-        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:ef_construction")?;
-        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:ef_search")?;
+        // TODO: MOVE DEFAULT CAPACITY OUT OF HERE
+        let max_elements = 10000;
+        let m = get_metadata_value_as::<i32>(metadata, "hnsw:M")?;
+        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:construction_ef")?;
+        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:search_ef")?;
         return Ok(HnswIndexConfig {
             max_elements: max_elements as usize,
             m: m as usize,

@@ -59,7 +59,7 @@ compaction_service:
             host: "logservice.chroma"
             port: 50051
     dispatcher:
-        num_worker_threads: 4
+        num_worker_threads: 1
         dispatcher_queue_size: 100
         worker_queue_size: 100
     compactor:
