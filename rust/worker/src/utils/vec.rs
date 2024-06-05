@@ -1,4 +1,4 @@
-pub(crate) fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+pub(crate) fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: &Vec<T>, b: &Vec<T>) -> Vec<T> {
     let mut result = Vec::with_capacity(a.len() + b.len());
     let mut a_idx = 0;
     let mut b_idx = 0;
@@ -31,7 +31,7 @@ pub(crate) fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: Vec<T>, b: Vec<T>
     result
 }
 
-pub(crate) fn merge_sorted_vecs_conjunction<T: Ord + Clone>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+pub(crate) fn merge_sorted_vecs_conjunction<T: Ord + Clone>(a: &Vec<T>, b: &Vec<T>) -> Vec<T> {
     let mut result = Vec::with_capacity(a.len() + b.len());
     let mut a_idx = 0;
     let mut b_idx = 0;
@@ -57,7 +57,7 @@ mod tests {
     fn test_merge_sorted_vecs_disjunction_rhs_empty() {
         let a = vec![1, 3, 5, 7, 9];
         let b = vec![];
-        let result = super::merge_sorted_vecs_disjunction(a, b);
+        let result = super::merge_sorted_vecs_disjunction(&a, &b);
         assert_eq!(result, vec![1, 3, 5, 7, 9]);
     }
 
@@ -65,7 +65,7 @@ mod tests {
     fn test_merge_sorted_vecs_disjunction_lhs_empty() {
         let a = vec![];
         let b = vec![2, 4, 6, 8, 10];
-        let result = super::merge_sorted_vecs_disjunction(a, b);
+        let result = super::merge_sorted_vecs_disjunction(&a, &b);
         assert_eq!(result, vec![2, 4, 6, 8, 10]);
     }
 
@@ -73,7 +73,7 @@ mod tests {
     fn test_merge_sorted_vecs_disjunction_both_empty() {
         let a: Vec<i32> = vec![];
         let b: Vec<i32> = vec![];
-        let result = super::merge_sorted_vecs_disjunction(a, b);
+        let result = super::merge_sorted_vecs_disjunction(&a, &b);
         assert!(result.is_empty())
     }
 
@@ -81,7 +81,7 @@ mod tests {
     fn test_merge_sorted_vecs_disjunction_both_populated() {
         let a = vec![1, 3, 5, 7, 9];
         let b = vec![2, 4, 6, 8, 10];
-        let result = super::merge_sorted_vecs_disjunction(a, b);
+        let result = super::merge_sorted_vecs_disjunction(&a, &b);
         assert_eq!(result, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
@@ -89,7 +89,7 @@ mod tests {
     fn test_merge_sorted_vecs_disjunction_lhs_subset() {
         let a = vec![1, 3, 5];
         let b = vec![2, 4, 6, 8, 10];
-        let result = super::merge_sorted_vecs_disjunction(a, b);
+        let result = super::merge_sorted_vecs_disjunction(&a, &b);
         assert_eq!(result, vec![1, 2, 3, 4, 5, 6, 8, 10]);
     }
 
@@ -97,7 +97,7 @@ mod tests {
     fn test_merge_sorted_vecs_conjunct_both_empty() {
         let a: Vec<i32> = vec![];
         let b: Vec<i32> = vec![];
-        let result = super::merge_sorted_vecs_conjunction(a, b);
+        let result = super::merge_sorted_vecs_conjunction(&a, &b);
         assert!(result.is_empty())
     }
 
@@ -105,7 +105,7 @@ mod tests {
     fn test_merge_sorted_vecs_conjunct_lhs_empty() {
         let a = vec![];
         let b = vec![2, 4, 6, 8, 10];
-        let result = super::merge_sorted_vecs_conjunction(a, b);
+        let result = super::merge_sorted_vecs_conjunction(&a, &b);
         assert!(result.is_empty())
     }
 
@@ -113,7 +113,7 @@ mod tests {
     fn test_merge_sorted_vecs_conjunct_rhs_empty() {
         let a = vec![1, 3, 5, 7, 9];
         let b = vec![];
-        let result = super::merge_sorted_vecs_conjunction(a, b);
+        let result = super::merge_sorted_vecs_conjunction(&a, &b);
         assert!(result.is_empty())
     }
 
@@ -121,7 +121,7 @@ mod tests {
     fn test_merge_sorted_vecs_conjunct_both_populated() {
         let a = vec![1, 3, 5, 7, 9];
         let b = vec![2, 3, 5, 8, 10];
-        let result = super::merge_sorted_vecs_conjunction(a, b);
+        let result = super::merge_sorted_vecs_conjunction(&a, &b);
         assert_eq!(result, vec![3, 5]);
     }
 
@@ -129,7 +129,7 @@ mod tests {
     fn test_merge_sorted_vecs_conjunct_lhs_subset() {
         let a = vec![1, 3, 5];
         let b = vec![1, 2, 3, 5, 8, 10];
-        let result = super::merge_sorted_vecs_conjunction(a, b);
+        let result = super::merge_sorted_vecs_conjunction(&a, &b);
         assert_eq!(result, vec![1, 3, 5]);
     }
 
@@ -137,7 +137,7 @@ mod tests {
     fn test_merge_sorted_vecs_conjunct_rhs_subset() {
         let a = vec![1, 3, 5, 7, 9];
         let b = vec![1, 2, 3, 5];
-        let result = super::merge_sorted_vecs_conjunction(a, b);
+        let result = super::merge_sorted_vecs_conjunction(&a, &b);
         assert_eq!(result, vec![1, 3, 5]);
     }
 }

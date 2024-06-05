@@ -515,10 +515,10 @@ pub(crate) fn process_where_document_clause_with_callback<
                 } else {
                     match where_document_children.operator {
                         BooleanOperator::And => {
-                            results = merge_sorted_vecs_conjunction(results, child_results);
+                            results = merge_sorted_vecs_conjunction(&results, &child_results);
                         }
                         BooleanOperator::Or => {
-                            results = merge_sorted_vecs_disjunction(results, child_results);
+                            results = merge_sorted_vecs_disjunction(&results, &child_results);
                         }
                     }
                 }
