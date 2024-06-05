@@ -4,7 +4,6 @@ from uuid import UUID
 
 from overrides import override
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
-from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -25,7 +24,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component, Settings
-from chromadb.types import Database, Tenant
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
 from chromadb.types import Collection as CollectionModel
 
@@ -59,7 +58,7 @@ class BaseAPI(ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[CollectionModel]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
@@ -101,7 +100,7 @@ class BaseAPI(ABC):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
-    ) -> Collection:
+    ) -> CollectionModel:
         """Create a new collection with the given name and metadata.
         Args:
             name: The name of the collection to create.
@@ -138,7 +137,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Collection:
+    ) -> CollectionModel:
         """Get a collection with the given name.
         Args:
             id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
@@ -170,7 +169,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Collection:
+    ) -> CollectionModel:
         """Get or create a collection with the given name and metadata.
         Args:
             name: The name of the collection to get or create
@@ -538,7 +537,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[CollectionModel]:
         pass
 
     @abstractmethod
@@ -561,7 +560,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
@@ -576,7 +575,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
@@ -591,7 +590,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
