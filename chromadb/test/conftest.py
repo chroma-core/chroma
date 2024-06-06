@@ -32,8 +32,16 @@ from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
 
+VALID_PRESETS = ["fast", "normal", "slow"]
+CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
+
+if CURRENT_PRESET not in VALID_PRESETS:
+    raise ValueError(
+        f"Invalid property testing preset: {CURRENT_PRESET}. Must be one of {VALID_PRESETS}."
+    )
+
 hypothesis.settings.register_profile(
-    "dev",
+    "base",
     deadline=45000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
@@ -41,7 +49,63 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
 )
-hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
+
+hypothesis.settings.register_profile(
+    "fast", hypothesis.settings.get_profile("base"), max_examples=50
+)
+# Hypothesis's default max_examples is 100
+hypothesis.settings.register_profile(
+    "normal", hypothesis.settings.get_profile("base"), max_examples=100
+)
+hypothesis.settings.register_profile(
+    "slow", hypothesis.settings.get_profile("base"), max_examples=200
+)
+
+hypothesis.settings.load_profile(CURRENT_PRESET)
+
+
+def override_hypothesis_profile(
+    fast: Optional[hypothesis.settings] = None,
+    normal: Optional[hypothesis.settings] = None,
+    slow: Optional[hypothesis.settings] = None,
+) -> Optional[hypothesis.settings]:
+    """Override Hypothesis settings for specific profiles.
+
+    For example, to override max_examples only when the current profile is 'fast':
+
+    override_hypothesis_profile(
+        fast=hypothesis.settings(max_examples=50),
+    )
+
+    Settings will be merged with the default/active profile.
+    """
+
+    allowable_override_keys = [
+        "deadline",
+        "max_examples",
+        "stateful_step_count",
+        "suppress_health_check",
+    ]
+
+    override_profiles = {
+        "fast": fast,
+        "normal": normal,
+        "slow": slow,
+    }
+
+    overriding_profile = override_profiles.get(CURRENT_PRESET)
+
+    if overriding_profile is not None:
+        overridden_settings = {
+            key: value
+            for key, value in overriding_profile.__dict__.items()
+            if key in allowable_override_keys
+        }
+
+        return hypothesis.settings(hypothesis.settings.default, **overridden_settings)
+
+    return hypothesis.settings.default
+
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
 MEMBERLIST_SLEEP = 5
