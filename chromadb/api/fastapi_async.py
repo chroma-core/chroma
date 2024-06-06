@@ -411,15 +411,11 @@ class FastAPIAsync(ServerAPIAsync):
         collection_id: UUID,
         n: int = 10,
     ) -> GetResult:
-        "oasidhiosdf"
-        # return cast(
-        #     GetResult,
-        #     self._get(
-        #         collection_id,
-        #         limit=n,
-        #         include=["embeddings", "documents", "metadatas"],
-        #     ),
-        # )
+        return await self._get(
+            collection_id,
+            limit=n,
+            include=["embeddings", "documents", "metadatas"],
+        )
 
     @trace_method("FastAPI._get", OpenTelemetryGranularity.OPERATION)
     @override
@@ -530,7 +526,7 @@ class FastAPIAsync(ServerAPIAsync):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size})
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
 
@@ -545,17 +541,14 @@ class FastAPIAsync(ServerAPIAsync):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        """
-        Updates a batch of embeddings in the database
-        - pass in column oriented data lists
-        """
-        # batch = (ids, embeddings, metadatas, documents, uris)
-        # validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        # resp = self._submit_batch(
-        #     batch, "/collections/" + str(collection_id) + "/update"
-        # )
-        # raise_chroma_error(resp)
-        # return True
+        batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
+
+        await self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/update"
+        )
+
+        return True
 
     @trace_method("FastAPI._upsert", OpenTelemetryGranularity.ALL)
     @override
@@ -568,17 +561,12 @@ class FastAPIAsync(ServerAPIAsync):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        """
-        Upserts a batch of embeddings in the database
-        - pass in column oriented data lists
-        """
-        # batch = (ids, embeddings, metadatas, documents, uris)
-        # validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        # resp = self._submit_batch(
-        #     batch, "/collections/" + str(collection_id) + "/upsert"
-        # )
-        # raise_chroma_error(resp)
-        # return True
+        batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
+        await self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/upsert"
+        )
+        return True
 
     @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)
     @override
@@ -619,18 +607,14 @@ class FastAPIAsync(ServerAPIAsync):
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
     @override
     async def reset(self) -> bool:
-        """Resets the database"""
-        # resp = self._session.post(self._api_url + "/reset")
-        # raise_chroma_error(resp)
-        # return cast(bool, json.loads(resp.text))
+        resp_json = await self._make_request("post", self._api_url + "/reset")
+        return cast(bool, resp_json)
 
     @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_version(self) -> str:
-        """Returns the version of the server"""
-        # resp = self._session.get(self._api_url + "/version")
-        # raise_chroma_error(resp)
-        # return cast(str, json.loads(resp.text))
+        resp_json = await self._make_request("get", self._api_url + "/version")
+        return cast(str, resp_json)
 
     @override
     async def get_settings(self) -> Settings:
@@ -638,22 +622,14 @@ class FastAPIAsync(ServerAPIAsync):
         # return self._settings
 
     # todo: cleanup
-    @property
     @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
+    @override
     async def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
             resp_json = await self._make_request(
                 "get", self._api_url + "/pre-flight-checks"
             )
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
-        return self._max_batch_size
-
-    @property
-    @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)
-    @override
-    def max_batch_size(self) -> int:
-        if self._max_batch_size == -1:
-            raise ValueError("max_batch_size is not yet set")
         return self._max_batch_size
 
 
@@ -678,7 +654,7 @@ async def raise_chroma_error(resp: aiohttp.ClientResponse) -> Any:
     try:
         resp.raise_for_status()
     except aiohttp.ClientResponseError:
-        raise (Exception(resp.text))
+        raise (Exception(await resp.text()))
 
 
 # todo: move to test directory?

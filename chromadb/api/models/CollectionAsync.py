@@ -154,6 +154,10 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
         return get_results
 
     @overrides
+    async def peek(self, limit: int = 10) -> GetResult:
+        return await self._client._peek(self.id, limit)
+
+    @overrides
     async def query(
         self,
         query_embeddings: Optional[
@@ -274,6 +278,87 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
+
+    @overrides
+    async def update(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
+    ) -> None:
+        (
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+            require_embeddings_or_data=False,
+        )
+
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(input=documents)
+            elif images is not None:
+                embeddings = self._embed(input=images)
+
+        await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+
+    @overrides
+    async def upsert(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
+    ) -> None:
+        (
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
+        )
+
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(input=documents)
+            else:
+                embeddings = self._embed(input=images)
+
+        await self._client._upsert(
+            collection_id=self.id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+        )
 
     @overrides
     async def delete(
