@@ -11,8 +11,7 @@ import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
-from chromadb import Client, config
-from chromadb.api import ServerAPI
+from chromadb import config
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -104,7 +103,7 @@ def patch_for_version(
 def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
     if packaging_version.Version(version) <= packaging_version.Version("0.4.14"):
         return module.api.API  # type: ignore
-    return module.api.ClientAPI  # type: ignore
+    return module.api.ServerAPI  # type: ignore
 
 
 def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
@@ -223,7 +222,8 @@ def persist_generated_data_with_old_version(
         api = system.instance(api_import_for_version(old_module, version))
         system.start()
 
-        coll = client.create_collection(
+        api.reset()
+        coll = api.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,
             # In order to test old versions, we can't rely on the not_implemented function
@@ -251,7 +251,7 @@ def persist_generated_data_with_old_version(
 
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
-collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
+collection_st: st.SearchStrategy[strategies.Collection] = st.shared(  # type: ignore[type-arg]
     strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
 )
 
@@ -312,7 +312,6 @@ def test_cycle_versions(
     system = config.System(settings)
     system.start()
     client = ClientCreator.from_system(system)
-
     coll = client.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
