@@ -9,7 +9,7 @@ from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -74,7 +74,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, api: ServerAPI):
+    def __init__(self, api: ClientAPI):
         super().__init__()
         self.api = api
         self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
@@ -413,10 +413,128 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
                 self.unique_ids_in_log.add(id)
 
 
-def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
+class EmbeddingStateMachine(EmbeddingStateMachineBase):
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
+
+    def __init__(self, api: ClientAPI):
+        super().__init__(api)
+
+    @initialize(collection=collection_st)  # type: ignore
+    def initialize(self, collection: strategies.Collection):
+        super().initialize(collection)
+        print("[test_embeddings] Reset")
+        self.log_operation_count = 0
+        self.unique_ids_in_log = set()
+        self.collection_version = self.collection.get_model()["version"]
+
+    @precondition(
+        lambda self: not NOT_CLUSTER_ONLY
+        and self.log_operation_count > 10
+        and len(self.unique_ids_in_log) > 3
+    )
+    @rule()
+    def wait_for_compaction(self) -> None:
+        current_version = get_collection_version(self.api, self.collection.name)
+        assert current_version >= self.collection_version
+        # This means that there was a compaction from the last time this was
+        # invoked. Ok to start all over again.
+        if current_version > self.collection_version:
+            print(
+                "[test_embeddings][wait_for_compaction] collection version has changed, so reset to 0"
+            )
+            self.collection_version = current_version
+            # This is fine even if the log has some records right now
+            self.log_operation_count = 0
+            self.unique_ids_in_log = set()
+        else:
+            print("[test_embeddings][wait_for_compaction] wait for version to increase")
+            new_version = wait_for_version_increase(
+                self.api, self.collection.name, current_version, additional_time=240
+            )
+            # Everything got compacted.
+            self.log_operation_count = 0
+            self.unique_ids_in_log = set()
+            self.collection_version = new_version
+
+    @rule(
+        target=embedding_ids,
+        record_set=strategies.recordsets(collection_st),
+    )
+    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
+        res = super().add_embeddings(record_set)
+        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
+            record_set
+        )
+        print(
+            "[test_embeddings][add] Non Intersection ids ",
+            normalized_record_set["ids"],
+            " len ",
+            len(normalized_record_set["ids"]),
+        )
+        self.log_operation_count += len(normalized_record_set["ids"])
+        for id in normalized_record_set["ids"]:
+            if id not in self.unique_ids_in_log:
+                self.unique_ids_in_log.add(id)
+        return res
+
+    @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
+    def delete_by_ids(self, ids: IDs) -> None:
+        super().delete_by_ids(ids)
+        print("[test_embeddings][delete] ids ", ids, " len ", len(ids))
+        self.log_operation_count += len(ids)
+        for id in ids:
+            if id in self.unique_ids_in_log:
+                self.unique_ids_in_log.remove(id)
+
+    # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
+    # Using a value < 5 causes retries and lowers the number of valid samples
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 5)
+    @rule(
+        record_set=strategies.recordsets(
+            collection_strategy=collection_st,
+            id_strategy=embedding_ids,
+            min_size=1,
+            max_size=5,
+        ),
+    )
+    def update_embeddings(self, record_set: strategies.RecordSet) -> None:
+        super().update_embeddings(record_set)
+        print(
+            "[test_embeddings][update] ids ",
+            record_set["ids"],
+            " len ",
+            len(invariants.wrap(record_set["ids"])),
+        )
+        self.log_operation_count += len(invariants.wrap(record_set["ids"]))
+
+    # Using a value < 3 causes more retries and lowers the number of valid samples
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
+    @rule(
+        record_set=strategies.recordsets(
+            collection_strategy=collection_st,
+            id_strategy=st.one_of(embedding_ids, strategies.safe_text),
+            min_size=1,
+            max_size=5,
+        )
+    )
+    def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
+        super().upsert_embeddings(record_set)
+        print(
+            "[test_embeddings][upsert] ids ",
+            record_set["ids"],
+            " len ",
+            len(invariants.wrap(record_set["ids"])),
+        )
+        self.log_operation_count += len(invariants.wrap(record_set["ids"]))
+        for id in invariants.wrap(record_set["ids"]):
+            if id not in self.unique_ids_in_log:
+                self.unique_ids_in_log.add(id)
+
+
+def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
-        lambda: EmbeddingStateMachine(api),
+        lambda: EmbeddingStateMachine(client),
         settings=settings(
             deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
         ),
@@ -531,9 +649,63 @@ def test_update_none(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     state.teardown()
 
 
-def test_multi_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    state = EmbeddingStateMachine(client)
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+            },
+            embedding_function=None,
+            id=uuid.UUID("2fb0c945-b877-42ab-9417-bfe0f6b172af"),
+            dimension=2,
+            dtype=np.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    v1, v2, v3, v4, v5 = state.add_embeddings(
+        record_set={
+            "ids": ["0", "1", "2", "3", "4"],
+            "embeddings": [
+                [0.09765625, 0.430419921875],
+                [0.20556640625, 0.08978271484375],
+                [-0.1527099609375, 0.291748046875],
+                [-0.12481689453125, 0.78369140625],
+                [0.92724609375, -0.233154296875],
+            ],
+            "metadatas": [None, None, None, None, None],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.update_embeddings(
+        record_set={
+            "ids": [v5],
+            "embeddings": [[0.58349609375, 0.05780029296875]],
+            "metadatas": [{v1: v1}],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.teardown()
+
+
+def test_multi_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
@@ -550,18 +722,18 @@ def test_multi_add(api: ServerAPI) -> None:
     assert coll.count() == 0
 
 
-def test_dup_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_dup_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
     with pytest.raises(errors.DuplicateIDError):
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
-def test_query_without_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_query_without_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
     N = np.random.randint(1, 2000)
     K = np.random.randint(1, 100)
@@ -574,9 +746,9 @@ def test_query_without_add(api: ServerAPI) -> None:
         assert all([len(result) == 0 for result in field_results])
 
 
-def test_get_non_existent(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_get_non_existent(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
     assert len(result["ids"]) == 0
     assert len(result["metadatas"]) == 0
@@ -586,10 +758,10 @@ def test_get_non_existent(api: ServerAPI) -> None:
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api: ServerAPI) -> None:
-    reset(api)
+def test_escape_chars_in_ids(client: ClientAPI) -> None:
+    client.reset()
     id = "\x1f"
-    coll = api.create_collection(name="foo")
+    coll = client.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])
     assert coll.count() == 1
     coll.delete(ids=[id])
@@ -606,9 +778,9 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
         {"where_document": {}, "where": {}},
     ],
 )
-def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_empty_fails(client: ClientAPI, kwargs: dict):
+    client.reset()
+    coll = client.create_collection(name="foo")
     with pytest.raises(Exception) as e:
         coll.delete(**kwargs)
     assert "You must provide either ids, where, or where_document to delete." in str(e)
@@ -629,9 +801,9 @@ def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
         },
     ],
 )
-def test_delete_success(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_success(client: ClientAPI, kwargs: dict):
+    client.reset()
+    coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
 
