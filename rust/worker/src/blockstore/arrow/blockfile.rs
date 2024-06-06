@@ -1225,7 +1225,7 @@ mod tests {
         let writer = blockfile_provider.create::<u32, &DataRecord>().unwrap();
         let id = writer.id();
 
-        let collection_id = uuid::uuid!("502df363-6da6-424b-a5ba-668b3f208fa9");
+        let collection_id = uuid::uuid!("26b46c42-37f0-4d91-8118-c3790d503901");
         let log = log::from_config(&config::LogConfig::Grpc(GrpcLogConfig {
             host: "localhost".to_string(),
             port: 50052,
