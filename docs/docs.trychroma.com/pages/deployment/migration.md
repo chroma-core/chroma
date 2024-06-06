@@ -20,6 +20,12 @@ We will aim to provide:
 
 ## Migration Log
 
+### Unreleased
+
+It wasn't previously documented, but if you were reading `.max_batch_size` on the Python client, you should now use `.get_max_batch_size()`.
+
+The first time this is run, it makes a HTTP request. We made this a method to make it more clear that it's potentially a blocking operation.
+
 ### Auth overhaul - April 20, 2024
 
 **If you are not using Chroma's [built-in auth system](https://docs.trychroma.com/deployment/auth), you do not need to take any action.**
