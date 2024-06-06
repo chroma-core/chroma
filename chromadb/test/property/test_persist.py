@@ -27,6 +27,7 @@ import hypothesis
 import os
 import shutil
 import tempfile
+from chromadb.api.client import Client as ClientCreator
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
@@ -73,11 +74,11 @@ def test_persist(
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
     system_1 = System(settings)
-    api_1 = system_1.instance(ServerAPI)
     system_1.start()
+    client_1 = ClientCreator.from_system(system_1)
 
-    api_1.reset()
-    coll = api_1.create_collection(
+    client_1.reset()
+    coll = client_1.create_collection(
         name=collection_strategy.name,
         metadata=collection_strategy.metadata,
         embedding_function=collection_strategy.embedding_function,
@@ -101,14 +102,14 @@ def test_persist(
     )
 
     system_1.stop()
-    del api_1
+    del client_1
     del system_1
 
     system_2 = System(settings)
-    api_2 = system_2.instance(ServerAPI)
     system_2.start()
+    client_2 = ClientCreator.from_system(system_2)
 
-    coll = api_2.get_collection(
+    coll = client_2.get_collection(
         name=collection_strategy.name,
         embedding_function=collection_strategy.embedding_function,
     )
@@ -123,7 +124,7 @@ def test_persist(
     )
 
     system_2.stop()
-    del api_2
+    del client_2
     del system_2
 
 
@@ -173,19 +174,19 @@ class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
 
 
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
-    def __init__(self, api: ClientAPI, settings: Settings):
-        self.api = api
+    def __init__(self, client: ClientAPI, settings: Settings):
+        self.client = client
         self.settings = settings
         self.last_persist_delay = 10
-        self.api.reset()
-        super().__init__(self.api)
+        self.client.reset()
+        super().__init__(self.client)
 
     @initialize(collection=embedding_collection_st, batch_size=st.integers(min_value=3, max_value=2000), sync_threshold=st.integers(min_value=3, max_value=2000))  # type: ignore
     def initialize(
         self, collection: strategies.Collection, batch_size: int, sync_threshold: int
     ):
-        self.api.reset()
-        self.collection = self.api.create_collection(
+        self.client.reset()
+        self.collection = self.client.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             embedding_function=collection.embedding_function,
@@ -228,16 +229,16 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
             self.last_persist_delay -= 1
 
     def teardown(self) -> None:
-        self.api.reset()
+        self.client.reset()
 
 
 def test_persist_embeddings_state(
     caplog: pytest.LogCaptureFixture, settings: Settings
 ) -> None:
     caplog.set_level(logging.ERROR)
-    api = chromadb.Client(settings)
+    client = chromadb.Client(settings)
     run_state_machine_as_test(
-        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api),
+        lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
         # For small max_example values, the test may not generate any examples that pass the precondition for persist().
         # This value makes it much more likely that the precondition will be satisfied and thus the rule will be exercised.
         _min_steps=10,
