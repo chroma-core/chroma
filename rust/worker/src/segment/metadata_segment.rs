@@ -37,6 +37,7 @@ const BOOL_METADATA: &str = "bool_metadata";
 const F32_METADATA: &str = "f32_metadata";
 const U32_METADATA: &str = "u32_metadata";
 
+#[derive(Clone)]
 pub(crate) struct MetadataSegmentWriter<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter<'me>>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,

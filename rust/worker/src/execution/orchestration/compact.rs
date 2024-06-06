@@ -26,6 +26,8 @@ use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
+use crate::segment::metadata_segment::MetadataSegmentWriter;
+use crate::segment::record_segment;
 use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentWriter;
@@ -110,10 +112,14 @@ enum GetSegmentWritersError {
     SysDbGetSegmentsError(#[from] GetSegmentsError),
     #[error("Error creating Record Segment Writer")]
     RecordSegmentWriterError,
+    #[error("Error creating Metadata Segment Writer")]
+    MetadataSegmentWriterError,
     #[error("Error creating HNSW Segment Writer")]
     HnswSegmentWriterError,
     #[error("No record segment found for collection")]
     NoRecordSegmentFound,
+    #[error("No metadata segment found for collection")]
+    NoMetadataSegmentFound,
     #[error("Collection not found")]
     CollectionNotFound,
     #[error("Error getting collection")]
@@ -237,6 +243,53 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Write;
 
+        let segments = self
+            .sysdb
+            .get_segments(
+                None,
+                Some(SegmentType::BlockfileMetadata.into()),
+                None,
+                Some(self.collection_id),
+            )
+            .await;
+
+        let segment = match segments {
+            Ok(mut segments) => {
+                if segments.is_empty() {
+                    return;
+                }
+                segments.drain(..).next().unwrap()
+            }
+            Err(_) => {
+                return;
+            }
+        };
+
+        if segment.r#type != SegmentType::BlockfileMetadata {
+            return;
+        }
+
+        tracing::debug!("Found metadata segment {:?}", segment);
+
+        let metadata_writer =
+            match MetadataSegmentWriter::from_segment(&segment, &self.blockfile_provider).await {
+                Ok(writer) => writer,
+                Err(e) => {
+                    tracing::error!("Metadata segment could not be created successfully");
+                    return;
+                }
+            };
+        // Ok(metadata_segment_writer)
+
+        // let metadata_writer_res = self.get_metadata_segment_writer().await;
+        // let metadata_writer = match metadata_writer_res {
+        //     Ok(writer) => writer,
+        //     Err(e) => {
+        //         // Log an error and return
+        //         return;
+        //     }
+        // };
+
         let writer_res = self.get_segment_writers().await;
         let (record_segment_writer, hnsw_segment_writer) = match writer_res {
             Ok(writers) => writers,
@@ -252,6 +305,7 @@ impl CompactOrchestrator {
             let input = WriteSegmentsInput::new(
                 record_segment_writer.clone(),
                 hnsw_segment_writer.clone(),
+                metadata_writer.clone(),
                 parition.clone(),
                 self.blockfile_provider.clone(),
                 self.record_segment
@@ -315,6 +369,49 @@ impl CompactOrchestrator {
                 // TODO: log an error and reply to caller
             }
         }
+    }
+
+    async fn get_metadata_segment_writer(
+        &self,
+    ) -> Result<MetadataSegmentWriter, Box<dyn ChromaError>> {
+        let mut sysdb = self.sysdb.clone();
+
+        let segments = sysdb
+            .get_segments(
+                None,
+                Some(SegmentType::BlockfileMetadata.into()),
+                None,
+                Some(self.collection_id),
+            )
+            .await;
+
+        let segment = match segments {
+            Ok(mut segments) => {
+                if segments.is_empty() {
+                    return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
+                }
+                segments.drain(..).next().unwrap()
+            }
+            Err(_) => {
+                return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
+            }
+        };
+
+        if segment.r#type != SegmentType::BlockfileMetadata {
+            return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
+        }
+
+        tracing::debug!("Found metadata segment {:?}", segment);
+
+        let metadata_segment_writer =
+            match MetadataSegmentWriter::from_segment(&segment, &self.blockfile_provider).await {
+                Ok(writer) => writer,
+                Err(e) => {
+                    tracing::error!("Metadata segment could not be created successfully");
+                    return Err(Box::new(GetSegmentWritersError::MetadataSegmentWriterError));
+                }
+            };
+        Ok(metadata_segment_writer)
     }
 
     async fn get_segment_writers(
@@ -541,6 +638,14 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
+            // // This is weird but the only way to do it with code structure currently.
+            // let mut writer = output.metadata_segment_writer.clone();
+            // match writer.write_to_blockfiles().await {
+            //     Ok(()) => (),
+            //     Err(e) => {
+            //         return;
+            //     }
+            // }
             self.flush_s3(
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
