@@ -4,7 +4,6 @@ variable "chroma_release" {
   default     = "0.5.0"
 }
 
-#TODO this should be updated to point to https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh in the repo
 data "http" "startup_script_remote" {
   url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh"
 }
