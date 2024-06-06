@@ -9,7 +9,7 @@ from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -70,7 +70,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, api: ServerAPI):
+    def __init__(self, api: ClientAPI):
         super().__init__()
         self.api = api
         self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
@@ -288,10 +288,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         pass
 
 
-def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
+def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
-        lambda: EmbeddingStateMachine(api),
+        lambda: EmbeddingStateMachine(client),
     )  # type: ignore
     print_traces()
 
@@ -350,9 +350,63 @@ def test_update_none(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     state.teardown()
 
 
-def test_multi_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    state = EmbeddingStateMachine(client)
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+            },
+            embedding_function=None,
+            id=uuid.UUID("2fb0c945-b877-42ab-9417-bfe0f6b172af"),
+            dimension=2,
+            dtype=np.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    v1, v2, v3, v4, v5 = state.add_embeddings(
+        record_set={
+            "ids": ["0", "1", "2", "3", "4"],
+            "embeddings": [
+                [0.09765625, 0.430419921875],
+                [0.20556640625, 0.08978271484375],
+                [-0.1527099609375, 0.291748046875],
+                [-0.12481689453125, 0.78369140625],
+                [0.92724609375, -0.233154296875],
+            ],
+            "metadatas": [None, None, None, None, None],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.update_embeddings(
+        record_set={
+            "ids": [v5],
+            "embeddings": [[0.58349609375, 0.05780029296875]],
+            "metadatas": [{v1: v1}],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.teardown()
+
+
+def test_multi_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
@@ -369,18 +423,18 @@ def test_multi_add(api: ServerAPI) -> None:
     assert coll.count() == 0
 
 
-def test_dup_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_dup_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
     with pytest.raises(errors.DuplicateIDError):
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
-def test_query_without_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_query_without_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
     N = np.random.randint(1, 2000)
     K = np.random.randint(1, 100)
@@ -393,9 +447,9 @@ def test_query_without_add(api: ServerAPI) -> None:
         assert all([len(result) == 0 for result in field_results])
 
 
-def test_get_non_existent(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_get_non_existent(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
     assert len(result["ids"]) == 0
     assert len(result["metadatas"]) == 0
@@ -405,10 +459,10 @@ def test_get_non_existent(api: ServerAPI) -> None:
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api: ServerAPI) -> None:
-    reset(api)
+def test_escape_chars_in_ids(client: ClientAPI) -> None:
+    client.reset()
     id = "\x1f"
-    coll = api.create_collection(name="foo")
+    coll = client.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])
     assert coll.count() == 1
     coll.delete(ids=[id])
@@ -425,9 +479,9 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
         {"where_document": {}, "where": {}},
     ],
 )
-def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_empty_fails(client: ClientAPI, kwargs: dict):
+    client.reset()
+    coll = client.create_collection(name="foo")
     with pytest.raises(Exception) as e:
         coll.delete(**kwargs)
     assert "You must provide either ids, where, or where_document to delete." in str(e)
@@ -448,9 +502,9 @@ def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
         },
     ],
 )
-def test_delete_success(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_success(client: ClientAPI, kwargs: dict):
+    client.reset()
+    coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
 
