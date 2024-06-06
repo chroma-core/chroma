@@ -246,9 +246,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return self._model
 
 
-def test_collections(caplog: pytest.LogCaptureFixture, api: ClientAPI) -> None:
+def test_collections(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore
+    run_state_machine_as_test(lambda: CollectionStateMachine(client))  # type: ignore
 
 
 # Below are tests that have failed in the past. If your test fails, please add
@@ -256,8 +256,8 @@ def test_collections(caplog: pytest.LogCaptureFixture, api: ClientAPI) -> None:
 # help doing so, talk to ben.
 
 
-def test_previously_failing_one(api: ClientAPI) -> None:
-    state = CollectionStateMachine(api)
+def test_previously_failing_one(client: ClientAPI) -> None:
+    state = CollectionStateMachine(client)
     state.initialize()
     # I don't know why the typechecker is red here. This code is correct and is
     # pulled from the logs.
@@ -284,8 +284,8 @@ def test_previously_failing_one(api: ClientAPI) -> None:
 
 
 # https://github.com/chroma-core/chroma/commit/cf476d70f0cebb7c87cb30c7172ba74d6ea175cd#diff-e81868b665d149bb315d86890dea6fc6a9fc9fc9ea3089aa7728142b54f622c5R210
-def test_previously_failing_two(api: ClientAPI) -> None:
-    state = CollectionStateMachine(api)
+def test_previously_failing_two(client: ClientAPI) -> None:
+    state = CollectionStateMachine(client)
     state.initialize()
     (v13,) = state.get_or_create_coll(
         coll=strategies.ExternalCollection(

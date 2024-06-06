@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, cast
 from hypothesis import given, settings, HealthCheck
 import pytest
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
     Document,
@@ -191,7 +191,7 @@ recordset_st = st.shared(
 )
 def test_filterable_metadata_get(
     caplog,
-    api: ServerAPI,
+    client: ClientAPI,
     collection: strategies.Collection,
     record_set,
     filters,
@@ -199,8 +199,8 @@ def test_filterable_metadata_get(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    reset(api)
-    coll = api.create_collection(
+    client.reset()
+    coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
@@ -241,7 +241,7 @@ def test_filterable_metadata_get(
 )
 def test_filterable_metadata_get_limit_offset(
     caplog,
-    api: ServerAPI,
+    client: ClientAPI,
     collection: strategies.Collection,
     record_set,
     filters,
@@ -256,8 +256,8 @@ def test_filterable_metadata_get_limit_offset(
     if not NOT_CLUSTER_ONLY:
         pytest.skip("Distributed system does not support limit/offset yet")
 
-    reset(api)
-    coll = api.create_collection(
+    client.reset()
+    coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
@@ -302,7 +302,7 @@ def test_filterable_metadata_get_limit_offset(
 )
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
-    api: ServerAPI,
+    client: ClientAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
@@ -310,8 +310,8 @@ def test_filterable_metadata_query(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    reset(api)
-    coll = api.create_collection(
+    client.reset()
+    coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
@@ -360,10 +360,10 @@ def test_filterable_metadata_query(
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
 
 
-def test_empty_filter(api: ServerAPI) -> None:
+def test_empty_filter(client: ClientAPI) -> None:
     """Test that a filter where no document matches returns an empty result"""
-    reset(api)
-    coll = api.create_collection(name="test")
+    client.reset()
+    coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
     test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
@@ -396,10 +396,10 @@ def test_empty_filter(api: ServerAPI) -> None:
     assert set(res["included"]) == set(["metadatas", "documents", "distances"])
 
 
-def test_boolean_metadata(api: ServerAPI) -> None:
+def test_boolean_metadata(client: ClientAPI) -> None:
     """Test that metadata with boolean values is correctly filtered"""
-    reset(api)
-    coll = api.create_collection(name="test")
+    client.reset()
+    coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
     test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
@@ -412,11 +412,11 @@ def test_boolean_metadata(api: ServerAPI) -> None:
     assert res["ids"] == ["1", "3"]
 
 
-def test_get_empty(api: ServerAPI) -> None:
+def test_get_empty(client: ClientAPI) -> None:
     """Tests that calling get() with empty filters returns nothing"""
 
-    reset(api)
-    coll = api.create_collection(name="test")
+    client.reset()
+    coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
     test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
