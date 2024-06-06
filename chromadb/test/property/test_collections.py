@@ -25,14 +25,14 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     collections = Bundle("collections")
 
-    def __init__(self, api: ClientAPI):
+    def __init__(self, client: ClientAPI):
         super().__init__()
         self._model = {}
-        self.api = api
+        self.client = client
 
     @initialize()
     def initialize(self) -> None:
-        self.api.reset()
+        self.client.reset()
         self._model = {}
 
     @rule(target=collections, coll=strategies.collections())
@@ -44,14 +44,14 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll.metadata is not None and len(coll.metadata) == 0
         ):
             with pytest.raises(Exception):
-                c = self.api.create_collection(
+                c = self.client.create_collection(
                     name=coll.name,
                     metadata=coll.metadata,
                     embedding_function=coll.embedding_function,
                 )
             return multiple()
 
-        c = self.api.create_collection(
+        c = self.client.create_collection(
             name=coll.name,
             metadata=coll.metadata,
             embedding_function=coll.embedding_function,
@@ -65,28 +65,28 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule(coll=collections)
     def get_coll(self, coll: strategies.ExternalCollection) -> None:
         if coll.name in self.model:
-            c = self.api.get_collection(name=coll.name)
+            c = self.client.get_collection(name=coll.name)
             assert c.name == coll.name
             assert c.metadata == self.model[coll.name]
         else:
             with pytest.raises(Exception):
-                self.api.get_collection(name=coll.name)
+                self.client.get_collection(name=coll.name)
 
     @rule(coll=consumes(collections))
     def delete_coll(self, coll: strategies.ExternalCollection) -> None:
         if coll.name in self.model:
-            self.api.delete_collection(name=coll.name)
+            self.client.delete_collection(name=coll.name)
             self.delete_from_model(coll.name)
         else:
             with pytest.raises(Exception):
-                self.api.delete_collection(name=coll.name)
+                self.client.delete_collection(name=coll.name)
 
         with pytest.raises(Exception):
-            self.api.get_collection(name=coll.name)
+            self.client.get_collection(name=coll.name)
 
     @rule()
     def list_collections(self) -> None:
-        colls = self.api.list_collections()
+        colls = self.client.list_collections()
         assert len(colls) == len(self.model)
         for c in colls:
             assert c.name in self.model
@@ -97,11 +97,11 @@ class CollectionStateMachine(RuleBasedStateMachine):
         offset=st.integers(min_value=0, max_value=5),
     )
     def list_collections_with_limit_offset(self, limit: int, offset: int) -> None:
-        colls = self.api.list_collections(limit=limit, offset=offset)
-        total_collections = self.api.count_collections()
+        colls = self.client.list_collections(limit=limit, offset=offset)
+        total_collections = self.client.count_collections()
 
         # get all collections
-        all_colls = self.api.list_collections()
+        all_colls = self.client.list_collections()
         # manually slice the collections based on the given limit and offset
         man_colls = all_colls[offset : offset + limit]
 
@@ -149,7 +149,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         if new_metadata is not None and len(new_metadata) == 0:
             with pytest.raises(Exception):
-                c = self.api.get_or_create_collection(
+                c = self.client.get_or_create_collection(
                     name=coll.name,
                     metadata=new_metadata,
                     embedding_function=coll.embedding_function,
@@ -168,7 +168,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         self.set_model(coll.name, coll.metadata)
 
         # Update API
-        c = self.api.get_or_create_collection(
+        c = self.client.get_or_create_collection(
             name=coll.name,
             metadata=new_metadata,
             embedding_function=coll.embedding_function,
@@ -193,16 +193,16 @@ class CollectionStateMachine(RuleBasedStateMachine):
     ) -> MultipleResults[strategies.ExternalCollection]:
         if coll.name not in self.model:
             with pytest.raises(Exception):
-                c = self.api.get_collection(name=coll.name)
+                c = self.client.get_collection(name=coll.name)
             return multiple()
 
-        c = self.api.get_collection(name=coll.name)
+        c = self.client.get_collection(name=coll.name)
         _metadata: Optional[Mapping[str, Any]] = self.model[coll.name]
         _name: str = coll.name
         if new_metadata is not None:
             if len(new_metadata) == 0:
                 with pytest.raises(Exception):
-                    c = self.api.get_or_create_collection(
+                    c = self.client.get_or_create_collection(
                         name=coll.name,
                         metadata=new_metadata,
                         embedding_function=coll.embedding_function,
@@ -223,7 +223,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         self.set_model(_name, _metadata)
         c.modify(metadata=_metadata, name=_name)
-        c = self.api.get_collection(name=coll.name)
+        c = self.client.get_collection(name=coll.name)
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
