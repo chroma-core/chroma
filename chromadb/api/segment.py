@@ -12,7 +12,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
-from chromadb.api.models.Collection import Collection
+from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
 from chromadb.errors import InvalidDimensionException, InvalidCollectionException
 import chromadb.utils.embedding_functions as ef
@@ -159,7 +159,7 @@ class SegmentAPI(ServerAPI):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         if metadata is not None:
             validate_metadata(metadata)
 
@@ -197,12 +197,7 @@ class SegmentAPI(ServerAPI):
         )
         add_attributes_to_current_span({"collection_uuid": str(id)})
 
-        return Collection(
-            client=self,
-            model=coll,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return coll
 
     @trace_method(
         "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
@@ -218,7 +213,7 @@ class SegmentAPI(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
@@ -244,7 +239,7 @@ class SegmentAPI(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionModel:
         if id is None and name is None or (id is not None and name is not None):
             raise ValueError("Name or id must be specified, but not both")
         existing = self._sysdb.get_collections(
@@ -252,12 +247,7 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
-            return Collection(
-                client=self,
-                model=existing[0],
-                embedding_function=embedding_function,
-                data_loader=data_loader,
-            )
+            return existing[0]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -269,19 +259,10 @@ class SegmentAPI(ServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
-        collections = []
-        db_collections = self._sysdb.get_collections(
+    ) -> Sequence[CollectionModel]:
+        return self._sysdb.get_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
         )
-        for db_collection in db_collections:
-            collections.append(
-                Collection(
-                    client=self,
-                    model=db_collection,
-                )
-            )
-        return collections
 
     @trace_method("SegmentAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
