@@ -518,7 +518,7 @@ class FastAPI(ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         raise_chroma_error(resp)
         return True
@@ -539,7 +539,7 @@ class FastAPI(ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
         )
@@ -562,7 +562,7 @@ class FastAPI(ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
         )
@@ -629,10 +629,9 @@ class FastAPI(ServerAPI):
         """Returns the settings of the client"""
         return self._settings
 
-    @property
-    @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)
+    @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
-    def max_batch_size(self) -> int:
+    async def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
             resp = self._session.get(self._api_url + "/pre-flight-checks")
             raise_chroma_error(resp)

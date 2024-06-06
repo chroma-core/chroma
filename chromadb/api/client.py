@@ -413,10 +413,9 @@ class Client(SharedSystemClient, ClientAPI):
     def get_settings(self) -> Settings:
         return self._server.get_settings()
 
-    @property
     @override
-    def max_batch_size(self) -> int:
-        return self._server.max_batch_size
+    def get_max_batch_size(self) -> int:
+        return self._server.get_max_batch_size()
 
     # endregion
 
