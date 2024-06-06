@@ -11,7 +11,7 @@ import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
-from chromadb import config
+from chromadb import Client, config
 from chromadb.api import ServerAPI
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
@@ -20,6 +20,7 @@ from packaging import version as packaging_version
 import re
 import multiprocessing
 from chromadb.config import Settings
+from chromadb.api.client import Client as ClientCreator
 
 MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -103,7 +104,7 @@ def patch_for_version(
 def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
     if packaging_version.Version(version) <= packaging_version.Version("0.4.14"):
         return module.api.API  # type: ignore
-    return module.api.ServerAPI  # type: ignore
+    return module.api.ClientAPI  # type: ignore
 
 
 def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
@@ -222,8 +223,7 @@ def persist_generated_data_with_old_version(
         api = system.instance(api_import_for_version(old_module, version))
         system.start()
 
-        api.reset()
-        coll = api.create_collection(
+        coll = client.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,
             # In order to test old versions, we can't rely on the not_implemented function
@@ -310,9 +310,10 @@ def test_cycle_versions(
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
-    api = system.instance(ServerAPI)
     system.start()
-    coll = api.get_collection(
+    client = ClientCreator.from_system(system)
+
+    coll = client.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
     )

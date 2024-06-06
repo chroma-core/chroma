@@ -67,15 +67,15 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, api: ClientAPI):
+    def __init__(self, client: ClientAPI):
         super().__init__()
-        self.api = api
+        self.client = client
         self._rules_strategy = strategies.DeterministicRuleStrategy(self)  # type: ignore
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
-        self.api.reset()
-        self.collection = self.api.create_collection(
+        self.client.reset()
+        self.collection = self.client.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             embedding_function=collection.embedding_function,
