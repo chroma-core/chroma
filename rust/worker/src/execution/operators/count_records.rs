@@ -210,7 +210,7 @@ mod tests {
         let in_memory_provider = BlockfileProvider::new_memory();
         let mut record_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
@@ -352,7 +352,7 @@ mod tests {
         let in_memory_provider = BlockfileProvider::new_memory();
         let record_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),

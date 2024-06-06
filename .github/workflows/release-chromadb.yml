@@ -51,6 +51,7 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     with:
       python_versions: '["3.8", "3.9", "3.10", "3.11", "3.12"]'
+      property_testing_preset: 'normal'
 
   javascript-client-tests:
     name: JavaScript client tests

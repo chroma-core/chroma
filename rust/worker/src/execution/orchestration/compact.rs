@@ -27,6 +27,7 @@ use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::record_segment::ApplyMaterializedLogError;
+use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentWriter;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
@@ -40,6 +41,7 @@ use crate::types::Segment;
 use crate::types::SegmentFlushInfo;
 use crate::types::SegmentType;
 use async_trait::async_trait;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -96,6 +98,8 @@ pub struct CompactOrchestrator {
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
+    // Current max offset id.
+    curr_max_offset_id: Arc<AtomicU32>,
 }
 
 #[derive(Error, Debug)]
@@ -146,6 +150,7 @@ impl CompactOrchestrator {
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
         >,
         record_segment: Option<Segment>,
+        curr_max_offset_id: Arc<AtomicU32>,
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
@@ -162,6 +167,7 @@ impl CompactOrchestrator {
             num_write_tasks: 0,
             result_channel,
             record_segment,
+            curr_max_offset_id,
         }
     }
 
@@ -252,6 +258,7 @@ impl CompactOrchestrator {
                     .as_ref()
                     .expect("WriteSegmentsInput: Record segment not set in the input")
                     .clone(),
+                self.curr_max_offset_id.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
             match self.dispatcher.send(task, Some(Span::current())).await {
@@ -342,7 +349,7 @@ impl CompactOrchestrator {
 
         let record_segment = segments
             .iter()
-            .find(|segment| segment.r#type == SegmentType::Record);
+            .find(|segment| segment.r#type == SegmentType::BlockfileRecord);
 
         tracing::debug!("Found Record Segment: {:?}", record_segment);
 
@@ -362,6 +369,14 @@ impl CompactOrchestrator {
             };
 
         tracing::debug!("Record Segment Writer created");
+        match RecordSegmentReader::from_segment(record_segment, &self.blockfile_provider).await {
+            Ok(reader) => {
+                self.curr_max_offset_id = reader.get_current_max_offset_id();
+                self.curr_max_offset_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            Err(_) => {}
+        };
         self.record_segment = Some(record_segment.clone()); // auto deref.
 
         // Create a hnsw segment writer

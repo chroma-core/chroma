@@ -13,6 +13,7 @@ use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
+use crate::segment::record_segment::RecordSegmentReader;
 use crate::storage::Storage;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
@@ -27,6 +28,8 @@ use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -110,6 +113,7 @@ impl CompactionManager {
                     dispatcher.clone(),
                     None,
                     None,
+                    Arc::new(AtomicU32::new(1)),
                 );
 
                 match orchestrator.run().await {
@@ -384,7 +388,7 @@ mod tests {
 
         let collection_1_record_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(collection_uuid_1),
             metadata: None,
@@ -393,7 +397,7 @@ mod tests {
 
         let collection_2_record_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::Record,
+            r#type: crate::types::SegmentType::BlockfileRecord,
             scope: crate::types::SegmentScope::RECORD,
             collection: Some(collection_uuid_2),
             metadata: None,

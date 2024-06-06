@@ -201,13 +201,9 @@ class SegmentAPI(ServerAPI):
 
         return Collection(
             client=self,
-            id=coll["id"],
-            name=name,
-            metadata=coll["metadata"],  # type: ignore
+            model=coll,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            tenant=tenant,
-            database=database,
         )
 
     @trace_method(
@@ -260,13 +256,9 @@ class SegmentAPI(ServerAPI):
         if existing:
             return Collection(
                 client=self,
-                id=existing[0]["id"],
-                name=existing[0]["name"],
-                metadata=existing[0]["metadata"],  # type: ignore
+                model=existing[0],
                 embedding_function=embedding_function,
                 data_loader=data_loader,
-                tenant=existing[0]["tenant"],
-                database=existing[0]["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
@@ -288,11 +280,7 @@ class SegmentAPI(ServerAPI):
             collections.append(
                 Collection(
                     client=self,
-                    id=db_collection["id"],
-                    name=db_collection["name"],
-                    metadata=db_collection["metadata"],  # type: ignore
-                    tenant=db_collection["tenant"],
-                    database=db_collection["database"],
+                    model=db_collection,
                 )
             )
         return collections

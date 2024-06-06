@@ -1,3 +1,6 @@
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
+
 use crate::blockstore::provider::BlockfileProvider;
 use crate::errors::ChromaError;
 use crate::segment::record_segment::ApplyMaterializedLogError;
@@ -53,6 +56,7 @@ pub struct WriteSegmentsInput {
     chunk: Chunk<LogRecord>,
     provider: BlockfileProvider,
     record_segment: Segment,
+    offset_id: Arc<AtomicU32>,
 }
 
 impl<'me> WriteSegmentsInput {
@@ -62,6 +66,7 @@ impl<'me> WriteSegmentsInput {
         chunk: Chunk<LogRecord>,
         provider: BlockfileProvider,
         record_segment: Segment,
+        offset_id: Arc<AtomicU32>,
     ) -> Self {
         WriteSegmentsInput {
             record_segment_writer,
@@ -69,6 +74,7 @@ impl<'me> WriteSegmentsInput {
             chunk,
             provider,
             record_segment,
+            offset_id,
         }
     }
 }
@@ -120,7 +126,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         let materializer = LogMaterializer::new(
             record_segment_reader,
             input.chunk.clone(),
-            input.record_segment_writer.get_curr_max_offset_id(),
+            input.offset_id.clone(),
         );
         // Materialize the logs.
         let res = match materializer.materialize().await {
