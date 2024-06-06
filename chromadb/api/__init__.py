@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import Generic, Sequence, Optional, TypeVar
 from uuid import UUID
 
 from overrides import override
+from chromadb.api.models.CollectionAsync import CollectionAsync
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -517,7 +518,10 @@ class AdminAPI(ABC):
         pass
 
 
-class ServerAPI(BaseAPI, AdminAPI, Component):
+CollectionT = TypeVar("CollectionT", Collection, CollectionAsync)
+
+
+class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
     """An API instance that extends the relevant Base API methods by passing
     in a tenant and database. This is the root component of the Chroma System"""
 
@@ -529,7 +533,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[CollectionT]:
         pass
 
     @abstractmethod
@@ -552,7 +556,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionT:
         pass
 
     @abstractmethod
@@ -567,7 +571,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionT:
         pass
 
     @abstractmethod
@@ -582,7 +586,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionT:
         pass
 
     @abstractmethod

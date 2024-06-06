@@ -18,9 +18,13 @@ def async_class_to_sync(cls: T) -> T:
                 def sync_wrapper(*args, **kwargs):
                     if asyncio.get_event_loop().is_running():
                         return func(*args, **kwargs)
-                    else:
-                        loop = asyncio.get_event_loop()
-                        result = loop.run_until_complete(func(*args, **kwargs))
+
+                    loop = asyncio.get_event_loop()
+                    result = loop.run_until_complete(func(*args, **kwargs))
+
+                    # todo: super hacky, is there a better pattern to use?
+                    if isinstance(result, object):
+                        return async_class_to_sync(result)
 
                     return result
 

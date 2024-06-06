@@ -18,7 +18,11 @@ from chromadb.utils.async_to_sync import async_class_to_sync
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.types import Database, Tenant
+from chromadb.types import Collection as CollectionModel
+
+# todo: remove
 from chromadb.api.models.Collection import Collection
+from chromadb.api.models.CollectionAsync import CollectionAsync
 from chromadb.api.types import (
     DataLoader,
     Documents,
@@ -42,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 
 class FastAPIAsync(ServerAPI):
+    _max_batch_size: int = -1
+
     def __init__(self, system: System):
         super().__init__(system)
 
@@ -236,29 +242,37 @@ class FastAPIAsync(ServerAPI):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionAsync:
         """Creates a collection"""
-        # resp = self._session.post(
-        #     self._api_url + "/collections",
-        #     data=json.dumps(
-        #         {
-        #             "name": name,
-        #             "metadata": metadata,
-        #             "get_or_create": get_or_create,
-        #         }
-        #     ),
-        #     params={"tenant": tenant, "database": database},
-        # )
-        # raise_chroma_error(resp)
-        # resp_json = json.loads(resp.text)
-        # return Collection(
-        #     client=self,
-        #     id=resp_json["id"],
-        #     name=resp_json["name"],
-        #     embedding_function=embedding_function,
-        #     data_loader=data_loader,
-        #     metadata=resp_json["metadata"],
-        # )
+        resp_json = await self._make_request(
+            "post",
+            self._api_url + "/collections",
+            data=json.dumps(
+                {
+                    "name": name,
+                    "metadata": metadata,
+                    "get_or_create": get_or_create,
+                }
+            ),
+            params={"tenant": tenant, "database": database},
+        )
+
+        model = CollectionModel(
+            id=resp_json["id"],
+            name=resp_json["name"],
+            metadata=resp_json["metadata"],
+            dimension=resp_json["dimension"],
+            tenant=resp_json["tenant"],
+            database=resp_json["database"],
+            version=resp_json["version"],
+        )
+
+        return CollectionAsync(
+            client=self,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
+        )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -360,11 +374,12 @@ class FastAPIAsync(ServerAPI):
         collection_id: UUID,
     ) -> int:
         """Returns the number of embeddings in the database"""
-        # resp = self._session.get(
-        #     self._api_url + "/collections/" + str(collection_id) + "/count"
-        # )
-        # raise_chroma_error(resp)
-        # return cast(int, json.loads(resp.text))
+        resp_json = await self._make_request(
+            "get",
+            self._api_url + "/collections/" + str(collection_id) + "/count",
+        )
+
+        return cast(int, resp_json)
 
     @trace_method("FastAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
@@ -461,23 +476,23 @@ class FastAPIAsync(ServerAPI):
             Optional[URIs],
         ],
         url: str,
-    ):  # -> requests.Response:
+    ):
         """
         Submits a batch of embeddings to the database
         """
-        # resp = self._session.post(
-        #     self._api_url + url,
-        #     data=json.dumps(
-        #         {
-        #             "ids": batch[0],
-        #             "embeddings": batch[1],
-        #             "metadatas": batch[2],
-        #             "documents": batch[3],
-        #             "uris": batch[4],
-        #         }
-        #     ),
-        # )
-        # return resp
+        return await self._make_request(
+            "post",
+            self._api_url + url,
+            data=json.dumps(
+                {
+                    "ids": batch[0],
+                    "embeddings": batch[1],
+                    "metadatas": batch[2],
+                    "documents": batch[3],
+                    "uris": batch[4],
+                }
+            ),
+        )
 
     @trace_method("FastAPI._add", OpenTelemetryGranularity.ALL)
     @override
@@ -494,11 +509,10 @@ class FastAPIAsync(ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        # batch = (ids, embeddings, metadatas, documents, uris)
-        # validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        # resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
-        # raise_chroma_error(resp)
-        # return True
+        batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size})
+        await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
+        return True
 
     @trace_method("FastAPI._update", OpenTelemetryGranularity.ALL)
     @override
@@ -606,16 +620,24 @@ class FastAPIAsync(ServerAPI):
         """Returns the settings of the client"""
         # return self._settings
 
+    # todo: cleanup
+    @property
+    @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
+    async def get_max_batch_size(self) -> int:
+        if self._max_batch_size == -1:
+            resp_json = await self._make_request(
+                "get", self._api_url + "/pre-flight-checks"
+            )
+            self._max_batch_size = cast(int, resp_json["max_batch_size"])
+        return self._max_batch_size
+
     @property
     @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
-    async def max_batch_size(self) -> int:
-        "asdfoih"
-        # if self._max_batch_size == -1:
-        #     resp = self._session.get(self._api_url + "/pre-flight-checks")
-        #     raise_chroma_error(resp)
-        #     self._max_batch_size = cast(int, json.loads(resp.text)["max_batch_size"])
-        # return self._max_batch_size
+    def max_batch_size(self) -> int:
+        if self._max_batch_size == -1:
+            raise ValueError("max_batch_size is not yet set")
+        return self._max_batch_size
 
 
 def raise_chroma_error(resp: aiohttp.ClientResponse) -> None:
