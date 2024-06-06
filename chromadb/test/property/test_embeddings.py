@@ -9,7 +9,7 @@ from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -69,7 +69,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, api: ServerAPI):
+    def __init__(self, api: ClientAPI):
         super().__init__()
         self.api = api
         self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
@@ -298,17 +298,17 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         pass
 
 
-def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
+def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
-        lambda: EmbeddingStateMachine(api),
+        lambda: EmbeddingStateMachine(client),
     )  # type: ignore
     print_traces()
 
 
-def test_multi_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_multi_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
@@ -325,18 +325,18 @@ def test_multi_add(api: ServerAPI) -> None:
     assert coll.count() == 0
 
 
-def test_dup_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_dup_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
     with pytest.raises(errors.DuplicateIDError):
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
-def test_query_without_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_query_without_add(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
     N = np.random.randint(1, 2000)
     K = np.random.randint(1, 100)
@@ -349,9 +349,9 @@ def test_query_without_add(api: ServerAPI) -> None:
         assert all([len(result) == 0 for result in field_results])
 
 
-def test_get_non_existent(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_get_non_existent(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
     assert len(result["ids"]) == 0
     assert len(result["metadatas"]) == 0
@@ -361,10 +361,10 @@ def test_get_non_existent(api: ServerAPI) -> None:
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api: ServerAPI) -> None:
-    reset(api)
+def test_escape_chars_in_ids(client: ClientAPI) -> None:
+    client.reset()
     id = "\x1f"
-    coll = api.create_collection(name="foo")
+    coll = client.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])
     assert coll.count() == 1
     coll.delete(ids=[id])
@@ -381,9 +381,9 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
         {"where_document": {}, "where": {}},
     ],
 )
-def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_empty_fails(client: ClientAPI, kwargs: dict):
+    client.reset()
+    coll = client.create_collection(name="foo")
     with pytest.raises(Exception) as e:
         coll.delete(**kwargs)
     assert "You must provide either ids, where, or where_document to delete." in str(e)
@@ -404,9 +404,9 @@ def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
         },
     ],
 )
-def test_delete_success(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_success(client: ClientAPI, kwargs: dict):
+    client.reset()
+    coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
 
