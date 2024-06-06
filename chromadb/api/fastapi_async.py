@@ -1,10 +1,11 @@
 from uuid import UUID
 import orjson as json
-from typing import Optional, cast, Tuple, Sequence, TypeVar, Callable, ParamSpec
+from typing import Any, Optional, cast, Tuple, Sequence, TypeVar, Callable, ParamSpec
 import logging
 from urllib.parse import quote, urlparse, urlunparse
 import aiohttp
 from overrides import override
+from chromadb import errors
 from chromadb.api import ServerAPIAsync
 from chromadb.api.types import CollectionMetadata, EmbeddingFunction, GetResult
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
@@ -80,7 +81,7 @@ class FastAPIAsync(ServerAPIAsync):
             self._session = aiohttp.ClientSession()
 
         async with self._session.request(method, url, **kwargs) as response:
-            raise_chroma_error(response)
+            await raise_chroma_error(response)
             return json.loads(await response.text())
 
     async def __aenter__(self):
@@ -91,6 +92,7 @@ class FastAPIAsync(ServerAPIAsync):
         if self._session is not None:
             await self._session.close()
 
+    # todo: factor out into helper?
     @staticmethod
     def _validate_host(host: str) -> None:
         parsed = urlparse(host)
@@ -341,19 +343,15 @@ class FastAPIAsync(ServerAPIAsync):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionAsync:
-        "sodfihsdof"
-        # return cast(
-        #     Collection,
-        #     self.create_collection(
-        #         name=name,
-        #         metadata=metadata,
-        #         embedding_function=embedding_function,
-        #         data_loader=data_loader,
-        #         get_or_create=True,
-        #         tenant=tenant,
-        #         database=database,
-        #     ),
-        # )
+        return await self.create_collection(
+            name=name,
+            metadata=metadata,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
+            get_or_create=True,
+            tenant=tenant,
+            database=database,
+        )
 
     @trace_method("FastAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
@@ -430,37 +428,35 @@ class FastAPIAsync(ServerAPIAsync):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
     ) -> GetResult:
-        "asodifhsdf"
-        # if page and page_size:
-        #     offset = (page - 1) * page_size
-        #     limit = page_size
+        if page and page_size:
+            offset = (page - 1) * page_size
+            limit = page_size
 
-        # resp = self._session.post(
-        #     self._api_url + "/collections/" + str(collection_id) + "/get",
-        #     data=json.dumps(
-        #         {
-        #             "ids": ids,
-        #             "where": where,
-        #             "sort": sort,
-        #             "limit": limit,
-        #             "offset": offset,
-        #             "where_document": where_document,
-        #             "include": include,
-        #         }
-        #     ),
-        # )
+        resp_json = await self._make_request(
+            "post",
+            self._api_url + "/collections/" + str(collection_id) + "/get",
+            data=json.dumps(
+                {
+                    "ids": ids,
+                    "where": where,
+                    "sort": sort,
+                    "limit": limit,
+                    "offset": offset,
+                    "where_document": where_document,
+                    "include": include,
+                }
+            ),
+        )
 
-        # raise_chroma_error(resp)
-        # body = json.loads(resp.text)
-        # return GetResult(
-        #     ids=body["ids"],
-        #     embeddings=body.get("embeddings", None),
-        #     metadatas=body.get("metadatas", None),
-        #     documents=body.get("documents", None),
-        #     data=None,
-        #     uris=body.get("uris", None),
-        #     included=body["included"],
-        # )
+        return GetResult(
+            ids=resp_json["ids"],
+            embeddings=resp_json.get("embeddings", None),
+            metadatas=resp_json.get("metadatas", None),
+            documents=resp_json.get("documents", None),
+            data=None,
+            uris=resp_json.get("uris", None),
+            included=resp_json["included"],
+        )
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
@@ -471,16 +467,15 @@ class FastAPIAsync(ServerAPIAsync):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
-        """Deletes embeddings from the database"""
-        # resp = self._session.post(
-        #     self._api_url + "/collections/" + str(collection_id) + "/delete",
-        #     data=json.dumps(
-        #         {"where": where, "ids": ids, "where_document": where_document}
-        #     ),
-        # )
+        resp_json = await self._make_request(
+            "post",
+            self._api_url + "/collections/" + str(collection_id) + "/delete",
+            data=json.dumps(
+                {"where": where, "ids": ids, "where_document": where_document}
+            ),
+        )
 
-        # raise_chroma_error(resp)
-        # return cast(IDs, json.loads(resp.text))
+        return cast(IDs, resp_json)
 
     @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     async def _submit_batch(
@@ -657,28 +652,28 @@ class FastAPIAsync(ServerAPIAsync):
         return self._max_batch_size
 
 
-def raise_chroma_error(resp: aiohttp.ClientResponse) -> None:
-    """Raises an error if the response is not ok, using a ChromaError if possible"""
+async def raise_chroma_error(resp: aiohttp.ClientResponse) -> Any:
+    """Raises an error if the response is not ok, using a ChromaError if possible."""
     if resp.ok:
         return
 
-    # chroma_error = None
-    # try:
-    #     body = json.loads(resp.text)
-    #     if "error" in body:
-    #         if body["error"] in errors.error_types:
-    #             chroma_error = errors.error_types[body["error"]](body["message"])
+    chroma_error = None
+    try:
+        body = json.loads(await resp.text())
+        if "error" in body:
+            if body["error"] in errors.error_types:
+                chroma_error = errors.error_types[body["error"]](body["message"])
 
-    # except BaseException:
-    #     pass
+    except BaseException:
+        pass
 
-    # if chroma_error:
-    #     raise chroma_error
+    if chroma_error:
+        raise chroma_error
 
-    # try:
-    #     resp.raise_for_status()
-    # except requests.HTTPError:
-    #     raise (Exception(resp.text))
+    try:
+        resp.raise_for_status()
+    except aiohttp.ClientResponseError:
+        raise (Exception(resp.text))
 
 
 # todo: move to test directory?

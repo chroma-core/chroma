@@ -102,3 +102,68 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
     @overrides
     async def count(self) -> int:
         return await self._client._count(collection_id=self.id)
+
+    @overrides
+    async def get(
+        self,
+        ids: Optional[OneOrMany[ID]] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["metadatas", "documents"],
+    ) -> GetResult:
+        valid_where = validate_where(where) if where else None
+        valid_where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
+        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
+        valid_include = validate_include(include, allow_distances=False)
+
+        if "data" in include and self._data_loader is None:
+            raise ValueError(
+                "You must set a data loader on the collection if loading from URIs."
+            )
+
+        # We need to include uris in the result from the API to load datas
+        if "data" in include and "uris" not in include:
+            valid_include.append("uris")
+
+        get_results = await self._client._get(
+            self.id,
+            valid_ids,
+            valid_where,
+            None,
+            limit,
+            offset,
+            where_document=valid_where_document,
+            include=valid_include,
+        )
+
+        if (
+            "data" in include
+            and self._data_loader is not None
+            and get_results["uris"] is not None
+        ):
+            get_results["data"] = self._data_loader(get_results["uris"])
+
+        # Remove URIs from the result if they weren't requested
+        if "uris" not in include:
+            get_results["uris"] = None
+
+        return get_results
+
+    @overrides
+    async def delete(
+        self,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ) -> None:
+        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
+        where = validate_where(where) if where else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
+
+        await self._client._delete(self.id, ids, where, where_document)
