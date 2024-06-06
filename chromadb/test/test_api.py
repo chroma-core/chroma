@@ -184,8 +184,8 @@ def test_persist(api_fixture, request):
     assert api.list_collections() == []
 
 
-def test_heartbeat(api):
-    heartbeat_ns = api.heartbeat()
+def test_heartbeat(client):
+    heartbeat_ns = client.heartbeat()
     assert isinstance(heartbeat_ns, int)
 
     heartbeat_s = heartbeat_ns // 10**9
@@ -193,17 +193,17 @@ def test_heartbeat(api):
     assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
-def test_max_batch_size(api):
-    print(api)
-    batch_size = api.get_max_batch_size()
+def test_max_batch_size(client):
+    print(client)
+    batch_size = client.get_max_batch_size()
     assert batch_size > 0
 
 
-def test_pre_flight_checks(api):
-    if not isinstance(api, FastAPI):
+def test_pre_flight_checks(client):
+    if not isinstance(client, FastAPI):
         pytest.skip("Not a FastAPI instance")
 
-    resp = requests.get(f"{api._api_url}/pre-flight-checks")
+    resp = requests.get(f"{client._api_url}/pre-flight-checks")
     assert resp.status_code == 200
     assert resp.json() is not None
     assert "max_batch_size" in resp.json().keys()
@@ -215,20 +215,20 @@ batch_records = {
 }
 
 
-def test_add(api):
-    api.reset()
+def test_add(client):
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
 
     collection.add(**batch_records)
 
     assert collection.count() == 2
 
 
-def test_collection_add_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_add_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -236,19 +236,19 @@ def test_collection_add_with_invalid_collection_throws(api):
         collection.add(**batch_records)
 
 
-def test_get_or_create(api):
-    api.reset()
+def test_get_or_create(client):
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
 
     collection.add(**batch_records)
 
     assert collection.count() == 2
 
     with pytest.raises(Exception):
-        collection = api.create_collection("testspace")
+        collection = client.create_collection("testspace")
 
-    collection = api.get_or_create_collection("testspace")
+    collection = client.get_or_create_collection("testspace")
 
     assert collection.count() == 2
 
@@ -259,19 +259,19 @@ minimal_records = {
 }
 
 
-def test_add_minimal(api):
-    api.reset()
+def test_add_minimal(client):
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
 
     collection.add(**minimal_records)
 
     assert collection.count() == 2
 
 
-def test_get_from_db(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_get_from_db(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
     includes = ["embeddings", "documents", "metadatas"]
     records = collection.get(include=includes)
@@ -284,10 +284,10 @@ def test_get_from_db(api):
             assert records[key] is None
 
 
-def test_collection_get_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_get_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -295,20 +295,20 @@ def test_collection_get_with_invalid_collection_throws(api):
         collection.get()
 
 
-def test_reset_db(api):
-    api.reset()
+def test_reset_db(client):
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    api.reset()
-    assert len(api.list_collections()) == 0
+    client.reset()
+    assert len(client.list_collections()) == 0
 
 
-def test_get_nearest_neighbors(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_get_nearest_neighbors(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
 
     includes = ["embeddings", "documents", "metadatas", "distances"]
@@ -355,9 +355,9 @@ def test_get_nearest_neighbors(api):
             assert nn[key] is None
 
 
-def test_delete(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_delete(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
 
@@ -365,18 +365,18 @@ def test_delete(api):
         collection.delete()
 
 
-def test_delete_with_index(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_delete_with_index(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
     collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
 
 
-def test_collection_delete_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_delete_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -384,18 +384,18 @@ def test_collection_delete_with_invalid_collection_throws(api):
         collection.delete(ids=["id1"])
 
 
-def test_count(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_count(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     assert collection.count() == 0
     collection.add(**batch_records)
     assert collection.count() == 2
 
 
-def test_collection_count_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_count_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -403,19 +403,19 @@ def test_collection_count_with_invalid_collection_throws(api):
         collection.count()
 
 
-def test_modify(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_modify(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.modify(name="testspace2")
 
     # collection name is modify
     assert collection.name == "testspace2"
 
 
-def test_collection_modify_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_modify_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -423,36 +423,36 @@ def test_collection_modify_with_invalid_collection_throws(api):
         collection.modify(name="test2")
 
 
-def test_modify_error_on_existing_name(api):
-    api.reset()
+def test_modify_error_on_existing_name(client):
+    client.reset()
 
-    api.create_collection("testspace")
-    c2 = api.create_collection("testspace2")
+    client.create_collection("testspace")
+    c2 = client.create_collection("testspace2")
 
     with pytest.raises(Exception):
         c2.modify(name="testspace")
 
 
-def test_modify_warn_on_DF_change(api, caplog):
-    api.reset()
+def test_modify_warn_on_DF_change(client, caplog):
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
 
     with pytest.raises(Exception, match="not supported"):
         collection.modify(metadata={"hnsw:space": "cosine"})
 
 
-def test_metadata_cru(api):
-    api.reset()
+def test_metadata_cru(client):
+    client.reset()
     metadata_a = {"a": 1, "b": 2}
     # Test create metatdata
-    collection = api.create_collection("testspace", metadata=metadata_a)
+    collection = client.create_collection("testspace", metadata=metadata_a)
     assert collection.metadata is not None
     assert collection.metadata["a"] == 1
     assert collection.metadata["b"] == 2
 
     # Test get metatdata
-    collection = api.get_collection("testspace")
+    collection = client.get_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 1
     assert collection.metadata["b"] == 2
@@ -464,24 +464,24 @@ def test_metadata_cru(api):
     assert "b" not in collection.metadata
 
     # Test get after modify metatdata
-    collection = api.get_collection("testspace")
+    collection = client.get_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 2
     assert collection.metadata["c"] == 3
     assert "b" not in collection.metadata
 
     # Test name exists get_or_create_metadata
-    collection = api.get_or_create_collection("testspace")
+    collection = client.get_or_create_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 2
     assert collection.metadata["c"] == 3
 
     # Test name exists create metadata
-    collection = api.get_or_create_collection("testspace2")
+    collection = client.get_or_create_collection("testspace2")
     assert collection.metadata is None
 
     # Test list collections
-    collections = api.list_collections()
+    collections = client.list_collections()
     for collection in collections:
         if collection.name == "testspace":
             assert collection.metadata is not None
@@ -491,9 +491,9 @@ def test_metadata_cru(api):
             assert collection.metadata is None
 
 
-def test_increment_index_on(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_increment_index_on(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
 
@@ -513,46 +513,46 @@ def test_increment_index_on(api):
             assert nn[key] is None
 
 
-def test_add_a_collection(api):
-    api.reset()
-    api.create_collection("testspace")
+def test_add_a_collection(client):
+    client.reset()
+    client.create_collection("testspace")
 
     # get collection does not throw an error
-    collection = api.get_collection("testspace")
+    collection = client.get_collection("testspace")
     assert collection.name == "testspace"
 
     # get collection should throw an error if collection does not exist
     with pytest.raises(Exception):
-        collection = api.get_collection("testspace2")
+        collection = client.get_collection("testspace2")
 
 
-def test_list_collections(api):
-    api.reset()
-    api.create_collection("testspace")
-    api.create_collection("testspace2")
+def test_list_collections(client):
+    client.reset()
+    client.create_collection("testspace")
+    client.create_collection("testspace2")
 
     # get collection does not throw an error
-    collections = api.list_collections()
+    collections = client.list_collections()
     assert len(collections) == 2
 
 
-def test_reset(api):
-    api.reset()
-    api.create_collection("testspace")
-    api.create_collection("testspace2")
+def test_reset(client):
+    client.reset()
+    client.create_collection("testspace")
+    client.create_collection("testspace2")
 
     # get collection does not throw an error
-    collections = api.list_collections()
+    collections = client.list_collections()
     assert len(collections) == 2
 
-    api.reset()
-    collections = api.list_collections()
+    client.reset()
+    collections = client.list_collections()
     assert len(collections) == 0
 
 
-def test_peek(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_peek(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
 
@@ -567,10 +567,10 @@ def test_peek(api):
             assert peek[key] is None
 
 
-def test_collection_peek_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_peek_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -578,10 +578,10 @@ def test_collection_peek_with_invalid_collection_throws(api):
         collection.peek()
 
 
-def test_collection_query_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_query_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -589,10 +589,10 @@ def test_collection_query_with_invalid_collection_throws(api):
         collection.query(query_texts=["test"])
 
 
-def test_collection_update_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_update_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -613,9 +613,9 @@ metadata_records = {
 }
 
 
-def test_metadata_add_get_int_float(api):
-    api.reset()
-    collection = api.create_collection("test_int")
+def test_metadata_add_get_int_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
     collection.add(**metadata_records)
 
     items = collection.get(ids=["id1", "id2"])
@@ -626,9 +626,9 @@ def test_metadata_add_get_int_float(api):
     assert isinstance(items["metadatas"][0]["float_value"], float)
 
 
-def test_metadata_add_query_int_float(api):
-    api.reset()
-    collection = api.create_collection("test_int")
+def test_metadata_add_query_int_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
     collection.add(**metadata_records)
 
     items: QueryResult = collection.query(
@@ -641,9 +641,9 @@ def test_metadata_add_query_int_float(api):
     assert isinstance(items["metadatas"][0][0]["float_value"], float)
 
 
-def test_metadata_get_where_string(api):
-    api.reset()
-    collection = api.create_collection("test_int")
+def test_metadata_get_where_string(client):
+    client.reset()
+    collection = client.create_collection("test_int")
     collection.add(**metadata_records)
 
     items = collection.get(where={"string_value": "one"})
@@ -651,9 +651,9 @@ def test_metadata_get_where_string(api):
     assert items["metadatas"][0]["string_value"] == "one"
 
 
-def test_metadata_get_where_int(api):
-    api.reset()
-    collection = api.create_collection("test_int")
+def test_metadata_get_where_int(client):
+    client.reset()
+    collection = client.create_collection("test_int")
     collection.add(**metadata_records)
 
     items = collection.get(where={"int_value": 1})
@@ -661,9 +661,9 @@ def test_metadata_get_where_int(api):
     assert items["metadatas"][0]["string_value"] == "one"
 
 
-def test_metadata_get_where_float(api):
-    api.reset()
-    collection = api.create_collection("test_int")
+def test_metadata_get_where_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
     collection.add(**metadata_records)
 
     items = collection.get(where={"float_value": 1.001})
@@ -672,9 +672,9 @@ def test_metadata_get_where_float(api):
     assert items["metadatas"][0]["float_value"] == 1.001
 
 
-def test_metadata_update_get_int_float(api):
-    api.reset()
-    collection = api.create_collection("test_int")
+def test_metadata_update_get_int_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
     collection.add(**metadata_records)
 
     collection.update(
@@ -694,31 +694,31 @@ bad_metadata_records = {
 }
 
 
-def test_metadata_validation_add(api):
-    api.reset()
-    collection = api.create_collection("test_metadata_validation")
+def test_metadata_validation_add(client):
+    client.reset()
+    collection = client.create_collection("test_metadata_validation")
     with pytest.raises(ValueError, match="metadata"):
         collection.add(**bad_metadata_records)
 
 
-def test_metadata_validation_update(api):
-    api.reset()
-    collection = api.create_collection("test_metadata_validation")
+def test_metadata_validation_update(client):
+    client.reset()
+    collection = client.create_collection("test_metadata_validation")
     collection.add(**metadata_records)
     with pytest.raises(ValueError, match="metadata"):
         collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
 
 
-def test_where_validation_get(api):
-    api.reset()
-    collection = api.create_collection("test_where_validation")
+def test_where_validation_get(client):
+    client.reset()
+    collection = client.create_collection("test_where_validation")
     with pytest.raises(ValueError, match="where"):
         collection.get(where={"value": {"nested": "5"}})
 
 
-def test_where_validation_query(api):
-    api.reset()
-    collection = api.create_collection("test_where_validation")
+def test_where_validation_query(client):
+    client.reset()
+    collection = client.create_collection("test_where_validation")
     with pytest.raises(ValueError, match="where"):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
 
@@ -733,49 +733,49 @@ operator_records = {
 }
 
 
-def test_where_lt(api):
-    api.reset()
-    collection = api.create_collection("test_where_lt")
+def test_where_lt(client):
+    client.reset()
+    collection = client.create_collection("test_where_lt")
     collection.add(**operator_records)
     items = collection.get(where={"int_value": {"$lt": 2}})
     assert len(items["metadatas"]) == 1
 
 
-def test_where_lte(api):
-    api.reset()
-    collection = api.create_collection("test_where_lte")
+def test_where_lte(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)
     items = collection.get(where={"int_value": {"$lte": 2.0}})
     assert len(items["metadatas"]) == 2
 
 
-def test_where_gt(api):
-    api.reset()
-    collection = api.create_collection("test_where_lte")
+def test_where_gt(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)
     items = collection.get(where={"float_value": {"$gt": -1.4}})
     assert len(items["metadatas"]) == 2
 
 
-def test_where_gte(api):
-    api.reset()
-    collection = api.create_collection("test_where_lte")
+def test_where_gte(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)
     items = collection.get(where={"float_value": {"$gte": 2.002}})
     assert len(items["metadatas"]) == 1
 
 
-def test_where_ne_string(api):
-    api.reset()
-    collection = api.create_collection("test_where_lte")
+def test_where_ne_string(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)
     items = collection.get(where={"string_value": {"$ne": "two"}})
     assert len(items["metadatas"]) == 1
 
 
-def test_where_ne_eq_number(api):
-    api.reset()
-    collection = api.create_collection("test_where_lte")
+def test_where_ne_eq_number(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)
     items = collection.get(where={"int_value": {"$ne": 1}})
     assert len(items["metadatas"]) == 1
@@ -783,9 +783,9 @@ def test_where_ne_eq_number(api):
     assert len(items["metadatas"]) == 1
 
 
-def test_where_valid_operators(api):
-    api.reset()
-    collection = api.create_collection("test_where_valid_operators")
+def test_where_valid_operators(client):
+    client.reset()
+    collection = client.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
     with pytest.raises(ValueError):
         collection.get(where={"int_value": {"$invalid": 2}})
@@ -846,9 +846,9 @@ bad_number_of_results_query = {
 }
 
 
-def test_dimensionality_validation_add(api):
-    api.reset()
-    collection = api.create_collection("test_dimensionality_validation")
+def test_dimensionality_validation_add(client):
+    client.reset()
+    collection = client.create_collection("test_dimensionality_validation")
     collection.add(**minimal_records)
 
     with pytest.raises(Exception) as e:
@@ -856,9 +856,9 @@ def test_dimensionality_validation_add(api):
     assert "dimensionality" in str(e.value)
 
 
-def test_dimensionality_validation_query(api):
-    api.reset()
-    collection = api.create_collection("test_dimensionality_validation_query")
+def test_dimensionality_validation_query(client):
+    client.reset()
+    collection = client.create_collection("test_dimensionality_validation_query")
     collection.add(**minimal_records)
 
     with pytest.raises(Exception) as e:
@@ -866,9 +866,9 @@ def test_dimensionality_validation_query(api):
     assert "dimensionality" in str(e.value)
 
 
-def test_query_document_valid_operators(api):
-    api.reset()
-    collection = api.create_collection("test_where_valid_operators")
+def test_query_document_valid_operators(client):
+    client.reset()
+    collection = client.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
     with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$lt": {"$nested": 2}})
@@ -913,9 +913,9 @@ contains_records = {
 }
 
 
-def test_get_where_document(api):
-    api.reset()
-    collection = api.create_collection("test_get_where_document")
+def test_get_where_document(client):
+    client.reset()
+    collection = client.create_collection("test_get_where_document")
     collection.add(**contains_records)
 
     items = collection.get(where_document={"$contains": "doc1"})
@@ -928,9 +928,9 @@ def test_get_where_document(api):
     assert len(items["metadatas"]) == 0
 
 
-def test_query_where_document(api):
-    api.reset()
-    collection = api.create_collection("test_query_where_document")
+def test_query_where_document(client):
+    client.reset()
+    collection = client.create_collection("test_query_where_document")
     collection.add(**contains_records)
 
     items = collection.query(
@@ -950,9 +950,9 @@ def test_query_where_document(api):
         assert "datapoints" in str(e.value)
 
 
-def test_delete_where_document(api):
-    api.reset()
-    collection = api.create_collection("test_delete_where_document")
+def test_delete_where_document(client):
+    client.reset()
+    collection = client.create_collection("test_delete_where_document")
     collection.add(**contains_records)
 
     collection.delete(where_document={"$contains": "doc1"})
@@ -988,9 +988,9 @@ logical_operator_records = {
 }
 
 
-def test_where_logical_operators(api):
-    api.reset()
-    collection = api.create_collection("test_logical_operators")
+def test_where_logical_operators(client):
+    client.reset()
+    collection = client.create_collection("test_logical_operators")
     collection.add(**logical_operator_records)
 
     items = collection.get(
@@ -1044,9 +1044,9 @@ def test_where_logical_operators(api):
     assert len(items["metadatas"]) == 2
 
 
-def test_where_document_logical_operators(api):
-    api.reset()
-    collection = api.create_collection("test_document_logical_operators")
+def test_where_document_logical_operators(client):
+    client.reset()
+    collection = client.create_collection("test_document_logical_operators")
     collection.add(**logical_operator_records)
 
     items = collection.get(
@@ -1096,9 +1096,9 @@ records = {
 }
 
 
-def test_query_include(api):
-    api.reset()
-    collection = api.create_collection("test_query_include")
+def test_query_include(client):
+    client.reset()
+    collection = client.create_collection("test_query_include")
     collection.add(**records)
 
     include = ["metadatas", "documents", "distances"]
@@ -1135,9 +1135,9 @@ def test_query_include(api):
     assert items["ids"][0][1] == "id2"
 
 
-def test_get_include(api):
-    api.reset()
-    collection = api.create_collection("test_get_include")
+def test_get_include(client):
+    client.reset()
+    collection = client.create_collection("test_get_include")
     collection.add(**records)
 
     include = ["metadatas", "documents"]
@@ -1172,9 +1172,9 @@ def test_get_include(api):
 # make sure query results are returned in the right order
 
 
-def test_query_order(api):
-    api.reset()
-    collection = api.create_collection("test_query_order")
+def test_query_order(client):
+    client.reset()
+    collection = client.create_collection("test_query_order")
     collection.add(**records)
 
     items = collection.query(
@@ -1190,9 +1190,9 @@ def test_query_order(api):
 # test to make sure add, get, delete error on invalid id input
 
 
-def test_invalid_id(api):
-    api.reset()
-    collection = api.create_collection("test_invalid_id")
+def test_invalid_id(client):
+    client.reset()
+    collection = client.create_collection("test_invalid_id")
     # Add with non-string id
     with pytest.raises(ValueError) as e:
         collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
@@ -1209,11 +1209,11 @@ def test_invalid_id(api):
     assert "ID" in str(e.value)
 
 
-def test_index_params(api):
+def test_index_params(client):
     EPS = 1e-12
     # first standard add
-    api.reset()
-    collection = api.create_collection(name="test_index_params")
+    client.reset()
+    collection = client.create_collection(name="test_index_params")
     collection.add(**records)
     items = collection.query(
         query_embeddings=[0.6, 1.12, 1.6],
@@ -1222,8 +1222,8 @@ def test_index_params(api):
     assert items["distances"][0][0] > 4
 
     # cosine
-    api.reset()
-    collection = api.create_collection(
+    client.reset()
+    collection = client.create_collection(
         name="test_index_params",
         metadata={"hnsw:space": "cosine", "hnsw:construction_ef": 20, "hnsw:M": 5},
     )
@@ -1236,8 +1236,8 @@ def test_index_params(api):
     assert items["distances"][0][0] < 1 + EPS
 
     # ip
-    api.reset()
-    collection = api.create_collection(
+    client.reset()
+    collection = client.create_collection(
         name="test_index_params", metadata={"hnsw:space": "ip"}
     )
     collection.add(**records)
@@ -1248,26 +1248,26 @@ def test_index_params(api):
     assert items["distances"][0][0] < -5
 
 
-def test_invalid_index_params(api):
-    api.reset()
+def test_invalid_index_params(client):
+    client.reset()
 
     with pytest.raises(Exception):
-        collection = api.create_collection(
+        collection = client.create_collection(
             name="test_index_params", metadata={"hnsw:foobar": "blarg"}
         )
         collection.add(**records)
 
     with pytest.raises(Exception):
-        collection = api.create_collection(
+        collection = client.create_collection(
             name="test_index_params", metadata={"hnsw:space": "foobar"}
         )
         collection.add(**records)
 
 
-def test_persist_index_loading_params(api, request):
-    api = request.getfixturevalue("local_persist_api")
-    api.reset()
-    collection = api.create_collection(
+def test_persist_index_loading_params(client, request):
+    client = request.getfixturevalue("local_persist_api")
+    client.reset()
+    collection = client.create_collection(
         "test",
         metadata={"hnsw:space": "ip"},
     )
@@ -1294,10 +1294,10 @@ def test_persist_index_loading_params(api, request):
             assert nn[key] is None
 
 
-def test_add_large(api):
-    api.reset()
+def test_add_large(client):
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
 
     # Test adding a large number of records
     large_records = np.random.rand(2000, 512).astype(np.float32).tolist()
@@ -1311,9 +1311,9 @@ def test_add_large(api):
 
 
 # test get_version
-def test_get_version(api):
-    api.reset()
-    version = api.get_version()
+def test_get_version(client):
+    client.reset()
+    version = client.get_version()
 
     # assert version matches the pattern x.y.z
     import re
@@ -1322,14 +1322,14 @@ def test_get_version(api):
 
 
 # test delete_collection
-def test_delete_collection(api):
-    api.reset()
-    collection = api.create_collection("test_delete_collection")
+def test_delete_collection(client):
+    client.reset()
+    collection = client.create_collection("test_delete_collection")
     collection.add(**records)
 
-    assert len(api.list_collections()) == 1
-    api.delete_collection("test_delete_collection")
-    assert len(api.list_collections()) == 0
+    assert len(client.list_collections()) == 1
+    client.delete_collection("test_delete_collection")
+    assert len(client.list_collections()) == 0
 
 
 # test default embedding function
@@ -1340,20 +1340,20 @@ def test_default_embedding():
     assert len(embeddings) == 64
 
 
-def test_multiple_collections(api):
+def test_multiple_collections(client):
     embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
     embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
     ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
     ids2 = [f"http://example.com/2/{i}" for i in range(len(embeddings2))]
 
-    api.reset()
-    coll1 = api.create_collection("coll1")
+    client.reset()
+    coll1 = client.create_collection("coll1")
     coll1.add(embeddings=embeddings1, ids=ids1)
 
-    coll2 = api.create_collection("coll2")
+    coll2 = client.create_collection("coll2")
     coll2.add(embeddings=embeddings2, ids=ids2)
 
-    assert len(api.list_collections()) == 2
+    assert len(client.list_collections()) == 2
     assert coll1.count() == len(embeddings1)
     assert coll2.count() == len(embeddings2)
 
@@ -1364,9 +1364,9 @@ def test_multiple_collections(api):
     assert results2["ids"][0][0] == ids2[0]
 
 
-def test_update_query(api):
-    api.reset()
-    collection = api.create_collection("test_update_query")
+def test_update_query(client):
+    client.reset()
+    collection = client.create_collection("test_update_query")
     collection.add(**records)
 
     updated_records = {
@@ -1393,9 +1393,9 @@ def test_update_query(api):
     )
 
 
-def test_get_nearest_neighbors_where_n_results_more_than_element(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_get_nearest_neighbors_where_n_results_more_than_element(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**records)
 
     includes = ["embeddings", "documents", "metadatas", "distances"]
@@ -1414,9 +1414,9 @@ def test_get_nearest_neighbors_where_n_results_more_than_element(api):
             assert results[key] is None
 
 
-def test_invalid_n_results_param(api):
-    api.reset()
-    collection = api.create_collection("testspace")
+def test_invalid_n_results_param(client):
+    client.reset()
+    collection = client.create_collection("testspace")
     collection.add(**records)
     with pytest.raises(TypeError) as exc:
         collection.query(
@@ -1470,9 +1470,9 @@ new_records = {
 }
 
 
-def test_upsert(api):
-    api.reset()
-    collection = api.create_collection("test")
+def test_upsert(client):
+    client.reset()
+    collection = client.create_collection("test")
 
     collection.add(**initial_records)
     assert collection.count() == 3
@@ -1516,10 +1516,10 @@ def test_upsert(api):
     assert get_result["documents"][0] is None
 
 
-def test_collection_upsert_with_invalid_collection_throws(api):
-    api.reset()
-    collection = api.create_collection("test")
-    api.delete_collection("test")
+def test_collection_upsert_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
     with pytest.raises(
         InvalidCollectionException, match=r"Collection .* does not exist."
@@ -1530,9 +1530,9 @@ def test_collection_upsert_with_invalid_collection_throws(api):
 # test to make sure add, query, update, upsert error on invalid embeddings input
 
 
-def test_invalid_embeddings(api):
-    api.reset()
-    collection = api.create_collection("test_invalid_embeddings")
+def test_invalid_embeddings(client):
+    client.reset()
+    collection = client.create_collection("test_invalid_embeddings")
 
     # Add with string embeddings
     invalid_records = {
@@ -1573,9 +1573,9 @@ def test_invalid_embeddings(api):
 # test to make sure update shows exception for bad dimensionality
 
 
-def test_dimensionality_exception_update(api):
-    api.reset()
-    collection = api.create_collection("test_dimensionality_update_exception")
+def test_dimensionality_exception_update(client):
+    client.reset()
+    collection = client.create_collection("test_dimensionality_update_exception")
     collection.add(**minimal_records)
 
     with pytest.raises(Exception) as e:
@@ -1586,9 +1586,9 @@ def test_dimensionality_exception_update(api):
 # test to make sure upsert shows exception for bad dimensionality
 
 
-def test_dimensionality_exception_upsert(api):
-    api.reset()
-    collection = api.create_collection("test_dimensionality_upsert_exception")
+def test_dimensionality_exception_upsert(client):
+    client.reset()
+    collection = client.create_collection("test_dimensionality_upsert_exception")
     collection.add(**minimal_records)
 
     with pytest.raises(Exception) as e:
