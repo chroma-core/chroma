@@ -81,8 +81,9 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
     reset(api)
 
     record_set = create_large_recordset(
-        min_size=api.max_batch_size,
-        max_size=api.max_batch_size + int(api.max_batch_size * random.random()),
+        min_size=api.get_max_batch_size(),
+        max_size=api.get_max_batch_size()
+        + int(api.get_max_batch_size() * random.random()),
     )
     coll = api.create_collection(
         name=collection.name,
@@ -112,8 +113,9 @@ def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) 
     reset(api)
 
     record_set = create_large_recordset(
-        min_size=api.max_batch_size,
-        max_size=api.max_batch_size + int(api.max_batch_size * random.random()),
+        min_size=api.get_max_batch_size(),
+        max_size=api.get_max_batch_size()
+        + int(api.get_max_batch_size() * random.random()),
     )
     coll = api.create_collection(
         name=collection.name,

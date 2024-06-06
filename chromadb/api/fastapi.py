@@ -631,7 +631,7 @@ class FastAPI(ServerAPI):
 
     @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
-    async def get_max_batch_size(self) -> int:
+    def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
             resp = self._session.get(self._api_url + "/pre-flight-checks")
             raise_chroma_error(resp)
