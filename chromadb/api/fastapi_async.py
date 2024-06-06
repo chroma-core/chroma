@@ -307,26 +307,35 @@ class FastAPIAsync(ServerAPIAsync):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionAsync:
-        """Returns a collection"""
-        # if (name is None and id is None) or (name is not None and id is not None):
-        #     raise ValueError("Name or id must be specified, but not both")
+        if (name is None and id is None) or (name is not None and id is not None):
+            raise ValueError("Name or id must be specified, but not both")
 
-        # _params = {"tenant": tenant, "database": database}
-        # if id is not None:
-        #     _params["type"] = str(id)
-        # resp = self._session.get(
-        #     self._api_url + "/collections/" + name if name else str(id), params=_params
-        # )
-        # raise_chroma_error(resp)
-        # resp_json = json.loads(resp.text)
-        # return Collection(
-        #     client=self,
-        #     name=resp_json["name"],
-        #     id=resp_json["id"],
-        #     embedding_function=embedding_function,
-        #     data_loader=data_loader,
-        #     metadata=resp_json["metadata"],
-        # )
+        params = {"tenant": tenant, "database": database}
+        if id is not None:
+            params["type"] = str(id)
+
+        resp_json = await self._make_request(
+            "get",
+            self._api_url + "/collections/" + name if name else str(id),
+            params=params,
+        )
+
+        model = CollectionModel(
+            id=resp_json["id"],
+            name=resp_json["name"],
+            metadata=resp_json["metadata"],
+            dimension=resp_json["dimension"],
+            tenant=resp_json["tenant"],
+            database=resp_json["database"],
+            version=resp_json["version"],
+        )
+
+        return CollectionAsync(
+            client=self,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
+        )
 
     @trace_method(
         "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
@@ -361,12 +370,11 @@ class FastAPIAsync(ServerAPIAsync):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
-        """Updates a collection"""
-        # resp = self._session.put(
-        #     self._api_url + "/collections/" + str(id),
-        #     data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
-        # )
-        # raise_chroma_error(resp)
+        await self._make_request(
+            "put",
+            self._api_url + "/collections/" + str(id),
+            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+        )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -583,33 +591,30 @@ class FastAPIAsync(ServerAPIAsync):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],
     ) -> QueryResult:
-        """Gets the nearest neighbors of a single embedding"""
-        # resp = self._session.post(
-        #     self._api_url + "/collections/" + str(collection_id) + "/query",
-        #     data=json.dumps(
-        #         {
-        #             "query_embeddings": query_embeddings,
-        #             "n_results": n_results,
-        #             "where": where,
-        #             "where_document": where_document,
-        #             "include": include,
-        #         }
-        #     ),
-        # )
+        resp_json = await self._make_request(
+            "post",
+            self._api_url + "/collections/" + str(collection_id) + "/query",
+            data=json.dumps(
+                {
+                    "query_embeddings": query_embeddings,
+                    "n_results": n_results,
+                    "where": where,
+                    "where_document": where_document,
+                    "include": include,
+                }
+            ),
+        )
 
-        # raise_chroma_error(resp)
-        # body = json.loads(resp.text)
-
-        # return QueryResult(
-        #     ids=body["ids"],
-        #     distances=body.get("distances", None),
-        #     embeddings=body.get("embeddings", None),
-        #     metadatas=body.get("metadatas", None),
-        #     documents=body.get("documents", None),
-        #     uris=body.get("uris", None),
-        #     data=None,
-        #     included=body["included"],
-        # )
+        return QueryResult(
+            ids=resp_json["ids"],
+            distances=resp_json.get("distances", None),
+            embeddings=resp_json.get("embeddings", None),
+            metadatas=resp_json.get("metadatas", None),
+            documents=resp_json.get("documents", None),
+            uris=resp_json.get("uris", None),
+            data=None,
+            included=resp_json["included"],
+        )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
     @override

@@ -154,6 +154,128 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
         return get_results
 
     @overrides
+    async def query(
+        self,
+        query_embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
+        query_texts: Optional[OneOrMany[Document]] = None,
+        query_images: Optional[OneOrMany[Image]] = None,
+        query_uris: Optional[OneOrMany[URI]] = None,
+        n_results: int = 10,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["metadatas", "documents", "distances"],
+    ) -> QueryResult:
+        # Users must provide only one of query_embeddings, query_texts, query_images, or query_uris
+        if not (
+            (query_embeddings is not None)
+            ^ (query_texts is not None)
+            ^ (query_images is not None)
+            ^ (query_uris is not None)
+        ):
+            raise ValueError(
+                "You must provide one of query_embeddings, query_texts, query_images, or query_uris."
+            )
+
+        valid_where = validate_where(where) if where else {}
+        valid_where_document = (
+            validate_where_document(where_document) if where_document else {}
+        )
+        valid_query_embeddings = (
+            validate_embeddings(
+                self._normalize_embeddings(
+                    maybe_cast_one_to_many_embedding(query_embeddings)  # type: ignore
+                )
+            )
+            if query_embeddings is not None
+            else None
+        )
+        valid_query_texts = (
+            maybe_cast_one_to_many_document(query_texts)
+            if query_texts is not None
+            else None
+        )
+        valid_query_images = (
+            maybe_cast_one_to_many_image(query_images)
+            if query_images is not None
+            else None
+        )
+        valid_query_uris = (
+            maybe_cast_one_to_many_uri(query_uris) if query_uris is not None else None
+        )
+        valid_include = validate_include(include, allow_distances=True)
+        valid_n_results = validate_n_results(n_results)
+
+        # If query_embeddings are not provided, we need to compute them from the inputs
+        if valid_query_embeddings is None:
+            if query_texts is not None:
+                valid_query_embeddings = self._embed(input=valid_query_texts)
+            elif query_images is not None:
+                valid_query_embeddings = self._embed(input=valid_query_images)
+            else:
+                if valid_query_uris is None:
+                    raise ValueError(
+                        "You must provide either query_embeddings, query_texts, query_images, or query_uris."
+                    )
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                valid_query_embeddings = self._embed(
+                    self._data_loader(valid_query_uris)
+                )
+
+        if "data" in include and "uris" not in include:
+            valid_include.append("uris")
+        query_results = await self._client._query(
+            collection_id=self.id,
+            query_embeddings=valid_query_embeddings,
+            n_results=valid_n_results,
+            where=valid_where,
+            where_document=valid_where_document,
+            include=include,
+        )
+
+        if (
+            "data" in include
+            and self._data_loader is not None
+            and query_results["uris"] is not None
+        ):
+            query_results["data"] = [
+                self._data_loader(uris) for uris in query_results["uris"]
+            ]
+
+        # Remove URIs from the result if they weren't requested
+        if "uris" not in include:
+            query_results["uris"] = None
+
+        return query_results
+
+    @overrides
+    async def modify(
+        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+    ) -> None:
+        if metadata is not None:
+            validate_metadata(metadata)
+            if "hnsw:space" in metadata:
+                raise ValueError(
+                    "Changing the distance function of a collection once it is created is not supported currently."
+                )
+
+        # Note there is a race condition here where the metadata can be updated
+        # but another thread sees the cached local metadata.
+        # TODO: fixme
+        await self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
+        if name:
+            self._model["name"] = name
+        if metadata:
+            self._model["metadata"] = metadata
+
+    @overrides
     async def delete(
         self,
         ids: Optional[IDs] = None,
