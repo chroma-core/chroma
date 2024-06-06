@@ -136,10 +136,10 @@ def load_and_check(
 ) -> None:
     try:
         system = System(settings)
-        api = system.instance(ServerAPI)
         system.start()
+        client = ClientCreator.from_system(system)
 
-        coll = api.get_collection(
+        coll = client.get_collection(
             name=collection_name,
             embedding_function=strategies.not_implemented_embedding_function(),
         )
