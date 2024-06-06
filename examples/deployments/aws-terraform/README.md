@@ -56,7 +56,7 @@ export TF_ssh_public_key="./chroma-aws.pub"
 #path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
 export TF_ssh_private_key="./chroma-aws"
 #set the chroma release to deploy
-export TF_VAR_chroma_release=0.4.12
+export TF_VAR_chroma_release=0.5.0
 # AWS region to deploy the chroma instance to
 export TF_VAR_region="us-west-1"
 #enable public access to the chroma instance on port 8000

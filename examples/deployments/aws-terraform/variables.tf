@@ -6,7 +6,7 @@ variable "chroma_release" {
 
 #TODO this should be updated to point to https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh in the repo
 data "http" "startup_script_remote" {
-  url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/aws-terraform/startup.sh"
+  url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh"
 }
 
 data "template_file" "user_data" {
@@ -79,10 +79,10 @@ locals {
   token_auth_credentials = {
     token = random_password.chroma_token.result
   }
-  tags = [
-    "chroma",
-    "release-${replace(var.chroma_release, ".", "")}",
-  ]
+  tags = {
+    Name = "chroma",
+    Release = "release-${replace(var.chroma_release, ".", "")}",
+  }
 }
 
 variable "ssh_public_key" {
@@ -109,15 +109,15 @@ variable "chroma_data_volume_size" {
 }
 
 variable "chroma_data_volume_snapshot_before_destroy" {
-    description = "Take a snapshot of the chroma data volume before destroying it"
-    type        = bool
-    default     = false
+  description = "Take a snapshot of the chroma data volume before destroying it"
+  type        = bool
+  default     = false
 }
 
 variable "chroma_data_restore_from_snapshot_id" {
-    description = "Restore the chroma data volume from a snapshot"
-    type        = string
-    default     = null
+  description = "Restore the chroma data volume from a snapshot"
+  type        = string
+  default     = ""
 }
 
 variable "chroma_port" {
@@ -127,13 +127,13 @@ variable "chroma_port" {
 }
 
 variable "source_ranges" {
-  default     = ["0.0.0.0/0", "::/0"]
+  default     = ["0.0.0.0/0"]
   type        = list(string)
   description = "List of CIDR ranges to allow through the firewall"
 }
 
 variable "mgmt_source_ranges" {
-  default     = ["0.0.0.0/0", "::/0"]
+  default     = ["0.0.0.0/0"]
   type        = list(string)
   description = "List of CIDR ranges to allow for management of the Chroma instance. This is used for SSH incoming traffic filtering"
 }

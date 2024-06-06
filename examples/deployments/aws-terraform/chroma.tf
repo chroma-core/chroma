@@ -19,7 +19,7 @@ provider "aws" {
 
 # Create security group
 resource "aws_security_group" "chroma_sg" {
-  name        = "chroma-cluster-sg"
+  name        = "chroma-cluster-sg-${random_string.aws_resource_name.result}"
   description = "Security group for the cluster nodes"
 
   ingress {
@@ -44,14 +44,19 @@ resource "aws_security_group" "chroma_sg" {
     to_port          = 0
     protocol         = "-1"
     cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
   }
 
   tags = local.tags
 }
 
+resource "random_string" "aws_resource_name" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 resource "aws_key_pair" "chroma-keypair" {
-  key_name   = "chroma-keypair"  # Replace with your desired key pair name
+  key_name   = "chroma-keypair-${random_string.aws_resource_name.result}"  # Replace with your desired key pair name
   public_key = file(var.ssh_public_key)  # Replace with the path to your public key file
 }
 
@@ -78,7 +83,7 @@ data "aws_ami" "ubuntu" {
 resource "aws_instance" "chroma_instance" {
   ami             = data.aws_ami.ubuntu.id
   instance_type   = var.instance_type
-  key_name        = "chroma-keypair"
+  key_name        = aws_key_pair.chroma-keypair.key_name
   security_groups = [aws_security_group.chroma_sg.name]
 
   user_data = data.template_file.user_data.rendered
@@ -101,7 +106,7 @@ resource "aws_ebs_volume" "chroma-volume" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
@@ -110,7 +115,7 @@ locals {
 }
 
 locals {
-  restore_from_snapshot = length(var.chroma_data_restore_from_snapshot_id) == 0 ? false : true
+  restore_from_snapshot = var.chroma_data_restore_from_snapshot_id == "" ? false : true
 }
 
 resource "aws_volume_attachment" "chroma_volume_attachment" {
@@ -119,7 +124,7 @@ resource "aws_volume_attachment" "chroma_volume_attachment" {
   instance_id = aws_instance.chroma_instance.id
   provisioner "remote-exec" {
     inline = [
-      "if [ -z \"${local.restore_from_snapshot}\"  ]; then export VOLUME_ID=${local.cleaned_volume_id} && sudo mkfs -t ext4 /dev/$(lsblk -o +SERIAL | grep $VOLUME_ID | awk '{print $1}'); fi",
+      "if [ -z \"${var.chroma_data_restore_from_snapshot_id}\"  ]; then export VOLUME_ID=${local.cleaned_volume_id} && sudo mkfs -t ext4 /dev/$(lsblk -o +SERIAL | grep $VOLUME_ID | awk '{print $1}'); fi",
       "sudo mkdir /chroma-data",
       "export VOLUME_ID=${local.cleaned_volume_id} && sudo mount /dev/$(lsblk -o +SERIAL | grep $VOLUME_ID | awk '{print $1}') /chroma-data",
       "export VOLUME_ID=${local.cleaned_volume_id} && cat <<EOF | sudo tee /etc/fstab >> /dev/null",
@@ -134,7 +139,7 @@ resource "aws_volume_attachment" "chroma_volume_attachment" {
       private_key = file(var.ssh_private_key)
     }
   }
-    depends_on = [aws_instance.chroma_instance, aws_ebs_volume.chroma-volume]
+  depends_on = [aws_instance.chroma_instance, aws_ebs_volume.chroma-volume]
 }
 
 
