@@ -42,6 +42,13 @@ from chromadb.api.types import (
     validate_batch,
 )
 
+
+# requests removes None values from the built query string, but aiohttp will throw if None is provided
+def clean_params(params: dict) -> dict:
+    """Remove None values from kwargs."""
+    return {k: v for k, v in params.items() if v is not None}
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,23 +205,34 @@ class FastAPIAsync(ServerAPIAsync):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionAsync]:
-        """Returns a list of all collections"""
-        # resp = self._session.get(
-        #     self._api_url + "/collections",
-        #     params={
-        #         "tenant": tenant,
-        #         "database": database,
-        #         "limit": limit,
-        #         "offset": offset,
-        #     },
-        # )
-        # raise_chroma_error(resp)
-        # json_collections = json.loads(resp.text)
-        # collections = []
-        # for json_collection in json_collections:
-        #     collections.append(Collection(self, **json_collection))
+        resp_json = await self._make_request(
+            "get",
+            self._api_url + "/collections",
+            params=clean_params(
+                {
+                    "tenant": tenant,
+                    "database": database,
+                    "limit": limit,
+                    "offset": offset,
+                }
+            ),
+        )
 
-        # return collections
+        collections = []
+        for json_collection in resp_json:
+            model = CollectionModel(
+                id=json_collection["id"],
+                name=json_collection["name"],
+                metadata=json_collection["metadata"],
+                dimension=json_collection["dimension"],
+                tenant=json_collection["tenant"],
+                database=json_collection["database"],
+                version=json_collection["version"],
+            )
+
+            collections.append(CollectionAsync(client=self, model=model))
+
+        return collections
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
@@ -360,12 +378,11 @@ class FastAPIAsync(ServerAPIAsync):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        """Deletes a collection"""
-        # resp = self._session.delete(
-        #     self._api_url + "/collections/" + name,
-        #     params={"tenant": tenant, "database": database},
-        # )
-        # raise_chroma_error(resp)
+        await self._make_request(
+            "delete",
+            self._api_url + "/collections/" + name,
+            params={"tenant": tenant, "database": database},
+        )
 
     @trace_method("FastAPI._count", OpenTelemetryGranularity.OPERATION)
     @override

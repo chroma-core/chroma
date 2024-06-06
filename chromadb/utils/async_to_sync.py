@@ -23,6 +23,9 @@ def async_class_to_sync(cls: T) -> T:
                     result = loop.run_until_complete(func(*args, **kwargs))
 
                     # todo: super hacky, is there a better pattern to use?
+                    if isinstance(result, list):
+                        return [async_class_to_sync(r) for r in result]
+
                     if isinstance(result, object):
                         return async_class_to_sync(result)
 
