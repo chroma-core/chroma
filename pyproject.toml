@@ -43,8 +43,6 @@ dependencies = [
   'PyYAML>=6.0.0',
   'mmh3>=4.0.1',
   'orjson>=3.9.12',
-  'mlx>=0.0.5',
-  'transformers'
 ]
 
 [tool.black]
