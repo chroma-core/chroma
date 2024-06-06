@@ -7,7 +7,6 @@ from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.test_api import records  # type: ignore
 from chromadb.api.models.Collection import Collection
 import time
-from chromadb.api.client import Client as ClientCreator
 
 batch_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
@@ -79,12 +78,12 @@ def verify_records(
 
 
 @skip_if_not_cluster()
-def test_add():  # type: ignore
+def test_add(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
+
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
@@ -98,11 +97,10 @@ def test_add():  # type: ignore
 
 
 @skip_if_not_cluster()
-def test_update():  # type: ignore
+def test_update(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
@@ -119,11 +117,10 @@ def test_update():  # type: ignore
 
 
 @skip_if_not_cluster()
-def test_delete(api):  # type: ignore
+def test_delete(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
@@ -138,10 +135,10 @@ def test_delete(api):  # type: ignore
 # TODO: These tests should be enabled when the distributed system has metadata segments
 @pytest.mark.xfail
 @skip_if_not_cluster()
-def test_delete_filter(api):  # type: ignore
+def test_delete_filter(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
-    client = ClientCreator.from_system(system)
+    system.start()
     client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
@@ -164,10 +161,10 @@ def test_delete_filter(api):  # type: ignore
 
 
 @skip_if_not_cluster()
-def test_upsert(api):  # type: ignore
+def test_upsert(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
-    client = ClientCreator.from_system(system)
+    system.start()
     client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
