@@ -135,11 +135,25 @@ Most importantly, there is no default embedding function. If you add() documents
 {% /tab %}
 {% tab label="Javascript" %}
 
-To run Chroma in client server mode, first install the chroma library and CLI via pypi:
+To run Chroma in client server mode, first install the chroma library via a package manager.
 
-```bash
-pip install chromadb
+{% codetabs customHeader="sh" %}
+{% codetab label="yarn" %}
+```bash {% codetab=true %}
+yarn install chromadb chromadb-default-embed # [!code $]
 ```
+{% /codetab %}
+{% codetab label="npm" %}
+```bash {% codetab=true %}
+npm install --save chromadb chromadb-default-embed # [!code $]
+```
+{% /codetab %}
+{% codetab label="pnpm" %}
+```bash {% codetab=true %}
+pnpm install chromadb chromadb-default-embed # [!code $]
+```
+{% /codetab %}
+{% /codetabs %}
 
 Then start the Chroma server:
 
