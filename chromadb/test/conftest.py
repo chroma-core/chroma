@@ -20,6 +20,7 @@ import hypothesis
 import pytest
 import uvicorn
 from requests.exceptions import ConnectionError
+from aiohttp.client_exceptions import ClientConnectionError
 from typing_extensions import Protocol
 
 from chromadb.api.fastapi_async import FastAPIAsync
@@ -155,7 +156,9 @@ def _run_server(
 def _await_server(api: ServerAPI, attempts: int = 0) -> None:
     try:
         api.heartbeat()
-    except ConnectionError as e:
+    # First error is from requests, second is from aiohttp
+    # todo: use httpx for both?
+    except (ConnectionError, ClientConnectionError) as e:
         if attempts > 15:
             raise e
         else:
@@ -165,6 +168,7 @@ def _await_server(api: ServerAPI, attempts: int = 0) -> None:
 
 def _fastapi_fixture(
     is_persistent: bool = False,
+    chroma_api_impl: str = "chromadb.api.fastapi.FastAPI",
     chroma_server_authn_provider: Optional[str] = None,
     chroma_client_auth_provider: Optional[str] = None,
     chroma_server_authn_credentials_file: Optional[str] = None,
@@ -229,7 +233,7 @@ def _fastapi_fixture(
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
     settings = Settings(
-        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_api_impl=chroma_api_impl,
         chroma_server_host="localhost",
         chroma_server_http_port=port,
         allow_reset=True,
@@ -254,6 +258,13 @@ def _fastapi_fixture(
 
 def fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=False)
+
+
+def fastapi_async():
+    return _fastapi_fixture(
+        is_persistent=False,
+        chroma_api_impl="chromadb.api.fastapi_async.FastAPIAsyncSync",
+    )
 
 
 def fastapi_persistent() -> Generator[System, None, None]:
@@ -469,7 +480,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, fastapi_persistent, sqlite, sqlite_persistent]
+    fixtures = [fastapi, fastapi_async, fastapi_persistent, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:

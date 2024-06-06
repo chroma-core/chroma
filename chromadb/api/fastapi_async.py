@@ -14,6 +14,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
+from chromadb.utils.async_to_sync import async_class_to_sync
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.types import Database, Tenant
@@ -62,8 +63,8 @@ class FastAPIAsync(ServerAPI):
 
     async def _make_request(self, method: str, url: str, **kwargs):
         if self._session is None:
-            # todo: better error
-            raise ValueError("Session not initialized")
+            # todo: should require session to be created in __aenter__?
+            self._session = aiohttp.ClientSession()
 
         async with self._session.request(method, url, **kwargs) as response:
             raise_chroma_error(response)
@@ -639,3 +640,9 @@ def raise_chroma_error(resp: aiohttp.ClientResponse) -> None:
     #     resp.raise_for_status()
     # except requests.HTTPError:
     #     raise (Exception(resp.text))
+
+
+# todo: move to test directory?
+@async_class_to_sync
+class FastAPIAsyncSync(FastAPIAsync):
+    pass

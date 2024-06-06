@@ -193,29 +193,6 @@ def test_heartbeat(api):
     assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
-# todo: parameterize async/sync tests or move to different file
-async def test_heartbeat_async(api_async):
-    heartbeat_ns = await api_async.heartbeat()
-    assert isinstance(heartbeat_ns, int)
-
-    heartbeat_s = heartbeat_ns // 10**9
-    heartbeat = datetime.fromtimestamp(heartbeat_s)
-    assert heartbeat > datetime.now() - timedelta(seconds=10)
-
-
-async def test_create_database_async(api_async):
-    await api_async.reset()
-    await api_async.create_database("foo")
-
-
-async def test_get_database_async(api_async):
-    await api_async.reset()
-    await api_async.create_database("foo")
-
-    database = await api_async.get_database("foo")
-    assert database["name"] == "foo"
-
-
 def test_max_batch_size(api):
     print(api)
     batch_size = api.max_batch_size
