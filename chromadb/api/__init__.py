@@ -433,9 +433,8 @@ class BaseAPI(ABC):
         """
         pass
 
-    @property
     @abstractmethod
-    def max_batch_size(self) -> int:
+    def get_max_batch_size(self) -> int:
         """Return the maximum number of records that can be submitted in a single call
         to submit_embeddings."""
         pass
@@ -726,10 +725,9 @@ class ServerAPIAsync(ServerAPI):
     ) -> QueryResult:
         pass
 
-    @property
     @abstractmethod
     @override
-    def max_batch_size(self) -> int:
+    async def get_max_batch_size(self) -> int:
         pass
 
     @abstractmethod

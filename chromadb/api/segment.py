@@ -364,7 +364,7 @@ class SegmentAPI(ServerAPI):
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.max_batch_size},
+            {"max_batch_size": self.get_max_batch_size()},
         )
         records_to_submit = []
         for r in _records(
@@ -406,7 +406,7 @@ class SegmentAPI(ServerAPI):
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.max_batch_size},
+            {"max_batch_size": self.get_max_batch_size()},
         )
         records_to_submit = []
         for r in _records(
@@ -450,7 +450,7 @@ class SegmentAPI(ServerAPI):
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.max_batch_size},
+            {"max_batch_size": self.get_max_batch_size()},
         )
         records_to_submit = []
         for r in _records(
@@ -790,9 +790,8 @@ class SegmentAPI(ServerAPI):
     def get_settings(self) -> Settings:
         return self._settings
 
-    @cached_property
     @override
-    def max_batch_size(self) -> int:
+    def get_max_batch_size(self) -> int:
         return self._producer.max_batch_size
 
     # TODO: This could potentially cause race conditions in a distributed version of the
