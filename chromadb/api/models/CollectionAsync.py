@@ -48,8 +48,11 @@ from chromadb.api.types import (
 
 from .CollectionCommon import CollectionCommon
 
+if TYPE_CHECKING:
+    from chromadb.api import ServerAPIAsync
 
-class CollectionAsync(CollectionCommon):
+
+class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
     @overrides
     async def add(
         self,
@@ -94,7 +97,6 @@ class CollectionAsync(CollectionCommon):
                     )
                 embeddings = self._embed(self._data_loader(uris))
 
-        # todo: fix type
         await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
     @overrides

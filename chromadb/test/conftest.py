@@ -623,13 +623,6 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
 
 
 @pytest.fixture(scope="function")
-async def api_async(system: System):
-    # todo: use system.instance instead?
-    async with FastAPIAsync(system) as api:
-        yield api
-
-
-@pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
     client = ClientCreator.from_system(system)

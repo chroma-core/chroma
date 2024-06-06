@@ -598,3 +598,210 @@ class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         pass
+
+
+class ServerAPIAsync(ServerAPI):
+    @abstractmethod
+    @override
+    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        pass
+
+    @abstractmethod
+    @override
+    async def create_tenant(self, name: str) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def get_tenant(self, name: str) -> Tenant:
+        pass
+
+    @abstractmethod
+    @override
+    async def heartbeat(self) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    async def _modify(
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def _add(
+        self,
+        ids: IDs,
+        collection_id: UUID,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    async def _update(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    async def _upsert(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    async def _count(self, collection_id: UUID) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    async def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    async def _get(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["embeddings", "metadatas", "documents"],
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    async def _delete(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs],
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+    ) -> IDs:
+        pass
+
+    @abstractmethod
+    @override
+    async def _query(
+        self,
+        collection_id: UUID,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+        where_document: WhereDocument = {},
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+    ) -> QueryResult:
+        pass
+
+    @property
+    @abstractmethod
+    @override
+    def max_batch_size(self) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    async def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[CollectionAsync]:
+        pass
+
+    @abstractmethod
+    @override
+    async def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    async def create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionAsync:
+        pass
+
+    @abstractmethod
+    @override
+    async def get_collection(
+        self,
+        name: str,
+        id: Optional[UUID] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionAsync:
+        pass
+
+    @abstractmethod
+    @override
+    async def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionAsync:
+        pass
+
+    @abstractmethod
+    @override
+    async def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass

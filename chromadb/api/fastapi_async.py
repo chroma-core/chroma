@@ -5,7 +5,7 @@ import logging
 from urllib.parse import quote, urlparse, urlunparse
 import aiohttp
 from overrides import override
-from chromadb.api import ServerAPI
+from chromadb.api import ServerAPIAsync
 from chromadb.api.types import CollectionMetadata, EmbeddingFunction, GetResult
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
@@ -45,7 +45,7 @@ from chromadb.api.types import (
 logger = logging.getLogger(__name__)
 
 
-class FastAPIAsync(ServerAPI):
+class FastAPIAsync(ServerAPIAsync):
     _max_batch_size: int = -1
 
     def __init__(self, system: System):
@@ -197,7 +197,7 @@ class FastAPIAsync(ServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[CollectionAsync]:
         """Returns a list of all collections"""
         # resp = self._session.get(
         #     self._api_url + "/collections",
@@ -286,7 +286,7 @@ class FastAPIAsync(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionAsync:
         """Returns a collection"""
         # if (name is None and id is None) or (name is not None and id is not None):
         #     raise ValueError("Name or id must be specified, but not both")
@@ -322,7 +322,7 @@ class FastAPIAsync(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> CollectionAsync:
         "sodfihsdof"
         # return cast(
         #     Collection,

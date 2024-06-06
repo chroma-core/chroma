@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
+from typing import TYPE_CHECKING, Generic, Optional, Tuple, Any, TypeVar, Union, cast
 import numpy as np
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
@@ -55,17 +55,20 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from chromadb.api import ServerAPI
+    from chromadb.api import ServerAPIAsync
+
+ClientT = TypeVar("ClientT", "ServerAPI", "ServerAPIAsync")
 
 
-class CollectionCommon:
+class CollectionCommon(Generic[ClientT]):
     _model: CollectionModel
-    _client: "ServerAPI"
+    _client: ClientT
     _embedding_function: Optional[EmbeddingFunction[Embeddable]]
     _data_loader: Optional[DataLoader[Loadable]]
 
     def __init__(
         self,
-        client: "ServerAPI",
+        client: ClientT,
         model: CollectionModel,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
