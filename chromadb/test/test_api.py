@@ -74,9 +74,9 @@ def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading(api_fixture, request):
-    api = request.getfixturevalue("local_persist_api")
-    api.reset()
-    collection = api.create_collection("test")
+    client = request.getfixturevalue("local_persist_api")
+    client.reset()
+    collection = client.create_collection("test")
     collection.add(ids="id1", documents="hello")
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
@@ -103,13 +103,13 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
         def __call__(self, input):
             return [[1, 2, 3] for _ in range(len(input))]
 
-    api = request.getfixturevalue("local_persist_api")
-    api.reset()
-    collection = api.create_collection("test", embedding_function=TestEF())
+    client = request.getfixturevalue("local_persist_api")
+    client.reset()
+    collection = client.create_collection("test", embedding_function=TestEF())
     collection.add(ids="id1", documents="hello")
 
-    api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test", embedding_function=TestEF())
+    client2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection = client2.get_collection("test", embedding_function=TestEF())
 
     includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
@@ -163,24 +163,24 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist(api_fixture, request):
-    api = request.getfixturevalue(api_fixture.__name__)
+    client = request.getfixturevalue(api_fixture.__name__)
 
-    api.reset()
+    client.reset()
 
-    collection = api.create_collection("testspace")
+    collection = client.create_collection("testspace")
 
     collection.add(**batch_records)
 
     assert collection.count() == 2
 
-    api = request.getfixturevalue(api_fixture.__name__)
-    collection = api.get_collection("testspace")
+    client = request.getfixturevalue(api_fixture.__name__)
+    collection = client.get_collection("testspace")
     assert collection.count() == 2
 
-    api.delete_collection("testspace")
+    client.delete_collection("testspace")
 
-    api = request.getfixturevalue(api_fixture.__name__)
-    assert api.list_collections() == []
+    client = request.getfixturevalue(api_fixture.__name__)
+    assert client.list_collections() == []
 
 
 def test_heartbeat(client):
