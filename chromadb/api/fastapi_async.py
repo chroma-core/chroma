@@ -1,4 +1,5 @@
 from uuid import UUID
+import urllib.parse
 import orjson as json
 from typing import Any, Optional, cast, Tuple, Sequence, TypeVar, Callable
 import logging
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 
 class FastAPIAsync(ServerAPIAsync):
+    _settings: Settings
     _max_batch_size: int = -1
 
     def __init__(self, system: System):
@@ -75,10 +77,14 @@ class FastAPIAsync(ServerAPIAsync):
 
         self._session = None
 
-    async def _make_request(self, method: str, url: str, **kwargs):
+    async def _make_request(self, method: str, path: str, **kwargs):
         if self._session is None:
             # todo: should require session to be created in __aenter__?
             self._session = aiohttp.ClientSession()
+
+        # Unlike requests, aiohttp does not automatically escape the path
+        escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
+        url = self._api_url + escaped_path
 
         async with self._session.request(method, url, **kwargs) as response:
             await raise_chroma_error(response)
@@ -143,7 +149,7 @@ class FastAPIAsync(ServerAPIAsync):
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     async def heartbeat(self) -> int:
-        response = await self._make_request("get", self._api_url)
+        response = await self._make_request("get", "")
         return int(response["nanosecond heartbeat"])
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
@@ -155,7 +161,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> None:
         await self._make_request(
             "post",
-            self._api_url + "/databases",
+            "/databases",
             data=json.dumps({"name": name}),
             params={"tenant": tenant},
         )
@@ -169,7 +175,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> Database:
         response = await self._make_request(
             "get",
-            self._api_url + "/databases/" + name,
+            "/databases/" + name,
             params={"tenant": tenant},
         )
 
@@ -180,23 +186,21 @@ class FastAPIAsync(ServerAPIAsync):
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def create_tenant(self, name: str) -> None:
-        """Creates a tenant"""
-        # resp = self._session.post(
-        #     self._api_url + "/tenants",
-        #     data=json.dumps({"name": name}),
-        # )
-        # raise_chroma_error(resp)
+        await self._make_request(
+            "post",
+            "/tenants",
+            data=json.dumps({"name": name}),
+        )
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_tenant(self, name: str) -> Tenant:
-        """Returns a tenant"""
-        # resp = self._session.get(
-        #     self._api_url + "/tenants/" + name,
-        # )
-        # raise_chroma_error(resp)
-        # resp_json = json.loads(resp.text)
-        # return Tenant(name=resp_json["name"])
+        resp_json = await self._make_request(
+            "get",
+            "/tenants/" + name,
+        )
+
+        return Tenant(name=resp_json["name"])
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     @override
@@ -209,7 +213,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> Sequence[CollectionAsync]:
         resp_json = await self._make_request(
             "get",
-            self._api_url + "/collections",
+            "/collections",
             params=clean_params(
                 {
                     "tenant": tenant,
@@ -241,13 +245,13 @@ class FastAPIAsync(ServerAPIAsync):
     async def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
-        """Returns a count of collections"""
-        # resp = self._session.get(
-        #     self._api_url + "/count_collections",
-        #     params={"tenant": tenant, "database": database},
-        # )
-        # raise_chroma_error(resp)
-        # return cast(int, json.loads(resp.text))
+        resp_json = await self._make_request(
+            "get",
+            "/count_collections",
+            params={"tenant": tenant, "database": database},
+        )
+
+        return cast(int, resp_json)
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -266,7 +270,7 @@ class FastAPIAsync(ServerAPIAsync):
         """Creates a collection"""
         resp_json = await self._make_request(
             "post",
-            self._api_url + "/collections",
+            "/collections",
             data=json.dumps(
                 {
                     "name": name,
@@ -316,7 +320,7 @@ class FastAPIAsync(ServerAPIAsync):
 
         resp_json = await self._make_request(
             "get",
-            self._api_url + "/collections/" + name if name else str(id),
+            "/collections/" + name if name else str(id),
             params=params,
         )
 
@@ -372,7 +376,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> None:
         await self._make_request(
             "put",
-            self._api_url + "/collections/" + str(id),
+            "/collections/" + str(id),
             data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
 
@@ -386,7 +390,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> None:
         await self._make_request(
             "delete",
-            self._api_url + "/collections/" + name,
+            "/collections/" + name,
             params={"tenant": tenant, "database": database},
         )
 
@@ -399,7 +403,7 @@ class FastAPIAsync(ServerAPIAsync):
         """Returns the number of embeddings in the database"""
         resp_json = await self._make_request(
             "get",
-            self._api_url + "/collections/" + str(collection_id) + "/count",
+            "/collections/" + str(collection_id) + "/count",
         )
 
         return cast(int, resp_json)
@@ -438,7 +442,7 @@ class FastAPIAsync(ServerAPIAsync):
 
         resp_json = await self._make_request(
             "post",
-            self._api_url + "/collections/" + str(collection_id) + "/get",
+            "/collections/" + str(collection_id) + "/get",
             data=json.dumps(
                 {
                     "ids": ids,
@@ -473,7 +477,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> IDs:
         resp_json = await self._make_request(
             "post",
-            self._api_url + "/collections/" + str(collection_id) + "/delete",
+            "/collections/" + str(collection_id) + "/delete",
             data=json.dumps(
                 {"where": where, "ids": ids, "where_document": where_document}
             ),
@@ -498,7 +502,7 @@ class FastAPIAsync(ServerAPIAsync):
         """
         return await self._make_request(
             "post",
-            self._api_url + url,
+            url,
             data=json.dumps(
                 {
                     "ids": batch[0],
@@ -581,7 +585,7 @@ class FastAPIAsync(ServerAPIAsync):
     ) -> QueryResult:
         resp_json = await self._make_request(
             "post",
-            self._api_url + "/collections/" + str(collection_id) + "/query",
+            "/collections/" + str(collection_id) + "/query",
             data=json.dumps(
                 {
                     "query_embeddings": query_embeddings,
@@ -607,28 +611,25 @@ class FastAPIAsync(ServerAPIAsync):
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
     @override
     async def reset(self) -> bool:
-        resp_json = await self._make_request("post", self._api_url + "/reset")
+        resp_json = await self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
     @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_version(self) -> str:
-        resp_json = await self._make_request("get", self._api_url + "/version")
+        resp_json = await self._make_request("get", "/version")
         return cast(str, resp_json)
 
     @override
     async def get_settings(self) -> Settings:
-        """Returns the settings of the client"""
-        # return self._settings
+        return self._settings
 
     # todo: cleanup
     @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
-            resp_json = await self._make_request(
-                "get", self._api_url + "/pre-flight-checks"
-            )
+            resp_json = await self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
 
