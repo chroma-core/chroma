@@ -162,7 +162,7 @@ impl ArrowBlockfileWriter {
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
         if delta.get_size::<K, V>() > MAX_BLOCK_SIZE {
-            let new_blocks = delta.split_v2::<K, V>();
+            let new_blocks = delta.split::<K, V>();
             for (split_key, new_delta) in new_blocks {
                 self.sparse_index.add_block(split_key, new_delta.id);
                 let mut deltas = self.block_deltas.lock();

@@ -112,7 +112,7 @@ impl BlockDelta {
         self.builder.to_record_batch::<K>()
     }
 
-    pub fn split_v2<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &'referred_data self,
     ) -> Vec<(CompositeKey, BlockDelta)> {
         let half_size = MAX_BLOCK_SIZE / 2;
