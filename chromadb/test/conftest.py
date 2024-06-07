@@ -314,6 +314,7 @@ def _fastapi_fixture(
     yield system
     system.stop()
     proc.kill()
+    ctx.Process.join(proc)
     if is_persistent and persist_directory is not None:
         if os.path.exists(persist_directory):
             shutil.rmtree(persist_directory)
