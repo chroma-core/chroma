@@ -30,6 +30,7 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
+        fail-fast: false
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
@@ -68,6 +69,7 @@ jobs:
             env-file: compose-env.linux
           - platform: windows-latest
             env-file: compose-env.windows
+      fail-fast: false
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -95,6 +97,7 @@ jobs:
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
                    "chromadb/test/test_logservice.py",
                    "chromadb/test/distributed/test_sanity.py"]
+    fail-fast: false
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
