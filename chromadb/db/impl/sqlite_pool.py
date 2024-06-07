@@ -135,7 +135,6 @@ class PerThreadPool(Pool):
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
-        print("sqlite pool connect")
         if hasattr(self._connection, "conn") and self._connection.conn is not None:
             return self._connection.conn  # type: ignore # cast doesn't work here for some reason
         else:
@@ -149,14 +148,11 @@ class PerThreadPool(Pool):
 
     @override
     def close(self) -> None:
-        print("sqlite pool closing...")
         with self._lock:
             for conn in self._connections:
                 conn.close_actual()
             self._connections.clear()
             self._connection = threading.local()
-
-        print("sqlite pool closed")
 
     @override
     def return_to_pool(self, conn: Connection) -> None:

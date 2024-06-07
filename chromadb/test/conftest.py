@@ -272,48 +272,51 @@ def _fastapi_fixture(
         chroma_server_ssl_keyfile,
         chroma_overwrite_singleton_tenant_database_access_from_auth,
     )
-    persist_directory = None
-    if is_persistent:
-        persist_directory = tempfile.mkdtemp()
-        print("using persist directory: ", persist_directory)
-        args = (
-            port,
-            is_persistent,
-            persist_directory,
-            chroma_server_authn_provider,
-            chroma_server_authn_credentials_file,
-            chroma_server_authn_credentials,
-            chroma_auth_token_transport_header,
-            chroma_server_authz_provider,
-            chroma_server_authz_config_file,
-            chroma_server_ssl_certfile,
-            chroma_server_ssl_keyfile,
-            chroma_overwrite_singleton_tenant_database_access_from_auth,
+
+    def run(args):
+        proc = ctx.Process(target=_run_server, args=args, daemon=True)
+        proc.start()
+        settings = Settings(
+            chroma_api_impl="chromadb.api.fastapi.FastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=port,
+            allow_reset=True,
+            chroma_client_auth_provider=chroma_client_auth_provider,
+            chroma_client_auth_credentials=chroma_client_auth_credentials,
+            chroma_auth_token_transport_header=chroma_auth_token_transport_header,
+            chroma_server_ssl_verify=chroma_server_ssl_certfile,
+            chroma_server_ssl_enabled=True if chroma_server_ssl_certfile else False,
+            chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
-    proc = ctx.Process(target=_run_server, args=args, daemon=True)
-    proc.start()
-    settings = Settings(
-        chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_host="localhost",
-        chroma_server_http_port=port,
-        allow_reset=True,
-        chroma_client_auth_provider=chroma_client_auth_provider,
-        chroma_client_auth_credentials=chroma_client_auth_credentials,
-        chroma_auth_token_transport_header=chroma_auth_token_transport_header,
-        chroma_server_ssl_verify=chroma_server_ssl_certfile,
-        chroma_server_ssl_enabled=True if chroma_server_ssl_certfile else False,
-        chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
-    )
-    system = System(settings)
-    api = system.instance(ServerAPI)
-    system.start()
-    _await_server(api)
-    yield system
-    system.stop()
-    proc.kill()
-    if is_persistent and persist_directory is not None:
-        if os.path.exists(persist_directory):
-            shutil.rmtree(persist_directory)
+        system = System(settings)
+        api = system.instance(ServerAPI)
+        system.start()
+        _await_server(api)
+        yield system
+        system.stop()
+        proc.kill()
+
+    if is_persistent:
+        with tempfile.TemporaryDirectory() as persist_directory:
+            args = (
+                port,
+                is_persistent,
+                persist_directory,
+                chroma_server_authn_provider,
+                chroma_server_authn_credentials_file,
+                chroma_server_authn_credentials,
+                chroma_auth_token_transport_header,
+                chroma_server_authz_provider,
+                chroma_server_authz_config_file,
+                chroma_server_ssl_certfile,
+                chroma_server_ssl_keyfile,
+                chroma_overwrite_singleton_tenant_database_access_from_auth,
+            )
+
+            yield from run(args)
+
+    else:
+        yield from run(args)
 
 
 def fastapi() -> Generator[System, None, None]:
@@ -513,23 +516,21 @@ def sqlite() -> Generator[System, None, None]:
 
 def sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
-    save_path = tempfile.mkdtemp()
-    settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
-        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        allow_reset=True,
-        is_persistent=True,
-        persist_directory=save_path,
-    )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path)
+    with tempfile.TemporaryDirectory() as save_path:
+        settings = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=save_path,
+        )
+        system = System(settings)
+        system.start()
+        yield system
+        system.stop()
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
