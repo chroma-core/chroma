@@ -48,11 +48,7 @@ def test_add(
 
     if not invariants.is_metadata_valid(normalized_record_set):
         with pytest.raises(Exception):
-            try:
-                coll.add(**normalized_record_set)
-            except Exception as e:
-                print(f"Exception: {e}")
-                raise e
+            coll.add(**normalized_record_set)
         return
 
     coll.add(**record_set)
