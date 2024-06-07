@@ -435,8 +435,7 @@ class BaseAPI(ABC):
 
     @abstractmethod
     def get_max_batch_size(self) -> int:
-        """Return the maximum number of records that can be submitted in a single call
-        to submit_embeddings."""
+        """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
 

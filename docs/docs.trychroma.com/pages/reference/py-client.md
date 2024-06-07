@@ -285,3 +285,15 @@ Get the settings used to initialize the client.
 **Returns**:
 
 - `Settings` - The settings used to initialize the client.
+
+## get_max_batch_size
+
+```python
+def get_max_batch_size() -> int
+```
+
+Get the maximum batch size.
+
+**Returns**:
+
+- `int` - The maximum number of records that can be created or mutated in a single call.
