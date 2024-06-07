@@ -16,10 +16,16 @@ def async_class_to_sync(cls: T) -> T:
             # (need an extra wrapper to capture the current value/func)
             def construct_wrapper(func):
                 def sync_wrapper(*args, **kwargs):
-                    if asyncio.get_event_loop().is_running():
+                    loop = None
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                    if loop.is_running():
                         return func(*args, **kwargs)
 
-                    loop = asyncio.get_event_loop()
                     result = loop.run_until_complete(func(*args, **kwargs))
 
                     # todo: super hacky, is there a better pattern to use?

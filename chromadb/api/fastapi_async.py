@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson as json
@@ -58,6 +59,16 @@ class FastAPIAsync(ServerAPIAsync):
     _settings: Settings
     _max_batch_size: int = -1
 
+    # We make one client per event loop to avoid unexpected issues if a client
+    # is shared between event loops.
+    # For example, if a client is constructed in the main thread, then passed
+    # (or a returned Collection is passed) to a new thread, the client would
+    # normally throw an obscure asyncio error.
+    # Mixing asyncio and threading in this manner usually discouraged, but
+    # this gives a better user experience with practically no downsides.
+    # https://github.com/encode/httpx/issues/2058
+    _clients: dict = {}
+
     def __init__(self, system: System):
         super().__init__(system)
 
@@ -75,28 +86,28 @@ class FastAPIAsync(ServerAPIAsync):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        self._client = None
+    # todo: context manager usage (with ...)?
+    def _get_client(self) -> httpx.AsyncClient:
+        # todo: should this use anyio?
+        loop = asyncio.get_event_loop()
+        loop_hash = loop.__hash__()
+        if loop_hash not in self._clients:
+            self._clients[loop_hash] = httpx.AsyncClient()
+
+        return self._clients[loop_hash]
 
     async def _make_request(self, method: str, path: str, **kwargs):
-        if self._client is None:
-            # todo: should require session to be created in __aenter__?
-            self._client = httpx.AsyncClient()
-
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
-        response = await self._client.request(method, url, **kwargs)
+        response = await self._get_client().request(method, url, **kwargs)
         await raise_chroma_error(response)
         return json.loads(response.text)
 
-    async def __aenter__(self):
-        self._client = httpx.AsyncClient()
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, exc_tb):
-        if self._client is not None:
-            await self._client.aclose()
+    async def close(self):
+        for client in self._clients.values():
+            await client.aclose()
 
     # todo: factor out into helper?
     @staticmethod
