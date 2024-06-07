@@ -11,6 +11,7 @@ from chromadb.api.types import Embeddings, Metadatas
 from chromadb.test.conftest import MEMBERLIST_SLEEP, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
@@ -43,10 +44,6 @@ def test_add(
         embedding_function=collection.embedding_function,
     )
 
-    initial_version = None
-    if not NOT_CLUSTER_ONLY:
-        initial_version = coll.get_model()["version"]
-
     normalized_record_set = invariants.wrap_all(record_set)
 
     if not invariants.is_metadata_valid(normalized_record_set):
@@ -62,18 +59,9 @@ def test_add(
 
     if not NOT_CLUSTER_ONLY:
         if should_compact:
+            initial_version = coll.get_model()["version"]
             # Wait for the model to be updated
-            timeout = 120
-            initial_time = time.time()
-
-            def get_collection_version() -> int:
-                coll = api.get_collection(collection.name)
-                return coll.get_model()["version"]
-
-            while get_collection_version() == initial_version:
-                time.sleep(0.1)
-                if time.time() - initial_time > timeout:
-                    raise TimeoutError("Model was not updated in time")
+            wait_for_version_increase(api, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
