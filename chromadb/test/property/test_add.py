@@ -2,13 +2,18 @@ import random
 import uuid
 from random import randint
 from typing import cast, List, Any, Dict
+import hypothesis
 import pytest
 import time
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ServerAPI
 from chromadb.api.types import Embeddings, Metadatas
-from chromadb.test.conftest import MEMBERLIST_SLEEP, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import (
+    MEMBERLIST_SLEEP,
+    NOT_CLUSTER_ONLY,
+    override_hypothesis_profile,
+)
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
@@ -29,7 +34,10 @@ def reset(api: ServerAPI) -> None:
     record_set=strategies.recordsets(collection_st, min_size=10),
     should_compact=st.booleans(),
 )
-@settings(deadline=None)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(normal=hypothesis.settings(max_examples=500), fast=hypothesis.settings(max_examples=200)),
+)
 def test_add(
     api: ServerAPI,
     collection: strategies.Collection,

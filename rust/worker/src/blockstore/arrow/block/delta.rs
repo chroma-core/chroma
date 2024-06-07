@@ -112,6 +112,14 @@ impl BlockDelta {
         self.builder.to_record_batch::<K>()
     }
 
+    /// Splits the block delta into two block deltas. The split point is the last key
+    /// that pushes the block over the half size.
+    /// # Arguments
+    /// - provider: the arrow block provider to create the new block.
+    /// # Returns
+    /// A tuple containing the the key of the split point and the new block delta.
+    /// The new block delta contains all the key value pairs after, but not including the
+    /// split point.
     pub fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &'referred_data self,
     ) -> Vec<(CompositeKey, BlockDelta)> {
@@ -169,53 +177,6 @@ impl BlockDelta {
         }
 
         return output;
-    }
-
-    /// Splits the block delta into two block deltas. The split point is the last key
-    /// that pushes the block over the half size.
-    /// # Arguments
-    /// - provider: the arrow block provider to create the new block.
-    /// # Returns
-    /// A tuple containing the the key of the split point and the new block delta.
-    /// The new block delta contains all the key value pairs after, but not including the
-    /// split point.
-    pub fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &'referred_data self,
-    ) -> (CompositeKey, BlockDelta) {
-        let half_size = MAX_BLOCK_SIZE / 2;
-        let mut running_prefix_size = 0;
-        let mut running_key_size = 0;
-        let mut running_value_size = 0;
-        let mut running_count = 0;
-        let mut split_index = 0;
-
-        // The split key will be the last key that pushes the block over the half size. Not the first key that pushes it over
-        for i in 0..self.len() {
-            // TODO: change this interface to be more ergo
-            running_prefix_size += self.builder.get_prefix_size(i, i + 1);
-            running_key_size += self.builder.get_key_size(i, i + 1);
-            running_value_size += self.builder.get_value_size(i, i + 1);
-            running_count += 1;
-
-            let current_size = self.get_block_size::<K, V>(
-                running_count,
-                running_prefix_size,
-                running_key_size,
-                running_value_size,
-            );
-            if current_size > half_size {
-                break;
-            }
-            split_index = i;
-        }
-
-        let split_key = self.builder.get_key(split_index);
-        let split_after = self.builder.split(&split_key.prefix, split_key.key.clone());
-        let new_delta = BlockDelta {
-            builder: split_after,
-            id: Uuid::new_v4(),
-        };
-        return (split_key.clone(), new_delta);
     }
 
     fn len(&self) -> usize {
