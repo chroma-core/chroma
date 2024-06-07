@@ -160,6 +160,10 @@ impl Index<HnswIndexConfig> for HnswIndex {
                 let distance_function_string: String =
                     index_config.distance_function.clone().into();
 
+                println!(
+                    "Creating with distance function: {}",
+                    distance_function_string
+                );
                 let space_name = match CString::new(distance_function_string) {
                     Ok(space_name) => space_name,
                     Err(e) => {
@@ -261,6 +265,10 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         id: Uuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let distance_function_string: String = index_config.distance_function.clone().into();
+        println!(
+            "Loading with distance function: {}",
+            distance_function_string
+        );
         let space_name = match CString::new(distance_function_string) {
             Ok(space_name) => space_name,
             Err(e) => {

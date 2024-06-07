@@ -22,53 +22,46 @@ def reset(api: ServerAPI) -> None:
         time.sleep(MEMBERLIST_SLEEP)
 
 
-# TOOD: Remove min_size
+# # TOOD: Remove min_size
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(collection_st, min_size=10),
+    should_compact=st.booleans(),
 )
 @settings(deadline=None)
 def test_add(
     api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
+    should_compact: bool,
 ) -> None:
     reset(api)
-    print("running test")
-    print(f"NOT_CLUSTER_ONLY: {NOT_CLUSTER_ONLY}")
     # TODO: Generative embedding functions
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    print(f"created collection: {coll.id}")
 
     initial_version = None
     if not NOT_CLUSTER_ONLY:
         initial_version = coll.get_model()["version"]
-        print(f"Initial version: {initial_version}")
 
-    print("wrapping")
+    normalized_record_set = invariants.wrap_all(record_set)
 
-    try:
-        normalized_record_set = invariants.wrap_all(record_set)
+    if not invariants.is_metadata_valid(normalized_record_set):
+        with pytest.raises(Exception):
+            try:
+                coll.add(**normalized_record_set)
+            except Exception as e:
+                print(f"Exception: {e}")
+                raise e
+        return
 
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                try:
-                    coll.add(**normalized_record_set)
-                except Exception as e:
-                    print(f"Exception: {e}")
-                    raise e
-            return
+    coll.add(**record_set)
 
-        print("adding")
-        coll.add(**record_set)
-        print(f"Added {len(record_set['ids'])} records")
-
-        if not NOT_CLUSTER_ONLY:
-            print("Waiting for compaction")
+    if not NOT_CLUSTER_ONLY:
+        if should_compact:
             # Wait for the model to be updated
             timeout = 120
             initial_time = time.time()
@@ -80,25 +73,16 @@ def test_add(
             while get_collection_version() == initial_version:
                 time.sleep(0.1)
                 if time.time() - initial_time > timeout:
-                    print(
-                        f"timed out waiting for model to update: {coll.get_model()['version']}"
-                    )
                     raise TimeoutError("Model was not updated in time")
-            print(f"done waiting: new version: {coll.get_model()['version']}")
 
-        print("counting")
-        invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
-        n_results = max(1, (len(normalized_record_set["ids"]) // 10))
-        invariants.ann_accuracy(
-            coll,
-            cast(strategies.RecordSet, normalized_record_set),
-            n_results=n_results,
-            embedding_function=collection.embedding_function,
-        )
-        print("done testing")
-    except Exception as e:
-        print(f"Exception: {e}")
-        raise e
+    invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+    n_results = max(1, (len(normalized_record_set["ids"]) // 10))
+    invariants.ann_accuracy(
+        coll,
+        cast(strategies.RecordSet, normalized_record_set),
+        n_results=n_results,
+        embedding_function=collection.embedding_function,
+    )
 
 
 def create_large_recordset(

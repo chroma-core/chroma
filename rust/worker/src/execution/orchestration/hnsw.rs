@@ -14,6 +14,7 @@ use crate::execution::operators::hnsw_knn::{
 use crate::execution::operators::merge_knn_results::{
     MergeKnnResultsOperator, MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput,
 };
+use crate::execution::operators::normalize_vectors::normalize;
 use crate::execution::operators::pull_log::PullLogsOutput;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::index::IndexConfig;
@@ -323,6 +324,7 @@ impl HnswQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Record Segment is not set");
 
+        println!("[DEBUG] Sending HNSW KNN tasks");
         // Dispatch a query task per query vector
         for (i, query_vector) in self.query_vectors.iter().enumerate() {
             let operator = Box::new(HnswKnnOperator {});
@@ -606,6 +608,14 @@ impl Component for HnswQueryOrchestrator {
         match IndexConfig::from_segment(&hnsw_segment, collection.dimension.unwrap()) {
             Ok(index_config) => {
                 self.index_config = Some(index_config);
+
+                // Normalize the query vectors if we are using the cosine similarity
+                if self.index_config.as_ref().unwrap().distance_function == DistanceFunction::Cosine
+                {
+                    for query_vector in self.query_vectors.iter_mut() {
+                        *query_vector = normalize(query_vector);
+                    }
+                }
             }
             Err(e) => {
                 self.terminate_with_error(e, ctx);

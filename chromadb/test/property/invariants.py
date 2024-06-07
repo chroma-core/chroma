@@ -273,6 +273,7 @@ def ann_accuracy(
                     print(
                         f"FAIL distance mismatch: {distances_i[index]} != {query_results['distances'][i][j]}"
                     )
+                    print(f"FAIL {distances_i} and {query_results['distances']}")
                 assert correct_distance
 
             assert np.allclose(embeddings[index], query_results["embeddings"][i][j])

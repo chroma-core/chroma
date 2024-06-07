@@ -365,6 +365,7 @@ impl DistributedHNSWSegmentReader {
         allowed_ids: &[usize],
         disallowd_ids: &[usize],
     ) -> (Vec<usize>, Vec<f32>) {
+        println!("[DEBUG] Querying HNSW index!");
         let index = self.index.read();
         index.query(vector, k, allowed_ids, disallowd_ids)
     }

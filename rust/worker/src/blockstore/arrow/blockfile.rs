@@ -204,7 +204,7 @@ impl ArrowBlockfileWriter {
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
         // let dbg = &key.to_string() == "1964";
-        let dbg = true;
+        let dbg = false;
         delta.add(prefix, key, value);
         if delta.get_size::<K, V>() > MAX_BLOCK_SIZE {
             let new_blocks = delta.split_v2::<K, V>(dbg);
@@ -1259,6 +1259,7 @@ mod tests {
                 // TODO: reintroduce metadata once we can size it
                 metadata: None,
             };
+            println!("Adding record {}", index);
             writer.set("", index as u32, &data_record).await.unwrap();
         }
 

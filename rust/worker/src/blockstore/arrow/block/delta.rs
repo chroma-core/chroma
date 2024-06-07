@@ -128,7 +128,7 @@ impl BlockDelta {
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
         let mut output = Vec::new();
-        println!("Performing split");
+        // println!("Performing split");
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
             if dbg {
@@ -139,6 +139,11 @@ impl BlockDelta {
                     blocks_to_split[0].get_size::<K, V>()
                 );
             }
+
+            // debug for debugger introspection
+            let block_len = blocks_to_split[0].len();
+            let block_size = blocks_to_split[0].get_size::<K, V>();
+
             let curr_block = blocks_to_split.pop().unwrap();
             let mut curr_split_index = 0;
             let mut curr_running_prefix_size = 0;
@@ -158,7 +163,7 @@ impl BlockDelta {
                     curr_running_value_size,
                 );
 
-                println!("size at index: {} is: {}", i, current_size);
+                // println!("size at index: {} is: {}", i, current_size);
 
                 if current_size > half_size {
                     if dbg {
@@ -171,6 +176,12 @@ impl BlockDelta {
                 }
                 curr_split_index = i;
             }
+
+            // The split() method is exclusive of the split index. Meaning
+            // the new block will contain the key at the split index. So we increment
+            // the split index by 1 to get the correct split point.
+            curr_split_index = std::cmp::min(curr_split_index + 1, curr_block.len() - 1);
+
             let split_key = curr_block.builder.get_key(curr_split_index);
             let new_delta = curr_block
                 .builder
@@ -179,11 +190,17 @@ impl BlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),
             };
-            println!(
-                "After split, old_size: {}, new_size: {}",
-                curr_block.get_size::<K, V>(),
-                new_block.get_size::<K, V>()
-            );
+            // println!(
+            //     "After split, old_size: {}, new_size: {}",
+            //     curr_block.get_size::<K, V>(),
+            //     new_block.get_size::<K, V>()
+            // );
+
+            let new_block_size = new_block.get_size::<K, V>();
+            let curr_block_size = curr_block.get_size::<K, V>();
+
+            let new_block_len = new_block.len();
+            let curr_block_len = curr_block.len();
 
             // if dbg {
             //     sleep(std::time::Duration::from_secs(1));
