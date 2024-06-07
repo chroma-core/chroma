@@ -20,7 +20,7 @@ import hypothesis
 import pytest
 import uvicorn
 from requests.exceptions import ConnectionError
-from aiohttp.client_exceptions import ClientConnectionError
+from httpx import ConnectError
 from typing_extensions import Protocol
 
 from chromadb.api.fastapi_async import FastAPIAsync
@@ -220,9 +220,9 @@ def _run_server(
 def _await_server(api: ServerAPI, attempts: int = 0) -> None:
     try:
         api.heartbeat()
-    # First error is from requests, second is from aiohttp
+    # First error is from requests, second is from httpx
     # todo: use httpx for both?
-    except (ConnectionError, ClientConnectionError) as e:
+    except (ConnectionError, ConnectError) as e:
         if attempts > 15:
             raise e
         else:

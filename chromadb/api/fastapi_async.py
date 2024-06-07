@@ -4,7 +4,7 @@ import orjson as json
 from typing import Any, Optional, cast, Tuple, Sequence, TypeVar, Callable
 import logging
 from urllib.parse import quote, urlparse, urlunparse
-import aiohttp
+import httpx
 from overrides import override
 from chromadb import errors
 from chromadb.api import ServerAPIAsync
@@ -45,7 +45,7 @@ from chromadb.api.types import (
 )
 
 
-# requests removes None values from the built query string, but aiohttp will throw if None is provided
+# requests removes None values from the built query string, but httpx includes it as an empty value
 def clean_params(params: dict) -> dict:
     """Remove None values from kwargs."""
     return {k: v for k, v in params.items() if v is not None}
@@ -75,28 +75,28 @@ class FastAPIAsync(ServerAPIAsync):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        self._session = None
+        self._client = None
 
     async def _make_request(self, method: str, path: str, **kwargs):
-        if self._session is None:
+        if self._client is None:
             # todo: should require session to be created in __aenter__?
-            self._session = aiohttp.ClientSession()
+            self._client = httpx.AsyncClient()
 
-        # Unlike requests, aiohttp does not automatically escape the path
+        # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
-        async with self._session.request(method, url, **kwargs) as response:
-            await raise_chroma_error(response)
-            return json.loads(await response.text())
+        response = await self._client.request(method, url, **kwargs)
+        await raise_chroma_error(response)
+        return json.loads(response.text)
 
     async def __aenter__(self):
-        self._session = aiohttp.ClientSession()
+        self._client = httpx.AsyncClient()
         return self
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
-        if self._session is not None:
-            await self._session.close()
+        if self._client is not None:
+            await self._client.aclose()
 
     # todo: factor out into helper?
     @staticmethod
@@ -634,14 +634,17 @@ class FastAPIAsync(ServerAPIAsync):
         return self._max_batch_size
 
 
-async def raise_chroma_error(resp: aiohttp.ClientResponse) -> Any:
+async def raise_chroma_error(resp: httpx.Response) -> Any:
     """Raises an error if the response is not ok, using a ChromaError if possible."""
-    if resp.ok:
+    try:
+        resp.raise_for_status()
         return
+    except httpx.HTTPStatusError:
+        pass
 
     chroma_error = None
     try:
-        body = json.loads(await resp.text())
+        body = json.loads(resp.text)
         if "error" in body:
             if body["error"] in errors.error_types:
                 chroma_error = errors.error_types[body["error"]](body["message"])
@@ -654,8 +657,8 @@ async def raise_chroma_error(resp: aiohttp.ClientResponse) -> Any:
 
     try:
         resp.raise_for_status()
-    except aiohttp.ClientResponseError:
-        raise (Exception(await resp.text()))
+    except httpx.HTTPStatusError:
+        raise (Exception(resp.text))
 
 
 # todo: move to test directory?
