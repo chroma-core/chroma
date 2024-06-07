@@ -23,8 +23,6 @@ import chromadb.utils.embedding_functions as ef
 from chromadb.types import Database, Tenant
 from chromadb.types import Collection as CollectionModel
 
-# todo: remove
-from chromadb.api.models.Collection import Collection
 from chromadb.api.models.CollectionAsync import CollectionAsync
 from chromadb.api.types import (
     DataLoader,
@@ -101,9 +99,18 @@ class FastAPIAsync(ServerAPIAsync):
             await client.aclose()
 
     def _get_client(self) -> httpx.AsyncClient:
-        # todo: should this use anyio?
-        loop = asyncio.get_event_loop()
-        loop_hash = loop.__hash__()
+        # Ideally this would use anyio to be compatible with both
+        # asyncio and trio, but anyio does not expose any way to identify
+        # the current event loop.
+        # We attempt to get the loop assuming the environment is asyncio, and
+        # otherwise gracefully fall back to using a singleton client.
+        loop_hash = None
+        try:
+            loop = asyncio.get_event_loop()
+            loop_hash = loop.__hash__()
+        except RuntimeError:
+            loop_hash = 0
+
         if loop_hash not in self._clients:
             self._clients[loop_hash] = httpx.AsyncClient(timeout=None)
 
