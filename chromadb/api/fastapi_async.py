@@ -67,7 +67,7 @@ class FastAPIAsync(ServerAPIAsync):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: dict = {}
+    _clients: dict[int, httpx.AsyncClient] = {}
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -86,7 +86,20 @@ class FastAPIAsync(ServerAPIAsync):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-    # todo: context manager usage (with ...)?
+    async def __aenter__(self):
+        self._get_client()
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.stop()
+        pass
+
+    @override
+    async def stop(self) -> None:
+        super().stop()
+        for client in self._clients.values():
+            await client.aclose()
+
     def _get_client(self) -> httpx.AsyncClient:
         # todo: should this use anyio?
         loop = asyncio.get_event_loop()
@@ -104,10 +117,6 @@ class FastAPIAsync(ServerAPIAsync):
         response = await self._get_client().request(method, url, **kwargs)
         await raise_chroma_error(response)
         return json.loads(response.text)
-
-    async def close(self):
-        for client in self._clients.values():
-            await client.aclose()
 
     # todo: factor out into helper?
     @staticmethod

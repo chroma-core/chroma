@@ -23,7 +23,6 @@ from requests.exceptions import ConnectionError
 from httpx import ConnectError
 from typing_extensions import Protocol
 
-from chromadb.api.fastapi_async import FastAPIAsync
 import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
@@ -590,29 +589,34 @@ def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
 def system_wrong_auth(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    for system in request.param():
+        yield system
 
 
 @pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
 def system_authn_rbac_authz(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    for system in request.param():
+        yield system
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    for system in request.param():
+        yield system
 
 
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
 def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    for system in request.param():
+        yield system
 
 
 @pytest.fixture(scope="module", params=system_fixtures_auth())
 def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    for system in request.param():
+        yield system
 
 
 @pytest.fixture(scope="function")
