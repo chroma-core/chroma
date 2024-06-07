@@ -195,7 +195,7 @@ def test_heartbeat(api):
 
 def test_max_batch_size(api):
     print(api)
-    batch_size = api.max_batch_size
+    batch_size = api.get_max_batch_size()
     assert batch_size > 0
 
 
