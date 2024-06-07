@@ -92,7 +92,7 @@ class FastAPIAsync(ServerAPIAsync):
         loop = asyncio.get_event_loop()
         loop_hash = loop.__hash__()
         if loop_hash not in self._clients:
-            self._clients[loop_hash] = httpx.AsyncClient()
+            self._clients[loop_hash] = httpx.AsyncClient(timeout=None)
 
         return self._clients[loop_hash]
 
