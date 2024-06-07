@@ -27,11 +27,9 @@ def reset(api: ServerAPI) -> None:
     if not NOT_CLUSTER_ONLY:
         time.sleep(MEMBERLIST_SLEEP)
 
-
-# # TOOD: Remove min_size
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=10),
+    record_set=strategies.recordsets(collection_st),
     should_compact=st.booleans(),
 )
 @settings(
@@ -62,7 +60,9 @@ def test_add(
     coll.add(**record_set)
 
     if not NOT_CLUSTER_ONLY:
-        if should_compact:
+        # Only wait for compaction if the size of the collection is 
+        # some minimal size
+        if should_compact and len(normalized_record_set["ids"]) > 10:
             initial_version = coll.get_model()["version"]
             # Wait for the model to be updated
             wait_for_version_increase(api, collection.name, initial_version)
