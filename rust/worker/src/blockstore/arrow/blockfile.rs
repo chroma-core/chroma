@@ -108,49 +108,6 @@ impl ArrowBlockfileWriter {
         Ok(flusher)
     }
 
-    // pub(crate) fn split_and_add<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-    //     &self,
-    //     prefix: &str,
-    //     key: K,
-    //     value: V,
-    //     delta: BlockDelta,
-    // ) -> Result<(), Box<dyn ChromaError>> {
-    //     let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-    //     if delta.can_add(prefix, &key, &value) {
-    //         delta.add(prefix, key, value);
-    //     } else {
-    //         let (split_key, new_delta) = delta.split::<K, V>();
-    //         self.sparse_index.add_block(split_key, new_delta.id);
-    //         match new_delta.get_min_key() {
-    //             Some(min_key) => {
-    //                 if search_key >= min_key {
-    //                     // Add to new_delta recursively.
-    //                     match self.split_and_add(prefix, key, value, new_delta.clone()) {
-    //                         Ok(()) => (),
-    //                         Err(e) => {
-    //                             return Err(e);
-    //                         }
-    //                     };
-    //                 } else {
-    //                     // Add to old delta recursively.
-    //                     match self.split_and_add(prefix, key, value, delta.clone()) {
-    //                         Ok(()) => (),
-    //                         Err(e) => {
-    //                             return Err(e);
-    //                         }
-    //                     };
-    //                 }
-    //             }
-    //             None => {
-    //                 panic!("New block after split cannot be empty");
-    //             }
-    //         }
-    //         let mut deltas = self.block_deltas.lock();
-    //         deltas.insert(new_delta.id, new_delta);
-    //     }
-    //     Ok(())
-    // }
-
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
@@ -203,11 +160,9 @@ impl ArrowBlockfileWriter {
 
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
-        // let dbg = &key.to_string() == "1964";
-        let dbg = false;
         delta.add(prefix, key, value);
         if delta.get_size::<K, V>() > MAX_BLOCK_SIZE {
-            let new_blocks = delta.split_v2::<K, V>(dbg);
+            let new_blocks = delta.split_v2::<K, V>();
             for (split_key, new_delta) in new_blocks {
                 self.sparse_index.add_block(split_key, new_delta.id);
                 let mut deltas = self.block_deltas.lock();
@@ -1001,7 +956,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_roaring_bitmap_value() {
-        println!("Running test_roaring_bitmap_value");
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let blockfile_provider = ArrowBlockfileProvider::new(storage);
@@ -1212,57 +1166,5 @@ mod tests {
             assert_eq!(res.1, expected_key);
             assert_eq!(res.2, expected_value);
         }
-    }
-
-    use crate::execution::operator::Operator;
-    use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator};
-    use crate::log;
-    #[tokio::test]
-    async fn test_split_data_records() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
-        let writer = blockfile_provider.create::<u32, &DataRecord>().unwrap();
-        let id = writer.id();
-
-        let collection_id = uuid::uuid!("26b46c42-37f0-4d91-8118-c3790d503901");
-        let log = log::from_config(&config::LogConfig::Grpc(GrpcLogConfig {
-            host: "localhost".to_string(),
-            port: 50052,
-        }))
-        .await
-        .unwrap();
-        let pull_logs_operator = PullLogsOperator::new(log);
-        let end_timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let pull_logs_input =
-            PullLogsInput::new(collection_id, 1, 1000, None, Some(end_timestamp as i64));
-        let logs = pull_logs_operator.run(&pull_logs_input).await.unwrap();
-        let logs = logs.logs();
-
-        for (log_entry, index) in logs.iter() {
-            let metadata = match &log_entry.record.metadata {
-                Some(metadata) => Some(update_metdata_to_metdata(metadata).unwrap()),
-                None => None,
-            };
-            let embedding = log_entry
-                .record
-                .embedding
-                .as_ref()
-                .expect("We are adding to must exist");
-            let data_record = DataRecord {
-                id: &log_entry.record.id,
-                embedding: embedding,
-                document: log_entry.record.document.as_deref(),
-                // TODO: reintroduce metadata once we can size it
-                metadata: None,
-            };
-            println!("Adding record {}", index);
-            writer.set("", index as u32, &data_record).await.unwrap();
-        }
-
-        writer.commit::<u32, &DataRecord>().unwrap();
     }
 }

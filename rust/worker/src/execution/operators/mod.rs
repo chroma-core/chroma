@@ -7,6 +7,6 @@ pub(super) mod merge_metadata_results;
 pub(super) mod metadata_filtering;
 pub(super) mod normalize_vectors;
 pub(super) mod partition;
-pub(crate) mod pull_log;
+pub(super) mod pull_log;
 pub(super) mod register;
 pub(super) mod write_segments;

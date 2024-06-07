@@ -324,7 +324,6 @@ impl HnswQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Record Segment is not set");
 
-        println!("[DEBUG] Sending HNSW KNN tasks");
         // Dispatch a query task per query vector
         for (i, query_vector) in self.query_vectors.iter().enumerate() {
             let operator = Box::new(HnswKnnOperator {});

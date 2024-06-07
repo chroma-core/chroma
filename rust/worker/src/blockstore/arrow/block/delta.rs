@@ -1,5 +1,3 @@
-use std::thread::sleep;
-
 use super::delta_storage::BlockStorage;
 use crate::blockstore::{
     arrow::{
@@ -48,11 +46,6 @@ impl BlockDelta {
     ) {
         // TODO: errors?
         V::add(prefix, key.into(), value, self);
-        println!(
-            "After add, size: {}. Len: {}",
-            self.get_size::<K, V>(),
-            self.len()
-        );
     }
 
     /// Deletes a key from the block delta.
@@ -121,29 +114,14 @@ impl BlockDelta {
 
     pub fn split_v2<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &'referred_data self,
-        dbg: bool,
     ) -> Vec<(CompositeKey, BlockDelta)> {
         let half_size = MAX_BLOCK_SIZE / 2;
 
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
         let mut output = Vec::new();
-        // println!("Performing split");
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
-            if dbg {
-                println!("Blocks to split: {}", blocks_to_split.len());
-                println!("Block is of length: {}", blocks_to_split[0].len());
-                println!(
-                    "Block is of size: {}",
-                    blocks_to_split[0].get_size::<K, V>()
-                );
-            }
-
-            // debug for debugger introspection
-            let block_len = blocks_to_split[0].len();
-            let block_size = blocks_to_split[0].get_size::<K, V>();
-
             let curr_block = blocks_to_split.pop().unwrap();
             let mut curr_split_index = 0;
             let mut curr_running_prefix_size = 0;
@@ -163,15 +141,7 @@ impl BlockDelta {
                     curr_running_value_size,
                 );
 
-                // println!("size at index: {} is: {}", i, current_size);
-
                 if current_size > half_size {
-                    if dbg {
-                        println!(
-                            "Breaking at index: {} at size: {}",
-                            curr_split_index, current_size
-                        );
-                    }
                     break;
                 }
                 curr_split_index = i;
@@ -190,21 +160,6 @@ impl BlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),
             };
-            // println!(
-            //     "After split, old_size: {}, new_size: {}",
-            //     curr_block.get_size::<K, V>(),
-            //     new_block.get_size::<K, V>()
-            // );
-
-            let new_block_size = new_block.get_size::<K, V>();
-            let curr_block_size = curr_block.get_size::<K, V>();
-
-            let new_block_len = new_block.len();
-            let curr_block_len = curr_block.len();
-
-            // if dbg {
-            //     sleep(std::time::Duration::from_secs(1));
-            // }
 
             if new_block.get_size::<K, V>() > MAX_BLOCK_SIZE {
                 blocks_to_split.push(new_block);
@@ -260,34 +215,7 @@ impl BlockDelta {
             builder: split_after,
             id: Uuid::new_v4(),
         };
-        println!(
-            "After split, old_size: {}, new_size: {}",
-            self.get_size::<K, V>(),
-            new_delta.get_size::<K, V>()
-        );
         return (split_key.clone(), new_delta);
-
-        // match &split_key {
-        //     // Note: Consider returning a Result instead of panicking
-        //     // This should never happen as we should only call this
-        //     // function if can_add returns false. But it may be worth making
-        //     // this compile time safe.
-        //     None => panic!("No split point found"),
-        //     Some(split_key) => {
-        //         // TODO: standardize on composite key vs split key
-        //         let split_after = self.builder.split(&split_key.prefix, split_key.key.clone());
-        //         let new_delta = BlockDelta {
-        //             builder: split_after,
-        //             id: Uuid::new_v4(),
-        //         };
-        //         println!(
-        //             "After split, old_size: {}, new_size: {}",
-        //             self.get_size::<K, V>(),
-        //             new_delta.get_size::<K, V>()
-        //         );
-        //         return (split_key.clone(), new_delta);
-        //     }
-        // }
     }
 
     fn len(&self) -> usize {

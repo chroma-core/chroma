@@ -6,7 +6,7 @@ use uuid::Uuid;
 /// An operator takes a generic input and returns a generic output.
 /// It is a definition of a function.
 #[async_trait]
-pub(crate) trait Operator<I, O>: Send + Sync + Debug
+pub(super) trait Operator<I, O>: Send + Sync + Debug
 where
     I: Send + Sync,
     O: Send + Sync,
