@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }}  ${{ matrix.test-globs }}
+        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }} -s
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
