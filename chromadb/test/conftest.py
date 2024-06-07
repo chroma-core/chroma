@@ -275,6 +275,7 @@ def _fastapi_fixture(
     persist_directory = None
     if is_persistent:
         persist_directory = tempfile.mkdtemp()
+        print("using persist directory: ", persist_directory)
         args = (
             port,
             is_persistent,
