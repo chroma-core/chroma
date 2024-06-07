@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson as json
-from typing import Any, Optional, cast, Tuple, Sequence, TypeVar, Callable
+from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 from urllib.parse import quote, urlparse, urlunparse
 import httpx
@@ -65,7 +65,7 @@ class FastAPIAsync(ServerAPIAsync):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: dict[int, httpx.AsyncClient] = {}
+    _clients: Dict[int, httpx.AsyncClient] = {}
 
     def __init__(self, system: System):
         super().__init__(system)
