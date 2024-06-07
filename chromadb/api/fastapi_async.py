@@ -1,6 +1,6 @@
 from uuid import UUID
 import orjson as json
-from typing import Any, Optional, cast, Tuple, Sequence, TypeVar, Callable, ParamSpec
+from typing import Any, Optional, cast, Tuple, Sequence, TypeVar, Callable
 import logging
 from urllib.parse import quote, urlparse, urlunparse
 import aiohttp
