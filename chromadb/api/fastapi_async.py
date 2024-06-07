@@ -182,7 +182,7 @@ class FastAPIAsync(ServerAPIAsync):
         await self._make_request(
             "post",
             "/databases",
-            data=json.dumps({"name": name}),
+            json={"name": name},
             params={"tenant": tenant},
         )
 
@@ -209,7 +209,7 @@ class FastAPIAsync(ServerAPIAsync):
         await self._make_request(
             "post",
             "/tenants",
-            data=json.dumps({"name": name}),
+            json={"name": name},
         )
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
@@ -291,13 +291,11 @@ class FastAPIAsync(ServerAPIAsync):
         resp_json = await self._make_request(
             "post",
             "/collections",
-            data=json.dumps(
-                {
-                    "name": name,
-                    "metadata": metadata,
-                    "get_or_create": get_or_create,
-                }
-            ),
+            json={
+                "name": name,
+                "metadata": metadata,
+                "get_or_create": get_or_create,
+            },
             params={"tenant": tenant, "database": database},
         )
 
@@ -397,7 +395,7 @@ class FastAPIAsync(ServerAPIAsync):
         await self._make_request(
             "put",
             "/collections/" + str(id),
-            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+            json={"new_metadata": new_metadata, "new_name": new_name},
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
@@ -463,17 +461,15 @@ class FastAPIAsync(ServerAPIAsync):
         resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/get",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "where": where,
-                    "sort": sort,
-                    "limit": limit,
-                    "offset": offset,
-                    "where_document": where_document,
-                    "include": include,
-                }
-            ),
+            json={
+                "ids": ids,
+                "where": where,
+                "sort": sort,
+                "limit": limit,
+                "offset": offset,
+                "where_document": where_document,
+                "include": include,
+            },
         )
 
         return GetResult(
@@ -498,9 +494,7 @@ class FastAPIAsync(ServerAPIAsync):
         resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/delete",
-            data=json.dumps(
-                {"where": where, "ids": ids, "where_document": where_document}
-            ),
+            json={"where": where, "ids": ids, "where_document": where_document},
         )
 
         return cast(IDs, resp_json)
@@ -523,15 +517,13 @@ class FastAPIAsync(ServerAPIAsync):
         return await self._make_request(
             "post",
             url,
-            data=json.dumps(
-                {
-                    "ids": batch[0],
-                    "embeddings": batch[1],
-                    "metadatas": batch[2],
-                    "documents": batch[3],
-                    "uris": batch[4],
-                }
-            ),
+            json={
+                "ids": batch[0],
+                "embeddings": batch[1],
+                "metadatas": batch[2],
+                "documents": batch[3],
+                "uris": batch[4],
+            },
         )
 
     @trace_method("FastAPI._add", OpenTelemetryGranularity.ALL)
@@ -606,15 +598,13 @@ class FastAPIAsync(ServerAPIAsync):
         resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/query",
-            data=json.dumps(
-                {
-                    "query_embeddings": query_embeddings,
-                    "n_results": n_results,
-                    "where": where,
-                    "where_document": where_document,
-                    "include": include,
-                }
-            ),
+            json={
+                "query_embeddings": query_embeddings,
+                "n_results": n_results,
+                "where": where,
+                "where_document": where_document,
+                "include": include,
+            },
         )
 
         return QueryResult(
