@@ -150,6 +150,7 @@ class PerThreadPool(Pool):
     def close(self) -> None:
         with self._lock:
             for conn in self._connections:
+                print("closing sqlite conn", conn)
                 conn.close_actual()
             self._connections.clear()
             self._connection = threading.local()
