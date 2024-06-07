@@ -20,9 +20,9 @@ We will aim to provide:
 
 ## Migration Log
 
-### Unreleased
+### v0.5.1
 
-It wasn't previously documented, but if you were reading `.max_batch_size` on the Python client, you should now use `.get_max_batch_size()`.
+On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
 
 The first time this is run, it makes a HTTP request. We made this a method to make it more clear that it's potentially a blocking operation.
 
