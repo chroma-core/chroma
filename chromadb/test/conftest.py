@@ -311,7 +311,6 @@ def _fastapi_fixture(
     yield system
     system.stop()
     proc.kill()
-    time.sleep(5)
     if is_persistent and persist_directory is not None:
         if os.path.exists(persist_directory):
             shutil.rmtree(persist_directory)
@@ -529,7 +528,6 @@ def sqlite_persistent() -> Generator[System, None, None]:
     system.start()
     yield system
     system.stop()
-    time.sleep(5)
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
