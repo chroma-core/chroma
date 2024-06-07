@@ -272,9 +272,8 @@ jobs:
       - name: Install vercel
         run: npm install -g vercel
       - name: Deploy
-        run: vercel deploy ${{ needs.check-tag.outputs.tag_matches == 'true' && '--prod' || '' }}
+        run: vercel deploy --token ${{ secrets.VERCEL_TOKEN }} ${{ needs.check-tag.outputs.tag_matches == 'true' && '--prod' || '' }}
         working-directory: ./docs/docs.trychroma.com
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
