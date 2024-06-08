@@ -295,6 +295,7 @@ def _fastapi_fixture(
         yield system
         system.stop()
         proc.kill()
+        proc.join()
 
     if is_persistent:
         with tempfile.TemporaryDirectory() as persist_directory:
