@@ -298,23 +298,30 @@ def _fastapi_fixture(
         proc.join()
 
     if is_persistent:
-        with tempfile.TemporaryDirectory() as persist_directory:
-            args = (
-                port,
-                is_persistent,
-                persist_directory,
-                chroma_server_authn_provider,
-                chroma_server_authn_credentials_file,
-                chroma_server_authn_credentials,
-                chroma_auth_token_transport_header,
-                chroma_server_authz_provider,
-                chroma_server_authz_config_file,
-                chroma_server_ssl_certfile,
-                chroma_server_ssl_keyfile,
-                chroma_overwrite_singleton_tenant_database_access_from_auth,
+        try:
+            with tempfile.TemporaryDirectory() as persist_directory:
+                args = (
+                    port,
+                    is_persistent,
+                    persist_directory,
+                    chroma_server_authn_provider,
+                    chroma_server_authn_credentials_file,
+                    chroma_server_authn_credentials,
+                    chroma_auth_token_transport_header,
+                    chroma_server_authz_provider,
+                    chroma_server_authz_config_file,
+                    chroma_server_ssl_certfile,
+                    chroma_server_ssl_keyfile,
+                    chroma_overwrite_singleton_tenant_database_access_from_auth,
+                )
+
+                yield from run(args)
+        except:
+            output = subprocess.check_output(
+                ["handle", os.path.join(persist_directory, "chroma.sqlite3")]
             )
 
-            yield from run(args)
+            raise PermissionError(output)
 
     else:
         yield from run(args)
@@ -610,8 +617,7 @@ def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, Non
 # todo: yield from syntax instead?
 @pytest.fixture(scope="module", params=system_fixtures_auth())
 def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    for system in request.param():
-        yield system
+    yield from request.param()
 
 
 @pytest.fixture(scope="function")
