@@ -1,6 +1,5 @@
 import multiprocessing
 import os
-import shutil
 import socket
 import subprocess
 import tempfile
@@ -298,26 +297,33 @@ def _fastapi_fixture(
         proc.join()
 
     if is_persistent:
-        # todo: why is ignore_cleanup_errors needed on Windows?
-        with tempfile.TemporaryDirectory(
-            ignore_cleanup_errors=True
-        ) as persist_directory:
-            args = (
-                port,
-                is_persistent,
-                persist_directory,
-                chroma_server_authn_provider,
-                chroma_server_authn_credentials_file,
-                chroma_server_authn_credentials,
-                chroma_auth_token_transport_header,
-                chroma_server_authz_provider,
-                chroma_server_authz_config_file,
-                chroma_server_ssl_certfile,
-                chroma_server_ssl_keyfile,
-                chroma_overwrite_singleton_tenant_database_access_from_auth,
-            )
+        persist_directory = tempfile.TemporaryDirectory()
+        args = (
+            port,
+            is_persistent,
+            persist_directory.name,
+            chroma_server_authn_provider,
+            chroma_server_authn_credentials_file,
+            chroma_server_authn_credentials,
+            chroma_auth_token_transport_header,
+            chroma_server_authz_provider,
+            chroma_server_authz_config_file,
+            chroma_server_ssl_certfile,
+            chroma_server_ssl_keyfile,
+            chroma_overwrite_singleton_tenant_database_access_from_auth,
+        )
 
-            yield from run(args)
+        yield from run(args)
+
+        try:
+            persist_directory.cleanup()
+
+        except PermissionError as e:
+            # todo: what's holding onto directory contents on Windows?
+            if os.name == "nt" and e.winerror:
+                pass
+
+            raise e
 
     else:
         yield from run(args)
@@ -594,31 +600,26 @@ def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
 def system_wrong_auth(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    for system in request.param():
-        yield system
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
 def system_authn_rbac_authz(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    for system in request.param():
-        yield system
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    for system in request.param():
-        yield system
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
 def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    for system in request.param():
-        yield system
+    yield from request.param()
 
 
-# todo: yield from syntax instead?
 @pytest.fixture(scope="module", params=system_fixtures_auth())
 def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield from request.param()

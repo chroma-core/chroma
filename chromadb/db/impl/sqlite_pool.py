@@ -1,4 +1,3 @@
-import gc
 import sqlite3
 from abc import ABC, abstractmethod
 from typing import Any, Set
@@ -40,7 +39,6 @@ class Connection:
     def close_actual(self) -> None:
         """Actually closes the connection to the db"""
         self._conn.close()
-        gc.collect()
 
 
 class Pool(ABC):

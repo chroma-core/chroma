@@ -6,7 +6,7 @@ on:
       python_versions:
         description: 'Python versions to test (as json array)'
         required: false
-        default: '["3.12"]'
+        default: '["3.8"]'
         type: string
       property_testing_preset:
         description: 'Property testing preset'
@@ -32,7 +32,7 @@ jobs:
                    "chromadb/test/property/test_persist.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
-            parallelized: false
+            parallelized: true
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }} -s
+        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
