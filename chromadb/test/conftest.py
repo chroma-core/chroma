@@ -299,7 +299,9 @@ def _fastapi_fixture(
 
     if is_persistent:
         # todo: why is ignore_cleanup_errors needed on Windows?
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as persist_directory:
+        with tempfile.TemporaryDirectory(
+            ignore_cleanup_errors=True
+        ) as persist_directory:
             args = (
                 port,
                 is_persistent,
@@ -354,9 +356,13 @@ def basic_http_client() -> Generator[System, None, None]:
 
 
 def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None, None]:
-    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd") as f:
+    # This (and similar usage below) should use the delete_on_close parameter
+    # instead of delete=False, but it's only available in Python 3.12 and later.
+    # We must explicitly close the file before spawning a subprocess to avoid
+    # file locking issues on Windows.
+    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
-        f.flush()
+        f.close()
 
         for item in _fastapi_fixture(
             is_persistent=False,
@@ -376,10 +382,10 @@ def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
         "admin": "$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS",
     }
-    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd") as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         for user, cred in creds.items():
             f.write(f"{user}:{cred}\n")
-        f.flush()
+        f.close()
 
         for item in _fastapi_fixture(
             is_persistent=False,
@@ -392,9 +398,9 @@ def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
 
 
 def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
-    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd") as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
-        f.flush()
+        f.close()
 
         for item in _fastapi_fixture(
             is_persistent=False,
@@ -407,13 +413,17 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
 
 
 def fastapi_server_basic_authn_rbac_authz() -> Generator[System, None, None]:
-    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd") as server_authn_file:
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".htpasswd", delete=False
+    ) as server_authn_file:
         server_authn_file.write(
             "admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n"
         )
-        server_authn_file.flush()
+        server_authn_file.close()
 
-        with tempfile.NamedTemporaryFile("w", suffix=".authz") as server_authz_file:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".authz", delete=False
+        ) as server_authz_file:
             server_authz_file.write(
                 """
 roles_mapping:
@@ -445,7 +455,7 @@ users:
   role: admin
     """
             )
-            server_authz_file.flush()
+            server_authz_file.close()
 
             for item in _fastapi_fixture(
                 is_persistent=False,
@@ -462,7 +472,7 @@ users:
 def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
     Generator[System, None, None]
 ):
-    with tempfile.NamedTemporaryFile("w", suffix=".authn") as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".authn", delete=False) as f:
         f.write(
             """
 users:
@@ -477,7 +487,7 @@ users:
       - singleton-token
 """
         )
-        f.flush()
+        f.close()
 
         for item in _fastapi_fixture(
             is_persistent=False,
