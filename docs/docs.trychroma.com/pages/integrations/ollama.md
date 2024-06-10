@@ -5,7 +5,11 @@ title: Ollama Embeddings
 Chroma provides a convenient wrapper around [Ollama](https://github.com/ollama/ollama)'
 s [embeddings API](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings). You can use
 the `OllamaEmbeddingFunction` embedding function to generate embeddings for your documents with
-a [model](https://github.com/ollama/ollama?tab=readme-ov-file#model-library) of your choice.
+a [model](https://ollama.com/search?q=embedding&p=1&sort=popular) of your choice.
+
+{% note type="note" %}
+An Ollama getting started guide can be found [here](https://github.com/chroma-core/chroma/blob/main/examples/use_with/ollama.md).
+{% /note %}
 
 {% tabs group="code-lang"  %}
 {% tab label="Python" %}
@@ -15,7 +19,7 @@ import chromadb.utils.embedding_functions as embedding_functions
 
 ollama_ef = embedding_functions.OllamaEmbeddingFunction(
     url="http://localhost:11434/api/embeddings",
-    model_name="llama2",
+    model_name="nomic-embed-text",
 )
 
 embeddings = ollama_ef(["This is my first text to embed",
@@ -31,7 +35,7 @@ embeddings = ollama_ef(["This is my first text to embed",
 import {OllamaEmbeddingFunction} from "chromadb";
 const embedder = new OllamaEmbeddingFunction({
     url: "http://127.0.0.1:11434/api/embeddings",
-    model: "llama2"
+    model: "nomic-embed-text"
 })
 
 // use directly
@@ -53,7 +57,7 @@ const collection = await client.getCollection({
 const {OllamaEmbeddingFunction} = require('chromadb');
 const embedder = new OllamaEmbeddingFunction({
     url: "http://127.0.0.1:11434/api/embeddings",
-    model: "llama2"
+    model: "nomic-embed-text"
 })
 
 // use directly
