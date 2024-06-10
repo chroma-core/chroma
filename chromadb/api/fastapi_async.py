@@ -97,6 +97,7 @@ class FastAPIAsync(ServerAPIAsync):
         super().stop()
         for client in self._clients.values():
             await client.aclose()
+            del client
 
     def _get_client(self) -> httpx.AsyncClient:
         # Ideally this would use anyio to be compatible with both
