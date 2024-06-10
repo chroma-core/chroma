@@ -17,6 +17,7 @@ jobs:
   test:
     timeout-minutes: 90
     strategy:
+      fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [ubuntu-latest, windows-latest]
@@ -50,6 +51,7 @@ jobs:
   # todo: break out stress integration tests
   test-single-node-integration:
     strategy:
+      fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [ubuntu-latest, windows-latest]
@@ -83,6 +85,7 @@ jobs:
 
   test-cluster-integration:
     strategy:
+      fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["16core-64gb-ubuntu-latest"]
