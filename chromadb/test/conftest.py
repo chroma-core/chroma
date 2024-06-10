@@ -298,30 +298,24 @@ def _fastapi_fixture(
         proc.join()
 
     if is_persistent:
-        try:
-            with tempfile.TemporaryDirectory() as persist_directory:
-                args = (
-                    port,
-                    is_persistent,
-                    persist_directory,
-                    chroma_server_authn_provider,
-                    chroma_server_authn_credentials_file,
-                    chroma_server_authn_credentials,
-                    chroma_auth_token_transport_header,
-                    chroma_server_authz_provider,
-                    chroma_server_authz_config_file,
-                    chroma_server_ssl_certfile,
-                    chroma_server_ssl_keyfile,
-                    chroma_overwrite_singleton_tenant_database_access_from_auth,
-                )
-
-                yield from run(args)
-        except:
-            output = subprocess.check_output(
-                ["handle", os.path.join(persist_directory, "chroma.sqlite3")]
+        # todo: why is ignore_cleanup_errors needed on Windows?
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as persist_directory:
+            args = (
+                port,
+                is_persistent,
+                persist_directory,
+                chroma_server_authn_provider,
+                chroma_server_authn_credentials_file,
+                chroma_server_authn_credentials,
+                chroma_auth_token_transport_header,
+                chroma_server_authz_provider,
+                chroma_server_authz_config_file,
+                chroma_server_ssl_certfile,
+                chroma_server_ssl_keyfile,
+                chroma_overwrite_singleton_tenant_database_access_from_auth,
             )
 
-            raise PermissionError(output)
+            yield from run(args)
 
     else:
         yield from run(args)
