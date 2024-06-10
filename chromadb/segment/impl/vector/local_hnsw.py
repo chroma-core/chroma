@@ -97,6 +97,10 @@ class LocalHnswSegment(VectorReader):
     @override
     def stop(self) -> None:
         super().stop()
+
+        if self._index is not None:
+            self._index.close_file_handles()
+
         if self._subscription:
             self._consumer.unsubscribe(self._subscription)
 
