@@ -24,6 +24,7 @@ pub struct HnswKnnOperatorInput {
     pub record_segment: Segment,
     pub blockfile_provider: BlockfileProvider,
     pub allowed_ids: Arc<[String]>,
+    pub allowed_ids_hnsw: Arc<[String]>,
     pub logs: Chunk<LogRecord>,
 }
 
@@ -105,6 +106,14 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         &self,
         input: &HnswKnnOperatorInput,
     ) -> Result<HnswKnnOperatorOutput, Self::Error> {
+        // If a filter list is supplied but it does not have anything for the segment
+        // then return an empty response.
+        if !input.allowed_ids.is_empty() && input.allowed_ids_hnsw.is_empty() {
+            return Ok(HnswKnnOperatorOutput {
+                offset_ids: vec![],
+                distances: vec![],
+            });
+        }
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -113,35 +122,55 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         {
             Ok(reader) => reader,
             Err(e) => {
+                // This should not happen even for uninitialized segment because
+                // we return early in case when record segment is uninitialized.
+                tracing::error!("[HnswKnnOperation]: Error creating record segment {:?}", e);
                 return Err(Box::new(HnswKnnOperatorError::RecordSegmentError));
             }
         };
         let mut allowed_offset_ids = Vec::new();
-        for user_id in input.allowed_ids.iter() {
+        for user_id in input.allowed_ids_hnsw.iter() {
             let offset_id = record_segment_reader
                 .get_offset_id_for_user_id(user_id)
                 .await;
             match offset_id {
                 Ok(offset_id) => allowed_offset_ids.push(offset_id),
                 Err(e) => {
+                    tracing::error!(
+                        "[HnswKnnOperation]: Record segment read error for allowed ids {:?}",
+                        e
+                    );
                     return Err(Box::new(HnswKnnOperatorError::RecordSegmentReadError));
                 }
             }
         }
+        tracing::info!(
+            "[HnswKnnOperation]: Allowed {} offset ids",
+            allowed_offset_ids.len()
+        );
         let disallowed_offset_ids = match self
             .get_disallowed_ids(input.logs.clone(), &record_segment_reader)
             .await
         {
             Ok(disallowed_offset_ids) => disallowed_offset_ids,
             Err(e) => {
+                tracing::error!("[HnswKnnOperation]: Error fetching disallowed ids {:?}", e);
                 return Err(Box::new(HnswKnnOperatorError::RecordSegmentReadError));
             }
         };
+        tracing::info!(
+            "[HnswKnnOperation]: Disallowed {} offset ids",
+            disallowed_offset_ids.len()
+        );
 
         match self.validate_allowed_and_disallowed_ids(&allowed_offset_ids, &disallowed_offset_ids)
         {
             Ok(_) => {}
             Err(e) => {
+                tracing::error!(
+                    "[HnswKnnOperation]: Error validating allowed and disallowed ids {:?}",
+                    e
+                );
                 return Err(e);
             }
         };

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::errors::ChromaError;
+use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::SegmentFlusher;
 use crate::types::SegmentFlushInfo;
 use crate::{
@@ -25,16 +26,19 @@ impl FlushS3Operator {
 pub struct FlushS3Input {
     record_segment_writer: RecordSegmentWriter,
     hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+    metadata_segment_writer: MetadataSegmentWriter<'static>,
 }
 
 impl FlushS3Input {
     pub fn new(
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+        metadata_segment_writer: MetadataSegmentWriter<'static>,
     ) -> Self {
         Self {
             record_segment_writer,
             hnsw_segment_writer,
+            metadata_segment_writer,
         }
     }
 }
@@ -56,18 +60,20 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        println!("Record Segment Flushed");
+                        tracing::info!("Record Segment Flushed");
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,
                         }
                     }
                     Err(e) => {
+                        tracing::error!("Error flushing metadata Segment: {:?}", e);
                         return Err(e);
                     }
                 }
             }
             Err(e) => {
+                tracing::error!("Error Commiting record Segment: {:?}", e);
                 return Err(e);
             }
         };
@@ -86,23 +92,49 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                         }
                     }
                     Err(e) => {
-                        // TODO: use logging
-                        println!("Error Flushing HNSW Segment: {:?}", e);
+                        tracing::error!("Error Flushing HNSW Segment: {:?}", e);
                         return Err(e);
                     }
                 }
             }
             Err(e) => {
-                // TODO: use logging;
-                println!("Error Commiting HNSW Segment: {:?}", e);
+                tracing::error!("Error Commiting HNSW Segment: {:?}", e);
                 return Err(e);
             }
         };
 
-        // TODO: use logging
-        println!("Flush to S3 complete");
+        let metadata_segment_flusher = input.metadata_segment_writer.clone().commit();
+        let metadata_segment_flush_info = match metadata_segment_flusher {
+            Ok(flusher) => {
+                let segment_id = input.metadata_segment_writer.id;
+                let res = flusher.flush().await;
+                match res {
+                    Ok(res) => {
+                        tracing::info!("Metadata Segment Flushed");
+                        SegmentFlushInfo {
+                            segment_id,
+                            file_paths: res,
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error Flushing metadata Segment: {:?}", e);
+                        return Err(e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Error Commiting metadata Segment: {:?}", e);
+                return Err(e);
+            }
+        };
+
+        tracing::info!("Flush to S3 complete");
         Ok(FlushS3Output {
-            segment_flush_info: Arc::new([record_segment_flush_info, hnsw_segment_flush_info]),
+            segment_flush_info: Arc::new([
+                record_segment_flush_info,
+                hnsw_segment_flush_info,
+                metadata_segment_flush_info,
+            ]),
         })
     }
 }

@@ -346,7 +346,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                 let data = match record_segment_reader.get_all_data().await {
                     Ok(data) => data,
                     Err(e) => {
-                        tracing::info!("Error reading Record Segment: {:?}", e);
+                        tracing::error!("[Mergemetadata]: Error reading Record Segment: {:?}", e);
                         return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
                     }
                 };

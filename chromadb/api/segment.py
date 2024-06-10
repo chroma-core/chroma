@@ -685,7 +685,7 @@ class SegmentAPI(ServerAPI):
         where_document = (
             validate_where_document(where_document)
             if where_document is not None and len(where_document) > 0
-            else where_document
+            else None
         )
 
         allowed_ids = None
@@ -700,6 +700,20 @@ class SegmentAPI(ServerAPI):
                 where=where, where_document=where_document
             )
             allowed_ids = [r["id"] for r in records]
+
+        # If where conditions returned empty list then no need to proceed
+        # further and can simply return an empty result set here.
+        if allowed_ids is not None and allowed_ids == []:
+            return QueryResult(
+                ids=[],
+                distances=None,
+                metadatas=None,
+                embeddings=None,
+                documents=None,
+                uris=None,
+                data=None,
+                included=include,
+            )
 
         query = t.VectorQuery(
             vectors=query_embeddings,

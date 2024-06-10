@@ -450,13 +450,21 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             Some(where_clause) => match process_where_clause_with_callback(where_clause, &clo) {
                 Ok(r) => {
                     let ids_as_u32: Vec<u32> = r.into_iter().map(|index| index as u32).collect();
+                    tracing::info!(
+                        "Filtered {} results from log based on where clause filtering",
+                        ids_as_u32.len()
+                    );
                     Some(ids_as_u32)
                 }
                 Err(e) => {
+                    tracing::error!("Error filtering logs based on where clause {:?}", e);
                     return Err(MetadataFilteringError::MetadataFilteringIndexError(e));
                 }
             },
-            None => None,
+            None => {
+                tracing::info!("Where clause not supplied by the user");
+                None
+            }
         };
         // AND this with where_document clause.
         let cb = |query: &str, op: WhereDocumentOperator| {
@@ -494,14 +502,22 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     Ok(res) => {
                         let ids_as_u32: Vec<u32> =
                             res.into_iter().map(|index| index as u32).collect();
+                        tracing::info!(
+                            "Filtered {} results from log based on where document filtering",
+                            ids_as_u32.len()
+                        );
                         Some(ids_as_u32)
                     }
                     Err(e) => {
+                        tracing::error!("Error filtering logs based on where document {:?}", e);
                         return Err(MetadataFilteringError::MetadataFilteringIndexError(e));
                     }
                 }
             }
-            None => None,
+            None => {
+                tracing::info!("Where document not supplied by the user");
+                None
+            }
         };
         let mut merged_result: Option<Vec<u32>> = None;
         if mtsearch_res.is_none() && fts_result.is_some() {
@@ -595,6 +611,11 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         }
                     }
                 }
+                tracing::info!(
+                    "For user supplied query ids, filtered {} records from log, {} ids remain",
+                    user_supplied_offset_ids.len(),
+                    remaining_id_set.len()
+                );
                 let record_segment_reader_2: Option<RecordSegmentReader>;
                 match RecordSegmentReader::from_segment(
                     &input.record_segment,
@@ -656,6 +677,10 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         user_supplied_offset_ids.sort();
         let mut filtered_offset_ids = None;
         if query_ids_present {
+            tracing::info!(
+                "Filtered {} records (log + segment) based on user supplied ids",
+                user_supplied_offset_ids.len()
+            );
             filtered_offset_ids = Some(user_supplied_offset_ids);
         }
         return Ok(MetadataFilteringOutput {

@@ -55,21 +55,21 @@ impl WriteSegmentsOperator {
 }
 
 #[derive(Debug)]
-pub struct WriteSegmentsInput<'me> {
+pub struct WriteSegmentsInput {
     record_segment_writer: RecordSegmentWriter,
     hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
-    metadata_segment_writer: MetadataSegmentWriter<'me>,
+    metadata_segment_writer: MetadataSegmentWriter<'static>,
     chunk: Chunk<LogRecord>,
     provider: BlockfileProvider,
     record_segment: Segment,
     offset_id: Arc<AtomicU32>,
 }
 
-impl<'me> WriteSegmentsInput<'me> {
+impl WriteSegmentsInput {
     pub fn new(
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
-        metadata_segment_writer: MetadataSegmentWriter<'me>,
+        metadata_segment_writer: MetadataSegmentWriter<'static>,
         chunk: Chunk<LogRecord>,
         provider: BlockfileProvider,
         record_segment: Segment,
@@ -91,16 +91,14 @@ impl<'me> WriteSegmentsInput<'me> {
 pub struct WriteSegmentsOutput {
     pub(crate) record_segment_writer: RecordSegmentWriter,
     pub(crate) hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+    pub(crate) metadata_segment_writer: MetadataSegmentWriter<'static>,
 }
 
 #[async_trait]
-impl<'a> Operator<WriteSegmentsInput<'a>, WriteSegmentsOutput> for WriteSegmentsOperator {
+impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator {
     type Error = WriteSegmentsOperatorError;
 
-    async fn run(
-        &self,
-        input: &WriteSegmentsInput<'a>,
-    ) -> Result<WriteSegmentsOutput, Self::Error> {
+    async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
         tracing::debug!("Materializing N Records: {:?}", input.chunk.len());
         // Prepare for log materialization.
         let record_segment_reader: Option<RecordSegmentReader>;
@@ -184,6 +182,7 @@ impl<'a> Operator<WriteSegmentsInput<'a>, WriteSegmentsOutput> for WriteSegments
         Ok(WriteSegmentsOutput {
             record_segment_writer: input.record_segment_writer.clone(),
             hnsw_segment_writer: input.hnsw_segment_writer.clone(),
+            metadata_segment_writer: input.metadata_segment_writer.clone(),
         })
     }
 }

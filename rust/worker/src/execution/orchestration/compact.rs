@@ -328,12 +328,17 @@ impl CompactOrchestrator {
         &mut self,
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+        metadata_segment_writer: MetadataSegmentWriter<'static>,
         self_address: Box<dyn Receiver<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
     ) {
         self.state = ExecutionState::Flush;
 
         let operator = FlushS3Operator::new();
-        let input = FlushS3Input::new(record_segment_writer, hnsw_segment_writer);
+        let input = FlushS3Input::new(
+            record_segment_writer,
+            hnsw_segment_writer,
+            metadata_segment_writer,
+        );
 
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
@@ -638,17 +643,18 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
-            // // This is weird but the only way to do it with code structure currently.
-            // let mut writer = output.metadata_segment_writer.clone();
-            // match writer.write_to_blockfiles().await {
-            //     Ok(()) => (),
-            //     Err(e) => {
-            //         return;
-            //     }
-            // }
+            // This is weird but the only way to do it with code structure currently.
+            let mut writer = output.metadata_segment_writer.clone();
+            match writer.write_to_blockfiles().await {
+                Ok(()) => (),
+                Err(_) => {
+                    return;
+                }
+            }
             self.flush_s3(
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
+                output.metadata_segment_writer,
                 _ctx.sender.as_receiver(),
             )
             .await;

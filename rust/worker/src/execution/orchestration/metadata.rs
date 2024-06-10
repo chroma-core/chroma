@@ -572,7 +572,7 @@ impl MetadataQueryOrchestrator {
     }
 
     async fn filter(&mut self, mut logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
-        println!("Filtering logs and searching metadata segment");
+        tracing::debug!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
         let input = MetadataFilteringInput::new(
@@ -778,7 +778,6 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
             }
         };
 
-        tracing::info!("MetadataFiltering output {:?}", output);
         self.state = ExecutionState::MergeResults;
 
         let operator = MergeMetadataResultsOperator::new();
@@ -829,7 +828,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
             .expect("Invariant violation. Result channel is not set.");
 
         let output = (output.ids, output.metadata, output.documents);
-        println!("Merged metadata results: {:?}", output);
+        tracing::trace!("Merged metadata results: {:?}", output);
 
         match result_channel.send(Ok(output)) {
             Ok(_) => (),

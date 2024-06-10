@@ -38,7 +38,7 @@ use thiserror::Error;
 /// A Block holds BlockData via its Inner. Conceptually, the BlockData being loaded into memory is an optimization. The Block interface
 /// could also support out of core operations where the BlockData is loaded from disk on demand. Currently we force operations to be in-core
 /// but could expand to out-of-core in the future.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Block {
     // The data is stored in an Arrow record batch with the column schema (prefix, key, value).
     // These are stored in sorted order by prefix and key for efficient lookups.

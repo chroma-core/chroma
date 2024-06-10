@@ -47,7 +47,10 @@ pub(crate) struct FullTextIndexWriter<'me> {
 
     // term -> positional posting list builder for that term
     uncommitted: Arc<tokio::sync::Mutex<HashMap<String, PositionalPostingListBuilder>>>,
-    uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, i32>>>,
+    // Value of this map is a tuple because we also need to keep the old frequency
+    // around. The reason is (token, freq) is the key in the blockfile hence
+    // when freq changes, we need to delete the old (token, freq) key.
+    uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
 }
 
 impl<'me> FullTextIndexWriter<'me> {
@@ -82,7 +85,8 @@ impl<'me> FullTextIndexWriter<'me> {
                         Err(_) => 0,
                     },
                 };
-                uncommitted_frequencies.insert(token.to_string(), frequency as i32);
+                uncommitted_frequencies
+                    .insert(token.to_string(), (frequency as i32, frequency as i32));
             }
         }
         let mut uncommitted = self.uncommitted.lock().await;
@@ -139,7 +143,7 @@ impl<'me> FullTextIndexWriter<'me> {
             let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
             uncommitted_frequencies
                 .entry(token.text.to_string())
-                .and_modify(|e| *e += 1);
+                .and_modify(|e| (*e).0 += 1);
             let mut uncommitted = self.uncommitted.lock().await;
             let builder = uncommitted
                 .entry(token.text.to_string())
@@ -184,7 +188,7 @@ impl<'me> FullTextIndexWriter<'me> {
             let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
             match uncommitted_frequencies.get_mut(token.text.as_str()) {
                 Some(frequency) => {
-                    *frequency -= 1;
+                    (*frequency).0 -= 1;
                 }
                 None => {
                     // Invariant violation -- we just populated this.
@@ -228,6 +232,7 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
+    // TODO(Sanket): Handle document and metadata deletes.
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
         let mut uncommitted = self.uncommitted.lock().await;
         for (key, mut value) in uncommitted.drain() {
@@ -256,10 +261,22 @@ impl<'me> FullTextIndexWriter<'me> {
         }
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         for (key, value) in uncommitted_frequencies.drain() {
+            // Delete the old frequency.
+            match self
+                .frequencies_blockfile_writer
+                .delete::<u32, u32>(key.as_str(), value.1 as u32)
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(FullTextIndexError::BlockfileWriteError(e));
+                }
+            }
+            // Insert the new frequency.
             // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
             match self
                 .frequencies_blockfile_writer
-                .set(key.as_str(), value as u32, 0)
+                .set(key.as_str(), value.0 as u32, 0)
                 .await
             {
                 Ok(_) => {}
