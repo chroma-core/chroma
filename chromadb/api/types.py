@@ -55,7 +55,9 @@ Embedding = Vector
 Embeddings = List[Embedding]
 
 
-def maybe_cast_one_to_many_embedding(target: OneOrMany[Embedding]) -> Embeddings:
+def maybe_cast_one_to_many_embedding(
+    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]
+) -> Embeddings:
     if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
