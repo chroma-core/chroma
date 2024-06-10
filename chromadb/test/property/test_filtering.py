@@ -261,6 +261,7 @@ def test_filterable_metadata_get_limit_offset(
         min_size=1,
     ),
 )
+
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
     api: ServerAPI,
