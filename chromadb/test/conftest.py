@@ -1,6 +1,5 @@
 import multiprocessing
 import os
-import shutil
 import socket
 import subprocess
 import tempfile
@@ -272,13 +271,37 @@ def _fastapi_fixture(
         chroma_server_ssl_keyfile,
         chroma_overwrite_singleton_tenant_database_access_from_auth,
     )
-    persist_directory = None
+
+    def run(args):
+        proc = ctx.Process(target=_run_server, args=args, daemon=True)
+        proc.start()
+        settings = Settings(
+            chroma_api_impl="chromadb.api.fastapi.FastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=port,
+            allow_reset=True,
+            chroma_client_auth_provider=chroma_client_auth_provider,
+            chroma_client_auth_credentials=chroma_client_auth_credentials,
+            chroma_auth_token_transport_header=chroma_auth_token_transport_header,
+            chroma_server_ssl_verify=chroma_server_ssl_certfile,
+            chroma_server_ssl_enabled=True if chroma_server_ssl_certfile else False,
+            chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
+        )
+        system = System(settings)
+        api = system.instance(ServerAPI)
+        system.start()
+        _await_server(api)
+        yield system
+        system.stop()
+        proc.kill()
+        proc.join()
+
     if is_persistent:
-        persist_directory = tempfile.mkdtemp()
+        persist_directory = tempfile.TemporaryDirectory()
         args = (
             port,
             is_persistent,
-            persist_directory,
+            persist_directory.name,
             chroma_server_authn_provider,
             chroma_server_authn_credentials_file,
             chroma_server_authn_credentials,
@@ -289,30 +312,21 @@ def _fastapi_fixture(
             chroma_server_ssl_keyfile,
             chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
-    proc = ctx.Process(target=_run_server, args=args, daemon=True)
-    proc.start()
-    settings = Settings(
-        chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_host="localhost",
-        chroma_server_http_port=port,
-        allow_reset=True,
-        chroma_client_auth_provider=chroma_client_auth_provider,
-        chroma_client_auth_credentials=chroma_client_auth_credentials,
-        chroma_auth_token_transport_header=chroma_auth_token_transport_header,
-        chroma_server_ssl_verify=chroma_server_ssl_certfile,
-        chroma_server_ssl_enabled=True if chroma_server_ssl_certfile else False,
-        chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
-    )
-    system = System(settings)
-    api = system.instance(ServerAPI)
-    system.start()
-    _await_server(api)
-    yield system
-    system.stop()
-    proc.kill()
-    if is_persistent and persist_directory is not None:
-        if os.path.exists(persist_directory):
-            shutil.rmtree(persist_directory)
+
+        yield from run(args)
+
+        try:
+            persist_directory.cleanup()
+
+        except PermissionError as e:
+            # todo: what's holding onto directory contents on Windows?
+            if os.name == "nt" and e.winerror:
+                pass
+
+            raise e
+
+    else:
+        yield from run(args)
 
 
 def fastapi() -> Generator[System, None, None]:
@@ -348,18 +362,22 @@ def basic_http_client() -> Generator[System, None, None]:
 
 
 def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None, None]:
-    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
-    with open(server_auth_file, "w") as f:
+    # This (and similar usage below) should use the delete_on_close parameter
+    # instead of delete=False, but it's only available in Python 3.12 and later.
+    # We must explicitly close the file before spawning a subprocess to avoid
+    # file locking issues on Windows.
+    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
-        chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-        chroma_client_auth_credentials="admin:admin",
-    ):
-        yield item
-    os.remove(server_auth_file)
+        f.close()
+
+        for item in _fastapi_fixture(
+            is_persistent=False,
+            chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
+            chroma_server_authn_credentials_file=f.name,
+            chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
+            chroma_client_auth_credentials="admin:admin",
+        ):
+            yield item
 
 
 def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
@@ -370,92 +388,97 @@ def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
         "admin": "$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS",
     }
-    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
-    with open(server_auth_file, "w") as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         for user, cred in creds.items():
             f.write(f"{user}:{cred}\n")
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
-        chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-        chroma_client_auth_credentials="admin:admin",
-    ):
-        yield item
-    os.remove(server_auth_file)
+        f.close()
+
+        for item in _fastapi_fixture(
+            is_persistent=False,
+            chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
+            chroma_server_authn_credentials_file=f.name,
+            chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
+            chroma_client_auth_credentials="admin:admin",
+        ):
+            yield item
 
 
 def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
-    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
-    with open(server_auth_file, "w") as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
-        chroma_server_authn_credentials_file="./server.htpasswd",
-        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-        chroma_client_auth_credentials="admin:admin1",
-    ):
-        yield item
-    os.remove(server_auth_file)
+        f.close()
+
+        for item in _fastapi_fixture(
+            is_persistent=False,
+            chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
+            chroma_server_authn_credentials_file=f.name,
+            chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
+            chroma_client_auth_credentials="admin:admin1",
+        ):
+            yield item
 
 
 def fastapi_server_basic_authn_rbac_authz() -> Generator[System, None, None]:
-    server_authn_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
-    server_authz_file = os.path.abspath(os.path.join(".", "server.authz"))
-    with open(server_authn_file, "w") as f:
-        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
-    with open(server_authz_file, "w") as f:
-        f.write(
-            """
-roles_mapping:
-  admin:
-    actions:
-      [
-        "system:reset",
-        "tenant:create_tenant",
-        "tenant:get_tenant",
-        "db:create_database",
-        "db:get_database",
-        "db:list_collections",
-        "db:create_collection",
-        "db:get_or_create_collection",
-        "collection:get_collection",
-        "collection:delete_collection",
-        "collection:update_collection",
-        "collection:add",
-        "collection:delete",
-        "collection:get",
-        "collection:query",
-        "collection:peek",
-        "collection:update",
-        "collection:upsert",
-        "collection:count",
-      ]
-users:
-  - id: admin
-    role: admin
-"""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".htpasswd", delete=False
+    ) as server_authn_file:
+        server_authn_file.write(
+            "admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n"
         )
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-        chroma_client_auth_credentials="admin:admin",
-        chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
-        chroma_server_authn_credentials_file=server_authn_file,
-        chroma_server_authz_provider="chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider",
-        chroma_server_authz_config_file=server_authz_file,
-    ):
-        yield item
-    os.remove(server_authn_file)
-    os.remove(server_authz_file)
+        server_authn_file.close()
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".authz", delete=False
+        ) as server_authz_file:
+            server_authz_file.write(
+                """
+roles_mapping:
+    admin:
+        actions:
+            [
+                "system:reset",
+                "tenant:create_tenant",
+                "tenant:get_tenant",
+                "db:create_database",
+                "db:get_database",
+                "db:list_collections",
+                "db:create_collection",
+                "db:get_or_create_collection",
+                "collection:get_collection",
+                "collection:delete_collection",
+                "collection:update_collection",
+                "collection:add",
+                "collection:delete",
+                "collection:get",
+                "collection:query",
+                "collection:peek",
+                "collection:update",
+                "collection:upsert",
+                "collection:count",
+            ]
+users:
+- id: admin
+  role: admin
+    """
+            )
+            server_authz_file.close()
+
+            for item in _fastapi_fixture(
+                is_persistent=False,
+                chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
+                chroma_client_auth_credentials="admin:admin",
+                chroma_server_authn_provider="chromadb.auth.basic_authn.BasicAuthenticationServerProvider",
+                chroma_server_authn_credentials_file=server_authn_file.name,
+                chroma_server_authz_provider="chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider",
+                chroma_server_authz_config_file=server_authz_file.name,
+            ):
+                yield item
 
 
 def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
     Generator[System, None, None]
 ):
-    server_authn_file = os.path.abspath(os.path.join(".", "server.authn"))
-    with open(server_authn_file, "w") as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".authn", delete=False) as f:
         f.write(
             """
 users:
@@ -470,16 +493,17 @@ users:
       - singleton-token
 """
         )
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_overwrite_singleton_tenant_database_access_from_auth=True,
-        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials="admin-token",
-        chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
-        chroma_server_authn_credentials_file=server_authn_file,
-    ):
-        yield item
-    os.remove(server_authn_file)
+        f.close()
+
+        for item in _fastapi_fixture(
+            is_persistent=False,
+            chroma_overwrite_singleton_tenant_database_access_from_auth=True,
+            chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
+            chroma_client_auth_credentials="admin-token",
+            chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
+            chroma_server_authn_credentials_file=f.name,
+        ):
+            yield item
 
 
 def integration() -> Generator[System, None, None]:
@@ -512,23 +536,21 @@ def sqlite() -> Generator[System, None, None]:
 
 def sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
-    save_path = tempfile.mkdtemp()
-    settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
-        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        allow_reset=True,
-        is_persistent=True,
-        persist_directory=save_path,
-    )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path)
+    with tempfile.TemporaryDirectory() as save_path:
+        settings = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=save_path,
+        )
+        system = System(settings)
+        system.start()
+        yield system
+        system.stop()
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
@@ -578,29 +600,29 @@ def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
 def system_wrong_auth(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
 def system_authn_rbac_authz(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
 def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    yield from request.param()
 
 
 @pytest.fixture(scope="module", params=system_fixtures_auth())
 def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield next(request.param())
+    yield from request.param()
 
 
 @pytest.fixture(scope="function")
