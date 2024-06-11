@@ -79,7 +79,7 @@ class SharedSystemClient:
                 identifier = (
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
                 )
-        elif "fastapi" in api_impl:
+        elif "FastAPI" in api_impl:
             # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
             identifier = str(uuid.uuid4())
         else:
