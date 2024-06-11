@@ -3,11 +3,14 @@ name: 📦 Release JavaScript client
 on:
   push:
     tags:
-      - 'js_release_*.*.*'  # Match tags in the form js_release_X.Y.Z
-      - 'js_release_alpha_*.*.*'  # Match tags in the form js_release_alpha_X.Y.Z
+      - 'js_release_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_X.Y.Z
+      - 'js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_alpha_X.Y.Z
 
 jobs:
   release:
+    strategy:
+      matrix:
+        registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
@@ -30,7 +33,7 @@ jobs:
     - uses: actions/setup-node@v3
       with:
         node-version: "16.x"
-        registry-url: "https://registry.npmjs.org"
+        registry-url: ${{ matrix.registry }}
     - name: Install dependencies
       run: npm install
       working-directory: ./clients/js/
@@ -38,4 +41,4 @@ jobs:
       run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
       working-directory: ./clients/js/
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}

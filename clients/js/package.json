@@ -67,7 +67,8 @@
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
     "release": "run-s build test:run && npm publish",
-    "release_alpha": "run-s build test:run && npm publish --tag alpha"
+    "release_alpha": "run-s build test:run && npm publish --tag alpha",
+    "release_dev": "run-s build test:run && npm version ${NEW_VERSION} --no-git-tag-version && npm publish"
   },
   "engines": {
     "node": ">=14.17.0"
