@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson as json
-from typing import Any, Awaitable, Optional, TypeVar, cast, Tuple, Sequence, Dict
+from typing import Any, Optional, TypeVar, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
@@ -44,7 +44,7 @@ from chromadb.api.types import (
 
 
 # requests removes None values from the built query string, but httpx includes it as an empty value
-T = TypeVar("T", bound=dict[Any, Any])
+T = TypeVar("T", bound=Dict[Any, Any])
 
 
 def clean_params(params: T) -> T:
@@ -117,7 +117,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return self._clients[loop_hash]
 
     async def _make_request(
-        self, method: str, path: str, **kwargs: dict[str, Any]
+        self, method: str, path: str, **kwargs: Dict[str, Any]
     ) -> Any:
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)

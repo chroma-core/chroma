@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Awaitable, Sequence, Optional
+from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
