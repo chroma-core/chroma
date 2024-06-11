@@ -55,7 +55,7 @@ def clean_params(params: T) -> T:
 logger = logging.getLogger(__name__)
 
 
-class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
+class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # We make one client per event loop to avoid unexpected issues if a client
     # is shared between event loops.
     # For example, if a client is constructed in the main thread, then passed
@@ -76,14 +76,14 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
 
-        self._api_url = FastAPIAsync.resolve_url(
+        self._api_url = AsyncFastAPI.resolve_url(
             chroma_server_host=str(system.settings.chroma_server_host),
             chroma_server_http_port=system.settings.chroma_server_http_port,
             chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-    async def __aenter__(self) -> "FastAPIAsync":
+    async def __aenter__(self) -> "AsyncFastAPI":
         self._get_client()
         return self
 
@@ -127,13 +127,13 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
         await raise_chroma_error(response)
         return json.loads(response.text)
 
-    @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     async def heartbeat(self) -> int:
         response = await self._make_request("get", "")
         return int(response["nanosecond heartbeat"])
 
-    @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     async def create_database(
         self,
@@ -147,7 +147,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             params={"tenant": tenant},
         )
 
-    @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_database(
         self,
@@ -164,7 +164,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             id=response["id"], name=response["name"], tenant=response["tenant"]
         )
 
-    @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def create_tenant(self, name: str) -> None:
         await self._make_request(
@@ -173,7 +173,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             json={"name": name},
         )
 
-    @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_tenant(self, name: str) -> Tenant:
         resp_json = await self._make_request(
@@ -183,7 +183,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
 
         return Tenant(name=resp_json["name"])
 
-    @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     @override
     async def list_collections(
         self,
@@ -221,7 +221,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
 
         return collections
 
-    @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
     async def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
@@ -234,7 +234,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
 
         return cast(int, resp_json)
 
-    @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
     async def create_collection(
         self,
@@ -277,7 +277,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             data_loader=data_loader,
         )
 
-    @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_collection(
         self,
@@ -321,7 +321,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
         )
 
     @trace_method(
-        "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
+        "AsyncFastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )
     @override
     async def get_or_create_collection(
@@ -345,7 +345,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             database=database,
         )
 
-    @trace_method("FastAPI._modify", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
     async def _modify(
         self,
@@ -359,7 +359,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             json={"new_metadata": new_metadata, "new_name": new_name},
         )
 
-    @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     async def delete_collection(
         self,
@@ -373,7 +373,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             params={"tenant": tenant, "database": database},
         )
 
-    @trace_method("FastAPI._count", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI._count", OpenTelemetryGranularity.OPERATION)
     @override
     async def _count(
         self,
@@ -387,7 +387,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
 
         return cast(int, resp_json)
 
-    @trace_method("FastAPI._peek", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
     async def _peek(
         self,
@@ -400,7 +400,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             include=["embeddings", "documents", "metadatas"],
         )
 
-    @trace_method("FastAPI._get", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI._get", OpenTelemetryGranularity.OPERATION)
     @override
     async def _get(
         self,
@@ -443,7 +443,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             included=resp_json["included"],
         )
 
-    @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
     async def _delete(
         self,
@@ -460,7 +460,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
 
         return cast(IDs, resp_json)
 
-    @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
+    @trace_method("AsyncFastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     async def _submit_batch(
         self,
         batch: Tuple[
@@ -487,7 +487,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             },
         )
 
-    @trace_method("FastAPI._add", OpenTelemetryGranularity.ALL)
+    @trace_method("AsyncFastAPI._add", OpenTelemetryGranularity.ALL)
     @override
     async def _add(
         self,
@@ -507,7 +507,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
 
-    @trace_method("FastAPI._update", OpenTelemetryGranularity.ALL)
+    @trace_method("AsyncFastAPI._update", OpenTelemetryGranularity.ALL)
     @override
     async def _update(
         self,
@@ -527,7 +527,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
 
         return True
 
-    @trace_method("FastAPI._upsert", OpenTelemetryGranularity.ALL)
+    @trace_method("AsyncFastAPI._upsert", OpenTelemetryGranularity.ALL)
     @override
     async def _upsert(
         self,
@@ -545,7 +545,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
         )
         return True
 
-    @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)
+    @trace_method("AsyncFastAPI._query", OpenTelemetryGranularity.ALL)
     @override
     async def _query(
         self,
@@ -579,13 +579,13 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
             included=resp_json["included"],
         )
 
-    @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
+    @trace_method("AsyncFastAPI.reset", OpenTelemetryGranularity.ALL)
     @override
     async def reset(self) -> bool:
         resp_json = await self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
-    @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_version(self) -> str:
         resp_json = await self._make_request("get", "/version")
@@ -596,7 +596,7 @@ class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
         return self._settings
 
     # todo: cleanup
-    @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
+    @trace_method("AsyncFastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
@@ -634,5 +634,5 @@ async def raise_chroma_error(resp: httpx.Response) -> Any:
 
 # todo: move to test directory?
 @async_class_to_sync
-class FastAPIAsyncSync(FastAPIAsync):
+class AsyncFastAPISync(AsyncFastAPI):
     pass

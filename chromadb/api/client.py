@@ -82,8 +82,8 @@ class SharedSystemClient:
         # todo: 🤢
         elif (
             api_impl == "chromadb.api.fastapi.FastAPI"
-            or api_impl == "chromadb.api.fastapi_async.FastAPIAsync"
-            or api_impl == "chromadb.api.fastapi_async.FastAPIAsyncSync"
+            or api_impl == "chromadb.api.fastapi_async.AsyncFastAPI"
+            or api_impl == "chromadb.api.fastapi_async.AsyncFastAPISync"
         ):
             # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
             identifier = str(uuid.uuid4())

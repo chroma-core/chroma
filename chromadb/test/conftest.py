@@ -340,7 +340,7 @@ def fastapi() -> Generator[System, None, None]:
 def fastapi_async():
     return _fastapi_fixture(
         is_persistent=False,
-        chroma_api_impl="chromadb.api.fastapi_async.FastAPIAsyncSync",
+        chroma_api_impl="chromadb.api.fastapi_async.AsyncFastAPISync",
     )
 
 
