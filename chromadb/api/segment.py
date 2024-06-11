@@ -721,7 +721,7 @@ class SegmentAPI(ServerAPI):
                     empty_metadatas.append([])
                 if "uris" in include:
                     empty_uris.append([])
-                
+
             return QueryResult(
                 ids=empty_ids,
                 distances=empty_distances if empty_distances else None,
