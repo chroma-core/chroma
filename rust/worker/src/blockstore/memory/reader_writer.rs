@@ -63,6 +63,7 @@ impl MemoryBlockfileWriter {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct MemoryBlockfileReader<K: Key, V: Value> {
     storage_manager: StorageManager,
     storage: Storage,

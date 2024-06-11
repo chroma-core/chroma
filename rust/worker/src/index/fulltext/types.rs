@@ -15,6 +15,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::tokenizer::ChromaTokenStream;
+
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
     #[error("Multiple tokens found in frequencies blockfile")]
@@ -35,6 +37,7 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct FullTextIndexWriter<'me> {
     // We use this to implement updates which require read-then-write semantics.
     full_text_index_reader: Option<FullTextIndexReader<'me>>,
@@ -42,9 +45,18 @@ pub(crate) struct FullTextIndexWriter<'me> {
     frequencies_blockfile_writer: BlockfileWriter,
     tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 
+    // TODO(Sanket): Move off this tokio::sync::mutex and use
+    // a lightweight lock instead. This is needed currently to
+    // keep holding the lock across an await point.
     // term -> positional posting list builder for that term
-    uncommitted: Arc<Mutex<HashMap<String, PositionalPostingListBuilder>>>,
-    uncommitted_frequencies: Arc<Mutex<HashMap<String, i32>>>,
+    uncommitted: Arc<tokio::sync::Mutex<HashMap<String, PositionalPostingListBuilder>>>,
+    // TODO(Sanket): Move off this tokio::sync::mutex and use
+    // a lightweight lock instead. This is needed currently to
+    // keep holding the lock across an await point.
+    // Value of this map is a tuple because we also need to keep the old frequency
+    // around. The reason is (token, freq) is the key in the blockfile hence
+    // when freq changes, we need to delete the old (token, freq) key.
+    uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
 }
 
 impl<'me> FullTextIndexWriter<'me> {
@@ -59,8 +71,8 @@ impl<'me> FullTextIndexWriter<'me> {
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
             tokenizer: Arc::new(Mutex::new(tokenizer)),
-            uncommitted: Arc::new(Mutex::new(HashMap::new())),
-            uncommitted_frequencies: Arc::new(Mutex::new(HashMap::new())),
+            uncommitted: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            uncommitted_frequencies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -68,7 +80,7 @@ impl<'me> FullTextIndexWriter<'me> {
         &self,
         token: &str,
     ) -> Result<(), FullTextIndexError> {
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         match uncommitted_frequencies.get(token) {
             Some(_) => return Ok(()),
             None => {
@@ -79,10 +91,11 @@ impl<'me> FullTextIndexWriter<'me> {
                         Err(_) => 0,
                     },
                 };
-                uncommitted_frequencies.insert(token.to_string(), frequency as i32);
+                uncommitted_frequencies
+                    .insert(token.to_string(), (frequency as i32, frequency as i32));
             }
         }
-        let mut uncommitted = self.uncommitted.lock();
+        let mut uncommitted = self.uncommitted.lock().await;
         match uncommitted.get(token) {
             Some(_) => {
                 // This should never happen -- if uncommitted has the token, then
@@ -116,21 +129,26 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
+    pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
+        let tokenizer = self.tokenizer.lock();
+        let tokens = tokenizer.encode(document);
+        tokens
+    }
+
     pub async fn add_document(
         &self,
         document: &str,
         offset_id: i32,
     ) -> Result<(), FullTextIndexError> {
-        let tokenizer = self.tokenizer.lock();
-        let tokens = tokenizer.encode(document);
+        let tokens = self.encode_tokens(document);
         for token in tokens.get_tokens() {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
                 .await?;
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
             uncommitted_frequencies
                 .entry(token.text.to_string())
-                .and_modify(|e| *e += 1);
-            let mut uncommitted = self.uncommitted.lock();
+                .and_modify(|e| (*e).0 += 1);
+            let mut uncommitted = self.uncommitted.lock().await;
             let builder = uncommitted
                 .entry(token.text.to_string())
                 .or_insert(PositionalPostingListBuilder::new());
@@ -165,15 +183,14 @@ impl<'me> FullTextIndexWriter<'me> {
         document: &str,
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
-        let tokenizer = self.tokenizer.lock();
-        let tokens = tokenizer.encode(document);
+        let tokens = self.encode_tokens(document);
         for token in tokens.get_tokens() {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
                 .await?;
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
             match uncommitted_frequencies.get_mut(token.text.as_str()) {
                 Some(frequency) => {
-                    *frequency -= 1;
+                    (*frequency).0 -= 1;
                 }
                 None => {
                     // Invariant violation -- we just populated this.
@@ -181,7 +198,7 @@ impl<'me> FullTextIndexWriter<'me> {
                     return Err(FullTextIndexError::InvariantViolation);
                 }
             }
-            let mut uncommitted = self.uncommitted.lock();
+            let mut uncommitted = self.uncommitted.lock().await;
             match uncommitted.get_mut(token.text.as_str()) {
                 Some(builder) => match builder.delete_doc_id(offset_id as i32) {
                     Ok(_) => {}
@@ -217,8 +234,9 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
+    // TODO(Sanket): Handle document and metadata deletes.
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
-        let mut uncommitted = self.uncommitted.lock();
+        let mut uncommitted = self.uncommitted.lock().await;
         for (key, mut value) in uncommitted.drain() {
             let built_list = value.build();
             for doc_id in built_list.doc_ids.iter() {
@@ -243,12 +261,24 @@ impl<'me> FullTextIndexWriter<'me> {
                 }
             }
         }
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock();
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         for (key, value) in uncommitted_frequencies.drain() {
+            // Delete the old frequency.
+            match self
+                .frequencies_blockfile_writer
+                .delete::<u32, u32>(key.as_str(), value.1 as u32)
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(FullTextIndexError::BlockfileWriteError(e));
+                }
+            }
+            // Insert the new frequency.
             // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
             match self
                 .frequencies_blockfile_writer
-                .set(key.as_str(), value as u32, 0)
+                .set(key.as_str(), value.0 as u32, 0)
                 .await
             {
                 Ok(_) => {}
@@ -313,6 +343,7 @@ impl FullTextIndexFlusher {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
     frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
@@ -332,9 +363,14 @@ impl<'me> FullTextIndexReader<'me> {
         }
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<i32>, FullTextIndexError> {
+    pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
         let tokenizer = self.tokenizer.lock();
-        let binding = tokenizer.encode(query);
+        let tokens = tokenizer.encode(document);
+        tokens
+    }
+
+    pub async fn search(&self, query: &str) -> Result<Vec<i32>, FullTextIndexError> {
+        let binding = self.encode_tokens(query);
         let tokens = binding.get_tokens();
 
         // Get query tokens sorted by frequency.

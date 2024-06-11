@@ -1,5 +1,6 @@
 use crate::blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::index::fulltext::types::FullTextIndexError;
 use crate::types::{BooleanOperator, MetadataType, Where, WhereClauseComparator, WhereComparison};
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use thiserror::Error;
@@ -18,6 +19,8 @@ pub(crate) enum MetadataIndexError {
     InvalidKeyType,
     #[error("Blockfile error: {0}")]
     BlockfileError(#[from] Box<dyn ChromaError>),
+    #[error("Full text index error: {0}")]
+    FullTextError(#[from] FullTextIndexError),
 }
 
 impl ChromaError for MetadataIndexError {
@@ -37,18 +40,22 @@ impl ChromaError for MetadataIndexError {
 // - We could do the Arrow pattern of having keys know how to write themselves
 //  into MetadataIndexWriter store and long term we probably want to. But for now
 //  this gets the job done.
+#[derive(Clone)]
 pub(crate) enum MetadataIndexWriter<'me> {
+    // TODO(Sanket): Move off this tokio::sync::mutex and use
+    // a lightweight lock instead. This is needed currently to
+    // keep holding the lock across an await point.
     StringMetadataIndexWriter(
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
-        Arc<Mutex<HashMap<String, HashMap<String, RoaringBitmap>>>>,
+        Arc<tokio::sync::Mutex<HashMap<String, HashMap<String, RoaringBitmap>>>>,
     ),
     U32MetadataIndexWriter(
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
-        Arc<Mutex<HashMap<String, HashMap<u32, RoaringBitmap>>>>,
+        Arc<tokio::sync::Mutex<HashMap<String, HashMap<u32, RoaringBitmap>>>>,
     ),
     // We use a Vec<(KeyWrapper, RoaringBitmap)> instead of a HashMap because
     // f32 doesn't implement Eq or Hash. Eq is trivial since we disallow
@@ -59,13 +66,13 @@ pub(crate) enum MetadataIndexWriter<'me> {
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
-        Arc<Mutex<HashMap<String, Vec<(f32, RoaringBitmap)>>>>,
+        Arc<tokio::sync::Mutex<HashMap<String, Vec<(f32, RoaringBitmap)>>>>,
     ),
     BoolMetadataIndexWriter(
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
-        Arc<Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
+        Arc<tokio::sync::Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
     ),
 }
 
@@ -344,7 +351,7 @@ impl<'me> MetadataIndexWriter<'me> {
         MetadataIndexWriter::StringMetadataIndexWriter(
             init_blockfile_writer,
             string_metadata_index_reader,
-            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         )
     }
 
@@ -355,7 +362,7 @@ impl<'me> MetadataIndexWriter<'me> {
         MetadataIndexWriter::U32MetadataIndexWriter(
             init_blockfile_writer,
             int_metadata_index_reader,
-            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         )
     }
 
@@ -366,7 +373,7 @@ impl<'me> MetadataIndexWriter<'me> {
         MetadataIndexWriter::F32MetadataIndexWriter(
             init_blockfile_writer,
             f32_metadata_index_reader,
-            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         )
     }
 
@@ -377,7 +384,7 @@ impl<'me> MetadataIndexWriter<'me> {
         MetadataIndexWriter::BoolMetadataIndexWriter(
             init_blockfile_writer,
             bool_metadata_index_reader,
-            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         )
     }
 
@@ -394,7 +401,7 @@ impl<'me> MetadataIndexWriter<'me> {
             MetadataIndexWriter::StringMetadataIndexWriter(_, reader, uncommitted_rbms) => {
                 match key {
                     KeyWrapper::String(k) => {
-                        let mut uncommitted_rbms = uncommitted_rbms.lock();
+                        let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                         if !uncommitted_rbms.contains_key(prefix) {
                             uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
                         }
@@ -403,6 +410,7 @@ impl<'me> MetadataIndexWriter<'me> {
                             let written_state = match reader {
                                 Some(reader) => match reader.get(prefix, key).await {
                                     Ok(rbm) => rbm,
+                                    // TODO: this should be more granular in its error handling
                                     Err(_) => RoaringBitmap::new(),
                                 },
                                 None => RoaringBitmap::new(),
@@ -415,7 +423,7 @@ impl<'me> MetadataIndexWriter<'me> {
             }
             MetadataIndexWriter::U32MetadataIndexWriter(_, reader, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     if !uncommitted_rbms.contains_key(prefix) {
                         uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
                     }
@@ -435,7 +443,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, reader, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     if !uncommitted_rbms.contains_key(prefix) {
                         uncommitted_rbms.insert(prefix.to_string(), Vec::new());
                     }
@@ -456,7 +464,7 @@ impl<'me> MetadataIndexWriter<'me> {
             MetadataIndexWriter::BoolMetadataIndexWriter(_, reader, uncommitted_rbms) => {
                 match key {
                     KeyWrapper::Bool(k) => {
-                        let mut uncommitted_rbms = uncommitted_rbms.lock();
+                        let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                         if !uncommitted_rbms.contains_key(prefix) {
                             uncommitted_rbms.insert(prefix.to_string(), HashMap::new());
                         }
@@ -491,7 +499,7 @@ impl<'me> MetadataIndexWriter<'me> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::String(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
@@ -500,7 +508,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
@@ -509,7 +517,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::U32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.insert(offset_id);
@@ -518,7 +526,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
                     rbm.1.insert(offset_id);
@@ -541,7 +549,7 @@ impl<'me> MetadataIndexWriter<'me> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::String(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.remove(offset_id);
@@ -550,7 +558,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::BoolMetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Bool(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.remove(offset_id);
@@ -559,7 +567,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::U32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Uint32(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.get_mut(&k).unwrap();
                     rbm.remove(offset_id);
@@ -568,7 +576,7 @@ impl<'me> MetadataIndexWriter<'me> {
             },
             MetadataIndexWriter::F32MetadataIndexWriter(_, _, uncommitted_rbms) => match key {
                 KeyWrapper::Float32(k) => {
-                    let mut uncommitted_rbms = uncommitted_rbms.lock();
+                    let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                     let rbms = uncommitted_rbms.get_mut(prefix).unwrap();
                     let rbm = rbms.iter_mut().find(|(rbm_k, _)| *rbm_k == k).unwrap();
                     rbm.1.remove(offset_id);
@@ -597,7 +605,7 @@ impl<'me> MetadataIndexWriter<'me> {
                 _,
                 uncommitted_rbms,
             ) => {
-                let mut uncommitted_rbms = uncommitted_rbms.lock();
+                let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         match blockfile_writer
@@ -611,7 +619,7 @@ impl<'me> MetadataIndexWriter<'me> {
                 }
             }
             MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _, uncommitted_rbms) => {
-                let mut uncommitted_rbms = uncommitted_rbms.lock();
+                let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
@@ -622,7 +630,7 @@ impl<'me> MetadataIndexWriter<'me> {
                 }
             }
             MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _, uncommitted_rbms) => {
-                let mut uncommitted_rbms = uncommitted_rbms.lock();
+                let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
@@ -633,7 +641,7 @@ impl<'me> MetadataIndexWriter<'me> {
                 }
             }
             MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _, uncommitted_rbms) => {
-                let mut uncommitted_rbms = uncommitted_rbms.lock();
+                let mut uncommitted_rbms = uncommitted_rbms.lock().await;
                 for (prefix, rbms) in uncommitted_rbms.drain() {
                     for (key, rbm) in rbms.iter() {
                         match blockfile_writer.set(prefix.as_str(), *key, rbm).await {
@@ -724,6 +732,7 @@ impl MetadataIndexFlusher {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum MetadataIndexReader<'me> {
     StringMetadataIndexReader(BlockfileReader<'me, &'me str, RoaringBitmap>),
     U32MetadataIndexReader(BlockfileReader<'me, u32, RoaringBitmap>),

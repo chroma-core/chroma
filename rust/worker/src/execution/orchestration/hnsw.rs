@@ -103,6 +103,8 @@ pub(crate) struct HnswQueryOrchestrator {
     query_vectors: Vec<Vec<f32>>,
     k: i32,
     allowed_ids: Arc<[String]>,
+    allowed_ids_hnsw_segment: Arc<[String]>,
+    allowed_ids_brute_force: Arc<[String]>,
     include_embeddings: bool,
     hnsw_segment_id: Uuid,
     // State fetched or created for query execution
@@ -168,6 +170,8 @@ impl HnswQueryOrchestrator {
             query_vectors,
             k,
             allowed_ids: allowed_ids.into(),
+            allowed_ids_brute_force: Arc::new([]),
+            allowed_ids_hnsw_segment: Arc::new([]),
             include_embeddings,
             hnsw_segment_id: segment_id,
             hnsw_segment: None,
@@ -251,6 +255,8 @@ impl HnswQueryOrchestrator {
                 query: query_vector.clone(),
                 k: self.k as usize,
                 distance_metric: distance_function.clone(),
+                allowed_ids: self.allowed_ids.clone(),
+                allowed_ids_brute_force: self.allowed_ids_brute_force.clone(),
             };
             let operator = Box::new(BruteForceKnnOperator {});
             let task = wrap(operator, bf_input, self_address.clone());
@@ -289,22 +295,26 @@ impl HnswQueryOrchestrator {
         .await
         {
             Ok(reader) => reader,
-            Err(e) => match *e {
-                DistributedHNSWSegmentFromSegmentError::Uninitialized => {
-                    // no task, decrement the merge dependency count and return
-                    // with an empty result
-                    for (i, _) in self.query_vectors.iter().enumerate() {
-                        self.merge_dependency_count -= 1;
-                        self.hnsw_result_distances.insert(i, Vec::new());
-                        self.hnsw_result_offset_ids.insert(i, Vec::new());
+            Err(e) => {
+                match *e {
+                    DistributedHNSWSegmentFromSegmentError::Uninitialized => {
+                        tracing::error!("[HnswQueryOperation]: Error creating distributed hnsw segment reader {:?}", *e);
+                        // no task, decrement the merge dependency count and return
+                        // with an empty result
+                        for (i, _) in self.query_vectors.iter().enumerate() {
+                            self.merge_dependency_count -= 1;
+                            self.hnsw_result_distances.insert(i, Vec::new());
+                            self.hnsw_result_offset_ids.insert(i, Vec::new());
+                        }
+                        return;
                     }
-                    return;
+                    _ => {
+                        tracing::error!("[HnswQueryOperation]: Error creating distributed hnsw segment reader {:?}", *e);
+                        self.terminate_with_error(e, ctx);
+                        return;
+                    }
                 }
-                _ => {
-                    self.terminate_with_error(e, ctx);
-                    return;
-                }
-            },
+            }
         };
         println!("Created HNSW Segment Reader: {:?}", hnsw_segment_reader);
 
@@ -323,6 +333,7 @@ impl HnswQueryOrchestrator {
                 record_segment: record_segment.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 allowed_ids: self.allowed_ids.clone(),
+                allowed_ids_hnsw: self.allowed_ids_hnsw_segment.clone(),
                 logs: logs.clone(),
             };
             let task = wrap(operator, input, ctx.sender.as_receiver());
@@ -373,6 +384,12 @@ impl HnswQueryOrchestrator {
         let brute_force_result_embeddings = self
             .brute_force_result_embeddings
             .remove(&query_vector_index);
+
+        tracing::info!(
+            "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids",
+            brute_force_result_user_ids.len(),
+            hnsw_result_offset_ids.len()
+        );
 
         let operator = Box::new(MergeKnnResultsOperator {});
         let input = MergeKnnResultsOperatorInput::new(
@@ -619,6 +636,25 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
+                // Divide the allowed_ids into two mutually exclusive lists
+                // one for the brute force and another for the hnsw segment query.
+                let mut allowed_ids_hnsw = vec![];
+                let mut allowed_ids_brute_force = vec![];
+                for id in self.allowed_ids.iter() {
+                    let mut found_in_log = false;
+                    for (log, _) in logs.iter() {
+                        if id == &log.record.id {
+                            found_in_log = true;
+                            allowed_ids_brute_force.push(id.clone());
+                            break;
+                        }
+                    }
+                    if !found_in_log {
+                        allowed_ids_hnsw.push(id.clone());
+                    }
+                }
+                self.allowed_ids_brute_force = allowed_ids_brute_force.into();
+                self.allowed_ids_hnsw_segment = allowed_ids_hnsw.into();
                 self.brute_force_query(logs.clone(), ctx.sender.as_receiver())
                     .await;
                 self.hnsw_segment_query(logs, ctx).await;
@@ -706,7 +742,6 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
             .hnsw_task_id_to_query_index
             .remove(&task_id)
             .expect("Invariant violation. HNSW task id is not set for query vector index");
-
         match message {
             Ok(output) => {
                 self.hnsw_result_offset_ids

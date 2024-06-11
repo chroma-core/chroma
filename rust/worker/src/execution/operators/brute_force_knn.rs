@@ -6,6 +6,7 @@ use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::sync::Arc;
 use tracing::trace;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
@@ -27,6 +28,10 @@ pub struct BruteForceKnnOperatorInput {
     pub query: Vec<f32>,
     pub k: usize,
     pub distance_metric: DistanceFunction,
+    pub allowed_ids: Arc<[String]>,
+    // This is just a subset of allowed_ids containing
+    // only the ids that are allowed and present in the log.
+    pub allowed_ids_brute_force: Arc<[String]>,
 }
 
 /// The output of the brute force k-nearest neighbors operator.
@@ -103,6 +108,17 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
 
             if log_record.record.operation == Operation::Delete {
                 // Explicitly skip deleted records.
+                continue;
+            }
+
+            // Skip records that are disallowed. If allowed list is empty then
+            // don't exclude anything.
+            // Empty allowed list is passed when where filtering is absent.
+            if !input.allowed_ids.is_empty()
+                && !input
+                    .allowed_ids_brute_force
+                    .contains(&log_record.record.id)
+            {
                 continue;
             }
             let embedding = match &log_record.record.embedding {
@@ -210,6 +226,8 @@ mod tests {
             query: vec![0.0, 0.0, 0.0],
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
         };
         let output = operator.run(&input).await.unwrap();
         assert_eq!(output.indices, vec![0, 1]);
@@ -271,6 +289,8 @@ mod tests {
             query: vec![0.0, 1.0, 0.0],
             k: 2,
             distance_metric: DistanceFunction::InnerProduct,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
         };
         let output = operator.run(&input).await.unwrap();
 
@@ -306,6 +326,8 @@ mod tests {
             query: vec![0.0, 0.0, 0.0],
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
         };
         let output = operator.run(&input).await.unwrap();
         assert_eq!(output.indices, vec![0]);
@@ -358,6 +380,8 @@ mod tests {
             query: vec![0.0, 0.0, 0.0],
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
         };
         let output = operator.run(&input).await.unwrap();
         assert_eq!(output.indices, vec![0, 2]);

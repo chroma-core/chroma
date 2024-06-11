@@ -26,6 +26,8 @@ use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
+use crate::segment::metadata_segment::MetadataSegmentWriter;
+use crate::segment::record_segment;
 use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentWriter;
@@ -110,10 +112,14 @@ enum GetSegmentWritersError {
     SysDbGetSegmentsError(#[from] GetSegmentsError),
     #[error("Error creating Record Segment Writer")]
     RecordSegmentWriterError,
+    #[error("Error creating Metadata Segment Writer")]
+    MetadataSegmentWriterError,
     #[error("Error creating HNSW Segment Writer")]
     HnswSegmentWriterError,
     #[error("No record segment found for collection")]
     NoRecordSegmentFound,
+    #[error("No metadata segment found for collection")]
+    NoMetadataSegmentFound,
     #[error("Collection not found")]
     CollectionNotFound,
     #[error("Error getting collection")]
@@ -238,10 +244,11 @@ impl CompactOrchestrator {
         self.state = ExecutionState::Write;
 
         let writer_res = self.get_segment_writers().await;
-        let (record_segment_writer, hnsw_segment_writer) = match writer_res {
+        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = match writer_res
+        {
             Ok(writers) => writers,
             Err(e) => {
-                // Log an error and return
+                tracing::error!("Error creating writers for compaction {:?}", e);
                 return;
             }
         };
@@ -252,6 +259,7 @@ impl CompactOrchestrator {
             let input = WriteSegmentsInput::new(
                 record_segment_writer.clone(),
                 hnsw_segment_writer.clone(),
+                metadata_segment_writer.clone(),
                 parition.clone(),
                 self.blockfile_provider.clone(),
                 self.record_segment
@@ -264,7 +272,8 @@ impl CompactOrchestrator {
             match self.dispatcher.send(task, Some(Span::current())).await {
                 Ok(_) => (),
                 Err(e) => {
-                    // Log an error and reply to caller
+                    tracing::error!("Error dispatching writers for compaction {:?}", e);
+                    // Reply to caller
                 }
             }
         }
@@ -274,12 +283,17 @@ impl CompactOrchestrator {
         &mut self,
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+        metadata_segment_writer: MetadataSegmentWriter<'static>,
         self_address: Box<dyn Receiver<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
     ) {
         self.state = ExecutionState::Flush;
 
         let operator = FlushS3Operator::new();
-        let input = FlushS3Input::new(record_segment_writer, hnsw_segment_writer);
+        let input = FlushS3Input::new(
+            record_segment_writer,
+            hnsw_segment_writer,
+            metadata_segment_writer,
+        );
 
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
@@ -319,8 +333,14 @@ impl CompactOrchestrator {
 
     async fn get_segment_writers(
         &mut self,
-    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegmentWriter>), Box<dyn ChromaError>>
-    {
+    ) -> Result<
+        (
+            RecordSegmentWriter,
+            Box<DistributedHNSWSegmentWriter>,
+            MetadataSegmentWriter<'static>,
+        ),
+        Box<dyn ChromaError>,
+    > {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -379,6 +399,28 @@ impl CompactOrchestrator {
         };
         self.record_segment = Some(record_segment.clone()); // auto deref.
 
+        let metadata_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::BlockfileMetadata);
+
+        tracing::debug!("Found metadata segment {:?}", metadata_segment);
+
+        if metadata_segment.is_none() {
+            return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
+        }
+        // Create a record segment writer
+        let mt_segment = metadata_segment.unwrap(); // safe to unwrap here.
+        let mt_segment_writer =
+            match MetadataSegmentWriter::from_segment(mt_segment, &self.blockfile_provider).await {
+                Ok(writer) => writer,
+                Err(e) => {
+                    println!("Error creating metadata Segment Writer: {:?}", e);
+                    return Err(Box::new(GetSegmentWritersError::MetadataSegmentWriterError));
+                }
+            };
+
+        tracing::debug!("Metadata Segment Writer created");
+
         // Create a hnsw segment writer
         let collection_res = self
             .sysdb
@@ -423,7 +465,11 @@ impl CompactOrchestrator {
             }
         };
 
-        Ok((record_segment_writer, hnsw_segment_writer))
+        Ok((
+            record_segment_writer,
+            hnsw_segment_writer,
+            mt_segment_writer,
+        ))
     }
 
     pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {
@@ -541,9 +587,23 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
+            // TODO: Ideally we shouldn't even have to make an explicit call to
+            // write_to_blockfiles since it is not the workflow for other segments
+            // and is exclusive to metadata segment. We should figure out a way
+            // to make this call a part of commit itself. It's not obvious directly
+            // how to do that since commit is per partition but write_to_blockfiles
+            // only need to be called once across all partitions combined.
+            let mut writer = output.metadata_segment_writer.clone();
+            match writer.write_to_blockfiles().await {
+                Ok(()) => (),
+                Err(_) => {
+                    return;
+                }
+            }
             self.flush_s3(
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
+                output.metadata_segment_writer,
                 _ctx.sender.as_receiver(),
             )
             .await;
