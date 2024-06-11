@@ -53,9 +53,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from chromadb.api import ServerAPI, ServerAPIAsync
+    from chromadb.api import ServerAPI, AsyncServerAPI
 
-ClientT = TypeVar("ClientT", "ServerAPI", "ServerAPIAsync")
+ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
 
 
 class CollectionCommon(Generic[ClientT]):

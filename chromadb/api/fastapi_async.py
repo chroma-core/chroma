@@ -2,14 +2,13 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson as json
-from typing import Any, Optional, cast, Tuple, Sequence, Dict
+from typing import Any, Awaitable, Optional, TypeVar, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
 from chromadb import errors
-from chromadb.api import ServerAPIAsync
+from chromadb.api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.api.types import CollectionMetadata, EmbeddingFunction, GetResult
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -45,15 +44,18 @@ from chromadb.api.types import (
 
 
 # requests removes None values from the built query string, but httpx includes it as an empty value
-def clean_params(params: dict) -> dict:
+T = TypeVar("T", bound=dict[Any, Any])
+
+
+def clean_params(params: T) -> T:
     """Remove None values from kwargs."""
-    return {k: v for k, v in params.items() if v is not None}
+    return {k: v for k, v in params.items() if v is not None}  # type: ignore
 
 
 logger = logging.getLogger(__name__)
 
 
-class FastAPIAsync(BaseHTTPClient, ServerAPIAsync):
+class FastAPIAsync(BaseHTTPClient, AsyncServerAPI):
     # We make one client per event loop to avoid unexpected issues if a client
     # is shared between event loops.
     # For example, if a client is constructed in the main thread, then passed
@@ -81,15 +83,16 @@ class FastAPIAsync(BaseHTTPClient, ServerAPIAsync):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "FastAPIAsync":
         self._get_client()
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         await self.stop()
 
     @override
-    async def stop(self) -> None:
+    # todo: syncify?
+    async def stop(self):
         super().stop()
         for client in self._clients.values():
             await client.aclose()
@@ -113,7 +116,9 @@ class FastAPIAsync(BaseHTTPClient, ServerAPIAsync):
 
         return self._clients[loop_hash]
 
-    async def _make_request(self, method: str, path: str, **kwargs):
+    async def _make_request(
+        self, method: str, path: str, **kwargs: dict[str, Any]
+    ) -> Any:
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
@@ -466,7 +471,7 @@ class FastAPIAsync(BaseHTTPClient, ServerAPIAsync):
             Optional[URIs],
         ],
         url: str,
-    ):
+    ) -> Any:
         """
         Submits a batch of embeddings to the database
         """
@@ -587,7 +592,7 @@ class FastAPIAsync(BaseHTTPClient, ServerAPIAsync):
         return cast(str, resp_json)
 
     @override
-    async def get_settings(self) -> Settings:
+    def get_settings(self) -> Settings:
         return self._settings
 
     # todo: cleanup

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Generic, Sequence, Optional, TypeVar
+from typing import Awaitable, Sequence, Optional
 from uuid import UUID
 
 from overrides import override
@@ -516,10 +516,7 @@ class AdminAPI(ABC):
         pass
 
 
-CollectionT = TypeVar("CollectionT", Collection, CollectionAsync)
-
-
-class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
+class ServerAPI(BaseAPI, AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
     in a tenant and database. This is the root component of the Chroma System"""
 
@@ -531,7 +528,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[CollectionT]:
+    ) -> Sequence[Collection]:
         pass
 
     @abstractmethod
@@ -554,7 +551,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionT:
+    ) -> Collection:
         pass
 
     @abstractmethod
@@ -569,7 +566,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionT:
+    ) -> Collection:
         pass
 
     @abstractmethod
@@ -584,7 +581,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionT:
+    ) -> Collection:
         pass
 
     @abstractmethod
@@ -598,45 +595,208 @@ class ServerAPI(BaseAPI, AdminAPI, Component, Generic[CollectionT]):
         pass
 
 
-class ServerAPIAsync(ServerAPI):
+#############
+# Async API #
+#############
+
+
+class AsyncBaseAPI(ABC):
     @abstractmethod
-    @override
-    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    def heartbeat(self) -> Awaitable[int]:
+        """Get the current time in nanoseconds since epoch.
+        Used to check if the server is alive.
+
+        Returns:
+            int: The current time in nanoseconds since epoch
+
+        """
+        pass
+
+    #
+    # COLLECTION METHODS
+    #
+
+    @abstractmethod
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Awaitable[Sequence[CollectionAsync]]:
+        """List all collections.
+        Args:
+            limit: The maximum number of entries to return. Defaults to None.
+            offset: The number of entries to skip before returning. Defaults to None.
+
+        Returns:
+            Sequence[Collection]: A list of collections
+
+        Examples:
+            ```python
+            await client.list_collections()
+            # [collection(name="my_collection", metadata={})]
+            ```
+        """
         pass
 
     @abstractmethod
-    @override
-    async def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+    def count_collections(self) -> Awaitable[int]:
+        """Count the number of collections.
+
+        Returns:
+            int: The number of collections.
+
+        Examples:
+            ```python
+            await client.count_collections()
+            # 1
+            ```
+        """
         pass
 
     @abstractmethod
-    @override
-    async def create_tenant(self, name: str) -> None:
+    def create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        get_or_create: bool = False,
+    ) -> Awaitable[CollectionAsync]:
+        """Create a new collection with the given name and metadata.
+        Args:
+            name: The name of the collection to create.
+            metadata: Optional metadata to associate with the collection.
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            get_or_create: If True, return the existing collection if it exists.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The newly created collection.
+
+        Raises:
+            ValueError: If the collection already exists and get_or_create is False.
+            ValueError: If the collection name is invalid.
+
+        Examples:
+            ```python
+            await client.create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+
+            await client.create_collection("my_collection", metadata={"foo": "bar"})
+            # collection(name="my_collection", metadata={"foo": "bar"})
+            ```
+        """
         pass
 
     @abstractmethod
-    @override
-    async def get_tenant(self, name: str) -> Tenant:
+    def get_collection(
+        self,
+        name: str,
+        id: Optional[UUID] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> Awaitable[CollectionAsync]:
+        """Get a collection with the given name.
+        Args:
+            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
+            name: The name of the collection to get
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            ```python
+            await client.get_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
         pass
 
     @abstractmethod
-    @override
-    async def heartbeat(self) -> int:
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> Awaitable[CollectionAsync]:
+        """Get or create a collection with the given name and metadata.
+        Args:
+            name: The name of the collection to get or create
+            metadata: Optional metadata to associate with the collection. If
+            the collection alredy exists, the metadata will be updated if
+            provided and not None. If the collection does not exist, the
+            new collection will be created with the provided metadata.
+            embedding_function: Optional function to use to embed documents
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            The collection
+
+        Examples:
+            ```python
+            await client.get_or_create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _modify(
+    def _modify(
         self,
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-    ) -> None:
+    ) -> Awaitable[None]:
+        """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
+
+        Args:
+            id: The internal UUID of the collection to modify.
+            new_name: The new name of the collection.
+                                If None, the existing name will remain. Defaults to None.
+            new_metadata: The new metadata to associate with the collection.
+                                      Defaults to None.
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _add(
+    def delete_collection(
+        self,
+        name: str,
+    ) -> Awaitable[None]:
+        """Delete a collection with the given name.
+        Args:
+            name: The name of the collection to delete.
+
+        Raises:
+            ValueError: If the collection does not exist.
+
+        Examples:
+            ```python
+            await client.delete_collection("my_collection")
+            ```
+        """
+        pass
+
+    #
+    # ITEM METHODS
+    #
+
+    @abstractmethod
+    def _add(
         self,
         ids: IDs,
         collection_id: UUID,
@@ -644,12 +804,25 @@ class ServerAPIAsync(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> Awaitable[bool]:
+        """[Internal] Add embeddings to a collection specified by UUID.
+        If (some) ids already exist, only the new embeddings will be added.
+
+        Args:
+            ids: The ids to associate with the embeddings.
+            collection_id: The UUID of the collection to add the embeddings to.
+            embedding: The sequence of embeddings to add.
+            metadata: The metadata to associate with the embeddings. Defaults to None.
+            documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
+
+        Returns:
+            True if the embeddings were added successfully.
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _update(
+    def _update(
         self,
         collection_id: UUID,
         ids: IDs,
@@ -657,12 +830,23 @@ class ServerAPIAsync(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> Awaitable[bool]:
+        """[Internal] Update entries in a collection specified by UUID.
+
+        Args:
+            collection_id: The UUID of the collection to update the embeddings in.
+            ids: The IDs of the entries to update.
+            embeddings: The sequence of embeddings to update. Defaults to None.
+            metadatas: The metadata to associate with the embeddings. Defaults to None.
+            documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
+        Returns:
+            True if the embeddings were updated successfully.
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _upsert(
+    def _upsert(
         self,
         collection_id: UUID,
         ids: IDs,
@@ -670,22 +854,51 @@ class ServerAPIAsync(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> Awaitable[bool]:
+        """[Internal] Add or update entries in the a collection specified by UUID.
+        If an entry with the same id already exists, it will be updated,
+        otherwise it will be added.
+
+        Args:
+            collection_id: The collection to add the embeddings to
+            ids: The ids to associate with the embeddings. Defaults to None.
+            embeddings: The sequence of embeddings to add
+            metadatas: The metadata to associate with the embeddings. Defaults to None.
+            documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _count(self, collection_id: UUID) -> int:
+    def _count(self, collection_id: UUID) -> Awaitable[int]:
+        """[Internal] Returns the number of entries in a collection specified by UUID.
+
+        Args:
+            collection_id: The UUID of the collection to count the embeddings in.
+
+        Returns:
+            int: The number of embeddings in the collection
+
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+    def _peek(self, collection_id: UUID, n: int = 10) -> Awaitable[GetResult]:
+        """[Internal] Returns the first n entries in a collection specified by UUID.
+
+        Args:
+            collection_id: The UUID of the collection to peek into.
+            n: The number of entries to peek. Defaults to 10.
+
+        Returns:
+            GetResult: The first n entries in the collection.
+
+        """
+
         pass
 
     @abstractmethod
-    @override
-    async def _get(
+    def _get(
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
@@ -697,23 +910,49 @@ class ServerAPIAsync(ServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
-    ) -> GetResult:
+    ) -> Awaitable[GetResult]:
+        """[Internal] Returns entries from a collection specified by UUID.
+
+        Args:
+            ids: The IDs of the entries to get. Defaults to None.
+            where: Conditional filtering on metadata. Defaults to {}.
+            sort: The column to sort the entries by. Defaults to None.
+            limit: The maximum number of entries to return. Defaults to None.
+            offset: The number of entries to skip before returning. Defaults to None.
+            page: The page number to return. Defaults to None.
+            page_size: The number of entries to return per page. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to {}.
+            include: The fields to include in the response.
+                          Defaults to ["embeddings", "metadatas", "documents"].
+        Returns:
+            GetResult: The entries in the collection that match the query.
+
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _delete(
+    def _delete(
         self,
         collection_id: UUID,
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> IDs:
+    ) -> Awaitable[IDs]:
+        """[Internal] Deletes entries from a collection specified by UUID.
+
+        Args:
+            collection_id: The UUID of the collection to delete the entries from.
+            ids: The IDs of the entries to delete. Defaults to None.
+            where: Conditional filtering on metadata. Defaults to {}.
+            where_document: Conditional filtering on documents. Defaults to {}.
+
+        Returns:
+            IDs: The list of IDs of the entries that were deleted.
+        """
         pass
 
     @abstractmethod
-    @override
-    async def _query(
+    def _query(
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
@@ -721,35 +960,130 @@ class ServerAPIAsync(ServerAPI):
         where: Where = {},
         where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents", "distances"],
-    ) -> QueryResult:
+    ) -> Awaitable[QueryResult]:
+        """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
+
+        Args:
+            collection_id: The UUID of the collection to query.
+            query_embeddings: The embeddings to use as the query.
+            n_results: The number of results to return. Defaults to 10.
+            where: Conditional filtering on metadata. Defaults to {}.
+            where_document: Conditional filtering on documents. Defaults to {}.
+            include: The fields to include in the response.
+                          Defaults to ["embeddings", "metadatas", "documents", "distances"].
+
+        Returns:
+            QueryResult: The results of the query.
+        """
         pass
 
     @abstractmethod
-    @override
-    async def get_max_batch_size(self) -> int:
+    def reset(self) -> Awaitable[bool]:
+        """Resets the database. This will delete all collections and entries.
+
+        Returns:
+            bool: True if the database was reset successfully.
+        """
         pass
 
     @abstractmethod
+    def get_version(self) -> Awaitable[str]:
+        """Get the version of Chroma.
+
+        Returns:
+            str: The version of Chroma
+
+        """
+        pass
+
+    @abstractmethod
+    def get_settings(self) -> Settings:
+        """Get the settings used to initialize.
+
+        Returns:
+            Settings: The settings used to initialize.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_max_batch_size(self) -> Awaitable[int]:
+        """Return the maximum number of records that can be created or mutated in a single call."""
+        pass
+
+
+class AsyncAdminAPI(ABC):
+    @abstractmethod
+    def create_database(
+        self, name: str, tenant: str = DEFAULT_TENANT
+    ) -> Awaitable[None]:
+        """Create a new database. Raises an error if the database already exists.
+
+        Args:
+            database: The name of the database to create.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_database(
+        self, name: str, tenant: str = DEFAULT_TENANT
+    ) -> Awaitable[Database]:
+        """Get a database. Raises an error if the database does not exist.
+
+        Args:
+            database: The name of the database to get.
+            tenant: The tenant of the database to get.
+
+        """
+        pass
+
+    @abstractmethod
+    def create_tenant(self, name: str) -> Awaitable[None]:
+        """Create a new tenant. Raises an error if the tenant already exists.
+
+        Args:
+            tenant: The name of the tenant to create.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_tenant(self, name: str) -> Awaitable[Tenant]:
+        """Get a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            tenant: The name of the tenant to get.
+
+        """
+        pass
+
+
+class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
+    """An API instance that extends the relevant Base API methods by passing
+    in a tenant and database. This is the root component of the Chroma System"""
+
+    @abstractmethod
     @override
-    async def list_collections(
+    def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[CollectionAsync]:
+    ) -> Awaitable[Sequence[CollectionAsync]]:
         pass
 
     @abstractmethod
     @override
-    async def count_collections(
+    def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
-    ) -> int:
+    ) -> Awaitable[int]:
         pass
 
     @abstractmethod
     @override
-    async def create_collection(
+    def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -760,12 +1094,12 @@ class ServerAPIAsync(ServerAPI):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> Awaitable[CollectionAsync]:
         pass
 
     @abstractmethod
     @override
-    async def get_collection(
+    def get_collection(
         self,
         name: str,
         id: Optional[UUID] = None,
@@ -775,12 +1109,12 @@ class ServerAPIAsync(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> Awaitable[CollectionAsync]:
         pass
 
     @abstractmethod
     @override
-    async def get_or_create_collection(
+    def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -790,15 +1124,15 @@ class ServerAPIAsync(ServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> Awaitable[CollectionAsync]:
         pass
 
     @abstractmethod
     @override
-    async def delete_collection(
+    def delete_collection(
         self,
         name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
+    ) -> Awaitable[None]:
         pass
