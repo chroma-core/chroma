@@ -35,16 +35,16 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
 
     def __init__(self, client: Client):
         super().__init__(client)
-        self.api = client
+        self.client = client
         self.admin_client = AdminClient.from_system(client._system)
 
     @initialize()
     def initialize(self) -> None:
-        self.api.reset()
+        self.client.reset()
         self.tenant_to_database_to_model = {}
         self.curr_tenant = DEFAULT_TENANT
         self.curr_database = DEFAULT_DATABASE
-        self.api.set_tenant(DEFAULT_TENANT, DEFAULT_DATABASE)
+        self.client.set_tenant(DEFAULT_TENANT, DEFAULT_DATABASE)
         self.set_tenant_model(self.curr_tenant, {})
         self.set_database_model_for_tenant(self.curr_tenant, self.curr_database, {})
 
@@ -102,7 +102,7 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     # without needing to do a bunch of pythonic cleverness to fake a dict which
     # preteds to have every key.
     def set_api_tenant_database(self, tenant: str, database: str) -> None:
-        self.api.set_tenant(tenant, database)
+        self.client.set_tenant(tenant, database)
 
     # For calls to create_database, and create_tenant we may want to override the tenant and database
     # This is a leaky abstraction that exists soley for the purpose of

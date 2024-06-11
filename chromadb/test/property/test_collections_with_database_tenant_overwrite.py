@@ -46,7 +46,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
     def initialize(self) -> None:
         # Make sure we're back to the root client and admin client before
         # doing reset/initialize things.
-        self.api = self.root_client
+        self.client = self.root_client
         self.admin_client = self.root_admin_client
 
         super().initialize()
@@ -59,18 +59,18 @@ class SingletonTenantDatabaseCollectionStateMachine(
 
     @invariant()
     def check_api_and_admin_client_are_in_sync(self) -> None:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             assert self.admin_client == self.singleton_admin_client
         else:
             assert self.admin_client == self.root_admin_client
 
     @rule()
     def change_clients(self) -> None:
-        if self.api == self.singleton_client:
-            self.api = self.root_client
+        if self.client == self.singleton_client:
+            self.client = self.root_client
             self.admin_client = self.root_admin_client
         else:
-            self.api = self.singleton_client
+            self.client = self.singleton_client
             self.admin_client = self.singleton_admin_client
 
     @overrides
@@ -81,7 +81,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
     def get_tenant_model(
         self, tenant: str
     ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             tenant = SINGLETON_TENANT
         return self.tenant_to_database_to_model[tenant]
 
@@ -91,7 +91,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
         tenant: str,
         model: Dict[str, Dict[str, Optional[types.CollectionMetadata]]],
     ) -> None:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             # This never happens because we never actually issue a
             # create_tenant call on singleton_tenant:
             # thanks to the above overriding of get_tenant_model(),
@@ -107,7 +107,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
         database: str,
         database_model: Dict[str, Optional[types.CollectionMetadata]],
     ) -> None:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             # This never happens because we never actually issue a
             # create_database call on (singleton_tenant, singleton_database):
             # thanks to the above overriding of has_database_for_tenant(),
@@ -118,19 +118,19 @@ class SingletonTenantDatabaseCollectionStateMachine(
 
     @overrides
     def overwrite_database(self, database: str) -> str:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             return SINGLETON_DATABASE
         return database
 
     @overrides
     def overwrite_tenant(self, tenant: str) -> str:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             return SINGLETON_TENANT
         return tenant
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
-        if self.api == self.singleton_client:
+        if self.client == self.singleton_client:
             return self.tenant_to_database_to_model[SINGLETON_TENANT][
                 SINGLETON_DATABASE
             ]
@@ -193,7 +193,7 @@ def test_repeat_failure(
             name="A00",
             metadata=None,
             embedding_function=strategies.hashing_embedding_function(
-                dim=2, dtype=numpy.float16
+                dim=2, dtype=numpy.float16  # type: ignore
             ),
             id=uuid.UUID("c9bcb72f-92b1-4604-a8cb-084162dfe98b"),
             dimension=2,
