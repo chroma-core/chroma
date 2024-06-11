@@ -111,7 +111,7 @@ jobs:
   # When creating a branch protection rule, you have to specify a static list
   # of checks.
   # So since this job always runs, we can specify it in the branch protection rule.
-  check:
+  all-required-pr-checks-passed:
     if: always()
     needs:
     - python-tests
