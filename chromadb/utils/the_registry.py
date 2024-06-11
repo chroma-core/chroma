@@ -1,4 +1,5 @@
-from typing import Any, Dict, Optional, Type, Self, TypeVar
+from typing import Any, Dict, Optional, Type, TypeVar
+from typing_extensions import Self
 
 
 T = TypeVar("T")
