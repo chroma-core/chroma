@@ -19,6 +19,8 @@ Set `anonymized_telemetry` to `False` in your client's settings:
 ```python
 from chromadb.config import Settings
 client = chromadb.Client(Settings(anonymized_telemetry=False))
+# or if using PersistentClient
+client = chromadb.PersistentClient(path="/path/to/save/to", settings=Settings(anonymized_telemetry=False))
 ```
 
 ###### In Chroma's Backend Using Environment Variables

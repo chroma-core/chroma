@@ -1,6 +1,8 @@
 use arrow::array::Int32Array;
 use async_trait::async_trait;
 use core::panic;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -12,6 +14,7 @@ use uuid::Uuid;
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
+use crate::blockstore::key::KeyWrapper;
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
@@ -23,12 +26,12 @@ use crate::index::metadata::types::{
     process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher,
     MetadataIndexReader, MetadataIndexWriter,
 };
-use crate::types::SegmentType;
 use crate::types::{
-    MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
-    WhereDocumentOperator,
+    BooleanOperator, MetadataValue, Operation, Segment, Where, WhereClauseComparator,
+    WhereDocument, WhereDocumentOperator,
 };
-use crate::utils::merge_sorted_vecs_conjunction;
+use crate::types::{SegmentType, WhereComparison};
+use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 
 const FULL_TEXT_PLS: &str = "full_text_pls";
 const FULL_TEXT_FREQS: &str = "full_text_freqs";
@@ -37,12 +40,14 @@ const BOOL_METADATA: &str = "bool_metadata";
 const F32_METADATA: &str = "f32_metadata";
 const U32_METADATA: &str = "u32_metadata";
 
+#[derive(Clone)]
 pub(crate) struct MetadataSegmentWriter<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter<'me>>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
+    pub(crate) id: Uuid,
 }
 
 impl Debug for MetadataSegmentWriter<'_> {
@@ -98,7 +103,6 @@ impl<'me> MetadataSegmentWriter<'me> {
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
-        println!("Creating MetadataSegmentWriter from Segment");
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
@@ -177,7 +181,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
                 let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
-                    NgramTokenizer::new(1, 3, false).unwrap(),
+                    NgramTokenizer::new(3, 3, false).unwrap(),
                 )));
                 Some(FullTextIndexReader::new(
                     pls_reader,
@@ -190,7 +194,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         };
 
         let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
-            NgramTokenizer::new(1, 3, false).unwrap(),
+            NgramTokenizer::new(3, 3, false).unwrap(),
         )));
         let full_text_index_writer = FullTextIndexWriter::new(
             full_text_index_reader,
@@ -357,6 +361,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             bool_metadata_index_writer: Some(bool_metadata_index_writer),
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
             u32_metadata_index_writer: Some(u32_metadata_index_writer),
+            id: segment.id,
         })
     }
 
@@ -978,7 +983,7 @@ impl MetadataSegmentReader<'_> {
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
                 let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
-                    NgramTokenizer::new(1, 3, false).unwrap(),
+                    NgramTokenizer::new(3, 3, false).unwrap(),
                 )));
                 Some(FullTextIndexReader::new(
                     pls_reader,
@@ -1130,11 +1135,28 @@ impl MetadataSegmentReader<'_> {
         // TODO we can do lots of clever query planning here. For now, just
         // run through the Where and WhereDocument clauses sequentially.
         let where_results = match where_clause {
-            Some(where_clause) => match self.process_where_clause(where_clause).map_err(|e| e) {
-                Ok(results) => Some(results),
-                Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
-            },
-            None => None,
+            Some(where_clause) => {
+                match self.process_where_clause(where_clause).await.map_err(|e| e) {
+                    Ok(results) => {
+                        tracing::info!(
+                            "Filtered {} records from metadata segment based on where clause",
+                            results.len()
+                        );
+                        Some(results)
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Error fetching results from metadata segment based on where clause {:?}",
+                            e
+                        );
+                        return Err(MetadataSegmentError::MetadataIndexQueryError(e));
+                    }
+                }
+            }
+            None => {
+                tracing::info!("No where clause to filter anything from metadata segment");
+                None
+            }
         };
         // Where and WhereDocument are implicitly ANDed, so if we have nothing
         // for the Where query we can just return.
@@ -1148,12 +1170,30 @@ impl MetadataSegmentReader<'_> {
         };
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
-                match self.process_where_document_clause(where_document_clause) {
-                    Ok(results) => Some(results),
-                    Err(e) => return Err(MetadataSegmentError::MetadataIndexQueryError(e)),
+                match self
+                    .process_where_document_clause(where_document_clause)
+                    .await
+                {
+                    Ok(results) => {
+                        tracing::info!(
+                            "Filtered {} records from metadata segment based on where document",
+                            results.len()
+                        );
+                        Some(results)
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Error fetching results from metadata segment based on where clause {:?}",
+                            e
+                        );
+                        return Err(MetadataSegmentError::MetadataIndexQueryError(e));
+                    }
                 }
             }
-            None => None,
+            None => {
+                tracing::info!("No where document to filter anything from metadata segment");
+                None
+            }
         };
         match &where_document_results {
             Some(results) => {
@@ -1178,253 +1218,539 @@ impl MetadataSegmentReader<'_> {
         }
     }
 
-    fn process_where_clause(&self, where_clause: &Where) -> Result<Vec<usize>, MetadataIndexError> {
-        let clo = |metadata_key: &str,
-                   metadata_value: &crate::blockstore::key::KeyWrapper,
-                   metadata_type: crate::types::MetadataType,
-                   comparator: WhereClauseComparator| {
-            match metadata_type {
-                crate::types::MetadataType::StringType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let result = match &self.string_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.get(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    // We don't allow these comparators for strings.
-                    WhereClauseComparator::LessThan => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        unimplemented!();
-                    }
-                },
-                crate::types::MetadataType::IntType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.get(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    WhereClauseComparator::LessThan => {
-                        let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => {
-                                futures::executor::block_on(reader.lt(metadata_key, metadata_value))
-                            }
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
+    fn process_where_clause<'me>(
+        &'me self,
+        where_clause: &'me Where,
+    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
+        async move {
+            let mut results = vec![];
+            match where_clause {
+                Where::DirectWhereComparison(direct_where_comparison) => {
+                    match &direct_where_comparison.comparison {
+                        WhereComparison::SingleStringComparison(operand, comparator) => {
+                            match comparator {
+                                WhereClauseComparator::Equal => {
+                                    let metadata_value_keywrapper = operand.as_str().try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.string_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .get(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting string to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::NotEqual => {
+                                    todo!();
+                                }
+                                // We don't allow these comparators for strings.
+                                WhereClauseComparator::LessThan => {
+                                    unimplemented!();
+                                }
+                                WhereClauseComparator::LessThanOrEqual => {
+                                    unimplemented!();
+                                }
+                                WhereClauseComparator::GreaterThan => {
+                                    unimplemented!();
+                                }
+                                WhereClauseComparator::GreaterThanOrEqual => {
+                                    unimplemented!();
+                                }
                             }
                         }
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.lte(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
+                        WhereComparison::SingleIntComparison(operand, comparator) => {
+                            match comparator {
+                                WhereClauseComparator::Equal => {
+                                    let metadata_value_keywrapper = (*operand).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.u32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .get(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting int to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::NotEqual => {
+                                    todo!();
+                                }
+                                WhereClauseComparator::LessThan => {
+                                    let metadata_value_keywrapper = (*operand).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.u32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .lt(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting int to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::LessThanOrEqual => {
+                                    let metadata_value_keywrapper = (*operand).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.u32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .lte(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting int to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::GreaterThan => {
+                                    let metadata_value_keywrapper = (*operand).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.u32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .gt(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting int to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::GreaterThanOrEqual => {
+                                    let metadata_value_keywrapper = (*operand).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.u32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .gte(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting int to keywrapper")
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => {
-                                futures::executor::block_on(reader.gt(metadata_key, metadata_value))
-                            }
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
+                        WhereComparison::SingleDoubleComparison(operand, comparator) => {
+                            match comparator {
+                                WhereClauseComparator::Equal => {
+                                    let metadata_value_keywrapper = (*operand as f32).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.f32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .get(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting double to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::NotEqual => {
+                                    todo!();
+                                }
+                                WhereClauseComparator::LessThan => {
+                                    let metadata_value_keywrapper = (*operand as f32).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.f32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .lt(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting double to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::LessThanOrEqual => {
+                                    let metadata_value_keywrapper = (*operand as f32).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.f32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .lte(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting double to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::GreaterThan => {
+                                    let metadata_value_keywrapper = (*operand as f32).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.f32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .gt(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting double to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::GreaterThanOrEqual => {
+                                    let metadata_value_keywrapper = (*operand as f32).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.f32_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .gte(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting double to keywrapper")
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        let result = match &self.u32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.gte(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
+                        WhereComparison::StringListComparison(operand, list_operator) => {
+                            todo!();
+                        }
+                        WhereComparison::IntListComparison(..) => {
+                            todo!();
+                        }
+                        WhereComparison::DoubleListComparison(..) => {
+                            todo!();
                         }
                     }
-                },
-                crate::types::MetadataType::DoubleType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.get(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    WhereClauseComparator::LessThan => {
-                        let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => {
-                                futures::executor::block_on(reader.lt(metadata_key, metadata_value))
-                            }
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.lte(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => {
-                                futures::executor::block_on(reader.gt(metadata_key, metadata_value))
-                            }
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        let result = match &self.f32_metadata_index_reader {
-                            Some(reader) => futures::executor::block_on(
-                                reader.gte(metadata_key, metadata_value),
-                            ),
-                            None => Ok(RoaringBitmap::new()),
-                        };
-                        match result {
-                            Ok(result) => {
-                                return result;
-                            }
-                            Err(_) => {
-                                panic!("Error querying metadata index")
-                            }
-                        }
-                    }
-                },
-                crate::types::MetadataType::StringListType => {
-                    todo!();
                 }
-                crate::types::MetadataType::IntListType => {
-                    todo!();
-                }
-                crate::types::MetadataType::DoubleListType => {
-                    todo!();
+                Where::WhereChildren(where_children) => {
+                    let mut first_iteration = true;
+                    for child in where_children.children.iter() {
+                        let child_results: Vec<usize> =
+                            match self.process_where_clause(&child).await {
+                                Ok(result) => result,
+                                Err(_) => vec![],
+                            };
+                        if first_iteration {
+                            results = child_results;
+                            first_iteration = false;
+                        } else {
+                            match where_children.operator {
+                                BooleanOperator::And => {
+                                    results =
+                                        merge_sorted_vecs_conjunction(&results, &child_results);
+                                }
+                                BooleanOperator::Or => {
+                                    results =
+                                        merge_sorted_vecs_disjunction(&results, &child_results);
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        };
-        return process_where_clause_with_callback(where_clause, &clo);
+            return Ok(results);
+        }
+        .boxed()
     }
 
-    fn process_where_document_clause(
-        &self,
-        where_document_clause: &WhereDocument,
-    ) -> Result<Vec<usize>, MetadataIndexError> {
-        let cb = |doc: &str, comparison: WhereDocumentOperator| match comparison {
-            WhereDocumentOperator::Contains => {
-                let result = match &self.full_text_index_reader {
-                    Some(reader) => futures::executor::block_on(reader.search(doc)),
-                    None => Ok(vec![]),
-                };
-                match result {
-                    Ok(result) => {
-                        return result;
+    fn process_where_document_clause<'me>(
+        &'me self,
+        where_document_clause: &'me WhereDocument,
+    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
+        async move {
+            let mut results = vec![];
+            match where_document_clause {
+                WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
+                    match &direct_document_comparison.operator {
+                        WhereDocumentOperator::Contains => {
+                            match &self.full_text_index_reader {
+                                Some(reader) => {
+                                    let result =
+                                        reader.search(&direct_document_comparison.document).await;
+                                    match result {
+                                        Ok(r) => {
+                                            results = r.iter().map(|x| *x as usize).collect();
+                                        }
+                                        Err(e) => {
+                                            return Err(MetadataIndexError::FullTextError(e));
+                                        }
+                                    }
+                                }
+                                // This is expected. Before the first ever compaction
+                                // the reader will be uninitialized, hence an empty vector
+                                // here since nothing has been written to storage yet.
+                                None => results = vec![],
+                            }
+                        }
+                        WhereDocumentOperator::NotContains => {
+                            todo!();
+                        }
                     }
-                    Err(_) => {
-                        panic!("Error querying metadata index")
+                }
+                WhereDocument::WhereDocumentChildren(where_document_children) => {
+                    let mut first_iteration = true;
+                    for child in where_document_children.children.iter() {
+                        let child_results: Vec<usize> =
+                            match self.process_where_document_clause(&child).await {
+                                Ok(result) => result,
+                                Err(_) => vec![],
+                            };
+                        if first_iteration {
+                            results = child_results;
+                            first_iteration = false;
+                        } else {
+                            match where_document_children.operator {
+                                BooleanOperator::And => {
+                                    results =
+                                        merge_sorted_vecs_conjunction(&results, &child_results);
+                                }
+                                BooleanOperator::Or => {
+                                    results =
+                                        merge_sorted_vecs_disjunction(&results, &child_results);
+                                }
+                            }
+                        }
                     }
                 }
             }
-            WhereDocumentOperator::NotContains => {
-                todo!()
-            }
-        };
-        process_where_document_clause_with_callback(where_document_clause, &cb)
+            results.sort();
+            return Ok(results);
+        }
+        .boxed()
     }
 }

@@ -422,10 +422,30 @@ mod tests {
             file_path: HashMap::new(),
         };
 
+        let collection_1_metadata_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(collection_uuid_1),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let collection_2_metadata_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(collection_uuid_2),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
         sysdb.add_segment(collection_1_record_segment);
         sysdb.add_segment(collection_2_record_segment);
         sysdb.add_segment(collection_1_hnsw_segment);
         sysdb.add_segment(collection_2_hnsw_segment);
+        sysdb.add_segment(collection_1_metadata_segment);
+        sysdb.add_segment(collection_2_metadata_segment);
 
         let last_compaction_time_1 = 2;
         sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);

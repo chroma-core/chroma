@@ -258,6 +258,7 @@ impl ArrowBlockfileWriter {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct ArrowBlockfileReader<
     'me,
     K: ArrowReadableKey<'me> + Into<KeyWrapper>,
@@ -265,7 +266,7 @@ pub(crate) struct ArrowBlockfileReader<
 > {
     block_manager: BlockManager,
     pub(super) sparse_index: SparseIndex,
-    loaded_blocks: Mutex<HashMap<Uuid, Box<Block>>>,
+    loaded_blocks: Arc<Mutex<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
     id: Uuid,
 }
@@ -277,7 +278,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         Self {
             block_manager,
             sparse_index,
-            loaded_blocks: Mutex::new(HashMap::new()),
+            loaded_blocks: Arc::new(Mutex::new(HashMap::new())),
             marker: std::marker::PhantomData,
             id,
         }

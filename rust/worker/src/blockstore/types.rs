@@ -227,6 +227,7 @@ impl BlockfileFlusher {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum BlockfileReader<
     'me,
     K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,

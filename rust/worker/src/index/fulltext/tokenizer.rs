@@ -2,7 +2,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tantivy::tokenizer::{NgramTokenizer, Token, TokenStream, Tokenizer};
 
-pub(crate) trait ChromaTokenStream {
+pub(crate) trait ChromaTokenStream: Send {
     fn process(&mut self, sink: &mut dyn FnMut(&Token));
     fn get_tokens(&self) -> &Vec<Token>;
 }
