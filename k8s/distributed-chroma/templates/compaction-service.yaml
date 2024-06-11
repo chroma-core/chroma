@@ -60,6 +60,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+      updateStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
