@@ -508,7 +508,7 @@ class SegmentAPI(ServerAPI):
         where_document = (
             validate_where_document(where_document)
             if where_document is not None and len(where_document) > 0
-            else where_document
+            else None
         )
 
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
@@ -701,7 +701,7 @@ class SegmentAPI(ServerAPI):
         where_document = (
             validate_where_document(where_document)
             if where_document is not None and len(where_document) > 0
-            else None
+            else where_document
         )
 
         allowed_ids = None
