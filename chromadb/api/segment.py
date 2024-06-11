@@ -703,13 +703,32 @@ class SegmentAPI(ServerAPI):
         # If where conditions returned empty list then no need to proceed
         # further and can simply return an empty result set here.
         if allowed_ids is not None and allowed_ids == []:
+            empty_ids: List[List[str]] = []
+            empty_distances: List[List[float]] = []
+            empty_embeddings: List[List[Embedding]] = []
+            empty_documents: List[List[Document]] = []
+            empty_uris: List[List[URI]] = []
+            empty_metadatas: List[List[t.Metadata]] = []
+            for em in range(len(query_embeddings)):
+                empty_ids.append([])
+                if "distances" in include:
+                    empty_distances.append([])
+                if "embeddings" in include:
+                    empty_embeddings.append([])
+                if "documents" in include:
+                    empty_documents.append([])
+                if "metadatas" in include:
+                    empty_metadatas.append([])
+                if "uris" in include:
+                    empty_uris.append([])
+                
             return QueryResult(
-                ids=[[]],
-                distances=None,
-                metadatas=None,
-                embeddings=None,
-                documents=None,
-                uris=None,
+                ids=empty_ids,
+                distances=empty_distances if empty_distances else None,
+                metadatas=empty_metadatas if empty_metadatas else None,
+                embeddings=empty_embeddings if empty_embeddings else None,
+                documents=empty_documents if empty_documents else None,
+                uris=empty_uris if empty_uris else None,
                 data=None,
                 included=include,
             )
