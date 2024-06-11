@@ -19,22 +19,22 @@ def random_documents() -> List[Document]:
 def test_embedding_function_results_format_when_response_is_valid() -> None:
     valid_embeddings = random_embeddings()
 
-    class TestEmbeddingFunction(EmbeddingFunction[Documents]):
+    class TestValidEmbeddingFunction(EmbeddingFunction[Documents]):
         def __call__(self, input: Documents) -> Embeddings:
             return valid_embeddings
 
-    ef = TestEmbeddingFunction()
+    ef = TestValidEmbeddingFunction()
     assert valid_embeddings == ef(random_documents())
 
 
 def test_embedding_function_results_format_when_response_is_invalid() -> None:
     invalid_embedding = {"error": "test"}
 
-    class TestEmbeddingFunction(EmbeddingFunction[Documents]):
+    class TestInvalidEmbeddingFunction(EmbeddingFunction[Documents]):
         def __call__(self, input: Documents) -> Embeddings:
             return cast(Embeddings, invalid_embedding)
 
-    ef = TestEmbeddingFunction()
+    ef = TestInvalidEmbeddingFunction()
     with pytest.raises(ValueError) as e:
         ef(random_documents())
     assert e.type is ValueError
