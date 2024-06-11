@@ -16,7 +16,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.utils.async_to_sync import async_class_to_sync
+from chromadb.utils.async_to_sync import async_class_to_sync, async_to_sync
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.types import Database, Tenant
@@ -87,16 +87,19 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self._get_client()
         return self
 
-    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        await self.stop()
-
-    @override
-    # todo: syncify?
-    async def stop(self):
-        super().stop()
+    async def _cleanup(self) -> None:
         for client in self._clients.values():
             await client.aclose()
             del client
+
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        await self._cleanup()
+
+    @override
+    def stop(self) -> None:
+        super().stop()
+
+        async_to_sync(self._cleanup)()
 
     def _get_client(self) -> httpx.AsyncClient:
         # Ideally this would use anyio to be compatible with both
@@ -595,7 +598,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     def get_settings(self) -> Settings:
         return self._settings
 
-    # todo: cleanup
     @trace_method("AsyncFastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_max_batch_size(self) -> int:
