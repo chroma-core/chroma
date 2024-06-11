@@ -1,40 +1,20 @@
-# todo: cleanup imports
 from typing import (
     TYPE_CHECKING,
-    Awaitable,
-    Callable,
     Optional,
-    ParamSpec,
-    Tuple,
-    Any,
-    TypeVar,
     Union,
-    cast,
 )
 import numpy as np
-from uuid import UUID
 
-from overrides import overrides
-import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
-    DataLoader,
     Embedding,
-    Embeddings,
-    Embeddable,
     Include,
-    Loadable,
     Metadata,
-    Metadatas,
     Document,
-    Documents,
     Image,
-    Images,
-    URIs,
     Where,
     IDs,
-    EmbeddingFunction,
     GetResult,
     QueryResult,
     ID,
@@ -42,19 +22,16 @@ from chromadb.api.types import (
     WhereDocument,
     maybe_cast_one_to_many_ids,
     maybe_cast_one_to_many_embedding,
-    maybe_cast_one_to_many_metadata,
     maybe_cast_one_to_many_document,
     maybe_cast_one_to_many_image,
     maybe_cast_one_to_many_uri,
     validate_ids,
     validate_include,
     validate_metadata,
-    validate_metadatas,
     validate_where,
     validate_where_document,
     validate_n_results,
     validate_embeddings,
-    validate_embedding_function,
 )
 
 from .CollectionCommon import CollectionCommon
@@ -64,7 +41,6 @@ if TYPE_CHECKING:
 
 
 class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
-    @overrides
     async def add(
         self,
         ids: OneOrMany[ID],
@@ -110,11 +86,9 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
 
         await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
-    @overrides
     async def count(self) -> int:
         return await self._client._count(collection_id=self.id)
 
-    @overrides
     async def get(
         self,
         ids: Optional[OneOrMany[ID]] = None,
@@ -164,11 +138,9 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
 
         return get_results
 
-    @overrides
     async def peek(self, limit: int = 10) -> GetResult:
         return await self._client._peek(self.id, limit)
 
-    @overrides
     async def query(
         self,
         query_embeddings: Optional[
@@ -270,7 +242,6 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
 
         return query_results
 
-    @overrides
     async def modify(
         self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
     ) -> None:
@@ -290,7 +261,6 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
         if metadata:
             self._model["metadata"] = metadata
 
-    @overrides
     async def update(
         self,
         ids: OneOrMany[ID],
@@ -330,7 +300,6 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
 
         await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
 
-    @overrides
     async def upsert(
         self,
         ids: OneOrMany[ID],
@@ -371,7 +340,6 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
             uris=uris,
         )
 
-    @overrides
     async def delete(
         self,
         ids: Optional[IDs] = None,
