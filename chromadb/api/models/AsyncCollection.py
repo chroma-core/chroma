@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI
 
 
-class CollectionAsync(CollectionCommon["AsyncServerAPI"]):
+class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
         ids: OneOrMany[ID],

@@ -22,7 +22,7 @@ import chromadb.utils.embedding_functions as ef
 from chromadb.types import Database, Tenant
 from chromadb.types import Collection as CollectionModel
 
-from chromadb.api.models.CollectionAsync import CollectionAsync
+from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.types import (
     DataLoader,
     Documents,
@@ -191,7 +191,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[CollectionAsync]:
+    ) -> Sequence[AsyncCollection]:
         resp_json = await self._make_request(
             "get",
             "/collections",
@@ -217,7 +217,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 version=json_collection["version"],
             )
 
-            collections.append(CollectionAsync(client=self, model=model))
+            collections.append(AsyncCollection(client=self, model=model))
 
         return collections
 
@@ -247,7 +247,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         """Creates a collection"""
         resp_json = await self._make_request(
             "post",
@@ -270,7 +270,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             version=resp_json["version"],
         )
 
-        return CollectionAsync(
+        return AsyncCollection(
             client=self,
             model=model,
             embedding_function=embedding_function,
@@ -289,7 +289,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
@@ -313,7 +313,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             version=resp_json["version"],
         )
 
-        return CollectionAsync(
+        return AsyncCollection(
             client=self,
             model=model,
             embedding_function=embedding_function,
@@ -334,7 +334,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         return await self.create_collection(
             name=name,
             metadata=metadata,

@@ -337,11 +337,10 @@ def fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=False)
 
 
-# todo: rename?
-def fastapi_async():
+def async_fastapi():
     return _fastapi_fixture(
         is_persistent=False,
-        chroma_api_impl="chromadb.api.fastapi_async.AsyncFastAPISync",
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPISync",
     )
 
 
@@ -566,7 +565,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, fastapi_async, fastapi_persistent, sqlite, sqlite_persistent]
+    fixtures = [fastapi, async_fastapi, fastapi_persistent, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:

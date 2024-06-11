@@ -3,7 +3,7 @@ from typing import Awaitable, Sequence, Optional
 from uuid import UUID
 
 from overrides import override
-from chromadb.api.models.CollectionAsync import CollectionAsync
+from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -621,7 +621,7 @@ class AsyncBaseAPI(ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[CollectionAsync]:
+    ) -> Sequence[AsyncCollection]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
@@ -663,7 +663,7 @@ class AsyncBaseAPI(ABC):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         """Create a new collection with the given name and metadata.
         Args:
             name: The name of the collection to create.
@@ -700,7 +700,7 @@ class AsyncBaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         """Get a collection with the given name.
         Args:
             id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
@@ -732,7 +732,7 @@ class AsyncBaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         """Get or create a collection with the given name and metadata.
         Args:
             name: The name of the collection to get or create
@@ -1014,9 +1014,7 @@ class AsyncBaseAPI(ABC):
 
 class AsyncAdminAPI(ABC):
     @abstractmethod
-    async def create_database(
-        self, name: str, tenant: str = DEFAULT_TENANT
-    ) -> None:
+    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
@@ -1026,9 +1024,7 @@ class AsyncAdminAPI(ABC):
         pass
 
     @abstractmethod
-    async def get_database(
-        self, name: str, tenant: str = DEFAULT_TENANT
-    ) -> Database:
+    async def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         """Get a database. Raises an error if the database does not exist.
 
         Args:
@@ -1071,7 +1067,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[CollectionAsync]:
+    ) -> Sequence[AsyncCollection]:
         pass
 
     @abstractmethod
@@ -1094,7 +1090,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         pass
 
     @abstractmethod
@@ -1109,7 +1105,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         pass
 
     @abstractmethod
@@ -1124,7 +1120,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionAsync:
+    ) -> AsyncCollection:
         pass
 
     @abstractmethod
