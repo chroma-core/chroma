@@ -1,6 +1,7 @@
 import inspect
 import asyncio
-from typing import Any, Callable, Coroutine, ParamSpec, TypeVar
+from typing import Any, Callable, Coroutine, TypeVar
+from typing_extensions import ParamSpec
 
 
 P = ParamSpec("P")
