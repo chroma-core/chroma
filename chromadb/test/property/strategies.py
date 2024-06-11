@@ -11,7 +11,7 @@ import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from hypothesis.errors import InvalidDefinition
 from hypothesis.stateful import RuleBasedStateMachine
-
+from chromadb.test.conftest import NOT_CLUSTER_ONLY
 from dataclasses import dataclass
 
 from chromadb.api.types import (
@@ -523,7 +523,14 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+    # This is hacky, but the distributed system does not support $in or $in so we
+    # need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $in and $nin
+    if not NOT_CLUSTER_ONLY:
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
+    else:
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):

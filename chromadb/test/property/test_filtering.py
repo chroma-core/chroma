@@ -14,6 +14,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
+from chromadb.test.conftest import NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
@@ -224,6 +225,11 @@ def test_filterable_metadata_get_limit_offset(
     offset,
 ) -> None:
     caplog.set_level(logging.ERROR)
+
+    # The distributed system does not support limit/offset yet
+    # so we skip this test for now if the system is distributed
+    if not NOT_CLUSTER_ONLY:
+        pytest.skip("Distributed system does not support limit/offset yet")
 
     api.reset()
     coll = api.create_collection(
