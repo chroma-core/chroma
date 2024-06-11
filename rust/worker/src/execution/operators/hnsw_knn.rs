@@ -106,7 +106,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         &self,
         input: &HnswKnnOperatorInput,
     ) -> Result<HnswKnnOperatorOutput, Self::Error> {
-        // If a filter list is supplied but it does not have anything for the segment
+        // If a filter list is supplied but it does not have anything for the segment, as it implies the data is all in the log
         // then return an empty response.
         if !input.allowed_ids.is_empty() && input.allowed_ids_hnsw.is_empty() {
             return Ok(HnswKnnOperatorOutput {
