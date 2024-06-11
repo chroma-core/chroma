@@ -87,7 +87,6 @@ class FastAPIAsync(BaseHTTPClient, ServerAPIAsync):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.stop()
-        pass
 
     @override
     async def stop(self) -> None:

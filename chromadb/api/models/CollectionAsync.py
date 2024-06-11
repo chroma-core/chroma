@@ -1,5 +1,16 @@
 # todo: cleanup imports
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Awaitable,
+    Callable,
+    Optional,
+    ParamSpec,
+    Tuple,
+    Any,
+    TypeVar,
+    Union,
+    cast,
+)
 import numpy as np
 from uuid import UUID
 
@@ -67,7 +78,7 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ):
+    ) -> None:
         (
             ids,
             embeddings,
@@ -192,7 +203,7 @@ class CollectionAsync(CollectionCommon["ServerAPIAsync"]):
         valid_query_embeddings = (
             validate_embeddings(
                 self._normalize_embeddings(
-                    maybe_cast_one_to_many_embedding(query_embeddings)  # type: ignore
+                    maybe_cast_one_to_many_embedding(query_embeddings)
                 )
             )
             if query_embeddings is not None
