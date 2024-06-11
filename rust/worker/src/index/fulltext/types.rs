@@ -45,8 +45,14 @@ pub(crate) struct FullTextIndexWriter<'me> {
     frequencies_blockfile_writer: BlockfileWriter,
     tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 
+    // TODO(Sanket): Move off this tokio::sync::mutex and use
+    // a lightweight lock instead. This is needed currently to
+    // keep holding the lock across an await point.
     // term -> positional posting list builder for that term
     uncommitted: Arc<tokio::sync::Mutex<HashMap<String, PositionalPostingListBuilder>>>,
+    // TODO(Sanket): Move off this tokio::sync::mutex and use
+    // a lightweight lock instead. This is needed currently to
+    // keep holding the lock across an await point.
     // Value of this map is a tuple because we also need to keep the old frequency
     // around. The reason is (token, freq) is the key in the blockfile hence
     // when freq changes, we need to delete the old (token, freq) key.
@@ -135,8 +141,6 @@ impl<'me> FullTextIndexWriter<'me> {
         offset_id: i32,
     ) -> Result<(), FullTextIndexError> {
         let tokens = self.encode_tokens(document);
-        // let tokenizer = self.tokenizer.lock();
-        // let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
                 .await?;
@@ -180,8 +184,6 @@ impl<'me> FullTextIndexWriter<'me> {
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
         let tokens = self.encode_tokens(document);
-        // let tokenizer = self.tokenizer.lock();
-        // let tokens = tokenizer.encode(document);
         for token in tokens.get_tokens() {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
                 .await?;
@@ -369,8 +371,6 @@ impl<'me> FullTextIndexReader<'me> {
 
     pub async fn search(&self, query: &str) -> Result<Vec<i32>, FullTextIndexError> {
         let binding = self.encode_tokens(query);
-        // let tokenizer = self.tokenizer.lock();
-        // let binding = tokenizer.encode(query);
         let tokens = binding.get_tokens();
 
         // Get query tokens sorted by frequency.

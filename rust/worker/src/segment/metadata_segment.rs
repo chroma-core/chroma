@@ -9,7 +9,6 @@ use std::fmt::{self, Debug, Formatter};
 use std::u32;
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
-use tokio::runtime::{Handle, Runtime};
 use uuid::Uuid;
 
 use super::record_segment::ApplyMaterializedLogError;
@@ -1249,8 +1248,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1303,8 +1303,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1340,8 +1341,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1374,8 +1376,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1408,8 +1411,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1442,8 +1446,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1480,8 +1485,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1517,8 +1523,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1551,8 +1558,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1585,8 +1593,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1619,8 +1628,9 @@ impl MetadataSegmentReader<'_> {
                                                                 .map(|x| x as usize)
                                                                 .collect();
                                                         }
-                                                        // TODO: Convert to error here.
-                                                        Err(_) => (),
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
                                                     }
                                                 }
                                                 // This is expected. Before the first ever compaction
@@ -1648,7 +1658,6 @@ impl MetadataSegmentReader<'_> {
                     }
                 }
                 Where::WhereChildren(where_children) => {
-                    // This feels like a crime.
                     let mut first_iteration = true;
                     for child in where_children.children.iter() {
                         let child_results: Vec<usize> =
@@ -1697,8 +1706,9 @@ impl MetadataSegmentReader<'_> {
                                         Ok(r) => {
                                             results = r.iter().map(|x| *x as usize).collect();
                                         }
-                                        // TODO: Convert to error here.
-                                        Err(_) => (),
+                                        Err(e) => {
+                                            return Err(MetadataIndexError::FullTextError(e));
+                                        }
                                     }
                                 }
                                 // This is expected. Before the first ever compaction

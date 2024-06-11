@@ -243,58 +243,12 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Write;
 
-        let segments = self
-            .sysdb
-            .get_segments(
-                None,
-                Some(SegmentType::BlockfileMetadata.into()),
-                None,
-                Some(self.collection_id),
-            )
-            .await;
-
-        let segment = match segments {
-            Ok(mut segments) => {
-                if segments.is_empty() {
-                    return;
-                }
-                segments.drain(..).next().unwrap()
-            }
-            Err(_) => {
-                return;
-            }
-        };
-
-        if segment.r#type != SegmentType::BlockfileMetadata {
-            return;
-        }
-
-        tracing::debug!("Found metadata segment {:?}", segment);
-
-        let metadata_writer =
-            match MetadataSegmentWriter::from_segment(&segment, &self.blockfile_provider).await {
-                Ok(writer) => writer,
-                Err(e) => {
-                    tracing::error!("Metadata segment could not be created successfully");
-                    return;
-                }
-            };
-        // Ok(metadata_segment_writer)
-
-        // let metadata_writer_res = self.get_metadata_segment_writer().await;
-        // let metadata_writer = match metadata_writer_res {
-        //     Ok(writer) => writer,
-        //     Err(e) => {
-        //         // Log an error and return
-        //         return;
-        //     }
-        // };
-
         let writer_res = self.get_segment_writers().await;
-        let (record_segment_writer, hnsw_segment_writer) = match writer_res {
+        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = match writer_res
+        {
             Ok(writers) => writers,
             Err(e) => {
-                // Log an error and return
+                tracing::error!("Error creating writers for compaction {:?}", e);
                 return;
             }
         };
@@ -305,7 +259,7 @@ impl CompactOrchestrator {
             let input = WriteSegmentsInput::new(
                 record_segment_writer.clone(),
                 hnsw_segment_writer.clone(),
-                metadata_writer.clone(),
+                metadata_segment_writer.clone(),
                 parition.clone(),
                 self.blockfile_provider.clone(),
                 self.record_segment
@@ -318,7 +272,8 @@ impl CompactOrchestrator {
             match self.dispatcher.send(task, Some(Span::current())).await {
                 Ok(_) => (),
                 Err(e) => {
-                    // Log an error and reply to caller
+                    tracing::error!("Error dispatching writers for compaction {:?}", e);
+                    // Reply to caller
                 }
             }
         }
@@ -376,53 +331,16 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn get_metadata_segment_writer(
-        &self,
-    ) -> Result<MetadataSegmentWriter, Box<dyn ChromaError>> {
-        let mut sysdb = self.sysdb.clone();
-
-        let segments = sysdb
-            .get_segments(
-                None,
-                Some(SegmentType::BlockfileMetadata.into()),
-                None,
-                Some(self.collection_id),
-            )
-            .await;
-
-        let segment = match segments {
-            Ok(mut segments) => {
-                if segments.is_empty() {
-                    return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
-                }
-                segments.drain(..).next().unwrap()
-            }
-            Err(_) => {
-                return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
-            }
-        };
-
-        if segment.r#type != SegmentType::BlockfileMetadata {
-            return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
-        }
-
-        tracing::debug!("Found metadata segment {:?}", segment);
-
-        let metadata_segment_writer =
-            match MetadataSegmentWriter::from_segment(&segment, &self.blockfile_provider).await {
-                Ok(writer) => writer,
-                Err(e) => {
-                    tracing::error!("Metadata segment could not be created successfully");
-                    return Err(Box::new(GetSegmentWritersError::MetadataSegmentWriterError));
-                }
-            };
-        Ok(metadata_segment_writer)
-    }
-
     async fn get_segment_writers(
         &mut self,
-    ) -> Result<(RecordSegmentWriter, Box<DistributedHNSWSegmentWriter>), Box<dyn ChromaError>>
-    {
+    ) -> Result<
+        (
+            RecordSegmentWriter,
+            Box<DistributedHNSWSegmentWriter>,
+            MetadataSegmentWriter<'static>,
+        ),
+        Box<dyn ChromaError>,
+    > {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -481,6 +399,28 @@ impl CompactOrchestrator {
         };
         self.record_segment = Some(record_segment.clone()); // auto deref.
 
+        let metadata_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::BlockfileMetadata);
+
+        tracing::debug!("Found metadata segment {:?}", metadata_segment);
+
+        if metadata_segment.is_none() {
+            return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
+        }
+        // Create a record segment writer
+        let mt_segment = metadata_segment.unwrap(); // safe to unwrap here.
+        let mt_segment_writer =
+            match MetadataSegmentWriter::from_segment(mt_segment, &self.blockfile_provider).await {
+                Ok(writer) => writer,
+                Err(e) => {
+                    println!("Error creating metadata Segment Writer: {:?}", e);
+                    return Err(Box::new(GetSegmentWritersError::MetadataSegmentWriterError));
+                }
+            };
+
+        tracing::debug!("Metadata Segment Writer created");
+
         // Create a hnsw segment writer
         let collection_res = self
             .sysdb
@@ -525,7 +465,11 @@ impl CompactOrchestrator {
             }
         };
 
-        Ok((record_segment_writer, hnsw_segment_writer))
+        Ok((
+            record_segment_writer,
+            hnsw_segment_writer,
+            mt_segment_writer,
+        ))
     }
 
     pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {
@@ -643,7 +587,12 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
-            // This is weird but the only way to do it with code structure currently.
+            // TODO: Ideally we shouldn't even have to make an explicit call to
+            // write_to_blockfiles since it is not the workflow for other segments
+            // and is exclusive to metadata segment. We should figure out a way
+            // to make this call a part of commit itself. It's not obvious directly
+            // how to do that since commit is per partition but write_to_blockfiles
+            // only need to be called once across all partitions combined.
             let mut writer = output.metadata_segment_writer.clone();
             match writer.write_to_blockfiles().await {
                 Ok(()) => (),

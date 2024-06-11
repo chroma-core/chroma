@@ -1,5 +1,6 @@
 use crate::blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::index::fulltext::types::FullTextIndexError;
 use crate::types::{BooleanOperator, MetadataType, Where, WhereClauseComparator, WhereComparison};
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use thiserror::Error;
@@ -18,6 +19,8 @@ pub(crate) enum MetadataIndexError {
     InvalidKeyType,
     #[error("Blockfile error: {0}")]
     BlockfileError(#[from] Box<dyn ChromaError>),
+    #[error("Full text index error: {0}")]
+    FullTextError(#[from] FullTextIndexError),
 }
 
 impl ChromaError for MetadataIndexError {
@@ -39,6 +42,9 @@ impl ChromaError for MetadataIndexError {
 //  this gets the job done.
 #[derive(Clone)]
 pub(crate) enum MetadataIndexWriter<'me> {
+    // TODO(Sanket): Move off this tokio::sync::mutex and use
+    // a lightweight lock instead. This is needed currently to
+    // keep holding the lock across an await point.
     StringMetadataIndexWriter(
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.

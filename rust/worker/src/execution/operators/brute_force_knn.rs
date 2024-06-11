@@ -29,6 +29,8 @@ pub struct BruteForceKnnOperatorInput {
     pub k: usize,
     pub distance_metric: DistanceFunction,
     pub allowed_ids: Arc<[String]>,
+    // This is just a subset of allowed_ids containing
+    // only the ids that are allowed and present in the log.
     pub allowed_ids_brute_force: Arc<[String]>,
 }
 

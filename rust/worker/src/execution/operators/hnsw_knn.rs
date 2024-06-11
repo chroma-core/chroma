@@ -24,6 +24,9 @@ pub struct HnswKnnOperatorInput {
     pub record_segment: Segment,
     pub blockfile_provider: BlockfileProvider,
     pub allowed_ids: Arc<[String]>,
+    // This is just a subset of allowed_ids containing
+    // ids that are allowed but not present in the log
+    // thus present in the segment.
     pub allowed_ids_hnsw: Arc<[String]>,
     pub logs: Chunk<LogRecord>,
 }
