@@ -8,6 +8,11 @@ R = TypeVar("R")
 
 
 def async_to_sync(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
+    """A function decorator that converts an async function to a sync function.
+
+    This should only be used in tests.
+    """
+
     def sync_wrapper(*args, **kwargs):  # type: ignore
         loop = None
         try:
@@ -42,7 +47,10 @@ T = TypeVar("T")
 
 
 def async_class_to_sync(cls: T) -> T:
-    """A decorator that converts a class with async methods to a class with sync methods."""
+    """A decorator that converts a class with async methods to a class with sync methods.
+
+    This should only be used in tests.
+    """
     for attr, value in inspect.getmembers(cls):
         if (
             callable(value)
