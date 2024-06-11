@@ -242,10 +242,6 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -319,10 +315,6 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -331,8 +323,6 @@ class FastAPI(ServerAPI):
             self.create_collection(
                 name=name,
                 metadata=metadata,
-                embedding_function=embedding_function,
-                data_loader=data_loader,
                 get_or_create=True,
                 tenant=tenant,
                 database=database,

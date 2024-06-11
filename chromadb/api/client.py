@@ -201,8 +201,6 @@ class Client(SharedSystemClient, ClientAPI):
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
@@ -227,8 +225,6 @@ class Client(SharedSystemClient, ClientAPI):
         model = self._server.get_collection(
             id=id,
             name=name,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
         )
@@ -252,8 +248,6 @@ class Client(SharedSystemClient, ClientAPI):
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
         )
