@@ -22,6 +22,7 @@ from requests.exceptions import ConnectionError
 from httpx import ConnectError
 from typing_extensions import Protocol
 
+from chromadb.api.async_fastapi import AsyncFastAPI
 import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
@@ -29,6 +30,7 @@ from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
+from chromadb.utils.async_to_sync import async_class_to_sync
 
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
@@ -103,6 +105,11 @@ def override_hypothesis_profile(
         return hypothesis.settings(hypothesis.settings.default, **overridden_settings)
 
     return hypothesis.settings.default
+
+
+@async_class_to_sync
+class AsyncFastAPISync(AsyncFastAPI):
+    pass
 
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
@@ -340,7 +347,7 @@ def fastapi() -> Generator[System, None, None]:
 def async_fastapi():
     return _fastapi_fixture(
         is_persistent=False,
-        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPISync",
+        chroma_api_impl="chromadb.test.conftest.AsyncFastAPISync",
     )
 
 

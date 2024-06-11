@@ -16,7 +16,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.utils.async_to_sync import async_class_to_sync, async_to_sync
+from chromadb.utils.async_to_sync import async_to_sync
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.types import Database, Tenant
@@ -99,7 +99,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     def stop(self) -> None:
         super().stop()
 
-        async_to_sync(self._cleanup)()
+        @async_to_sync
+        async def sync_cleanup() -> None:
+            await self._cleanup()
+
+        sync_cleanup()
 
     def _get_client(self) -> httpx.AsyncClient:
         # Ideally this would use anyio to be compatible with both
@@ -501,10 +505,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        """
-        Adds a batch of embeddings to the database
-        - pass in column oriented data lists
-        """
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
@@ -632,9 +632,3 @@ async def raise_chroma_error(resp: httpx.Response) -> Any:
         resp.raise_for_status()
     except httpx.HTTPStatusError:
         raise (Exception(resp.text))
-
-
-# todo: move to test directory?
-@async_class_to_sync
-class AsyncFastAPISync(AsyncFastAPI):
-    pass
