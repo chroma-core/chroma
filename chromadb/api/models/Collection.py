@@ -36,7 +36,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from chromadb.api import ServerAPI
+    from chromadb.api import ServerAPI  # noqa: F401
 
 
 class Collection(CollectionCommon["ServerAPI"]):

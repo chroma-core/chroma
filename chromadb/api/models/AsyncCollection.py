@@ -37,7 +37,7 @@ from chromadb.api.types import (
 from .CollectionCommon import CollectionCommon
 
 if TYPE_CHECKING:
-    from chromadb.api import AsyncServerAPI
+    from chromadb.api import AsyncServerAPI  # noqa: F401
 
 
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
