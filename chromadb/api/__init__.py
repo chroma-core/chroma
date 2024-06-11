@@ -602,7 +602,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
 class AsyncBaseAPI(ABC):
     @abstractmethod
-    def heartbeat(self) -> Awaitable[int]:
+    async def heartbeat(self) -> int:
         """Get the current time in nanoseconds since epoch.
         Used to check if the server is alive.
 
@@ -617,11 +617,11 @@ class AsyncBaseAPI(ABC):
     #
 
     @abstractmethod
-    def list_collections(
+    async def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Awaitable[Sequence[CollectionAsync]]:
+    ) -> Sequence[CollectionAsync]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
@@ -639,7 +639,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def count_collections(self) -> Awaitable[int]:
+    async def count_collections(self) -> int:
         """Count the number of collections.
 
         Returns:
@@ -654,7 +654,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def create_collection(
+    async def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -663,7 +663,7 @@ class AsyncBaseAPI(ABC):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
-    ) -> Awaitable[CollectionAsync]:
+    ) -> CollectionAsync:
         """Create a new collection with the given name and metadata.
         Args:
             name: The name of the collection to create.
@@ -692,7 +692,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def get_collection(
+    async def get_collection(
         self,
         name: str,
         id: Optional[UUID] = None,
@@ -700,7 +700,7 @@ class AsyncBaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Awaitable[CollectionAsync]:
+    ) -> CollectionAsync:
         """Get a collection with the given name.
         Args:
             id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
@@ -724,7 +724,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def get_or_create_collection(
+    async def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -732,7 +732,7 @@ class AsyncBaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Awaitable[CollectionAsync]:
+    ) -> CollectionAsync:
         """Get or create a collection with the given name and metadata.
         Args:
             name: The name of the collection to get or create
@@ -755,12 +755,12 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _modify(
+    async def _modify(
         self,
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-    ) -> Awaitable[None]:
+    ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
         Args:
@@ -773,10 +773,10 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def delete_collection(
+    async def delete_collection(
         self,
         name: str,
-    ) -> Awaitable[None]:
+    ) -> None:
         """Delete a collection with the given name.
         Args:
             name: The name of the collection to delete.
@@ -796,7 +796,7 @@ class AsyncBaseAPI(ABC):
     #
 
     @abstractmethod
-    def _add(
+    async def _add(
         self,
         ids: IDs,
         collection_id: UUID,
@@ -804,7 +804,7 @@ class AsyncBaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> Awaitable[bool]:
+    ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
 
@@ -822,7 +822,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _update(
+    async def _update(
         self,
         collection_id: UUID,
         ids: IDs,
@@ -830,7 +830,7 @@ class AsyncBaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> Awaitable[bool]:
+    ) -> bool:
         """[Internal] Update entries in a collection specified by UUID.
 
         Args:
@@ -846,7 +846,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _upsert(
+    async def _upsert(
         self,
         collection_id: UUID,
         ids: IDs,
@@ -854,7 +854,7 @@ class AsyncBaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> Awaitable[bool]:
+    ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
         otherwise it will be added.
@@ -870,7 +870,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _count(self, collection_id: UUID) -> Awaitable[int]:
+    async def _count(self, collection_id: UUID) -> int:
         """[Internal] Returns the number of entries in a collection specified by UUID.
 
         Args:
@@ -883,7 +883,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _peek(self, collection_id: UUID, n: int = 10) -> Awaitable[GetResult]:
+    async def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         """[Internal] Returns the first n entries in a collection specified by UUID.
 
         Args:
@@ -898,7 +898,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _get(
+    async def _get(
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
@@ -910,7 +910,7 @@ class AsyncBaseAPI(ABC):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
-    ) -> Awaitable[GetResult]:
+    ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
         Args:
@@ -931,13 +931,13 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _delete(
+    async def _delete(
         self,
         collection_id: UUID,
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> Awaitable[IDs]:
+    ) -> IDs:
         """[Internal] Deletes entries from a collection specified by UUID.
 
         Args:
@@ -952,7 +952,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _query(
+    async def _query(
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
@@ -960,7 +960,7 @@ class AsyncBaseAPI(ABC):
         where: Where = {},
         where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents", "distances"],
-    ) -> Awaitable[QueryResult]:
+    ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
         Args:
@@ -978,7 +978,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def reset(self) -> Awaitable[bool]:
+    async def reset(self) -> bool:
         """Resets the database. This will delete all collections and entries.
 
         Returns:
@@ -987,7 +987,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def get_version(self) -> Awaitable[str]:
+    async def get_version(self) -> str:
         """Get the version of Chroma.
 
         Returns:
@@ -1007,16 +1007,16 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    def get_max_batch_size(self) -> Awaitable[int]:
+    async def get_max_batch_size(self) -> int:
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
 
 class AsyncAdminAPI(ABC):
     @abstractmethod
-    def create_database(
+    async def create_database(
         self, name: str, tenant: str = DEFAULT_TENANT
-    ) -> Awaitable[None]:
+    ) -> None:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
@@ -1026,9 +1026,9 @@ class AsyncAdminAPI(ABC):
         pass
 
     @abstractmethod
-    def get_database(
+    async def get_database(
         self, name: str, tenant: str = DEFAULT_TENANT
-    ) -> Awaitable[Database]:
+    ) -> Database:
         """Get a database. Raises an error if the database does not exist.
 
         Args:
@@ -1039,7 +1039,7 @@ class AsyncAdminAPI(ABC):
         pass
 
     @abstractmethod
-    def create_tenant(self, name: str) -> Awaitable[None]:
+    async def create_tenant(self, name: str) -> None:
         """Create a new tenant. Raises an error if the tenant already exists.
 
         Args:
@@ -1049,7 +1049,7 @@ class AsyncAdminAPI(ABC):
         pass
 
     @abstractmethod
-    def get_tenant(self, name: str) -> Awaitable[Tenant]:
+    async def get_tenant(self, name: str) -> Tenant:
         """Get a tenant. Raises an error if the tenant does not exist.
 
         Args:
@@ -1065,25 +1065,25 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
 
     @abstractmethod
     @override
-    def list_collections(
+    async def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Awaitable[Sequence[CollectionAsync]]:
+    ) -> Sequence[CollectionAsync]:
         pass
 
     @abstractmethod
     @override
-    def count_collections(
+    async def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
-    ) -> Awaitable[int]:
+    ) -> int:
         pass
 
     @abstractmethod
     @override
-    def create_collection(
+    async def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -1094,12 +1094,12 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Awaitable[CollectionAsync]:
+    ) -> CollectionAsync:
         pass
 
     @abstractmethod
     @override
-    def get_collection(
+    async def get_collection(
         self,
         name: str,
         id: Optional[UUID] = None,
@@ -1109,12 +1109,12 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Awaitable[CollectionAsync]:
+    ) -> CollectionAsync:
         pass
 
     @abstractmethod
     @override
-    def get_or_create_collection(
+    async def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -1124,15 +1124,15 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Awaitable[CollectionAsync]:
+    ) -> CollectionAsync:
         pass
 
     @abstractmethod
     @override
-    def delete_collection(
+    async def delete_collection(
         self,
         name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Awaitable[None]:
+    ) -> None:
         pass

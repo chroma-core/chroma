@@ -337,6 +337,7 @@ def fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=False)
 
 
+# todo: rename?
 def fastapi_async():
     return _fastapi_fixture(
         is_persistent=False,
