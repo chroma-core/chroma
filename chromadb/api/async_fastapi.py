@@ -88,9 +88,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return self
 
     async def _cleanup(self) -> None:
-        for client in self._clients.values():
+        while len(self._clients) > 0:
+            (_, client) = self._clients.popitem()
             await client.aclose()
-            del client
 
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         await self._cleanup()
