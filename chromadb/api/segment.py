@@ -681,6 +681,22 @@ class SegmentAPI(ServerAPI):
                 "where": str(where),
             }
         )
+
+        query_amount = len(query_embeddings)
+        self._product_telemetry_client.capture(
+            CollectionQueryEvent(
+                collection_uuid=str(collection_id),
+                query_amount=query_amount,
+                n_results=n_results,
+                with_metadata_filter=query_amount if where is not None else 0,
+                with_document_filter=query_amount if where_document is not None else 0,
+                include_metadatas=query_amount if "metadatas" in include else 0,
+                include_documents=query_amount if "documents" in include else 0,
+                include_uris=query_amount if "uris" in include else 0,
+                include_distances=query_amount if "distances" in include else 0,
+            )
+        )
+
         where = validate_where(where) if where is not None and len(where) > 0 else where
         where_document = (
             validate_where_document(where_document)
@@ -700,49 +716,6 @@ class SegmentAPI(ServerAPI):
                 where=where, where_document=where_document
             )
             allowed_ids = [r["id"] for r in records]
-        # If where conditions returned empty list then no need to proceed
-        # further and can simply return an empty result set here.
-        if allowed_ids is not None and allowed_ids == []:
-            empty_ids: List[List[str]] = []
-            empty_distances: List[List[float]] = []
-            empty_embeddings: List[List[Embedding]] = []
-            empty_documents: List[List[Document]] = []
-            empty_uris: List[List[URI]] = []
-            empty_metadatas: List[List[t.Metadata]] = []
-            for em in range(len(query_embeddings)):
-                empty_ids.append([])
-                if "distances" in include:
-                    empty_distances.append([])
-                if "embeddings" in include:
-                    empty_embeddings.append([])
-                if "documents" in include:
-                    empty_documents.append([])
-                if "metadatas" in include:
-                    empty_metadatas.append([])
-                if "uris" in include:
-                    empty_uris.append([])
-
-            return QueryResult(
-                ids=empty_ids,
-                distances=empty_distances if empty_distances else None,
-                metadatas=empty_metadatas if empty_metadatas else None,
-                embeddings=empty_embeddings if empty_embeddings else None,
-                documents=empty_documents if empty_documents else None,
-                uris=empty_uris if empty_uris else None,
-                data=None,
-                included=include,
-            )
-
-        query = t.VectorQuery(
-            vectors=query_embeddings,
-            k=n_results,
-            allowed_ids=allowed_ids,
-            include_embeddings="embeddings" in include,
-            options=None,
-        )
-
-        vector_reader = self._manager.get_segment(collection_id, VectorReader)
-        results = vector_reader.query_vectors(query)
 
         ids: List[List[str]] = []
         distances: List[List[float]] = []
@@ -751,54 +724,68 @@ class SegmentAPI(ServerAPI):
         uris: List[List[URI]] = []
         metadatas: List[List[t.Metadata]] = []
 
-        for result in results:
-            ids.append([r["id"] for r in result])
-            if "distances" in include:
-                distances.append([r["distance"] for r in result])
-            if "embeddings" in include:
-                embeddings.append([cast(Embedding, r["embedding"]) for r in result])
-
-        if "documents" in include or "metadatas" in include or "uris" in include:
-            all_ids: Set[str] = set()
-            for id_list in ids:
-                all_ids.update(id_list)
-            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
-            records = metadata_reader.get_metadata(ids=list(all_ids))
-            metadata_by_id = {r["id"]: r["metadata"] for r in records}
-            for id_list in ids:
-                # In the segment based architecture, it is possible for one segment
-                # to have a record that another segment does not have. This results in
-                # data inconsistency. For the case of the local segments and the
-                # local segment manager, there is a case where a thread writes
-                # a record to the vector segment but not the metadata segment.
-                # Then a query'ing thread reads from the vector segment and
-                # queries the metadata segment. The metadata segment does not have
-                # the record. In this case we choose to return potentially
-                # incorrect data in the form of None.
-                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
-                if "metadatas" in include:
-                    metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
+        # If where conditions returned empty list then no need to proceed
+        # further and can simply return an empty result set here.
+        if allowed_ids is not None and allowed_ids == []:
+            for em in range(len(query_embeddings)):
+                ids.append([])
+                if "distances" in include:
+                    distances.append([])
+                if "embeddings" in include:
+                    embeddings.append([])
                 if "documents" in include:
-                    doc_list = [_doc(m) for m in metadata_list]
-                    documents.append(doc_list)  # type: ignore
+                    documents.append([])
+                if "metadatas" in include:
+                    metadatas.append([])
                 if "uris" in include:
-                    uri_list = [_uri(m) for m in metadata_list]
-                    uris.append(uri_list)  # type: ignore
-
-        query_amount = len(query_embeddings)
-        self._product_telemetry_client.capture(
-            CollectionQueryEvent(
-                collection_uuid=str(collection_id),
-                query_amount=query_amount,
-                n_results=n_results,
-                with_metadata_filter=query_amount if where is not None else 0,
-                with_document_filter=query_amount if where_document is not None else 0,
-                include_metadatas=query_amount if "metadatas" in include else 0,
-                include_documents=query_amount if "documents" in include else 0,
-                include_uris=query_amount if "uris" in include else 0,
-                include_distances=query_amount if "distances" in include else 0,
+                    uris.append([])
+        else:
+            query = t.VectorQuery(
+                vectors=query_embeddings,
+                k=n_results,
+                allowed_ids=allowed_ids,
+                include_embeddings="embeddings" in include,
+                options=None,
             )
-        )
+
+            vector_reader = self._manager.get_segment(collection_id, VectorReader)
+            results = vector_reader.query_vectors(query)
+
+            for result in results:
+                ids.append([r["id"] for r in result])
+                if "distances" in include:
+                    distances.append([r["distance"] for r in result])
+                if "embeddings" in include:
+                    embeddings.append([cast(Embedding, r["embedding"]) for r in result])
+
+            if "documents" in include or "metadatas" in include or "uris" in include:
+                all_ids: Set[str] = set()
+                for id_list in ids:
+                    all_ids.update(id_list)
+                metadata_reader = self._manager.get_segment(
+                    collection_id, MetadataReader
+                )
+                records = metadata_reader.get_metadata(ids=list(all_ids))
+                metadata_by_id = {r["id"]: r["metadata"] for r in records}
+                for id_list in ids:
+                    # In the segment based architecture, it is possible for one segment
+                    # to have a record that another segment does not have. This results in
+                    # data inconsistency. For the case of the local segments and the
+                    # local segment manager, there is a case where a thread writes
+                    # a record to the vector segment but not the metadata segment.
+                    # Then a query'ing thread reads from the vector segment and
+                    # queries the metadata segment. The metadata segment does not have
+                    # the record. In this case we choose to return potentially
+                    # incorrect data in the form of None.
+                    metadata_list = [metadata_by_id.get(id, None) for id in id_list]
+                    if "metadatas" in include:
+                        metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
+                    if "documents" in include:
+                        doc_list = [_doc(m) for m in metadata_list]
+                        documents.append(doc_list)  # type: ignore
+                    if "uris" in include:
+                        uri_list = [_uri(m) for m in metadata_list]
+                        uris.append(uri_list)  # type: ignore
 
         return QueryResult(
             ids=ids,
