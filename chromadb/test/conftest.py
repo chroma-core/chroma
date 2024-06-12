@@ -23,6 +23,7 @@ from httpx import ConnectError
 from typing_extensions import Protocol
 
 from chromadb.api.async_fastapi import AsyncFastAPI
+from chromadb.api.fastapi import FastAPI
 import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
@@ -105,11 +106,6 @@ def override_hypothesis_profile(
         return hypothesis.settings(hypothesis.settings.default, **overridden_settings)
 
     return hypothesis.settings.default
-
-
-@async_class_to_sync
-class AsyncFastAPISync(AsyncFastAPI):
-    pass
 
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
@@ -301,7 +297,7 @@ def _fastapi_fixture(
         system = System(settings)
         api = system.instance(ServerAPI)
         system.start()
-        _await_server(api)
+        _await_server(api if isinstance(api, FastAPI) else async_class_to_sync(api))
         yield system
         system.stop()
         proc.kill()
@@ -344,10 +340,10 @@ def fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=False)
 
 
-def async_fastapi():
+def async_fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(
         is_persistent=False,
-        chroma_api_impl="chromadb.test.conftest.AsyncFastAPISync",
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
     )
 
 
@@ -647,7 +643,12 @@ def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, No
 def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
     api = system.instance(ServerAPI)
-    yield api
+
+    if isinstance(api, AsyncFastAPI):
+        transformed = async_class_to_sync(api)
+        yield transformed
+    else:
+        yield api
 
 
 @pytest.fixture(scope="function")
