@@ -1,4 +1,14 @@
-from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import (
+    Optional,
+    Type,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -17,10 +27,13 @@ from chromadb.types import (
 )
 from inspect import signature
 from tenacity import retry
+from chromadb.utils.the_registry import _register
+import json
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
+META_KEY_CHROMA_EF_METADATA = "chroma:ef_metadata"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
@@ -182,7 +195,73 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-class EmbeddingFunction(Protocol[D]):
+# region: They told me I was mad. Well who's mad now?!
+
+
+class StoreInitArgsMeta(type):
+    @staticmethod
+    def _serialize_args_kwargs(*args: Any, **kwargs: Any) -> str:
+        args_list = list(args)
+        try:
+            serialized = json.dumps({"args": args_list, "kwargs": kwargs})
+        except Exception as e:
+            raise ValueError(f"Failed to serialize args and kwargs: {e}")
+        return serialized
+
+    @staticmethod
+    def _deserialize_args_kwargs(
+        serialized: str,
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        try:
+            deserialized = json.loads(serialized)
+            return tuple(deserialized["args"]), deserialized["kwargs"]
+        except Exception as e:
+            raise ValueError(f"Failed to deserialize args and kwargs: {e}")
+
+    def __call__(cls: Type[T], *args: Any, **kwargs: Any) -> T:
+        instance: T = super().__call__(*args, **kwargs)  # type: ignore[misc]
+        setattr(
+            instance,
+            "_init_args",
+            StoreInitArgsMeta._serialize_args_kwargs(*args, **kwargs),
+        )
+        return instance
+
+    def from_init_args(cls: Type[T], init_args: str) -> T:
+        args, kwargs = StoreInitArgsMeta._deserialize_args_kwargs(init_args)
+        return cls(*args, **kwargs)
+
+
+Ty = TypeVar("Ty", bound=type)
+
+
+class RegisterMeta(type):
+    def __new__(
+        cls: Type[Ty], name: str, bases: Tuple[type, ...], dct: Dict[str, Any]
+    ) -> Ty:
+        # Create the new class using super()
+        new_class: Ty = super().__new__(cls, name, bases, dct)  # type: ignore[misc]
+        # Register the class automatically if it is a direct or indirect subclass
+        if bases:  # This condition avoids registering the base class itself
+            _register(new_class)
+        return new_class
+
+
+class StoreProtocolMeta(StoreInitArgsMeta, type(Protocol)):  # type: ignore[misc]
+    pass
+
+
+class RegisterProtocolMeta(RegisterMeta, type(Protocol)):  # type: ignore[misc]
+    pass
+
+
+class StoreAndRegisterProtocolMeta(
+    StoreProtocolMeta, RegisterProtocolMeta, type(Protocol)  # type: ignore[misc]
+):
+    pass
+
+
+class EmbeddingFunction(Protocol[D], metaclass=StoreAndRegisterProtocolMeta):
     def __call__(self, input: D) -> Embeddings:
         ...
 
@@ -197,8 +276,8 @@ class EmbeddingFunction(Protocol[D]):
 
         setattr(cls, "__call__", __call__)
 
-    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
-        return retry(**retry_kwargs)(self.__call__)(input)
+    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:  # type: ignore
+        return retry(**retry_kwargs)(self.__call__)(input)  # type: ignore
 
 
 def validate_embedding_function(

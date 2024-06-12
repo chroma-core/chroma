@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
 import numpy as np
 from uuid import UUID
-import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -40,7 +39,6 @@ from chromadb.api.types import (
     validate_where_document,
     validate_n_results,
     validate_embeddings,
-    validate_embedding_function,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -66,20 +64,13 @@ class Collection:
         self,
         client: "ServerAPI",
         model: CollectionModel,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
         data_loader: Optional[DataLoader[Loadable]] = None,
     ):
         """Initializes a new instance of the Collection class."""
 
         self._client = client
         self._model = model
-
-        # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
-        if embedding_function is not None:
-            validate_embedding_function(embedding_function)
-
         self._embedding_function = embedding_function
         self._data_loader = data_loader
 

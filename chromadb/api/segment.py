@@ -224,6 +224,7 @@ class SegmentAPI(ServerAPI):
     ) -> CollectionModel:
         if id is None and name is None or (id is not None and name is not None):
             raise ValueError("Name or id must be specified, but not both")
+
         existing = self._sysdb.get_collections(
             id=id, name=name, tenant=tenant, database=database
         )

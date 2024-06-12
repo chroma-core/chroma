@@ -80,7 +80,7 @@ def test_persist(
     client_1.reset()
     coll = client_1.create_collection(
         name=collection_strategy.name,
-        metadata=collection_strategy.metadata,
+        metadata=collection_strategy.metadata,  # type: ignore
         embedding_function=collection_strategy.embedding_function,
     )
 
@@ -111,7 +111,6 @@ def test_persist(
 
     coll = client_2.get_collection(
         name=collection_strategy.name,
-        embedding_function=collection_strategy.embedding_function,
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
@@ -141,7 +140,6 @@ def load_and_check(
 
         coll = client.get_collection(
             name=collection_name,
-            embedding_function=strategies.not_implemented_embedding_function(),
         )
         invariants.count(coll, record_set)
         invariants.metadatas_match(coll, record_set)
@@ -188,7 +186,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.client.reset()
         self.collection = self.client.create_collection(
             name=collection.name,
-            metadata=collection.metadata,
+            metadata=collection.metadata,  # type: ignore
             embedding_function=collection.embedding_function,
         )
         self.embedding_function = collection.embedding_function

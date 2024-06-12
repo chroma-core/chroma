@@ -51,6 +51,18 @@ class CollectionStateMachine(RuleBasedStateMachine):
                 )
             return multiple()
 
+        # Metadata can't contain reserved keys
+        if (coll.metadata is not None) and (
+            types.META_KEY_CHROMA_EF_METADATA in coll.metadata
+        ):
+            with pytest.raises(Exception):
+                c = self.client.create_collection(
+                    name=coll.name,
+                    metadata=coll.metadata,
+                    embedding_function=coll.embedding_function,
+                )
+            return multiple()
+
         c = self.client.create_collection(
             name=coll.name,
             metadata=coll.metadata,
@@ -207,6 +219,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
                         metadata=new_metadata,
                         embedding_function=coll.embedding_function,
                     )
+                return multiple()
+            if types.META_KEY_CHROMA_EF_METADATA in new_metadata:
+                with pytest.raises(Exception):
+                    c.modify(metadata=new_metadata, name=new_name)
                 return multiple()
             coll.metadata = new_metadata
             _metadata = new_metadata

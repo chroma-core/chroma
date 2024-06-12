@@ -7,6 +7,7 @@ from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
 from chromadb.api.types import (
     Document,
     Documents,
+    Embeddable,
     Embedding,
     Image,
     Images,
@@ -50,6 +51,18 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
             sha256_hash.update(byte_block)
 
     return sha256_hash.hexdigest() == expected_sha256
+
+
+def _serialize_embedding_function(
+    ef: Optional[EmbeddingFunction[Embeddable]],
+) -> Optional[str]:
+    if ef is None:
+        return None
+
+    ef_name = type(ef).__name__
+    init_args = ef._init_args  # type: ignore[attr-defined]
+
+    return json.dumps({"name": ef_name, "init_args": init_args})
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
