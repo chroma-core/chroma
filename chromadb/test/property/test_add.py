@@ -19,6 +19,7 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
 
+
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
@@ -27,6 +28,7 @@ def reset(api: ServerAPI) -> None:
     if not NOT_CLUSTER_ONLY:
         time.sleep(MEMBERLIST_SLEEP)
 
+
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(collection_st),
@@ -34,7 +36,10 @@ def reset(api: ServerAPI) -> None:
 )
 @settings(
     deadline=None,
-    parent=override_hypothesis_profile(normal=hypothesis.settings(max_examples=500), fast=hypothesis.settings(max_examples=200)),
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=500),
+        fast=hypothesis.settings(max_examples=200),
+    ),
 )
 def test_add(
     api: ServerAPI,
@@ -60,7 +65,7 @@ def test_add(
     coll.add(**record_set)
 
     if not NOT_CLUSTER_ONLY:
-        # Only wait for compaction if the size of the collection is 
+        # Only wait for compaction if the size of the collection is
         # some minimal size
         if should_compact and len(normalized_record_set["ids"]) > 10:
             initial_version = coll.get_model()["version"]
