@@ -12,6 +12,7 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
+    cast,
 )
 from uuid import UUID
 
@@ -30,6 +31,7 @@ from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
+from chromadb.api.async_client import AsyncClient as AsyncClientCreator
 from chromadb.utils.async_to_sync import async_class_to_sync
 
 VALID_PRESETS = ["fast", "normal", "slow"]
@@ -643,11 +645,27 @@ def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, No
     yield from request.param()
 
 
-@pytest.fixture(scope="function")
-def api(system: System) -> Generator[ServerAPI, None, None]:
+@async_class_to_sync
+class AsyncClientCreatorSync(AsyncClientCreator):
+    pass
+
+
+# todo: less hacky
+@pytest.fixture(scope="function", params=["sync_client", "async_client"])
+def api(
+    system: System, request: pytest.FixtureRequest
+) -> Generator[ServerAPI, None, None]:
     system.reset_state()
-    api = system.instance(ServerAPI)
-    yield api
+
+    if (
+        request.param == "async_client"
+        and system.settings.chroma_server_host is not None
+    ):
+        api = AsyncClientCreatorSync.from_system(system)
+        yield api
+    else:
+        api = system.instance(ServerAPI)
+        yield api
 
 
 @pytest.fixture(scope="function")
