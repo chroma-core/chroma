@@ -2,10 +2,10 @@ import { AuthOptions } from "./auth";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 
 export enum IncludeEnum {
-  Documents = 'documents',
-  Embeddings = 'embeddings',
-  Metadatas = 'metadatas',
-  Distances = 'distances'
+  Documents = "documents",
+  Embeddings = "embeddings",
+  Metadatas = "metadatas",
+  Distances = "distances",
 }
 
 type Number = number;
@@ -31,7 +31,9 @@ type InclusionOperator = "$in" | "$nin";
 type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
 
 type OperatorExpression = {
-  [key in WhereOperator | InclusionOperator | LogicalOperator ]?: LiteralValue | ListLiteralValue;
+  [key in WhereOperator | InclusionOperator | LogicalOperator]?:
+    | LiteralValue
+    | ListLiteralValue;
 };
 
 type BaseWhere = {
@@ -47,7 +49,10 @@ export type Where = BaseWhere | LogicalWhere;
 type WhereDocumentOperator = "$contains" | "$not_contains" | LogicalOperator;
 
 export type WhereDocument = {
-  [key in WhereDocumentOperator]?: LiteralValue | LiteralNumber | WhereDocument[];
+  [key in WhereDocumentOperator]?:
+    | LiteralValue
+    | LiteralNumber
+    | WhereDocument[];
 };
 
 export type CollectionType = {
@@ -62,6 +67,7 @@ export type GetResponse = {
   documents: (null | Document)[];
   metadatas: (null | Metadata)[];
   error: null | string;
+  included: IncludeEnum[];
 };
 
 export type QueryResponse = {
@@ -70,11 +76,12 @@ export type QueryResponse = {
   documents: (null | Document)[][];
   metadatas: (null | Metadata)[][];
   distances: null | number[][];
-}
+  included: IncludeEnum[];
+};
 
 export type AddResponse = {
   error: string;
-}
+};
 
 export type CollectionMetadata = Record<string, unknown>;
 
@@ -85,72 +92,72 @@ export type ConfigOptions = {
 };
 
 export type GetParams = {
-  ids?: ID | IDs,
-  where?: Where,
-  limit?: PositiveInteger,
-  offset?: PositiveInteger,
-  include?: IncludeEnum[],
-  whereDocument?: WhereDocument
-}
+  ids?: ID | IDs;
+  where?: Where;
+  limit?: PositiveInteger;
+  offset?: PositiveInteger;
+  include?: IncludeEnum[];
+  whereDocument?: WhereDocument;
+};
 
 export type ListCollectionsParams = {
-  limit?: PositiveInteger,
-  offset?: PositiveInteger,
-}
+  limit?: PositiveInteger;
+  offset?: PositiveInteger;
+};
 
 export type ChromaClientParams = {
-  path?: string,
-  fetchOptions?: RequestInit,
-  auth?: AuthOptions,
-  tenant?: string,
-  database?: string,
-}
+  path?: string;
+  fetchOptions?: RequestInit;
+  auth?: AuthOptions;
+  tenant?: string;
+  database?: string;
+};
 
 export type CreateCollectionParams = {
-  name: string,
-  metadata?: CollectionMetadata,
-  embeddingFunction?: IEmbeddingFunction
-}
+  name: string;
+  metadata?: CollectionMetadata;
+  embeddingFunction?: IEmbeddingFunction;
+};
 
-export type GetOrCreateCollectionParams = CreateCollectionParams
+export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction?: IEmbeddingFunction
-}
+  embeddingFunction?: IEmbeddingFunction;
+};
 
 export type DeleteCollectionParams = {
-  name: string
-}
+  name: string;
+};
 
 export type AddParams = {
-  ids: ID | IDs,
-  embeddings?: Embedding | Embeddings,
-  metadatas?: Metadata | Metadatas,
-  documents?: Document | Documents,
-}
+  ids: ID | IDs;
+  embeddings?: Embedding | Embeddings;
+  metadatas?: Metadata | Metadatas;
+  documents?: Document | Documents;
+};
 
 export type UpsertParams = AddParams;
 export type UpdateParams = AddParams;
 
 export type ModifyCollectionParams = {
-  name?: string,
-  metadata?: CollectionMetadata
-}
+  name?: string;
+  metadata?: CollectionMetadata;
+};
 
 export type QueryParams = {
-    queryEmbeddings?: Embedding | Embeddings,
-    nResults?: PositiveInteger,
-    where?: Where,
-    queryTexts?: string | string[],
-    whereDocument?: WhereDocument, // {"$contains":"search_string"}
-    include?: IncludeEnum[] // ["metadata", "document"]
-}
+  queryEmbeddings?: Embedding | Embeddings;
+  nResults?: PositiveInteger;
+  where?: Where;
+  queryTexts?: string | string[];
+  whereDocument?: WhereDocument; // {"$contains":"search_string"}
+  include?: IncludeEnum[]; // ["metadata", "document"]
+};
 
-export type PeekParams = { limit?: PositiveInteger }
+export type PeekParams = { limit?: PositiveInteger };
 
 export type DeleteParams = {
-    ids?: ID | IDs,
-    where?: Where,
-    whereDocument?: WhereDocument
-}
+  ids?: ID | IDs;
+  where?: Where;
+  whereDocument?: WhereDocument;
+};

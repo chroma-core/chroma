@@ -17,7 +17,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import (
-    EmbeddingRecord,
+    LogRecord,
     Metadata,
     Operation,
     Segment,
@@ -222,14 +222,16 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         "PersistentLocalHnswSegment._write_records", OpenTelemetryGranularity.ALL
     )
     @override
-    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+    def _write_records(self, records: Sequence[LogRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
         with WriteRWLock(self._lock):
             for record in records:
-                if record["embedding"] is not None:
-                    self._ensure_index(len(records), len(record["embedding"]))
+                if record["operation_record"]["embedding"] is not None:
+                    self._ensure_index(
+                        len(records), len(record["operation_record"]["embedding"])
+                    )
                 if not self._index_initialized:
                     # If the index is not initialized here, it means that we have
                     # not yet added any records to the index. So we can just
@@ -237,9 +239,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     continue
                 self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
-                self._max_seq_id = max(self._max_seq_id, record["seq_id"])
-                id = record["id"]
-                op = record["operation"]
+                self._max_seq_id = max(self._max_seq_id, record["log_offset"])
+                id = record["operation_record"]["id"]
+                op = record["operation_record"]["operation"]
                 exists_in_index = self._id_to_label.get(
                     id, None
                 ) is not None or self._brute_force_index.has_id(id)
@@ -254,23 +256,23 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
-                    if record["embedding"] is not None:
+                    if record["operation_record"]["embedding"] is not None:
                         if exists_in_index:
                             self._curr_batch.apply(record)
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(
-                                f"Update of nonexisting embedding ID: {record['id']}"
+                                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
                             )
                 elif op == Operation.ADD:
-                    if record["embedding"] is not None:
+                    if record["operation_record"]["embedding"] is not None:
                         if not exists_in_index:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
-                    if record["embedding"] is not None:
+                    if record["operation_record"]["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
                 if len(self._curr_batch) >= self._batch_size:
@@ -325,9 +327,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
             for label, vector in zip(hnsw_labels, vectors):
                 id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
                 results[id_to_index[id]] = VectorEmbeddingRecord(
-                    id=id, seq_id=seq_id, embedding=vector
+                    id=id, embedding=vector
                 )
 
         return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
@@ -451,6 +452,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Open the persistent index"""
         if self._index is not None:
             self._index.open_file_handles()
+
+    @override
+    def stop(self) -> None:
+        super().stop()
+        self.close_persistent_index()
 
     def close_persistent_index(self) -> None:
         """Close the persistent index"""

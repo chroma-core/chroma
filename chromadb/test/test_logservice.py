@@ -1,11 +1,12 @@
 import array
 from typing import Dict, Any, Callable
-
+import pytest
 from chromadb.config import System, Settings
 from chromadb.logservice.logservice import LogService
 from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.test_api import records  # type: ignore
 from chromadb.api.models.Collection import Collection
+import time
 
 batch_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
@@ -31,6 +32,9 @@ contains_records = {
     ],
 }
 
+# Sleep to allow memberlist to initialize after reset()
+MEMBERLIST_DELAY_SLEEP_TIME = 5
+
 
 def verify_records(
     logservice: LogService,
@@ -39,10 +43,10 @@ def verify_records(
     test_func: Callable,  # type: ignore
     operation: int,
 ) -> None:
-    start_id = 1
+    start_offset = 1
     for batch_records in test_records_map.values():
         test_func(**batch_records)
-        pushed_records = logservice.pull_logs(collection.id, start_id, 100)
+        pushed_records = logservice.pull_logs(collection.id, start_offset, 100)
         assert len(pushed_records) == len(batch_records["ids"])
         for i, record in enumerate(pushed_records):
             assert record.record.id == batch_records["ids"][i]
@@ -70,7 +74,7 @@ def verify_records(
                     == batch_records["documents"][i]
                 )
             assert len(record.record.metadata.metadata) == metadata_count
-        start_id += len(pushed_records)
+        start_offset += len(pushed_records)
 
 
 @skip_if_not_cluster()
@@ -79,6 +83,7 @@ def test_add(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
         "batch_records": batch_records,
@@ -96,6 +101,7 @@ def test_update(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
         "updated_records": {
@@ -115,6 +121,7 @@ def test_delete(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     collection = api.create_collection("testdelete")
 
@@ -123,7 +130,19 @@ def test_delete(api):  # type: ignore
     pushed_records = logservice.pull_logs(collection.id, 1, 100)
     assert len(pushed_records) == 2
 
-    # delete by where does not work atm
+
+# TODO: These tests should be enabled when the distributed system has metadata segments
+@pytest.mark.xfail
+@skip_if_not_cluster()
+def test_delete_filter(api):  # type: ignore
+    system = System(Settings(allow_reset=True))
+    logservice = system.instance(LogService)
+    system.start()
+    api.reset()
+
+    collection = api.create_collection("testdelete_filter")
+
+    # delete by where
     collection.delete(where_document={"$contains": "doc1"})
     collection.delete(where_document={"$contains": "bad"})
     collection.delete(where_document={"$contains": "great"})
@@ -145,6 +164,7 @@ def test_upsert(api):  # type: ignore
     logservice = system.instance(LogService)
     system.start()
     api.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
         "batch_records": batch_records,

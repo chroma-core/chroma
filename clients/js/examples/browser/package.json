@@ -6,14 +6,19 @@
   "author": "",
   "license": "Apache-2.0",
   "devDependencies": {
-    "parcel": "^2.6.0",
-    "process": "^0.11.10"
+    "@types/react": "^18.2.79",
+    "@vitejs/plugin-react": "^4.2.1",
+    "chromadb-default-embed": "^2.13.2",
+    "buffer": "^5.5.0||^6.0.0",
+    "process": "^0.11.10",
+    "vite": "^5.2.10"
   },
   "dependencies": {
-    "chromadb": "file:../.."
+    "chromadb": "link:../..",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "scripts": {
-    "dev": "parcel ./index.html --port 3000 --no-cache",
-    "start": "parcel ./index.html --port 3000 --no-cache"
+    "dev": "vite"
   }
 }

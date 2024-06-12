@@ -1,26 +1,15 @@
 version: '3.9'
 
-networks:
-  test_net:
-    driver: bridge
-
 services:
   test_server:
     build:
       context: .
-      dockerfile: Dockerfile
-    volumes:
-      - chroma-data:/chroma/chroma
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    platform: ${PLATFORM:-linux/amd64}
     command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
     environment:
       - ANONYMIZED_TELEMETRY=False
       - ALLOW_RESET=True
-      - IS_PERSISTENT=TRUE
+      - IS_PERSISTENT=True
     ports:
-      - ${CHROMA_PORT}:8000
-    networks:
-      - test_net
-
-volumes:
-  chroma-data:
-    driver: local
+      - 8000:8000

@@ -3,7 +3,6 @@ import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
 from uuid import UUID
-
 import requests
 from overrides import override
 
@@ -33,8 +32,6 @@ from chromadb.api.types import (
 from chromadb.auth import (
     ClientAuthProvider,
 )
-from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
-from chromadb.auth.registry import resolve_provider
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -43,6 +40,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from urllib.parse import urlparse, urlunparse, quote
+from chromadb.types import Collection as CollectionModel
 
 logger = logging.getLogger(__name__)
 
@@ -114,32 +112,19 @@ class FastAPI(ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
+        self._session = requests.Session()
+
         self._header = system.settings.chroma_server_headers
-        if (
-            system.settings.chroma_client_auth_provider
-            and system.settings.chroma_client_auth_protocol_adapter
-        ):
-            self._auth_provider = self.require(
-                resolve_provider(
-                    system.settings.chroma_client_auth_provider, ClientAuthProvider
-                )
-            )
-            self._adapter = cast(
-                RequestsClientAuthProtocolAdapter,
-                system.require(
-                    resolve_provider(
-                        system.settings.chroma_client_auth_protocol_adapter,
-                        RequestsClientAuthProtocolAdapter,
-                    )
-                ),
-            )
-            self._session = self._adapter.session
-        else:
-            self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
         if self._settings.chroma_server_ssl_verify is not None:
             self._session.verify = self._settings.chroma_server_ssl_verify
+
+        if system.settings.chroma_client_auth_provider:
+            self._auth_provider = self.require(ClientAuthProvider)
+            _headers = self._auth_provider.authenticate()
+            for header, value in _headers.items():
+                self._session.headers[header] = value.get_secret_value()
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
@@ -224,7 +209,16 @@ class FastAPI(ServerAPI):
         json_collections = json.loads(resp.text)
         collections = []
         for json_collection in json_collections:
-            collections.append(Collection(self, **json_collection))
+            model = CollectionModel(
+                id=json_collection["id"],
+                name=json_collection["name"],
+                metadata=json_collection["metadata"],
+                dimension=json_collection["dimension"],
+                tenant=json_collection["tenant"],
+                database=json_collection["database"],
+                version=json_collection["version"],
+            )
+            collections.append(Collection(self, model=model))
 
         return collections
 
@@ -269,13 +263,20 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = json.loads(resp.text)
-        return Collection(
-            client=self,
+        model = CollectionModel(
             id=resp_json["id"],
             name=resp_json["name"],
+            metadata=resp_json["metadata"],
+            dimension=resp_json["dimension"],
+            tenant=resp_json["tenant"],
+            database=resp_json["database"],
+            version=resp_json["version"],
+        )
+        return Collection(
+            client=self,
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -303,13 +304,20 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = json.loads(resp.text)
+        model = CollectionModel(
+            id=resp_json["id"],
+            name=resp_json["name"],
+            metadata=resp_json["metadata"],
+            dimension=resp_json["dimension"],
+            tenant=resp_json["tenant"],
+            database=resp_json["database"],
+            version=resp_json["version"],
+        )
         return Collection(
             client=self,
-            name=resp_json["name"],
-            id=resp_json["id"],
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method(
@@ -442,6 +450,7 @@ class FastAPI(ServerAPI):
             documents=body.get("documents", None),
             data=None,
             uris=body.get("uris", None),
+            included=body["included"],
         )
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -509,7 +518,7 @@ class FastAPI(ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         raise_chroma_error(resp)
         return True
@@ -530,7 +539,7 @@ class FastAPI(ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
         )
@@ -553,7 +562,7 @@ class FastAPI(ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
         )
@@ -596,6 +605,7 @@ class FastAPI(ServerAPI):
             documents=body.get("documents", None),
             uris=body.get("uris", None),
             data=None,
+            included=body["included"],
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
@@ -619,10 +629,9 @@ class FastAPI(ServerAPI):
         """Returns the settings of the client"""
         return self._settings
 
-    @property
-    @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)
+    @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
-    def max_batch_size(self) -> int:
+    def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
             resp = self._session.get(self._api_url + "/pre-flight-checks")
             raise_chroma_error(resp)

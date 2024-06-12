@@ -1,3 +1,4 @@
+import asyncio
 from functools import wraps
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Sequence, Union
@@ -70,7 +71,7 @@ def otel_init(
     """Initializes module-level state for OpenTelemetry.
 
     Parameters match the environment variables which configure OTel as documented
-    at https://docs.trychroma.com/observability.
+    at https://docs.trychroma.com/deployment/observability.
     - otel_service_name: The name of the service for OTel tagging and aggregation.
     - otel_collection_endpoint: The endpoint to which OTel spans are sent
         (e.g. api.honeycomb.com).
@@ -120,17 +121,32 @@ def trace_method(
     """A decorator that traces a method."""
 
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(f)
-        def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
-            global tracer, granularity
-            if trace_granularity < granularity:
-                return f(*args, **kwargs)
-            if not tracer:
-                return f(*args, **kwargs)
-            with tracer.start_as_current_span(trace_name, attributes=attributes):
-                return f(*args, **kwargs)
+        if asyncio.iscoroutinefunction(f):
 
-        return wrapper
+            @wraps(f)
+            async def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+                global tracer, granularity
+                if trace_granularity < granularity:
+                    return await f(*args, **kwargs)
+                if not tracer:
+                    return await f(*args, **kwargs)
+                with tracer.start_as_current_span(trace_name, attributes=attributes):
+                    return await f(*args, **kwargs)
+
+            return wrapper
+        else:
+
+            @wraps(f)
+            def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+                global tracer, granularity
+                if trace_granularity < granularity:
+                    return f(*args, **kwargs)
+                if not tracer:
+                    return f(*args, **kwargs)
+                with tracer.start_as_current_span(trace_name, attributes=attributes):
+                    return f(*args, **kwargs)
+
+            return wrapper
 
     return decorator
 

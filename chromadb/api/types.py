@@ -157,6 +157,7 @@ class GetResult(TypedDict):
     uris: Optional[URIs]
     data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
+    included: Include
 
 
 class QueryResult(TypedDict):
@@ -167,6 +168,7 @@ class QueryResult(TypedDict):
     data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
+    included: Include
 
 
 class IndexMetadata(TypedDict):
@@ -210,8 +212,8 @@ def validate_embedding_function(
     if not function_signature == protocol_signature:
         raise ValueError(
             f"Expected EmbeddingFunction.__call__ to have the following signature: {protocol_signature}, got {function_signature}\n"
-            "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
-            "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
+            "Please see https://docs.trychroma.com/guides/embeddings for details of the EmbeddingFunction interface.\n"
+            "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/deployment/migration#migration-to-0.4.16---november-7,-2023 \n"
         )
 
 
@@ -394,7 +396,7 @@ def validate_where(where: Where) -> Where:
                     or not all(isinstance(x, type(operand[0])) for x in operand)
                 ):
                     raise ValueError(
-                        f"Expected where operand value to be a non-empty list, and all values to obe of the same type "
+                        f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                         f"got {operand}"
                     )
     return where

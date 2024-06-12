@@ -26,9 +26,9 @@ func TestNodeWatcher(t *testing.T) {
 	node_watcher.Start()
 
 	// create some fake pods to test the watcher
-	clientset.CoreV1().Pods("chroma").Create(context.TODO(), &v1.Pod{
+	clientset.CoreV1().Pods("chroma").Create(context.Background(), &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      "test-pod-0",
 			Namespace: "chroma",
 			Labels: map[string]string{
 				"member-type": "worker",
@@ -46,18 +46,22 @@ func TestNodeWatcher(t *testing.T) {
 	}, metav1.CreateOptions{})
 
 	// Get the status of the node
-	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.1")
+	ok := retryUntilCondition(func() bool {
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == Ready
+
+		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0"}})
 	}, 10, 1*time.Second)
+	if !ok {
+		t.Fatalf("Node status did not update after adding a pod")
+	}
 
 	// Add a not ready pod
-	clientset.CoreV1().Pods("chroma").Create(context.TODO(), &v1.Pod{
+	clientset.CoreV1().Pods("chroma").Create(context.Background(), &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod-2",
+			Name:      "test-pod-1",
 			Namespace: "chroma",
 			Labels: map[string]string{
 				"member-type": "worker",
@@ -74,14 +78,16 @@ func TestNodeWatcher(t *testing.T) {
 		},
 	}, metav1.CreateOptions{})
 
-	retryUntilCondition(t, func() bool {
-		node_status, err := node_watcher.GetStatus("10.0.0.2")
+	ok = retryUntilCondition(func() bool {
+		memberlist, err := node_watcher.ListReadyMembers()
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return node_status == NotReady
+		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0"}})
 	}, 10, 1*time.Second)
-
+	if !ok {
+		t.Fatalf("Node status did not update after adding a not ready pod")
+	}
 }
 
 func TestMemberlistStore(t *testing.T) {
@@ -94,7 +100,7 @@ func TestMemberlistStore(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), cr_memberlist)
 
 	memberlist_store := NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
-	memberlist, _, err := memberlist_store.GetMemberlist(context.TODO())
+	memberlist, _, err := memberlist_store.GetMemberlist(context.Background())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
@@ -102,25 +108,28 @@ func TestMemberlistStore(t *testing.T) {
 	assert.Equal(t, Memberlist{}, *memberlist)
 
 	// Add a member to the memberlist
-	memberlist_store.UpdateMemberlist(context.TODO(), &Memberlist{"10.0.0.1", "10.0.0.2"}, "0")
-	memberlist, _, err = memberlist_store.GetMemberlist(context.TODO())
+	memberlist_store.UpdateMemberlist(context.Background(), &Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}, "0")
+	memberlist, _, err = memberlist_store.GetMemberlist(context.Background())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
-	assert.Equal(t, Memberlist{"10.0.0.1", "10.0.0.2"}, *memberlist)
+	// assert the memberlist has the correct members
+	if !memberlistSame(*memberlist, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}) {
+		t.Fatalf("Memberlist did not update after adding a member")
+	}
 }
 
-func createFakePod(ip string, clientset kubernetes.Interface) {
-	clientset.CoreV1().Pods("chroma").Create(context.TODO(), &v1.Pod{
+func createFakePod(memberId string, podIp string, clientset kubernetes.Interface) {
+	clientset.CoreV1().Pods("chroma").Create(context.Background(), &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ip,
+			Name:      memberId,
 			Namespace: "chroma",
 			Labels: map[string]string{
 				"member-type": "worker",
 			},
 		},
 		Status: v1.PodStatus{
-			PodIP: ip,
+			PodIP: podIp,
 			Conditions: []v1.PodCondition{
 				{
 					Type:   v1.PodReady,
@@ -131,8 +140,11 @@ func createFakePod(ip string, clientset kubernetes.Interface) {
 	}, metav1.CreateOptions{})
 }
 
-func deleteFakePod(ip string, clientset kubernetes.Interface) {
-	clientset.CoreV1().Pods("chroma").Delete(context.TODO(), ip, metav1.DeleteOptions{})
+func deleteFakePod(name string, clientset kubernetes.Interface) {
+	gracefulPeriodSeconds := int64(0)
+	clientset.CoreV1().Pods("chroma").Delete(context.Background(), name, metav1.DeleteOptions{
+		GracePeriodSeconds: &gracefulPeriodSeconds,
+	})
 }
 
 func TestMemberlistManager(t *testing.T) {
@@ -151,53 +163,89 @@ func TestMemberlistManager(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), initialCrMemberlist)
 
 	// Create a node watcher
-	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 60*time.Second)
+	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 100*time.Millisecond)
 
 	// Create a memberlist store
 	memberlistStore := NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
 
 	// Create a memberlist manager
-	memberlist_manager := NewMemberlistManager(nodeWatcher, memberlistStore)
+	memberlistManager := NewMemberlistManager(nodeWatcher, memberlistStore)
+	memberlistManager.SetReconcileInterval(1 * time.Second)
+	memberlistManager.SetReconcileCount(1)
 
 	// Start the memberlist manager
-	err = memberlist_manager.Start()
+	err = memberlistManager.Start()
 	if err != nil {
 		t.Fatalf("Error starting memberlist manager: %v", err)
 	}
 
 	// Add a ready pod
-	createFakePod("10.0.0.49", clientset)
+	createFakePod("test-pod-0", "10.0.0.49", clientset)
 
 	// Get the memberlist
-	retryUntilCondition(t, func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.49"})
-	}, 10, 1*time.Second)
+	ok := retryUntilCondition(func() bool {
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0"}})
+	}, 30, 1*time.Second)
+	if !ok {
+		t.Fatalf("Memberlist did not update after adding a pod")
+	}
 
 	// Add another ready pod
-	createFakePod("10.0.0.50", clientset)
+	createFakePod("test-pod-1", "10.0.0.50", clientset)
 
 	// Get the memberlist
-	retryUntilCondition(t, func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.49", "10.0.0.50"})
-	}, 10, 1*time.Second)
+	ok = retryUntilCondition(func() bool {
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}})
+	}, 30, 1*time.Second)
+	if !ok {
+		t.Fatalf("Memberlist did not update after adding a pod")
+	}
 
 	// Delete a pod
-	deleteFakePod("10.0.0.49", clientset)
+	deleteFakePod("test-pod-0", clientset)
 
 	// Get the memberlist
-	retryUntilCondition(t, func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{"10.0.0.50"})
-	}, 10, 1*time.Second)
+	ok = retryUntilCondition(func() bool {
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-1"}})
+	}, 30, 1*time.Second)
+	if !ok {
+		t.Fatalf("Memberlist did not update after deleting a pod")
+	}
 }
 
-func retryUntilCondition(t *testing.T, f func() bool, retry_count int, retry_interval time.Duration) {
+func TestMemberlistSame(t *testing.T) {
+	memberlist := Memberlist{}
+	assert.True(t, memberlistSame(memberlist, memberlist))
+
+	newMemberlist := Memberlist{Member{id: "test-pod-0"}}
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+	assert.True(t, memberlistSame(newMemberlist, newMemberlist))
+
+	memberlist = Memberlist{Member{id: "test-pod-1"}}
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(memberlist, memberlist))
+
+	memberlist = Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}
+	assert.True(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(newMemberlist, memberlist))
+
+	memberlist = Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1"}, Member{id: "test-pod-0"}}
+	assert.True(t, memberlistSame(memberlist, newMemberlist))
+	assert.True(t, memberlistSame(newMemberlist, memberlist))
+}
+
+func retryUntilCondition(f func() bool, retry_count int, retry_interval time.Duration) bool {
 	for i := 0; i < retry_count; i++ {
 		if f() {
-			return
+			return true
 		}
 		time.Sleep(retry_interval)
 	}
-	t.Fatalf("Condition not met after %d retries", retry_count)
+	return false
 }
 
 func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, expected_memberlist Memberlist) bool {
@@ -205,5 +253,5 @@ func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, exp
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
-	return reflect.DeepEqual(expected_memberlist, *memberlist)
+	return memberlistSame(*memberlist, expected_memberlist)
 }

@@ -1,580 +1,355 @@
-use super::positional_posting_list_value::PositionalPostingList;
+use super::arrow::blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter};
+use super::arrow::flusher::ArrowBlockfileFlusher;
+use super::arrow::types::{
+    ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
+};
+use super::key::KeyWrapper;
+use super::memory::reader_writer::{
+    MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
+};
+use super::memory::storage::{Readable, Writeable};
+use crate::blockstore::positional_posting_list_value::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
-use parking_lot::RwLock;
+use futures::{Stream, StreamExt};
 use roaring::RoaringBitmap;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::pin::Pin;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum BlockfileError {
     #[error("Key not found")]
     NotFoundError,
+    #[error("Invalid Key Type")]
+    InvalidKeyType,
+    #[error("Invalid Value Type")]
+    InvalidValueType,
+    #[error("Transaction already in progress")]
+    TransactionInProgress,
+    #[error("Transaction not in progress")]
+    TransactionNotInProgress,
+    #[error("Block not found")]
+    BlockNotFound,
 }
 
 impl ChromaError for BlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
-            BlockfileError::NotFoundError => ErrorCodes::InvalidArgument,
+            BlockfileError::NotFoundError
+            | BlockfileError::InvalidKeyType
+            | BlockfileError::InvalidValueType => ErrorCodes::InvalidArgument,
+            BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
+                ErrorCodes::FailedPrecondition
+            }
+            BlockfileError::BlockNotFound => ErrorCodes::Internal,
         }
     }
 }
 
 // ===== Key Types =====
+pub(crate) trait Key: PartialEq + Debug + Display + Into<KeyWrapper> + Clone {
+    fn get_size(&self) -> usize;
+}
+
+impl Key for &str {
+    fn get_size(&self) -> usize {
+        self.len()
+    }
+}
+
+impl Key for f32 {
+    fn get_size(&self) -> usize {
+        4
+    }
+}
+
+impl Key for bool {
+    fn get_size(&self) -> usize {
+        1
+    }
+}
+
+impl Key for u32 {
+    fn get_size(&self) -> usize {
+        4
+    }
+}
+
+pub(crate) trait Value: Clone {
+    fn get_size(&self) -> usize;
+}
+
+// TODO: Maybe make writeable and readable traits'
+// TODO: we don't need this get size
+impl Value for Int32Array {
+    fn get_size(&self) -> usize {
+        self.get_buffer_memory_size()
+    }
+}
+
+impl Value for &Int32Array {
+    fn get_size(&self) -> usize {
+        self.get_buffer_memory_size()
+    }
+}
+
+impl Value for &str {
+    fn get_size(&self) -> usize {
+        self.len()
+    }
+}
+
+impl Value for u32 {
+    fn get_size(&self) -> usize {
+        4
+    }
+}
+
+impl Value for RoaringBitmap {
+    fn get_size(&self) -> usize {
+        self.serialized_size()
+    }
+}
+
+impl Value for &RoaringBitmap {
+    fn get_size(&self) -> usize {
+        self.serialized_size()
+    }
+}
+
+impl Value for PositionalPostingList {
+    fn get_size(&self) -> usize {
+        return self.size_in_bytes();
+    }
+}
+
+impl<'a> Value for DataRecord<'a> {
+    fn get_size(&self) -> usize {
+        DataRecord::get_size(self)
+    }
+}
+
+impl<'a> Value for &DataRecord<'a> {
+    fn get_size(&self) -> usize {
+        DataRecord::get_size(self)
+    }
+}
+
 #[derive(Clone)]
-pub(crate) struct BlockfileKey {
-    pub(crate) prefix: String,
-    pub(crate) key: Key,
+pub(crate) enum BlockfileWriter {
+    MemoryBlockfileWriter(MemoryBlockfileWriter),
+    ArrowBlockfileWriter(ArrowBlockfileWriter),
 }
 
-impl Key {
-    pub(crate) fn get_size(&self) -> usize {
+impl BlockfileWriter {
+    pub(crate) fn commit<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        self,
+    ) -> Result<BlockfileFlusher, Box<dyn ChromaError>> {
         match self {
-            Key::String(s) => s.len(),
-            Key::Float(_) => 4,
-            Key::Bool(_) => 1,
+            BlockfileWriter::MemoryBlockfileWriter(writer) => match writer.commit() {
+                Ok(flusher) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(flusher)),
+                Err(e) => Err(e),
+            },
+            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit::<K, V>() {
+                Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
+                Err(e) => Err(e),
+            },
         }
     }
-}
 
-impl BlockfileKey {
-    pub(super) fn get_size(&self) -> usize {
-        self.get_prefix_size() + self.key.get_size()
-    }
-
-    pub(super) fn get_prefix_size(&self) -> usize {
-        self.prefix.len()
-    }
-}
-
-#[derive(Clone, PartialEq, PartialOrd, Debug)]
-pub(crate) enum Key {
-    String(String),
-    Float(f32),
-    Bool(bool),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum KeyType {
-    String,
-    Float,
-    Bool,
-}
-
-impl Display for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub(crate) async fn set<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        &self,
+        prefix: &str,
+        key: K,
+        value: V,
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            Key::String(s) => write!(f, "{}", s),
-            Key::Float(fl) => write!(f, "{}", fl),
-            Key::Bool(b) => write!(f, "{}", b),
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.set(prefix, key, value),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.set(prefix, key, value).await,
         }
     }
-}
 
-impl BlockfileKey {
-    pub(crate) fn new(prefix: String, key: Key) -> Self {
-        BlockfileKey { prefix, key }
-    }
-}
-
-impl Debug for BlockfileKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "BlockfileKey(prefix: {}, key: {})",
-            self.prefix, self.key
-        )
-    }
-}
-
-impl Hash for BlockfileKey {
-    // Hash is only used for the HashMap implementation, which is a test/reference implementation
-    // Therefore this hash implementation is not used in production and allowed to be
-    // hacky
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.prefix.hash(state);
-    }
-}
-
-impl PartialEq for BlockfileKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.prefix == other.prefix && self.key == other.key
-    }
-}
-
-impl PartialOrd for BlockfileKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.prefix == other.prefix {
-            self.key.partial_cmp(&other.key)
-        } else {
-            self.prefix.partial_cmp(&other.prefix)
-        }
-    }
-}
-
-impl Eq for BlockfileKey {}
-
-impl Ord for BlockfileKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if self.prefix == other.prefix {
-            match self.key {
-                Key::String(ref s1) => match &other.key {
-                    Key::String(s2) => s1.cmp(s2),
-                    _ => panic!("Cannot compare string to float or bool"),
-                },
-                Key::Float(f1) => match &other.key {
-                    Key::Float(f2) => f1.partial_cmp(f2).unwrap(),
-                    _ => panic!("Cannot compare float to string or bool"),
-                },
-                Key::Bool(b1) => match &other.key {
-                    Key::Bool(b2) => b1.cmp(b2),
-                    _ => panic!("Cannot compare bool to string or float"),
-                },
-            }
-        } else {
-            self.prefix.cmp(&other.prefix)
-        }
-    }
-}
-
-// ===== Value Types =====
-
-#[derive(Debug)]
-pub(crate) enum Value {
-    Int32ArrayValue(Int32Array),
-    PositionalPostingListValue(PositionalPostingList),
-    StringValue(String),
-    Int32Value(i32),
-    RoaringBitmapValue(RoaringBitmap),
-}
-
-impl Clone for Value {
-    fn clone(&self) -> Self {
-        // TODO: make this correct for all types
+    pub(crate) async fn delete<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            Value::Int32ArrayValue(arr) => {
-                // An arrow array, if nested in a larger structure, when cloned may clone the entire larger buffer.
-                // This leads to a large memory overhead and also breaks our sizing assumptions. In order to work around this,
-                // we have to manuallly create a new array and copy the data over.
-
-                // Note that we use a vector here to avoid the overhead of the builder. The from() method for primitive
-                // types uses unsafe code to wrap the vecs underlying buffer in an arrow array.
-
-                // There are more performant ways to do this, but this is the most straightforward.
-                let mut new_vec = Vec::with_capacity(arr.len());
-                for i in 0..arr.len() {
-                    new_vec.push(arr.value(i));
-                }
-                let new_arr = Int32Array::from(new_vec);
-                Value::Int32ArrayValue(new_arr)
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.delete::<K, V>(prefix, key),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => {
+                writer.delete::<K, V>(prefix, key).await
             }
-            Value::PositionalPostingListValue(list) => {
-                Value::PositionalPostingListValue(list.clone())
-            }
-            Value::StringValue(s) => Value::StringValue(s.clone()),
-            Value::RoaringBitmapValue(bitmap) => Value::RoaringBitmapValue(bitmap.clone()),
-            Value::Int32Value(i) => Value::Int32Value(*i),
         }
     }
-}
 
-impl Value {
-    pub(crate) fn get_size(&self) -> usize {
+    pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
-            Value::Int32ArrayValue(arr) => arr.get_buffer_memory_size(),
-            Value::PositionalPostingListValue(list) => {
-                unimplemented!("Size of positional posting list")
-            }
-            Value::StringValue(s) => s.len(),
-            Value::RoaringBitmapValue(bitmap) => unimplemented!("Size of roaring bitmap"),
-            Value::Int32Value(_) => 4,
+            BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.id(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ValueType {
-    Int32Array,
-    PositionalPostingList,
-    RoaringBitmap,
-    String,
-    Int32,
+pub(crate) enum BlockfileFlusher {
+    MemoryBlockfileFlusher(MemoryBlockfileFlusher),
+    ArrowBlockfileFlusher(ArrowBlockfileFlusher),
 }
 
-pub(crate) trait Blockfile: BlockfileClone {
-    // ===== Transaction methods =====
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
+impl BlockfileFlusher {
+    pub(crate) async fn flush<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        self,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => Ok(()),
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.flush::<K, V>().await,
+        }
+    }
 
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>>;
-
-    // ===== Data methods =====
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>>;
-    fn get_by_prefix(
-        &self,
-        prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
-
-    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>>;
-
-    fn get_gt(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
-
-    fn get_lt(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
-
-    fn get_gte(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
-
-    fn get_lte(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>>;
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        match self {
+            BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.id(),
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
+        }
+    }
 }
 
-pub(crate) trait BlockfileClone {
-    fn clone_box(&self) -> Box<dyn Blockfile>;
+#[derive(Clone)]
+pub(crate) enum BlockfileReader<
+    'me,
+    K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,
+    V: Value + ArrowReadableValue<'me>,
+> {
+    MemoryBlockfileReader(MemoryBlockfileReader<K, V>),
+    ArrowBlockfileReader(ArrowBlockfileReader<'me, K, V>),
 }
 
-impl<T> BlockfileClone for T
-where
-    T: 'static + Blockfile + Clone,
+impl<
+        'referred_data,
+        K: Key
+            + Into<KeyWrapper>
+            + From<&'referred_data KeyWrapper>
+            + ArrowReadableKey<'referred_data>,
+        V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
+    > BlockfileReader<'referred_data, K, V>
 {
-    fn clone_box(&self) -> Box<dyn Blockfile> {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for Box<dyn Blockfile> {
-    fn clone(&self) -> Box<dyn Blockfile> {
-        self.clone_box()
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct HashMapBlockfile {
-    map: Arc<RwLock<HashMap<BlockfileKey, Value>>>,
-}
-
-impl HashMapBlockfile {
-    pub(super) fn new() -> Self {
-        Self {
-            map: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-}
-
-impl Blockfile for HashMapBlockfile {
-    fn get(&self, key: BlockfileKey) -> Result<Value, Box<dyn ChromaError>> {
-        match self.map.read().get(&key) {
-            Some(value) => Ok(value.clone()),
-            None => Err(Box::new(BlockfileError::NotFoundError)),
+    pub(crate) async fn get(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Result<V, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
         }
     }
 
-    fn get_by_prefix(
-        &self,
-        prefix: String,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
-        let mut result = Vec::new();
-        for (key, value) in self.map.read().iter() {
-            if key.prefix == prefix {
-                result.push((key.clone(), value.clone()));
-            }
-        }
-        Ok(result)
-    }
-
-    fn set(&mut self, key: BlockfileKey, value: Value) -> Result<(), Box<dyn ChromaError>> {
-        self.map.write().insert(key, value);
-        Ok(())
-    }
-
-    fn get_gt(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
-        let mut result = Vec::new();
-        for (k, v) in self.map.read().iter() {
-            if k.prefix == prefix && k.key > key {
-                result.push((k.clone(), v.clone()));
-            }
-        }
-        Ok(result)
-    }
-
-    fn get_gte(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
-        let mut result = Vec::new();
-        for (k, v) in self.map.read().iter() {
-            if k.prefix == prefix && k.key >= key {
-                result.push((k.clone(), v.clone()));
-            }
-        }
-        Ok(result)
-    }
-
-    fn get_lt(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
-        let mut result = Vec::new();
-        for (k, v) in self.map.read().iter() {
-            if k.prefix == prefix && k.key < key {
-                result.push((k.clone(), v.clone()));
-            }
-        }
-        Ok(result)
-    }
-
-    fn get_lte(
-        &self,
-        prefix: String,
-        key: Key,
-    ) -> Result<Vec<(BlockfileKey, Value)>, Box<dyn ChromaError>> {
-        let mut result = Vec::new();
-        for (k, v) in self.map.read().iter() {
-            if k.prefix == prefix && k.key <= key {
-                result.push((k.clone(), v.clone()));
-            }
-        }
-        Ok(result)
-    }
-
-    fn begin_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        Ok(())
-    }
-
-    fn commit_transaction(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::blockstore::positional_posting_list_value::PositionalPostingListBuilder;
-    use arrow::array::Array;
-
-    #[test]
-    fn test_blockfile_set_get() {
-        let mut blockfile = HashMapBlockfile::new();
-        let key = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key1".to_string()),
-        };
-        let _res = blockfile
-            .set(
-                key.clone(),
-                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
-            )
-            .unwrap();
-        let value = blockfile.get(key);
-        // downcast to string
-        match value.unwrap() {
-            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
-            _ => panic!("Value is not a string"),
+    pub(crate) async fn contains(&'referred_data self, prefix: &str, key: K) -> bool {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.contains(prefix, key),
         }
     }
 
-    #[test]
-    fn test_blockfile_get_by_prefix() {
-        let mut blockfile = HashMapBlockfile::new();
-        let key1 = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key1".to_string()),
-        };
-        let key2 = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key2".to_string()),
-        };
-        let _res = blockfile
-            .set(
-                key1.clone(),
-                Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3])),
-            )
-            .unwrap();
-        let _res = blockfile
-            .set(
-                key2.clone(),
-                Value::Int32ArrayValue(Int32Array::from(vec![4, 5, 6])),
-            )
-            .unwrap();
-        let values = blockfile.get_by_prefix("text_prefix".to_string()).unwrap();
-        assert_eq!(values.len(), 2);
-        // May return values in any order
-        match &values[0].1 {
-            Value::Int32ArrayValue(arr) => assert!(
-                arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
-            ),
-            _ => panic!("Value is not a string"),
-        }
-        match &values[1].1 {
-            Value::Int32ArrayValue(arr) => assert!(
-                arr == &Int32Array::from(vec![1, 2, 3]) || arr == &Int32Array::from(vec![4, 5, 6])
-            ),
-            _ => panic!("Value is not a string"),
-        }
-    }
-
-    #[test]
-    fn test_bool_key() {
-        let mut blockfile = HashMapBlockfile::new();
-        let key = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::Bool(true),
-        };
-        let _res = blockfile.set(
-            key.clone(),
-            Value::Int32ArrayValue(Int32Array::from(vec![1])),
-        );
-        let value = blockfile.get(key).unwrap();
-        match value {
-            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1])),
-            _ => panic!("Value is not an arrow int32 array"),
-        }
-    }
-
-    #[test]
-    fn test_storing_arrow_in_blockfile() {
-        let mut blockfile = HashMapBlockfile::new();
-        let key = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key1".to_string()),
-        };
-        let array = Value::Int32ArrayValue(Int32Array::from(vec![1, 2, 3]));
-        let _res = blockfile.set(key.clone(), array).unwrap();
-        let value = blockfile.get(key).unwrap();
-        match value {
-            Value::Int32ArrayValue(arr) => assert_eq!(arr, Int32Array::from(vec![1, 2, 3])),
-            _ => panic!("Value is not an arrow int32 array"),
-        }
-    }
-
-    #[test]
-    fn test_blockfile_get_gt() {
-        let mut blockfile = HashMapBlockfile::new();
-        let key1 = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key1".to_string()),
-        };
-        let key2 = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key2".to_string()),
-        };
-        let key3 = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("key3".to_string()),
-        };
-        let _res = blockfile.set(
-            key1.clone(),
-            Value::Int32ArrayValue(Int32Array::from(vec![1])),
-        );
-        let _res = blockfile.set(
-            key2.clone(),
-            Value::Int32ArrayValue(Int32Array::from(vec![2])),
-        );
-        let _res = blockfile.set(
-            key3.clone(),
-            Value::Int32ArrayValue(Int32Array::from(vec![3])),
-        );
-        let values = blockfile
-            .get_gt("text_prefix".to_string(), Key::String("key1".to_string()))
-            .unwrap();
-        assert_eq!(values.len(), 2);
-        match &values[0].0.key {
-            Key::String(s) => assert!(s == "key2" || s == "key3"),
-            _ => panic!("Key is not a string"),
-        }
-        match &values[1].0.key {
-            Key::String(s) => assert!(s == "key2" || s == "key3"),
-            _ => panic!("Key is not a string"),
-        }
-    }
-
-    #[test]
-    fn test_learning_arrow_struct() {
-        let mut builder = PositionalPostingListBuilder::new();
-        let _res = builder.add_doc_id_and_positions(1, vec![0]);
-        let _res = builder.add_doc_id_and_positions(2, vec![0, 1]);
-        let _res = builder.add_doc_id_and_positions(3, vec![0, 1, 2]);
-        let list_term_1 = builder.build();
-
-        // Example of how to use the struct array, which is one value for a term
-        let mut blockfile = HashMapBlockfile::new();
-        let key = BlockfileKey {
-            prefix: "text_prefix".to_string(),
-            key: Key::String("term1".to_string()),
-        };
-        let _res = blockfile
-            .set(key.clone(), Value::PositionalPostingListValue(list_term_1))
-            .unwrap();
-        let posting_list = blockfile.get(key).unwrap();
-        let posting_list = match posting_list {
-            Value::PositionalPostingListValue(arr) => arr,
-            _ => panic!("Value is not an arrow struct array"),
-        };
-
-        let ids = posting_list.get_doc_ids();
-        let ids = ids.as_any().downcast_ref::<Int32Array>().unwrap();
-        // find index of target id
-        let target_id = 2;
-
-        // imagine this is binary search instead of linear
-        for i in 0..ids.len() {
-            if ids.is_null(i) {
-                continue;
-            }
-            if ids.value(i) == target_id {
-                let pos_list = posting_list.get_positions_for_doc_id(target_id).unwrap();
-                let pos_list = pos_list.as_any().downcast_ref::<Int32Array>().unwrap();
-                assert_eq!(pos_list.len(), 2);
-                assert_eq!(pos_list.value(0), 0);
-                assert_eq!(pos_list.value(1), 1);
-                break;
+    pub(crate) async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                let count = reader.count().await;
+                match count {
+                    Ok(c) => {
+                        return Ok(c);
+                    }
+                    Err(_) => {
+                        return Err(Box::new(BlockfileError::BlockNotFound));
+                    }
+                }
             }
         }
     }
 
-    #[test]
-    fn test_roaring_bitmap_example() {
-        let mut bitmap = RoaringBitmap::new();
-        bitmap.insert(1);
-        bitmap.insert(2);
-        bitmap.insert(3);
-        let mut blockfile = HashMapBlockfile::new();
-        let key = BlockfileKey::new(
-            "text_prefix".to_string(),
-            Key::String("bitmap1".to_string()),
-        );
-        let _res = blockfile
-            .set(key.clone(), Value::RoaringBitmapValue(bitmap))
-            .unwrap();
-        let value = blockfile.get(key).unwrap();
-        match value {
-            Value::RoaringBitmapValue(bitmap) => {
-                assert!(bitmap.contains(1));
-                assert!(bitmap.contains(2));
-                assert!(bitmap.contains(3));
-            }
-            _ => panic!("Value is not a roaring bitmap"),
+    // TODO: make prefix &str
+    pub(crate) async fn get_by_prefix(
+        &'referred_data self,
+        prefix: &str,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_by_prefix(prefix).await,
+        }
+    }
+
+    pub(crate) async fn get_gt(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gt(prefix, key).await,
+        }
+    }
+
+    pub(crate) async fn get_lt(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lt(prefix, key).await,
+        }
+    }
+
+    pub(crate) async fn get_gte(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gte(prefix, key).await,
+        }
+    }
+
+    pub(crate) async fn get_lte(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lte(prefix, key).await,
+        }
+    }
+
+    pub(crate) async fn get_at_index(
+        &'referred_data self,
+        index: usize,
+    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_at_index(index),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_at_index(index).await,
+        }
+    }
+
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
         }
     }
 }

@@ -15,17 +15,20 @@ spec:
     spec:
       serviceAccountName: logservice-serviceaccount
       containers:
-        - command:
-            - "/bin/sh"
-            - "-c"
-            # This has to be one line to be passed into the `exec` env correctly. I truly could not tell you why.
-            - logservice logservice {{ range $k, $v := .Values.logService.flags }} --{{ $k }}={{ $v }} {{ end }}
-          env:
+        - env:
             {{ range .Values.logService.env }}
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
             {{ end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           image: "{{ .Values.logService.image.repository }}:{{ .Values.logService.image.tag }}"
           imagePullPolicy: IfNotPresent
           name: logservice
@@ -56,3 +59,27 @@ metadata:
   namespace: {{ .Values.namespace }}
 
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: logservice-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lease-watcher
+subjects:
+- kind: ServiceAccount
+  name: logservice-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: lease-watcher
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "create", "watch", "update", "delete"]

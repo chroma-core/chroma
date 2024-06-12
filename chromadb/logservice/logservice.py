@@ -1,18 +1,18 @@
 import sys
 
 import grpc
-
+import time
 from chromadb.ingest import (
     Producer,
     Consumer,
     ConsumerCallbackFn,
 )
 from chromadb.proto.convert import to_proto_submit
-from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, RecordLog
+from chromadb.proto.logservice_pb2 import PushLogsRequest, PullLogsRequest, LogRecord
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
-    SubmitEmbeddingRecord,
+    OperationRecord,
     SeqId,
 )
 from chromadb.config import System
@@ -22,7 +22,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from overrides import override
-from typing import Sequence, Optional, Dict, cast
+from typing import Sequence, Optional, cast
 from uuid import UUID
 import logging
 
@@ -67,31 +67,29 @@ class LogService(Producer, Consumer):
     def reset_state(self) -> None:
         super().reset_state()
 
+    @trace_method("LogService.delete_log", OpenTelemetryGranularity.ALL)
     @override
-    def create_topic(self, topic_name: str) -> None:
-        raise NotImplementedError("Not implemented")
-
-    @trace_method("LogService.delete_topic", OpenTelemetryGranularity.ALL)
-    @override
-    def delete_topic(self, topic_name: str) -> None:
+    def delete_log(self, collection_id: UUID) -> None:
         raise NotImplementedError("Not implemented")
 
     @trace_method("LogService.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
     def submit_embedding(
-        self, topic_name: str, embedding: SubmitEmbeddingRecord
+        self, collection_id: UUID, embedding: OperationRecord
     ) -> SeqId:
         if not self._running:
             raise RuntimeError("Component not running")
 
-        return self.submit_embeddings(topic_name, [embedding])[0]  # type: ignore
+        return self.submit_embeddings(collection_id, [embedding])[0]  # type: ignore
 
     @trace_method("LogService.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
     def submit_embeddings(
-        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+        self, collection_id: UUID, embeddings: Sequence[OperationRecord]
     ) -> Sequence[SeqId]:
-        logger.info(f"Submitting {len(embeddings)} embeddings to {topic_name}")
+        logger.info(
+            f"Submitting {len(embeddings)} embeddings to log for collection {collection_id}"
+        )
 
         if not self._running:
             raise RuntimeError("Component not running")
@@ -100,38 +98,30 @@ class LogService(Producer, Consumer):
             return []
 
         # push records to the log service
-        collection_id_to_embeddings: Dict[UUID, list[SubmitEmbeddingRecord]] = {}
-        for embedding in embeddings:
-            collection_id = cast(UUID, embedding.get("collection_id"))
-            if collection_id is None:
-                raise ValueError("collection_id is required")
-            if collection_id not in collection_id_to_embeddings:
-                collection_id_to_embeddings[collection_id] = []
-            collection_id_to_embeddings[collection_id].append(embedding)
-
         counts = []
-        for collection_id, records in collection_id_to_embeddings.items():
-            protos_to_submit = [to_proto_submit(record) for record in records]
-            counts.append(
-                self.push_logs(
-                    collection_id,
-                    cast(Sequence[SubmitEmbeddingRecord], protos_to_submit),
-                )
+        protos_to_submit = [to_proto_submit(record) for record in embeddings]
+        counts.append(
+            self.push_logs(
+                collection_id,
+                cast(Sequence[OperationRecord], protos_to_submit),
             )
+        )
 
+        # This returns counts, which is completely incorrect
+        # TODO: Fix this
         return counts
 
     @trace_method("LogService.subscribe", OpenTelemetryGranularity.ALL)
     @override
     def subscribe(
         self,
-        topic_name: str,
+        collection_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,
         id: Optional[UUID] = None,
     ) -> UUID:
-        logger.info(f"Subscribing to {topic_name}, noop for logservice")
+        logger.info(f"Subscribing to log for {collection_id}, noop for logservice")
         return UUID(int=0)
 
     @trace_method("LogService.unsubscribe", OpenTelemetryGranularity.ALL)
@@ -150,22 +140,21 @@ class LogService(Producer, Consumer):
     @property
     @override
     def max_batch_size(self) -> int:
-        return sys.maxsize
+        return 25000
 
-    def push_logs(
-        self, collection_id: UUID, records: Sequence[SubmitEmbeddingRecord]
-    ) -> int:
+    def push_logs(self, collection_id: UUID, records: Sequence[OperationRecord]) -> int:
         request = PushLogsRequest(collection_id=str(collection_id), records=records)
         response = self._log_service_stub.PushLogs(request)
         return response.record_count  # type: ignore
 
     def pull_logs(
-        self, collection_id: UUID, start_id: int, batch_size: int
-    ) -> Sequence[RecordLog]:
+        self, collection_id: UUID, start_offset: int, batch_size: int
+    ) -> Sequence[LogRecord]:
         request = PullLogsRequest(
             collection_id=str(collection_id),
-            start_from_id=start_id,
+            start_from_offset=start_offset,
             batch_size=batch_size,
+            end_timestamp=time.time_ns(),
         )
         response = self._log_service_stub.PullLogs(request)
         return response.records  # type: ignore

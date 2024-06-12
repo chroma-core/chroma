@@ -2,6 +2,11 @@ package grpc
 
 import (
 	"context"
+	"errors"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/model"
@@ -17,10 +22,11 @@ func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDa
 	}
 	_, err := s.coordinator.CreateDatabase(ctx, createDatabase)
 	if err != nil {
-		if err == common.ErrDatabaseUniqueConstraintViolation {
+		if errors.Is(err, common.ErrDatabaseUniqueConstraintViolation) {
 			res.Status = failResponseWithError(err, 409)
-			return res, nil
+			return res, err
 		}
+
 		res.Status = failResponseWithError(err, errorCode)
 		return res, nil
 	}
@@ -87,5 +93,31 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 		Name: tenant.Name,
 	}
 	res.Status = setResponseStatus(successCode)
+	return res, nil
+}
+
+func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordinatorpb.SetLastCompactionTimeForTenantRequest) (*emptypb.Empty, error) {
+	err := s.coordinator.SetTenantLastCompactionTime(ctx, req.TenantLastCompactionTime.TenantId, req.TenantLastCompactionTime.LastCompactionTime)
+	if err != nil {
+		log.Error("error SetTenantLastCompactionTime", zap.Any("request", req.TenantLastCompactionTime), zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordinatorpb.GetLastCompactionTimeForTenantRequest) (*coordinatorpb.GetLastCompactionTimeForTenantResponse, error) {
+	res := &coordinatorpb.GetLastCompactionTimeForTenantResponse{}
+	tenantIDs := req.TenantId
+	tenants, err := s.coordinator.GetTenantsLastCompactionTime(ctx, tenantIDs)
+	if err != nil {
+		log.Error("error GetLastCompactionTimeForTenant", zap.Any("tenantIDs", tenantIDs), zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	for _, tenant := range tenants {
+		res.TenantLastCompactionTime = append(res.TenantLastCompactionTime, &coordinatorpb.TenantLastCompactionTime{
+			TenantId:           tenant.ID,
+			LastCompactionTime: tenant.LastCompactionTime,
+		})
+	}
 	return res, nil
 }

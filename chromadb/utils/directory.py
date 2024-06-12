@@ -1,5 +1,6 @@
 import os
 
+
 def get_directory_size(directory: str) -> int:
     """
     Calculate the total size of the directory by walking through each file.

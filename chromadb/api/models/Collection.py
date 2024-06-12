@@ -1,11 +1,7 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
-
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
 import numpy as np
-from pydantic import BaseModel, PrivateAttr
-
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
-
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -46,6 +42,12 @@ from chromadb.api.types import (
     validate_embeddings,
     validate_embedding_function,
 )
+
+# TODO: We should rename the types in chromadb.types to be Models where
+# appropriate. This will help to distinguish between manipulation objects
+# which are essentially API views. And the actual data models which are
+# stored / retrieved / transmitted.
+from chromadb.types import Collection as CollectionModel
 import logging
 
 logger = logging.getLogger(__name__)
@@ -54,33 +56,25 @@ if TYPE_CHECKING:
     from chromadb.api import ServerAPI
 
 
-class Collection(BaseModel):
-    name: str
-    id: UUID
-    metadata: Optional[CollectionMetadata] = None
-    tenant: Optional[str] = None
-    database: Optional[str] = None
-    _client: "ServerAPI" = PrivateAttr()
-    _embedding_function: Optional[EmbeddingFunction[Embeddable]] = PrivateAttr()
-    _data_loader: Optional[DataLoader[Loadable]] = PrivateAttr()
+class Collection:
+    _model: CollectionModel
+    _client: "ServerAPI"
+    _embedding_function: Optional[EmbeddingFunction[Embeddable]]
+    _data_loader: Optional[DataLoader[Loadable]]
 
     def __init__(
         self,
         client: "ServerAPI",
-        name: str,
-        id: UUID,
+        model: CollectionModel,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-        tenant: Optional[str] = None,
-        database: Optional[str] = None,
-        metadata: Optional[CollectionMetadata] = None,
     ):
-        super().__init__(
-            name=name, metadata=metadata, id=id, tenant=tenant, database=database
-        )
+        """Initializes a new instance of the Collection class."""
+
         self._client = client
+        self._model = model
 
         # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
         if embedding_function is not None:
@@ -91,6 +85,51 @@ class Collection(BaseModel):
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name})"
+
+    # Expose the model properties as read-only properties on the Collection class
+
+    @property
+    def id(self) -> UUID:
+        return self._model["id"]
+
+    @property
+    def name(self) -> str:
+        return self._model["name"]
+
+    @property
+    def metadata(self) -> CollectionMetadata:
+        return cast(CollectionMetadata, self._model["metadata"])
+
+    @property
+    def tenant(self) -> str:
+        return self._model["tenant"]
+
+    @property
+    def database(self) -> str:
+        return self._model["database"]
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Collection):
+            return False
+        id_match = self.id == other.id
+        name_match = self.name == other.name
+        metadata_match = self.metadata == other.metadata
+        tenant_match = self.tenant == other.tenant
+        database_match = self.database == other.database
+        embedding_function_match = self._embedding_function == other._embedding_function
+        data_loader_match = self._data_loader == other._data_loader
+        return (
+            id_match
+            and name_match
+            and metadata_match
+            and tenant_match
+            and database_match
+            and embedding_function_match
+            and data_loader_match
+        )
+
+    def get_model(self) -> CollectionModel:
+        return self._model
 
     def count(self) -> int:
         """The total number of embeddings added to the database
@@ -382,13 +421,17 @@ class Collection(BaseModel):
             validate_metadata(metadata)
             if "hnsw:space" in metadata:
                 raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently.")
+                    "Changing the distance function of a collection once it is created is not supported currently."
+                )
 
+        # Note there is a race condition here where the metadata can be updated
+        # but another thread sees the cached local metadata.
+        # TODO: fixme
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
-            self.name = name
+            self._model["name"] = name
         if metadata:
-            self.metadata = metadata
+            self._model["metadata"] = metadata
 
     def update(
         self,
@@ -628,6 +671,6 @@ class Collection(BaseModel):
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
-                "https://docs.trychroma.com/embeddings"
+                "https://docs.trychroma.com/guides/embeddings"
             )
         return self._embedding_function(input=input)

@@ -3,10 +3,10 @@ package grpc
 import (
 	"context"
 	"errors"
-	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"time"
 
-	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
+
 	"github.com/chroma-core/chroma/go/pkg/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dao"
@@ -36,21 +36,23 @@ type Config struct {
 	NotifierProvider          string
 	NotificationTopic         string
 
-	// Pulsar config
-	PulsarAdminURL  string
-	PulsarURL       string
-	PulsarTenant    string
-	PulsarNamespace string
-
 	// Kubernetes config
-	KubernetesNamespace  string
-	WorkerMemberlistName string
+	KubernetesNamespace string
 
-	// Assignment policy config can be "simple" or "rendezvous"
-	AssignmentPolicy string
+	// Memberlist config
+	ReconcileInterval time.Duration
+	ReconcileCount    uint
+
+	// Query service memberlist config
+	QueryServiceMemberlistName string
+	QueryServicePodLabel       string
 
 	// Watcher config
 	WatchInterval time.Duration
+
+	// Compaction service memberlist config
+	CompactionServiceMemberlistName string
+	CompactionServicePodLabel       string
 
 	// Config for testing
 	Testing bool
@@ -88,22 +90,6 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		healthServer: health.NewServer(),
 	}
 
-	var assignmentPolicy coordinator.CollectionAssignmentPolicy
-	if config.AssignmentPolicy == "simple" {
-		log.Info("Using simple assignment policy")
-		assignmentPolicy = coordinator.NewSimpleAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
-	} else if config.AssignmentPolicy == "rendezvous" {
-		log.Info("Using rendezvous assignment policy")
-		//err := utils.CreateTopics(config.PulsarAdminURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
-		//if err != nil {
-		//	log.Error("Failed to create topics", zap.Error(err))
-		//	return nil, err
-		//}
-		assignmentPolicy = coordinator.NewRendezvousAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
-	} else {
-		return nil, errors.New("invalid assignment policy, only simple and rendezvous are supported")
-	}
-
 	var notificationStore notification.NotificationStore
 	if config.NotificationStoreProvider == "memory" {
 		log.Info("Using memory notification store")
@@ -117,46 +103,39 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	}
 
 	var notifier notification.Notifier
-	var client pulsar.Client
-	var producer pulsar.Producer
 	if config.NotifierProvider == "memory" {
 		log.Info("Using memory notifier")
 		notifier = notification.NewMemoryNotifier()
-	} else if config.NotifierProvider == "pulsar" {
-		log.Info("Using pulsar notifier")
-		pulsarNotifier, pulsarClient, pulsarProducer, err := createPulsarNotifer(config.PulsarURL, config.NotificationTopic)
-		notifier = pulsarNotifier
-		client = pulsarClient
-		producer = pulsarProducer
-		if err != nil {
-			log.Error("Failed to create pulsar notifier", zap.Error(err))
-			return nil, err
-		}
 	} else {
-		return nil, errors.New("invalid notifier provider, only memory and pulsar are supported")
+		return nil, errors.New("invalid notifier provider, only memory are supported")
 	}
-
-	if client != nil {
-		defer client.Close()
-	}
-	if producer != nil {
-		defer producer.Close()
-	}
-
-	coordinator, err := coordinator.NewCoordinator(ctx, assignmentPolicy, db, notificationStore, notifier)
+	coordinator, err := coordinator.NewCoordinator(ctx, db, notificationStore, notifier)
 	if err != nil {
 		return nil, err
 	}
 	s.coordinator = coordinator
 	s.coordinator.Start()
 	if !config.Testing {
-		memberlist_manager, err := createMemberlistManager(config)
+		namespace := config.KubernetesNamespace
+		// Create memberlist manager for query service
+		queryMemberlistManager, err := createMemberlistManager(namespace, config.QueryServiceMemberlistName, config.QueryServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
 		if err != nil {
 			return nil, err
 		}
 
-		// Start the memberlist manager
-		err = memberlist_manager.Start()
+		// Create memberlist manager for compaction service
+		compactionMemberlistManager, err := createMemberlistManager(namespace, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+		if err != nil {
+			return nil, err
+		}
+
+		// Start the memberlist manager for query service
+		err = queryMemberlistManager.Start()
+		if err != nil {
+			return nil, err
+		}
+		// Start the memberlist manager for compaction service
+		err = compactionMemberlistManager.Start()
 		if err != nil {
 			return nil, err
 		}
@@ -171,11 +150,8 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	return s, nil
 }
 
-func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManager, error) {
-	// TODO: Make this configuration
-	log.Info("Starting memberlist manager")
-	memberlist_name := config.WorkerMemberlistName
-	namespace := config.KubernetesNamespace
+func createMemberlistManager(namespace string, memberlistName string, podLabel string, watchInterval time.Duration, reconcileInterval time.Duration, reconcileCount uint) (*memberlist_manager.MemberlistManager, error) {
+	log.Info("Creating memberlist manager for {}", zap.String("memberlist", memberlistName))
 	clientset, err := utils.GetKubernetesInterface()
 	if err != nil {
 		return nil, err
@@ -184,31 +160,12 @@ func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManag
 	if err != nil {
 		return nil, err
 	}
-	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker", config.WatchInterval)
-	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
+	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, podLabel, watchInterval)
+	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
 	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
+	memberlist_manager.SetReconcileInterval(reconcileInterval)
+	memberlist_manager.SetReconcileCount(reconcileCount)
 	return memberlist_manager, nil
-}
-
-func createPulsarNotifer(pulsarURL string, notificationTopic string) (*notification.PulsarNotifier, pulsar.Client, pulsar.Producer, error) {
-	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL: pulsarURL,
-	})
-	if err != nil {
-		log.Error("Failed to create pulsar client", zap.Error(err))
-		return nil, nil, nil, err
-	}
-
-	producer, err := client.CreateProducer(pulsar.ProducerOptions{
-		Topic: notificationTopic,
-	})
-	if err != nil {
-		log.Error("Failed to create producer", zap.Error(err))
-		return nil, nil, nil, err
-	}
-
-	notifier := notification.NewPulsarNotifier(producer)
-	return notifier, client, producer, nil
 }
 
 func (s *Server) Close() error {

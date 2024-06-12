@@ -14,6 +14,11 @@ func (s *collectionMetadataDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.CollectionMetadata{}).Error
 }
 
+func (s *collectionMetadataDb) GetForCollection(collectionID string) (metadata []dbmodel.CollectionMetadata, err error) {
+	err = s.db.Where("collection_id = ?", collectionID).Find(&metadata).Error
+	return
+}
+
 func (s *collectionMetadataDb) DeleteByCollectionID(collectionID string) (int, error) {
 	var metadata []dbmodel.CollectionMetadata
 	err := s.db.Clauses(clause.Returning{}).Where("collection_id = ?", collectionID).Delete(&metadata).Error

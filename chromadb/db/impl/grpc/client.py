@@ -28,7 +28,6 @@ from chromadb.proto.coordinator_pb2 import (
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
@@ -145,14 +144,12 @@ class GrpcSysDB(SysDB):
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        topic: Optional[str] = None,
         collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         request = GetSegmentsRequest(
             id=id.hex if id else None,
             type=type,
             scope=to_proto_segment_scope(scope) if scope else None,
-            topic=topic,
             collection=collection.hex if collection else None,
         )
         response = self._sys_db_stub.GetSegments(request)
@@ -166,14 +163,9 @@ class GrpcSysDB(SysDB):
     def update_segment(
         self,
         id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
         collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_topic = None
-        if topic != Unspecified():
-            write_topic = cast(Union[str, None], topic)
-
         write_collection = None
         if collection != Unspecified():
             write_collection = cast(Union[UUID, None], collection)
@@ -184,16 +176,11 @@ class GrpcSysDB(SysDB):
 
         request = UpdateSegmentRequest(
             id=id.hex,
-            topic=write_topic,
             collection=write_collection.hex if write_collection else None,
             metadata=to_proto_update_metadata(write_metadata)
             if write_metadata
             else None,
         )
-
-        if topic is None:
-            request.ClearField("topic")
-            request.reset_topic = True
 
         if collection is None:
             request.ClearField("collection")
@@ -252,7 +239,6 @@ class GrpcSysDB(SysDB):
     def get_collections(
         self,
         id: Optional[UUID] = None,
-        topic: Optional[str] = None,
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -260,13 +246,32 @@ class GrpcSysDB(SysDB):
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         # TODO: implement limit and offset in the gRPC service
-        request = GetCollectionsRequest(
-            id=id.hex if id else None,
-            topic=topic,
-            name=name,
-            tenant=tenant,
-            database=database,
-        )
+        request = None
+        if id is not None:
+            request = GetCollectionsRequest(
+                id=id.hex,
+                limit=limit,
+                offset=offset,
+            )
+        if name is not None:
+            if tenant is None and database is None:
+                raise ValueError(
+                    "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
+                )
+            request = GetCollectionsRequest(
+                name=name,
+                tenant=tenant,
+                database=database,
+                limit=limit,
+                offset=offset,
+            )
+        if id is None and name is None:
+            request = GetCollectionsRequest(
+                tenant=tenant,
+                database=database,
+                limit=limit,
+                offset=offset,
+            )
         response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
         results: List[Collection] = []
         for collection in response.collections:
@@ -277,15 +282,10 @@ class GrpcSysDB(SysDB):
     def update_collection(
         self,
         id: UUID,
-        topic: OptionalArgument[str] = Unspecified(),
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_topic = None
-        if topic != Unspecified():
-            write_topic = cast(str, topic)
-
         write_name = None
         if name != Unspecified():
             write_name = cast(str, name)
@@ -300,7 +300,6 @@ class GrpcSysDB(SysDB):
 
         request = UpdateCollectionRequest(
             id=id.hex,
-            topic=write_topic,
             name=write_name,
             dimension=write_dimension,
             metadata=to_proto_update_metadata(write_metadata)
@@ -314,6 +313,8 @@ class GrpcSysDB(SysDB):
         response = self._sys_db_stub.UpdateCollection(request)
         if response.status.code == 404:
             raise NotFoundError()
+        if response.status.code == 409:
+            raise UniqueConstraintError()
 
     def reset_and_wait_for_ready(self) -> None:
         self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)

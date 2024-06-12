@@ -7,7 +7,7 @@ import "chromadb/proto/chroma.proto";
 
 message PushLogsRequest {
   string collection_id = 1;
-  repeated SubmitEmbeddingRecord records = 2;
+  repeated OperationRecord records = 2;
 }
 
 message PushLogsResponse {
@@ -16,24 +16,27 @@ message PushLogsResponse {
 
 message PullLogsRequest {
   string collection_id = 1;
-  int64 start_from_id = 2;
+  int64 start_from_offset = 2;
   int32 batch_size = 3;
+  int64 end_timestamp = 4;
 }
 
-message RecordLog {
-  int64 log_id = 1;
-  SubmitEmbeddingRecord record = 2;
+// Represents an operation from the log
+message LogRecord {
+  int64 log_offset = 1;
+  OperationRecord record = 2;
 }
 
 message PullLogsResponse {
-  repeated RecordLog records = 1;
+  repeated LogRecord records = 1;
 }
 
 message CollectionInfo {
   string collection_id = 1;
-  // The first log id of the collection that needs to be compacted
-  int64 first_log_id = 2;
-  int64 first_log_id_ts = 3;
+  // The log offset of the first log entry of the collection that needs to be compacted
+  int64 first_log_offset = 2;
+  // The timestamp of the first log entry of the collection that needs to be compacted
+  int64 first_log_ts = 3;
 }
 
 message GetAllCollectionInfoToCompactRequest {
@@ -44,8 +47,18 @@ message GetAllCollectionInfoToCompactResponse {
   repeated CollectionInfo all_collection_info = 1;
 }
 
+message UpdateCollectionLogOffsetRequest {
+  string collection_id = 1;
+  int64 log_offset = 2;
+}
+
+message UpdateCollectionLogOffsetResponse {
+  // Empty
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
+  rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
 }

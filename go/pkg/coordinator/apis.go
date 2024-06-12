@@ -2,7 +2,9 @@ package coordinator
 
 import (
 	"context"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
@@ -16,17 +18,20 @@ type ICoordinator interface {
 	common.Component
 	ResetState(ctx context.Context) error
 	CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error)
-	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, dataName string) ([]*model.Collection, error)
+	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, dataName string, limit *int32, offset *int32) ([]*model.Collection, error)
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
 	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
 	CreateSegment(ctx context.Context, createSegment *model.CreateSegment) error
-	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error)
+	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error)
 	DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
 	UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error)
 	CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase) (*model.Database, error)
 	GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
 	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
+	SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error
+	GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error)
+	FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error)
 }
 
 func (s *Coordinator) ResetState(ctx context.Context) error {
@@ -66,12 +71,7 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 }
 
 func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error) {
-	collectionTopic, err := s.assignCollection(createCollection.ID)
-	if err != nil {
-		return nil, err
-	}
-	createCollection.Topic = collectionTopic
-	log.Info("apis create collection", zap.Any("collection", createCollection))
+	log.Info("create collection", zap.Any("createCollection", createCollection))
 	collection, err := s.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)
 	if err != nil {
 		return nil, err
@@ -79,8 +79,8 @@ func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *mo
 	return collection, nil
 }
 
-func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, databaseName string) ([]*model.Collection, error) {
-	return s.catalog.GetCollections(ctx, collectionID, collectionName, collectionTopic, tenantID, databaseName)
+func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
+	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
 
 func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
@@ -102,8 +102,8 @@ func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSe
 	return nil
 }
 
-func (s *Coordinator) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error) {
-	return s.catalog.GetSegments(ctx, segmentID, segmentType, scope, topic, collectionID)
+func (s *Coordinator) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error) {
+	return s.catalog.GetSegments(ctx, segmentID, segmentType, scope, collectionID)
 }
 
 func (s *Coordinator) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
@@ -155,4 +155,16 @@ func verifySegmentMetadata(metadata *model.SegmentMetadata[model.SegmentMetadata
 		}
 	}
 	return nil
+}
+
+func (s *Coordinator) SetTenantLastCompactionTime(ctx context.Context, tenantID string, lastCompactionTime int64) error {
+	return s.catalog.SetTenantLastCompactionTime(ctx, tenantID, lastCompactionTime)
+}
+
+func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
+	return s.catalog.GetTenantsLastCompactionTime(ctx, tenantIDs)
+}
+
+func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }

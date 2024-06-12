@@ -1,73 +1,80 @@
-use super::types::Blockfile;
-use super::types::{HashMapBlockfile, KeyType, ValueType};
+use super::arrow::provider::ArrowBlockfileProvider;
+use super::arrow::types::{
+    ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
+};
+use super::key::KeyWrapper;
+use super::memory::provider::HashMapBlockfileProvider;
+use super::memory::storage::{Readable, Writeable};
+use super::types::BlockfileWriter;
+use super::{BlockfileReader, Key, Value};
 use crate::errors::ChromaError;
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
+use crate::storage::Storage;
+use core::fmt::{self, Debug};
+use std::fmt::Formatter;
 use thiserror::Error;
 
-// =================== Interfaces ===================
-
-/// A trait for opening and creating blockfiles
-/// # Methods
-/// - new: Create a new instance of the blockfile provider. A blockfile provider returns a Box<dyn Blockfile> of a given type.
-/// Currently, we support HashMap and Arrow-backed blockfiles.
-/// - open: Open a blockfile at the given path, returning a Box<dyn Blockfile> and error if it does not exist
-/// - create: Create a new blockfile at the given path, returning a Box<dyn Blockfile> and error if it already exists
-/// # Example
-/// ```ignore (TODO: This example is not runnable from outside the crate it seems. Fix this. Ignore for now.)
-/// use crate::blockstore::provider::HashMapBlockfileProvider;
-/// use crate::blockstore::types::{KeyType, ValueType};
-/// let mut provider = HashMapBlockfileProvider::new();
-/// let blockfile = provider.create("test", KeyType::String, ValueType::Int32Array);
-/// ```
-pub(crate) trait BlockfileProvider {
-    fn new() -> Self;
-    fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>>;
-    fn create(
-        &mut self,
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Box<dyn Blockfile>, Box<CreateError>>;
+#[derive(Clone)]
+pub(crate) enum BlockfileProvider {
+    HashMapBlockfileProvider(HashMapBlockfileProvider),
+    ArrowBlockfileProvider(ArrowBlockfileProvider),
 }
 
-/// A BlockFileProvider that creates HashMapBlockfiles (in-memory blockfiles used for testing).
-/// It bookkeeps the blockfiles locally.
-/// # Note
-/// This is not intended for production use.
-pub(crate) struct HashMapBlockfileProvider {
-    files: Arc<RwLock<HashMap<String, Box<dyn Blockfile>>>>,
-}
-
-impl BlockfileProvider for HashMapBlockfileProvider {
-    fn new() -> Self {
-        Self {
-            files: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    fn open(&self, path: &str) -> Result<Box<dyn Blockfile>, Box<OpenError>> {
-        match self.files.read().get(path) {
-            Some(file) => Ok(file.clone()),
-            None => Err(Box::new(OpenError::NotFound)),
-        }
-    }
-
-    fn create(
-        &mut self,
-        path: &str,
-        key_type: KeyType,
-        value_type: ValueType,
-    ) -> Result<Box<dyn Blockfile>, Box<CreateError>> {
-        let mut files = self.files.write();
-        match files.get(path) {
-            Some(_) => Err(Box::new(CreateError::AlreadyExists)),
-            None => {
-                let blockfile = Box::new(HashMapBlockfile::new());
-                files.insert(path.to_string(), blockfile);
-                Ok(files.get(path).unwrap().clone())
+impl Debug for BlockfileProvider {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+                write!(f, "HashMapBlockfileProvider")
             }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                write!(f, "ArrowBlockfileProvider")
+            }
+        }
+    }
+}
+
+impl BlockfileProvider {
+    pub(crate) fn new_memory() -> Self {
+        BlockfileProvider::HashMapBlockfileProvider(HashMapBlockfileProvider::new())
+    }
+
+    pub(crate) fn new_arrow(storage: Storage) -> Self {
+        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(storage))
+    }
+
+    pub(crate) async fn open<
+        'new,
+        K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
+        V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
+    >(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.open::<K, V>(id),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.open::<K, V>(id).await,
+        }
+    }
+
+    pub(crate) fn create<
+        'new,
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
+        V: Value + Writeable + ArrowWriteableValue + 'new,
+    >(
+        &self,
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create::<K, V>(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.create::<K, V>(),
+        }
+    }
+
+    pub(crate) async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork::<K, V>(id),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.fork::<K, V>(id).await,
         }
     }
 }

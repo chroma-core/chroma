@@ -17,7 +17,7 @@ pub(crate) enum ComponentState {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum ComponentRuntime {
-    Global,
+    Inherit,
     Dedicated,
 }
 
@@ -30,12 +30,14 @@ pub(crate) enum ComponentRuntime {
 /// # Methods
 /// - queue_size: The size of the queue to use for the component before it starts dropping messages
 /// - on_start: Called when the component is started
+#[async_trait]
 pub(crate) trait Component: Send + Sized + Debug + 'static {
+    fn get_name() -> &'static str;
     fn queue_size(&self) -> usize;
     fn runtime() -> ComponentRuntime {
-        ComponentRuntime::Global
+        ComponentRuntime::Inherit
     }
-    fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -46,7 +48,11 @@ pub(crate) trait Handler<M>
 where
     Self: Component + Sized + 'static,
 {
-    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ();
+    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ()
+    // The need for this lifetime bound comes from the async_trait macro when we need generic lifetimes in our message type
+    // https://stackoverflow.com/questions/69560112/how-to-use-rust-async-trait-generic-to-a-lifetime-parameter
+    where
+        M: 'async_trait;
 }
 
 /// A stream handler is a component that can process messages of a given type from a stream.
@@ -140,10 +146,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::stream;
-    use std::sync::Arc;
-    use std::time::Duration;
-
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[derive(Debug)]
     struct TestComponent {
@@ -168,12 +172,17 @@ mod tests {
     }
     impl StreamHandler<usize> for TestComponent {}
 
+    #[async_trait]
     impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
         fn queue_size(&self) -> usize {
             self.queue_size
         }
 
-        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }
@@ -181,13 +190,13 @@ mod tests {
 
     #[tokio::test]
     async fn it_can_work() {
-        let mut system = System::new();
+        let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let mut handle = system.start_component(component);
-        handle.sender.send(1).await.unwrap();
-        handle.sender.send(2).await.unwrap();
-        handle.sender.send(3).await.unwrap();
+        handle.sender.send(1, None).await.unwrap();
+        handle.sender.send(2, None).await.unwrap();
+        handle.sender.send(3, None).await.unwrap();
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         // With the streaming data and the messages we should have 12
@@ -197,7 +206,7 @@ mod tests {
         tokio::task::yield_now().await;
         // Expect the component to be stopped
         assert_eq!(*handle.state(), ComponentState::Stopped);
-        let res = handle.sender.send(4).await;
+        let res = handle.sender.send(4, None).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());
     }

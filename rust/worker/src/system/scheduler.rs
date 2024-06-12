@@ -1,21 +1,19 @@
 use parking_lot::RwLock;
 use std::fmt::Debug;
-use std::num;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{executor, Component, ComponentContext, ComponentHandle, Handler, StreamHandler};
-use super::{
-    executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
-};
+use super::sender::Sender;
+use super::{Component, ComponentContext, Handler};
 
+#[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
     join_handle: Option<tokio::task::JoinHandle<()>>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Scheduler {
     handles: Arc<RwLock<Vec<SchedulerTaskHandle>>>,
 }
@@ -44,7 +42,7 @@ impl Scheduler {
                     return;
                 }
                 _ = tokio::time::sleep(duration) => {
-                    match sender.send(message).await {
+                    match sender.send(message, None).await {
                         Ok(_) => {
                             return;
                         },
@@ -85,7 +83,7 @@ impl Scheduler {
                         return;
                     }
                     _ = tokio::time::sleep(duration) => {
-                        match sender.send(message.clone()).await {
+                        match sender.send(message.clone(), None).await {
                             Ok(_) => {
                             },
                             Err(e) => {
@@ -141,6 +139,7 @@ impl Scheduler {
 
 mod tests {
     use super::*;
+    use crate::system::System;
     use async_trait::async_trait;
     use std::sync::Arc;
     use std::time::Duration;
@@ -175,12 +174,17 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
         fn queue_size(&self) -> usize {
             self.queue_size
         }
 
-        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
                 .schedule(ctx.sender.clone(), ScheduleMessage {}, duration, ctx);
@@ -198,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schedule() {
-        let mut system = System::new();
+        let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let _handle = system.start_component(component);

@@ -64,7 +64,6 @@ message GetSegmentsRequest {
   optional string id = 1;
   optional string type = 2;
   optional SegmentScope scope = 3;
-  optional string topic = 4;
   optional string collection = 5; // Collection ID
 }
 
@@ -76,10 +75,6 @@ message GetSegmentsResponse {
 
 message UpdateSegmentRequest {
   string id = 1;
-  oneof topic_update {
-    string topic = 2;
-    bool reset_topic = 3;
-  }
   oneof collection_update {
     string collection = 4;
     bool reset_collection = 5;
@@ -123,9 +118,10 @@ message DeleteCollectionResponse {
 message GetCollectionsRequest {
   optional string id = 1;
   optional string name = 2;
-  optional string topic = 3;
   string tenant = 4;
   string database = 5;
+  optional int32 limit = 6;
+  optional int32 offset = 7;
 }
 
 message GetCollectionsResponse {
@@ -135,7 +131,6 @@ message GetCollectionsResponse {
 
 message UpdateCollectionRequest {
   string id = 1;
-  optional string topic = 2;
   optional string name = 3;
   optional int32 dimension = 4;
   oneof metadata_update {
@@ -159,6 +154,42 @@ message ResetStateResponse {
   Status status = 1;
 }
 
+message GetLastCompactionTimeForTenantRequest {
+  repeated string tenant_id = 1;
+}
+
+message TenantLastCompactionTime {
+  string tenant_id = 1;
+  int64 last_compaction_time = 2;
+}
+
+message GetLastCompactionTimeForTenantResponse {
+  repeated TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
+message SetLastCompactionTimeForTenantRequest {
+  TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
+message FlushSegmentCompactionInfo {
+  string segment_id = 1;
+  map<string,FilePaths> file_paths = 2;
+}
+
+message FlushCollectionCompactionRequest {
+  string tenant_id = 1;
+  string collection_id = 2;
+  int64 log_position = 3;
+  int32 collection_version = 4;
+  repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
+}
+
+message FlushCollectionCompactionResponse {
+  string collection_id = 1;
+  int32 collection_version = 2;
+  int64 last_compaction_time = 3;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -173,4 +204,7 @@ service SysDB {
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
+  rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
+  rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
+  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
 }
