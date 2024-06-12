@@ -20,18 +20,6 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
-    maybe_cast_one_to_many_ids,
-    maybe_cast_one_to_many_embedding,
-    maybe_cast_one_to_many_document,
-    maybe_cast_one_to_many_image,
-    maybe_cast_one_to_many_uri,
-    validate_ids,
-    validate_include,
-    validate_metadata,
-    validate_where,
-    validate_where_document,
-    validate_n_results,
-    validate_embeddings,
 )
 
 from .CollectionCommon import CollectionCommon
@@ -80,29 +68,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embeddings,
             metadatas,
             documents,
-            images,
             uris,
-        ) = self._validate_embedding_set(
+        ) = self._validate_and_prepare_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
-
-        # We need to compute the embeddings if they're not provided
-        if embeddings is None:
-            # At this point, we know that one of documents or images are provided from the validation above
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
-            else:
-                if uris is None:
-                    raise ValueError(
-                        "You must provide either embeddings, documents, images, or uris."
-                    )
-                if self._data_loader is None:
-                    raise ValueError(
-                        "You must set a data loader on the collection if loading from URIs."
-                    )
-                embeddings = self._embed(self._data_loader(uris))
 
         await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
@@ -139,21 +108,12 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             GetResult: A GetResult object containing the results.
 
         """
-        valid_where = validate_where(where) if where else None
-        valid_where_document = (
-            validate_where_document(where_document) if where_document else None
-        )
-        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
-        valid_include = validate_include(include, allow_distances=False)
-
-        if "data" in include and self._data_loader is None:
-            raise ValueError(
-                "You must set a data loader on the collection if loading from URIs."
-            )
-
-        # We need to include uris in the result from the API to load datas
-        if "data" in include and "uris" not in include:
-            valid_include.append("uris")
+        (
+            valid_ids,
+            valid_where,
+            valid_where_document,
+            valid_include,
+        ) = self._validate_and_prepare_get_request(ids, where, where_document, include)
 
         get_results = await self._client._get(
             self.id,
@@ -166,18 +126,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             include=valid_include,
         )
 
-        if (
-            "data" in include
-            and self._data_loader is not None
-            and get_results["uris"] is not None
-        ):
-            get_results["data"] = self._data_loader(get_results["uris"])
-
-        # Remove URIs from the result if they weren't requested
-        if "uris" not in include:
-            get_results["uris"] = None
-
-        return get_results
+        return self._transform_get_response(get_results, valid_include)
 
     async def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -228,67 +177,22 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         """
 
-        # Users must provide only one of query_embeddings, query_texts, query_images, or query_uris
-        if not (
-            (query_embeddings is not None)
-            ^ (query_texts is not None)
-            ^ (query_images is not None)
-            ^ (query_uris is not None)
-        ):
-            raise ValueError(
-                "You must provide one of query_embeddings, query_texts, query_images, or query_uris."
-            )
+        (
+            valid_query_embeddings,
+            valid_n_results,
+            valid_where,
+            valid_where_document,
+        ) = self._validate_and_prepare_query_request(
+            query_embeddings,
+            query_texts,
+            query_images,
+            query_uris,
+            n_results,
+            where,
+            where_document,
+            include,
+        )
 
-        valid_where = validate_where(where) if where else {}
-        valid_where_document = (
-            validate_where_document(where_document) if where_document else {}
-        )
-        valid_query_embeddings = (
-            validate_embeddings(
-                self._normalize_embeddings(
-                    maybe_cast_one_to_many_embedding(query_embeddings)
-                )
-            )
-            if query_embeddings is not None
-            else None
-        )
-        valid_query_texts = (
-            maybe_cast_one_to_many_document(query_texts)
-            if query_texts is not None
-            else None
-        )
-        valid_query_images = (
-            maybe_cast_one_to_many_image(query_images)
-            if query_images is not None
-            else None
-        )
-        valid_query_uris = (
-            maybe_cast_one_to_many_uri(query_uris) if query_uris is not None else None
-        )
-        valid_include = validate_include(include, allow_distances=True)
-        valid_n_results = validate_n_results(n_results)
-
-        # If query_embeddings are not provided, we need to compute them from the inputs
-        if valid_query_embeddings is None:
-            if query_texts is not None:
-                valid_query_embeddings = self._embed(input=valid_query_texts)
-            elif query_images is not None:
-                valid_query_embeddings = self._embed(input=valid_query_images)
-            else:
-                if valid_query_uris is None:
-                    raise ValueError(
-                        "You must provide either query_embeddings, query_texts, query_images, or query_uris."
-                    )
-                if self._data_loader is None:
-                    raise ValueError(
-                        "You must set a data loader on the collection if loading from URIs."
-                    )
-                valid_query_embeddings = self._embed(
-                    self._data_loader(valid_query_uris)
-                )
-
-        if "data" in include and "uris" not in include:
-            valid_include.append("uris")
         query_results = await self._client._query(
             collection_id=self.id,
             query_embeddings=valid_query_embeddings,
@@ -298,20 +202,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             include=include,
         )
 
-        if (
-            "data" in include
-            and self._data_loader is not None
-            and query_results["uris"] is not None
-        ):
-            query_results["data"] = [
-                self._data_loader(uris) for uris in query_results["uris"]
-            ]
-
-        # Remove URIs from the result if they weren't requested
-        if "uris" not in include:
-            query_results["uris"] = None
-
-        return query_results
+        return self._transform_query_response(query_results, include)
 
     async def modify(
         self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
@@ -325,21 +216,15 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        if metadata is not None:
-            validate_metadata(metadata)
-            if "hnsw:space" in metadata:
-                raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently."
-                )
+
+        self._validate_modify_request(metadata)
 
         # Note there is a race condition here where the metadata can be updated
         # but another thread sees the cached local metadata.
         # TODO: fixme
         await self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
-        if name:
-            self._model["name"] = name
-        if metadata:
-            self._model["metadata"] = metadata
+
+        self._update_model_after_modify_success(name, metadata)
 
     async def update(
         self,
@@ -371,23 +256,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embeddings,
             metadatas,
             documents,
-            images,
             uris,
-        ) = self._validate_embedding_set(
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-            require_embeddings_or_data=False,
+        ) = self._validate_and_prepare_update_request(
+            ids, embeddings, metadatas, documents, images, uris
         )
-
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
 
         await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
 
@@ -421,17 +293,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embeddings,
             metadatas,
             documents,
-            images,
             uris,
-        ) = self._validate_embedding_set(
+        ) = self._validate_and_prepare_upsert_request(
             ids, embeddings, metadatas, documents, images, uris
         )
-
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            else:
-                embeddings = self._embed(input=images)
 
         await self._client._upsert(
             collection_id=self.id,
@@ -461,10 +326,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Raises:
             ValueError: If you don't provide either ids, where, or where_document
         """
-        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
-        where = validate_where(where) if where else None
-        where_document = (
-            validate_where_document(where_document) if where_document else None
+        (ids, where, where_document) = self._validate_and_prepare_delete_request(
+            ids, where, where_document
         )
 
         await self._client._delete(self.id, ids, where, where_document)
