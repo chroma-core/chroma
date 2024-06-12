@@ -7,11 +7,16 @@ from chromadb.api import ServerAPI
 import time
 
 from chromadb.api.types import QueryResult
-from chromadb.test.conftest import COMPACTION_SLEEP, MEMBERLIST_SLEEP
+from chromadb.test.conftest import (
+    COMPACTION_SLEEP,
+    MEMBERLIST_SLEEP,
+    skip_if_not_cluster,
+)
 
 EPS = 1e-6
 
 
+@skip_if_not_cluster()
 def test_add(
     api: ServerAPI,
 ) -> None:
@@ -63,6 +68,7 @@ def test_add(
         assert abs(ground_truth_distances[i] - retrieved_distances[i]) < EPS
 
 
+@skip_if_not_cluster()
 def test_add_include_all_with_compaction_delay(api: ServerAPI) -> None:
     api.reset()
 
