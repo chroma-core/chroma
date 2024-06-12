@@ -3,8 +3,8 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
+from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
-from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -26,18 +26,10 @@ from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 
-# Re-export the async version
-from chromadb.api.async_api import (  # noqa: F401
-    AsyncBaseAPI,
-    AsyncClientAPI,
-    AsyncAdminAPI,
-    AsyncServerAPI,
-)
 
-
-class BaseAPI(ABC):
+class AsyncBaseAPI(ABC):
     @abstractmethod
-    def heartbeat(self) -> int:
+    async def heartbeat(self) -> int:
         """Get the current time in nanoseconds since epoch.
         Used to check if the server is alive.
 
@@ -52,11 +44,11 @@ class BaseAPI(ABC):
     #
 
     @abstractmethod
-    def list_collections(
+    async def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[AsyncCollection]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
@@ -67,14 +59,14 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.list_collections()
+            await client.list_collections()
             # [collection(name="my_collection", metadata={})]
             ```
         """
         pass
 
     @abstractmethod
-    def count_collections(self) -> int:
+    async def count_collections(self) -> int:
         """Count the number of collections.
 
         Returns:
@@ -82,14 +74,14 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.count_collections()
+            await client.count_collections()
             # 1
             ```
         """
         pass
 
     @abstractmethod
-    def create_collection(
+    async def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -98,7 +90,7 @@ class BaseAPI(ABC):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
-    ) -> Collection:
+    ) -> AsyncCollection:
         """Create a new collection with the given name and metadata.
         Args:
             name: The name of the collection to create.
@@ -117,17 +109,17 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.create_collection("my_collection")
+            await client.create_collection("my_collection")
             # collection(name="my_collection", metadata={})
 
-            client.create_collection("my_collection", metadata={"foo": "bar"})
+            await client.create_collection("my_collection", metadata={"foo": "bar"})
             # collection(name="my_collection", metadata={"foo": "bar"})
             ```
         """
         pass
 
     @abstractmethod
-    def get_collection(
+    async def get_collection(
         self,
         name: str,
         id: Optional[UUID] = None,
@@ -135,7 +127,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Collection:
+    ) -> AsyncCollection:
         """Get a collection with the given name.
         Args:
             id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
@@ -152,14 +144,14 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.get_collection("my_collection")
+            await client.get_collection("my_collection")
             # collection(name="my_collection", metadata={})
             ```
         """
         pass
 
     @abstractmethod
-    def get_or_create_collection(
+    async def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -167,7 +159,7 @@ class BaseAPI(ABC):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Collection:
+    ) -> AsyncCollection:
         """Get or create a collection with the given name and metadata.
         Args:
             name: The name of the collection to get or create
@@ -183,13 +175,14 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.get_or_create_collection("my_collection")
+            await client.get_or_create_collection("my_collection")
             # collection(name="my_collection", metadata={})
             ```
         """
         pass
 
-    def _modify(
+    @abstractmethod
+    async def _modify(
         self,
         id: UUID,
         new_name: Optional[str] = None,
@@ -207,7 +200,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def delete_collection(
+    async def delete_collection(
         self,
         name: str,
     ) -> None:
@@ -220,7 +213,7 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.delete_collection("my_collection")
+            await client.delete_collection("my_collection")
             ```
         """
         pass
@@ -230,7 +223,7 @@ class BaseAPI(ABC):
     #
 
     @abstractmethod
-    def _add(
+    async def _add(
         self,
         ids: IDs,
         collection_id: UUID,
@@ -256,7 +249,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _update(
+    async def _update(
         self,
         collection_id: UUID,
         ids: IDs,
@@ -280,7 +273,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _upsert(
+    async def _upsert(
         self,
         collection_id: UUID,
         ids: IDs,
@@ -304,7 +297,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _count(self, collection_id: UUID) -> int:
+    async def _count(self, collection_id: UUID) -> int:
         """[Internal] Returns the number of entries in a collection specified by UUID.
 
         Args:
@@ -317,7 +310,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+    async def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         """[Internal] Returns the first n entries in a collection specified by UUID.
 
         Args:
@@ -332,7 +325,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _get(
+    async def _get(
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
@@ -365,7 +358,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _delete(
+    async def _delete(
         self,
         collection_id: UUID,
         ids: Optional[IDs],
@@ -386,7 +379,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _query(
+    async def _query(
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
@@ -412,7 +405,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def reset(self) -> bool:
+    async def reset(self) -> bool:
         """Resets the database. This will delete all collections and entries.
 
         Returns:
@@ -421,7 +414,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def get_version(self) -> str:
+    async def get_version(self) -> str:
         """Get the version of Chroma.
 
         Returns:
@@ -441,12 +434,12 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def get_max_batch_size(self) -> int:
+    async def get_max_batch_size(self) -> int:
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
 
-class ClientAPI(BaseAPI, ABC):
+class AsyncClientAPI(AsyncBaseAPI, ABC):
     tenant: str
     database: str
 
@@ -480,9 +473,9 @@ class ClientAPI(BaseAPI, ABC):
         pass
 
 
-class AdminAPI(ABC):
+class AsyncAdminAPI(ABC):
     @abstractmethod
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
@@ -492,7 +485,7 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
-    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+    async def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         """Get a database. Raises an error if the database does not exist.
 
         Args:
@@ -503,7 +496,7 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
-    def create_tenant(self, name: str) -> None:
+    async def create_tenant(self, name: str) -> None:
         """Create a new tenant. Raises an error if the tenant already exists.
 
         Args:
@@ -513,7 +506,7 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
-    def get_tenant(self, name: str) -> Tenant:
+    async def get_tenant(self, name: str) -> Tenant:
         """Get a tenant. Raises an error if the tenant does not exist.
 
         Args:
@@ -523,31 +516,31 @@ class AdminAPI(ABC):
         pass
 
 
-class ServerAPI(BaseAPI, AdminAPI, Component):
+class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
     in a tenant and database. This is the root component of the Chroma System"""
 
     @abstractmethod
     @override
-    def list_collections(
+    async def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[Collection]:
+    ) -> Sequence[AsyncCollection]:
         pass
 
     @abstractmethod
     @override
-    def count_collections(
+    async def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
         pass
 
     @abstractmethod
     @override
-    def create_collection(
+    async def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -558,12 +551,12 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> AsyncCollection:
         pass
 
     @abstractmethod
     @override
-    def get_collection(
+    async def get_collection(
         self,
         name: str,
         id: Optional[UUID] = None,
@@ -573,12 +566,12 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> AsyncCollection:
         pass
 
     @abstractmethod
     @override
-    def get_or_create_collection(
+    async def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
@@ -588,12 +581,12 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection:
+    ) -> AsyncCollection:
         pass
 
     @abstractmethod
     @override
-    def delete_collection(
+    async def delete_collection(
         self,
         name: str,
         tenant: str = DEFAULT_TENANT,
