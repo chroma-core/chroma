@@ -64,7 +64,7 @@ def test_add(
         if should_compact and len(normalized_record_set["ids"]) > 10:
             initial_version = coll.get_model()["version"]
             # Wait for the model to be updated
-            wait_for_version_increase(api, collection.name, initial_version)
+            wait_for_version_increase(client, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))

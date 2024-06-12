@@ -34,7 +34,7 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         or isinstance(expr, int)
         or isinstance(expr, float)
     ):
-        return _filter_where_clause({key: {"$eq": expr}}, metadata)
+        return _filter_where_clause({key: {"$eq": expr}}, metadata)  # type: ignore[dict-item]
 
     # expr is a list of clauses
     if key == "$and":
@@ -46,10 +46,10 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         return any(_filter_where_clause(clause, metadata) for clause in expr)
     if key == "$in":
         assert isinstance(expr, list)
-        return metadata[key] in expr if key in metadata else False
+        return metadata[key] in expr if key in metadata else False  # type: ignore[comparison-overlap]
     if key == "$nin":
         assert isinstance(expr, list)
-        return metadata[key] not in expr
+        return metadata[key] not in expr  # type: ignore[comparison-overlap]
 
     # expr is an operator expression
     assert isinstance(expr, dict)
@@ -63,9 +63,9 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
     elif op == "$ne":
         return key in metadata and metadata_key != val
     elif op == "$in":
-        return key in metadata and metadata_key in val
+        return key in metadata and metadata_key in val  # type: ignore[operator]
     elif op == "$nin":
-        return key in metadata and metadata_key not in val
+        return key in metadata and metadata_key not in val  # type: ignore[operator]
 
     # The following conditions only make sense for numeric values
     assert isinstance(metadata_key, int) or isinstance(metadata_key, float)
@@ -183,7 +183,7 @@ def test_filterable_metadata_get(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    client.reset()
+    reset(client)
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
@@ -231,7 +231,7 @@ def test_filterable_metadata_get_limit_offset(
     if not NOT_CLUSTER_ONLY:
         pytest.skip("Distributed system does not support limit/offset yet")
 
-    client.reset()
+    reset(client)
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
@@ -276,7 +276,7 @@ def test_filterable_metadata_query(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    client.reset()
+    reset(client)
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
@@ -324,7 +324,7 @@ def test_filterable_metadata_query(
 
 def test_empty_filter(client: ClientAPI) -> None:
     """Test that a filter where no document matches returns an empty result"""
-    client.reset()
+    reset(client)
     coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
@@ -336,7 +336,7 @@ def test_empty_filter(client: ClientAPI) -> None:
 
     res = coll.query(
         query_embeddings=test_query_embedding,
-        where={"q": {"$eq": 4}},
+        where={"q": {"$eq": 4}},  # type: ignore[dict-item]
         n_results=3,
         include=["embeddings", "distances", "metadatas"],
     )
@@ -360,7 +360,7 @@ def test_empty_filter(client: ClientAPI) -> None:
 
 def test_boolean_metadata(client: ClientAPI) -> None:
     """Test that metadata with boolean values is correctly filtered"""
-    client.reset()
+    reset(client)
     coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
@@ -377,7 +377,7 @@ def test_boolean_metadata(client: ClientAPI) -> None:
 def test_get_empty(client: ClientAPI) -> None:
     """Tests that calling get() with empty filters returns nothing"""
 
-    client.reset()
+    reset(client)
     coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]

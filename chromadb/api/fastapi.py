@@ -8,19 +8,14 @@ import urllib.parse
 from overrides import override
 
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.types import Database, Tenant
-import chromadb.utils.embedding_functions as ef
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
 
 from chromadb.api.types import (
-    DataLoader,
     Documents,
-    Embeddable,
     Embeddings,
-    EmbeddingFunction,
     IDs,
     Include,
-    Loadable,
     Metadatas,
     URIs,
     Where,
@@ -223,10 +218,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
