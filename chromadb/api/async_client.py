@@ -1,3 +1,4 @@
+import httpx
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
@@ -20,6 +21,7 @@ from chromadb.api.types import (
     URIs,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+from chromadb.errors import ChromaError
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
@@ -102,31 +104,30 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self.database = database
 
     async def _validate_tenant_database(self, tenant: str, database: str) -> None:
-        pass
-        # try:
-        #     await self._admin_client.get_tenant(name=tenant)
-        # except requests.exceptions.ConnectionError:
-        #     raise ValueError(
-        #         "Could not connect to a Chroma server. Are you sure it is running?"
-        #     )
-        # # Propagate ChromaErrors
-        # except ChromaError as e:
-        #     raise e
-        # except Exception:
-        #     raise ValueError(
-        #         f"Could not connect to tenant {tenant}. Are you sure it exists?"
-        #     )
+        try:
+            await self._admin_client.get_tenant(name=tenant)
+        except httpx.ConnectError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
+        # Propagate ChromaErrors
+        except ChromaError as e:
+            raise e
+        except Exception:
+            raise ValueError(
+                f"Could not connect to tenant {tenant}. Are you sure it exists?"
+            )
 
-        # try:
-        #     self._admin_client.get_database(name=database, tenant=tenant)
-        # except requests.exceptions.ConnectionError:
-        #     raise ValueError(
-        #         "Could not connect to a Chroma server. Are you sure it is running?"
-        #     )
-        # except Exception:
-        #     raise ValueError(
-        #         f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
-        #     )
+        try:
+            await self._admin_client.get_database(name=database, tenant=tenant)
+        except httpx.ConnectError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
+        except Exception:
+            raise ValueError(
+                f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
+            )
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
