@@ -136,9 +136,16 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[AsyncCollection]:
-        return await self._server.list_collections(
+        models = await self._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
         )
+        return [
+            AsyncCollection(
+                client=self._server,
+                model=model,
+            )
+            for model in models
+        ]
 
     @override
     async def count_collections(self) -> int:
@@ -157,14 +164,18 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
-        return await self._server.create_collection(
+        model = await self._server.create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
+        )
+        return AsyncCollection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -177,13 +188,17 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
-        return await self._server.get_collection(
+        model = await self._server.get_collection(
             id=id,
             name=name,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+        )
+        return AsyncCollection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -196,13 +211,17 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
-        return await self._server.get_or_create_collection(
+        model = await self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+        )
+        return AsyncCollection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override

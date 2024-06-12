@@ -12,7 +12,6 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
-# from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzAction,
@@ -633,9 +632,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
-                None,
-                None,
-                None,
+                None,  # id
                 tenant,
                 database,
                 limiter=self._capacity_limiter,

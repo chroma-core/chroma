@@ -253,7 +253,7 @@ def test_collections(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
 
 # Below are tests that have failed in the past. If your test fails, please add
 # it to protect against regressions in the test harness itself. If you need
-# help doing so, talk to ben.
+# help doing so, talk to anton.
 
 
 def test_previously_failing_one(client: ClientAPI) -> None:

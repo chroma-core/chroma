@@ -16,20 +16,14 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
-import chromadb.utils.embedding_functions as ef
 
-from chromadb.types import Database, Tenant
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 
-from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.types import (
-    DataLoader,
     Documents,
-    Embeddable,
     Embeddings,
-    EmbeddingFunction,
     IDs,
     Include,
-    Loadable,
     Metadatas,
     URIs,
     Where,
@@ -187,7 +181,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[AsyncCollection]:
+    ) -> Sequence[CollectionModel]:
         resp_json = await self._make_request(
             "get",
             "/collections",
@@ -201,13 +195,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             ),
         )
 
-        collections = []
-        for json_collection in resp_json:
-            model = json_to_collection_model(json_collection)
-
-            collections.append(AsyncCollection(client=self, model=model))
-
-        return collections
+        models = [
+            json_to_collection_model(json_collection) for json_collection in resp_json
+        ]
+        return models
 
     @trace_method("AsyncFastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
@@ -228,14 +219,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         """Creates a collection"""
         resp_json = await self._make_request(
             "post",
@@ -250,12 +237,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         model = json_to_collection_model(resp_json)
 
-        return AsyncCollection(
-            client=self,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return model
 
     @trace_method("AsyncFastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -263,13 +245,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
@@ -285,12 +263,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         model = json_to_collection_model(resp_json)
 
-        return AsyncCollection(
-            client=self,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return model
 
     @trace_method(
         "AsyncFastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
@@ -300,18 +273,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         return await self.create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             get_or_create=True,
             tenant=tenant,
             database=database,
