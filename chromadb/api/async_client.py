@@ -2,7 +2,6 @@ from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
-from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -54,6 +53,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> "AsyncClient":
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings)
+        SharedSystemClient._populate_data_from_system(self._system)
         self._admin_client = AsyncAdminClient.from_system(self._system)
         await self._validate_tenant_database(tenant=tenant, database=database)
 
@@ -61,8 +61,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self.database = database
 
         # Get the root system component we want to interact with
-        # todo: should this be AsyncServerAPI?
-        self._server = self._system.instance(AsyncFastAPI)
+        self._server = self._system.instance(AsyncServerAPI)
 
         # Submit event for a client start
         telemetry_client = self._system.instance(ProductTelemetryClient)
@@ -70,20 +69,26 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         return self
 
-    # todo: override incorrect?
     @classmethod
-    @override
-    async def from_system(
+    async def create_from_system(
         cls,
         system: System,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "AsyncClient":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = await cls.create(
-            tenant=tenant, database=database, settings=system.settings
+        """Create a client from an existing system. This is useful for testing and debugging."""
+        return await AsyncClient.create(tenant, database, system.settings)
+
+    @classmethod
+    @override
+    def from_system(
+        cls,
+        system: System,
+    ) -> "SharedSystemClient":
+        """AsyncClient cannot be created synchronously. Use .create_from_system() instead."""
+        raise NotImplementedError(
+            "AsyncClient cannot be created synchronously. Use .create_from_system() instead."
         )
-        return instance
 
     @override
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:

@@ -444,7 +444,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     database: str
 
     @abstractmethod
-    def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
+    async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
         """Set the tenant and database for the client. Raises an error if the tenant or
         database does not exist.
 
@@ -456,7 +456,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         pass
 
     @abstractmethod
-    def set_database(self, database: str) -> None:
+    async def set_database(self, database: str) -> None:
         """Set the database for the client. Raises an error if the database does not exist.
 
         Args:
