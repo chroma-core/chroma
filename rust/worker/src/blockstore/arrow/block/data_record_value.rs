@@ -29,6 +29,12 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         id_offset + metdata_offset + document_offset
     }
 
+    fn validity_size(item_count: usize) -> usize {
+        let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count, 8));
+        // Both document and metadata can be null
+        return validity_bytes * 2;
+    }
+
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
             BlockStorage::DataRecord(builder) => {

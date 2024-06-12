@@ -1,31 +1,11 @@
-// use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use super::delta::BlockDelta;
-use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
-use crate::blockstore::key::{CompositeKey, KeyWrapper};
-use crate::blockstore::Key;
-use crate::errors::{ChromaError, ErrorCodes};
-use arrow::array::{
-    ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
-    Float32Builder, StructArray, UInt32Array, UInt32Builder,
-};
+use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue};
+use crate::errors::ChromaError;
 use arrow::{
-    array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
-    datatypes::{DataType, Field},
+    array::{Array, StringArray},
     record_batch::RecordBatch,
 };
-use bytes::Bytes;
-use tokio::io::AsyncBufRead;
-// use proptest::bits::usize;
 use uuid::Uuid;
-// use parking_lot::RwLock;
-use std::io::Error;
-use std::sync::Arc;
-// use std::sync::Arc;
-use thiserror::Error;
-// use uuid::Uuid;
-
-// use super::delta::BlockDelta;
-// use super::iterator::BlockIterator;
 
 /// A block in a blockfile. A block is a sorted collection of data that is immutable once it has been committed.
 /// Blocks are the fundamental unit of storage in the blockstore and are used to store data in the form of (key, value) pairs.

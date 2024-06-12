@@ -9,7 +9,6 @@ use crate::types::{
     Operation, Segment, SegmentType,
 };
 use async_trait::async_trait;
-use futures::StreamExt;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
