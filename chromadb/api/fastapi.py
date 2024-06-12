@@ -8,19 +8,14 @@ import urllib.parse
 from overrides import override
 
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.types import Database, Tenant
-import chromadb.utils.embedding_functions as ef
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
 
 from chromadb.api.types import (
-    DataLoader,
     Documents,
-    Embeddable,
     Embeddings,
-    EmbeddingFunction,
     IDs,
     Include,
-    Loadable,
     Metadatas,
     URIs,
     Where,
@@ -230,10 +225,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -273,15 +264,12 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return cast(
-            CollectionModel,
-            self.create_collection(
-                name=name,
-                metadata=metadata,
-                get_or_create=True,
-                tenant=tenant,
-                database=database,
-            ),
+        return self.create_collection(
+            name=name,
+            metadata=metadata,
+            get_or_create=True,
+            tenant=tenant,
+            database=database,
         )
 
     @trace_method("FastAPI._modify", OpenTelemetryGranularity.OPERATION)
@@ -339,7 +327,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             self._get(
                 collection_id,
                 limit=n,
-                include=["embeddings", "documents", "metadatas"],
+                include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
             ),
         )
 
@@ -356,7 +344,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
@@ -503,7 +491,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         n_results: int = 10,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
         resp_json = self._make_request(

@@ -11,7 +11,7 @@ import time
 from chromadb.api.types import QueryResult
 from chromadb.test.conftest import (
     COMPACTION_SLEEP,
-    MEMBERLIST_SLEEP,
+    reset,
     skip_if_not_cluster,
 )
 from chromadb.utils.distance_functions import l2
@@ -23,12 +23,7 @@ EPS = 1e-6
 def test_add(
     client: ClientAPI,
 ) -> None:
-    client.reset()
-
-    # Once we reset, we have to wait for sometime to let the memberlist on the frontends
-    # propagate, there isn't a clean way to do this so we sleep for a configured amount of time
-    # to ensure that the memberlist has propagated
-    time.sleep(MEMBERLIST_SLEEP)
+    reset(client)
 
     collection = client.create_collection(
         name="test",
@@ -52,7 +47,7 @@ def test_add(
     results = collection.query(
         query_embeddings=[random_query],  # type: ignore
         n_results=10,
-        include=["distances"],
+        include=["distances"],  # type: ignore[list-item]
     )
 
     # Check that the distances are correct in l2
@@ -72,10 +67,7 @@ def test_add(
 
 @skip_if_not_cluster()
 def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
-    client.reset()
-
-    time.sleep(MEMBERLIST_SLEEP)
-
+    reset(client)
     collection = client.create_collection(
         name="test_add_include_all_with_compaction_delay"
     )
@@ -100,7 +92,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
     results = collection.query(
         query_embeddings=[random_query_1, random_query_2],  # type: ignore
         n_results=10,
-        include=["metadatas", "documents", "distances", "embeddings"],
+        include=["metadatas", "documents", "distances", "embeddings"],  # type: ignore[list-item]
     )
 
     ids_and_embeddings = list(zip(ids, embeddings))

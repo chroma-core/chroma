@@ -23,7 +23,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component, Settings
-from chromadb.types import Database, Tenant
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
 
 
@@ -44,28 +44,6 @@ class AsyncBaseAPI(ABC):
     #
 
     @abstractmethod
-    async def list_collections(
-        self,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-    ) -> Sequence[AsyncCollection]:
-        """List all collections.
-        Args:
-            limit: The maximum number of entries to return. Defaults to None.
-            offset: The number of entries to skip before returning. Defaults to None.
-
-        Returns:
-            Sequence[Collection]: A list of collections
-
-        Examples:
-            ```python
-            await client.list_collections()
-            # [collection(name="my_collection", metadata={})]
-            ```
-        """
-        pass
-
-    @abstractmethod
     async def count_collections(self) -> int:
         """Count the number of collections.
 
@@ -76,107 +54,6 @@ class AsyncBaseAPI(ABC):
             ```python
             await client.count_collections()
             # 1
-            ```
-        """
-        pass
-
-    @abstractmethod
-    async def create_collection(
-        self,
-        name: str,
-        metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
-        get_or_create: bool = False,
-    ) -> AsyncCollection:
-        """Create a new collection with the given name and metadata.
-        Args:
-            name: The name of the collection to create.
-            metadata: Optional metadata to associate with the collection.
-            embedding_function: Optional function to use to embed documents.
-                                Uses the default embedding function if not provided.
-            get_or_create: If True, return the existing collection if it exists.
-            data_loader: Optional function to use to load records (documents, images, etc.)
-
-        Returns:
-            Collection: The newly created collection.
-
-        Raises:
-            ValueError: If the collection already exists and get_or_create is False.
-            ValueError: If the collection name is invalid.
-
-        Examples:
-            ```python
-            await client.create_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-
-            await client.create_collection("my_collection", metadata={"foo": "bar"})
-            # collection(name="my_collection", metadata={"foo": "bar"})
-            ```
-        """
-        pass
-
-    @abstractmethod
-    async def get_collection(
-        self,
-        name: str,
-        id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> AsyncCollection:
-        """Get a collection with the given name.
-        Args:
-            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
-            name: The name of the collection to get
-            embedding_function: Optional function to use to embed documents.
-                                Uses the default embedding function if not provided.
-            data_loader: Optional function to use to load records (documents, images, etc.)
-
-        Returns:
-            Collection: The collection
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            ```python
-            await client.get_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-            ```
-        """
-        pass
-
-    @abstractmethod
-    async def get_or_create_collection(
-        self,
-        name: str,
-        metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> AsyncCollection:
-        """Get or create a collection with the given name and metadata.
-        Args:
-            name: The name of the collection to get or create
-            metadata: Optional metadata to associate with the collection. If
-            the collection alredy exists, the metadata will be updated if
-            provided and not None. If the collection does not exist, the
-            new collection will be created with the provided metadata.
-            embedding_function: Optional function to use to embed documents
-            data_loader: Optional function to use to load records (documents, images, etc.)
-
-        Returns:
-            The collection
-
-        Examples:
-            ```python
-            await client.get_or_create_collection("my_collection")
-            # collection(name="my_collection", metadata={})
             ```
         """
         pass
@@ -444,6 +321,129 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     database: str
 
     @abstractmethod
+    async def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[AsyncCollection]:
+        """List all collections.
+        Args:
+            limit: The maximum number of entries to return. Defaults to None.
+            offset: The number of entries to skip before returning. Defaults to None.
+
+        Returns:
+            Sequence[Collection]: A list of collections
+
+        Examples:
+            ```python
+            await client.list_collections()
+            # [collection(name="my_collection", metadata={})]
+            ```
+        """
+        pass
+
+    @abstractmethod
+    async def create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        get_or_create: bool = False,
+    ) -> AsyncCollection:
+        """Create a new collection with the given name and metadata.
+        Args:
+            name: The name of the collection to create.
+            metadata: Optional metadata to associate with the collection.
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            get_or_create: If True, return the existing collection if it exists.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The newly created collection.
+
+        Raises:
+            ValueError: If the collection already exists and get_or_create is False.
+            ValueError: If the collection name is invalid.
+
+        Examples:
+            ```python
+            await client.create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+
+            await client.create_collection("my_collection", metadata={"foo": "bar"})
+            # collection(name="my_collection", metadata={"foo": "bar"})
+            ```
+        """
+        pass
+
+    @abstractmethod
+    async def get_collection(
+        self,
+        name: str,
+        id: Optional[UUID] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> AsyncCollection:
+        """Get a collection with the given name.
+        Args:
+            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
+            name: The name of the collection to get
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            ```python
+            await client.get_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
+    async def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> AsyncCollection:
+        """Get or create a collection with the given name and metadata.
+        Args:
+            name: The name of the collection to get or create
+            metadata: Optional metadata to associate with the collection. If
+            the collection alredy exists, the metadata will be updated if
+            provided and not None. If the collection does not exist, the
+            new collection will be created with the provided metadata.
+            embedding_function: Optional function to use to embed documents
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            The collection
+
+        Examples:
+            ```python
+            await client.get_or_create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
         """Set the tenant and database for the client. Raises an error if the tenant or
         database does not exist.
@@ -521,14 +521,13 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     in a tenant and database. This is the root component of the Chroma System"""
 
     @abstractmethod
-    @override
     async def list_collections(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[AsyncCollection]:
+    ) -> Sequence[CollectionModel]:
         pass
 
     @abstractmethod
@@ -539,49 +538,34 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         pass
 
     @abstractmethod
-    @override
     async def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
-    @override
     async def get_collection(
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
-    @override
     async def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
