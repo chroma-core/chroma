@@ -95,9 +95,10 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 			strValue      sql.NullString
 			intValue      sql.NullInt64
 			floatValue    sql.NullFloat64
+			boolValue     sql.NullBool
 		)
 
-		err := rows.Scan(&segmentID, &collectionID, &segmentType, &scope, &filePathsJson, &key, &strValue, &intValue, &floatValue)
+		err := rows.Scan(&segmentID, &collectionID, &segmentType, &scope, &filePathsJson, &key, &strValue, &intValue, &floatValue, &boolValue)
 		if err != nil {
 			log.Error("scan segment failed", zap.Error(err))
 		}
@@ -155,6 +156,12 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 			segmentMetadata.FloatValue = &floatValue.Float64
 		} else {
 			segmentMetadata.FloatValue = nil
+		}
+
+		if boolValue.Valid {
+			segmentMetadata.BoolValue = &boolValue.Bool
+		} else {
+			segmentMetadata.BoolValue = nil
 		}
 
 		metadata = append(metadata, segmentMetadata)

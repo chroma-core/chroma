@@ -11,6 +11,7 @@ import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from hypothesis.errors import InvalidDefinition
 from hypothesis.stateful import RuleBasedStateMachine
+from chromadb.test.conftest import NOT_CLUSTER_ONLY
 
 from dataclasses import dataclass
 
@@ -523,7 +524,14 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+    # This is hacky, but the distributed system does not support $in or $in so we
+    # need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $in and $nin
+    if not NOT_CLUSTER_ONLY:
+        legal_ops: List[Optional[str]] = [None, "$eq"]
+    else:
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
@@ -554,7 +562,13 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         word = draw(safe_text)
 
-    op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
+    op: WhereOperator
+    if not NOT_CLUSTER_ONLY:
+        op = draw(st.sampled_from(["$contains"]))
+    else:
+        op = draw(st.sampled_from(["$contains", "$not_contains"]))
+
+    # op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
     if op == "$contains":
         return {"$contains": word}
     else:

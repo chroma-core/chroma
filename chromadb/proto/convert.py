@@ -87,9 +87,11 @@ def _from_proto_metadata_handle_none(
 ) -> Optional[Union[UpdateMetadata, Metadata]]:
     if not metadata.metadata:
         return None
-    out_metadata: Dict[str, Union[str, int, float, None]] = {}
+    out_metadata: Dict[str, Union[str, int, float, bool, None]] = {}
     for key, value in metadata.metadata.items():
-        if value.HasField("string_value"):
+        if value.HasField("bool_value"):
+            out_metadata[key] = value.bool_value
+        elif value.HasField("string_value"):
             out_metadata[key] = value.string_value
         elif value.HasField("int_value"):
             out_metadata[key] = value.int_value

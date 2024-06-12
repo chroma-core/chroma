@@ -13,9 +13,9 @@ echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
 # We need the ports forwarded since tilt ci will
 # not keep them forwarded
 # https://github.com/tilt-dev/tilt/issues/5964
-kubectl -n chroma port-forward svc/sysdb 50051:50051 &
-kubectl -n chroma port-forward svc/logservice 50052:50051 &
-kubectl -n chroma port-forward svc/query-service 50053:50051 &
-kubectl -n chroma port-forward svc/frontend-service 8000:8000 &
+# kubectl -n chroma port-forward svc/sysdb 50051:50051 &
+# kubectl -n chroma port-forward svc/logservice 50052:50051 &
+# kubectl -n chroma port-forward svc/query-service 50053:50051 &
+# kubectl -n chroma port-forward svc/frontend-service 8000:8000 &
 
 "$@"
