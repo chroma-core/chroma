@@ -12,7 +12,6 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
-    cast,
 )
 from uuid import UUID
 

@@ -321,9 +321,12 @@ class System(Component):
     def __init__(self, settings: Settings):
         if is_thin_client:
             # The thin client is a system with only the API component
-            if settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
+            if settings["chroma_api_impl"] not in [
+                "chromadb.api.fastapi.FastAPI",
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ]:
                 raise RuntimeError(
-                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
+                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'chromadb.api.async_fastapi.AsyncFastAPI as the chroma_api_impl. \
             see https://docs.trychroma.com/guides#using-the-python-http-only-client for more information."
                 )
         # Validate settings don't contain any legacy config values

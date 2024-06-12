@@ -129,6 +129,26 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
+  test-thin-client-async:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [ubuntu-latest] # # todo: should run on Windows, currently failing because Dockerfile doesn't build
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: clients/python/integration-test.sh
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_API_IMPL: chromadb.api.async_fastapi.AsyncFastAPI
+
+
   test-stress:
     timeout-minutes: 90
     strategy:
