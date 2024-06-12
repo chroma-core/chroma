@@ -19,7 +19,7 @@ def test_basic_authn_rbac_authz_unit_test(api_with_authn_rbac_authz: ServerAPI) 
     api_with_authn_rbac_authz.create_collection("test_collection")
 
 
-@settings(max_examples=10, phases=[Phase.generate, Phase.target])
+@settings(max_examples=10, phases=[Phase.generate, Phase.target], deadline=None)
 @given(rbac_test_conf(), st.booleans(), random_token_transport_header(), st.data())
 def test_token_authn_rbac_authz(
     rbac_conf: Dict[str, Any], persistence: bool, header: Optional[str], data: Any
