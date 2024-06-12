@@ -72,6 +72,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
     "chromadb.api.AsyncServerAPI": "chroma_api_impl",
+    # todo: why?
+    "chromadb.api.async_api.AsyncServerAPI": "chroma_api_impl",
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",

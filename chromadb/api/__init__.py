@@ -28,10 +28,10 @@ import chromadb.utils.embedding_functions as ef
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
-    AsyncBaseAPI,
-    AsyncClientAPI,
-    AsyncAdminAPI,
-    AsyncServerAPI,
+    AsyncBaseAPI as AsyncBaseAPI,
+    AsyncClientAPI as AsyncClientAPI,
+    AsyncAdminAPI as AsyncAdminAPI,
+    AsyncServerAPI as AsyncServerAPI,
 )
 
 

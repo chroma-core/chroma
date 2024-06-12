@@ -204,7 +204,7 @@ def HttpClient(
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
 
-async def create_async_http_client(
+async def AsyncHttpClient(
     host: str = "localhost",
     port: int = 8000,
     ssl: bool = False,
