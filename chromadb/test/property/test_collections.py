@@ -17,7 +17,6 @@ from hypothesis.stateful import (
 from typing import Any, Dict, Mapping, Optional
 
 from chromadb.test.property.strategies import hashing_document_embedding_function
-from chromadb.utils.embedding_functions import _serialize_embedding_function
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
@@ -52,14 +51,24 @@ class CollectionStateMachine(RuleBasedStateMachine):
                 )
             return multiple()
 
+        # Metadata can't contain reserved keys
+        if (coll.metadata is not None) and (
+            types.META_KEY_CHROMA_EF_METADATA in coll.metadata
+        ):
+            with pytest.raises(Exception):
+                c = self.client.create_collection(
+                    name=coll.name,
+                    metadata=coll.metadata,
+                    embedding_function=coll.embedding_function,
+                )
+            return multiple()
+
         c = self.client.create_collection(
             name=coll.name,
             metadata=coll.metadata,
             embedding_function=coll.embedding_function,
         )
-        self.set_model(
-            coll.name, coll.metadata, embedding_function=coll.embedding_function
-        )
+        self.set_model(coll.name, coll.metadata)
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
@@ -211,6 +220,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
                         embedding_function=coll.embedding_function,
                     )
                 return multiple()
+            if types.META_KEY_CHROMA_EF_METADATA in new_metadata:
+                with pytest.raises(Exception):
+                    c.modify(metadata=new_metadata, name=new_name)
+                return multiple()
             coll.metadata = new_metadata
             _metadata = new_metadata
 
@@ -236,16 +249,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
         self,
         name: str,
         metadata: Optional[types.CollectionMetadata],
-        embedding_function: Optional[types.EmbeddingFunction] = None,
     ) -> None:
         model = self.model
         model[name] = metadata
-        if embedding_function is not None:
-            if metadata is None:
-                model[name] = {}
-            model[name]["_ef_metadata"] = _serialize_embedding_function(
-                embedding_function
-            )
 
     def delete_from_model(self, name: str) -> None:
         model = self.model

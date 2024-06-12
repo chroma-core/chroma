@@ -8,19 +8,14 @@ from overrides import override
 
 import chromadb.errors as errors
 from chromadb.types import Database, Tenant
-import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
 
 # from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
-    DataLoader,
     Documents,
-    Embeddable,
     Embeddings,
-    EmbeddingFunction,
     IDs,
     Include,
-    Loadable,
     Metadatas,
     URIs,
     Where,
@@ -277,19 +272,12 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Returns a collection"""
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
-
-        if embedding_function is not None:
-            raise NotImplementedError(
-                "Embedding functions should no longer be passed to get_collection. Please see the documentation for more information: https://docs.trychroma.com"
-            )
 
         _params = {"tenant": tenant, "database": database}
         if id is not None:
