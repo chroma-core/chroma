@@ -70,10 +70,13 @@ message Tenant {
 }
 
 message UpdateMetadataValue {
+    // Not set if user wants to delete the key.
+    // TODO(Sanket): Should we make this more explicit?
     oneof value {
         string string_value = 1;
         int64 int_value = 2;
         double float_value = 3;
+        bool bool_value = 4;
     }
 }
 
@@ -176,6 +179,8 @@ message DirectComparison {
         IntListComparison int_list_operand = 5;
         SingleDoubleComparison single_double_operand = 6;
         DoubleListComparison double_list_operand = 7;
+        BoolListComparison bool_list_operand = 8;
+        SingleBoolComparison single_bool_operand = 9;
     }
 }
 
@@ -229,6 +234,11 @@ message SingleStringComparison {
     GenericComparator comparator = 2;
 }
 
+message SingleBoolComparison {
+    bool value = 1;
+    GenericComparator comparator = 2;
+}
+
 // Used when a leaf-node `Where` clause compares an int to a list of ints.
 // `ListOperator` specifies whether values in the list are allowed or disallowed.
 message IntListComparison {
@@ -249,6 +259,11 @@ message SingleIntComparison {
 // `ListOperator` specifies whether values in the list are allowed or disallowed.
 message DoubleListComparison {
     repeated double values = 1;
+    ListOperator list_operator = 2;
+}
+
+message BoolListComparison {
+    repeated bool values = 1;
     ListOperator list_operator = 2;
 }
 
