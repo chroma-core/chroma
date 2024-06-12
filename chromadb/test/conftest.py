@@ -654,9 +654,14 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
-    client = ClientCreator.from_system(system)
-    yield client
-    client.clear_system_cache()
+
+    if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+        # todo: remove this when async client is added
+        pytest.skip("Client with async backing not yet implemented.")
+    else:
+        client = ClientCreator.from_system(system)
+        yield client
+        client.clear_system_cache()
 
 
 @pytest.fixture(scope="function")
