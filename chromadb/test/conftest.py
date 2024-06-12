@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import time
 from typing import (
+    Any,
     Generator,
     Iterator,
     List,
@@ -12,6 +13,7 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
+    cast,
 )
 from uuid import UUID
 
@@ -645,7 +647,6 @@ class AsyncClientCreatorSync(AsyncClientCreator):
     pass
 
 
-# todo: less hacky
 @pytest.fixture(scope="function")
 def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
@@ -663,8 +664,9 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-        # todo: remove this when async client is added
-        pytest.skip("Client with async backing not yet implemented.")
+        client = cast(Any, AsyncClientCreatorSync.from_system(system))
+        yield client
+        client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
         yield client

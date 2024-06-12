@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Optional, Tuple
 import pytest
 from chromadb.api import AdminAPI
+from chromadb.api.async_client import AsyncAdminClient
 import chromadb.api.types as types
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
@@ -15,6 +16,7 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 import chromadb.test.property.strategies as strategies
+from chromadb.utils.async_to_sync import async_class_to_sync
 
 
 class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
@@ -36,7 +38,15 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     def __init__(self, client: Client):
         super().__init__(client)
         self.api = client
-        self.admin_client = AdminClient.from_system(client._system)
+
+        if (
+            client._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            self.admin_client = AsyncAdminClient.from_system(client._system)  # type: ignore
+            self.admin_client = async_class_to_sync(self.admin_client)
+        else:
+            self.admin_client = AdminClient.from_system(client._system)
 
     @initialize()
     def initialize(self) -> None:
