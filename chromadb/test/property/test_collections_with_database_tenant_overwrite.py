@@ -192,9 +192,7 @@ def test_repeat_failure(
         coll=strategies.Collection(
             name="A00",
             metadata=None,
-            embedding_function=strategies.hashing_embedding_function(
-                dim=2, dtype=numpy.float16  # type: ignore
-            ),
+            embedding_function=strategies.hashing_document_embedding_function(dim=2),
             id=uuid.UUID("c9bcb72f-92b1-4604-a8cb-084162dfe98b"),
             dimension=2,
             dtype=numpy.float16,
