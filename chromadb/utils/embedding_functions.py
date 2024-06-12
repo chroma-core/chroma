@@ -53,7 +53,12 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
     return sha256_hash.hexdigest() == expected_sha256
 
 
-def _serialize_embedding_function(ef: EmbeddingFunction[Embeddable]) -> str:
+def _serialize_embedding_function(
+    ef: Optional[EmbeddingFunction[Embeddable]],
+) -> Optional[str]:
+    if ef is None:
+        return None
+
     ef_name = type(ef).__name__
     init_args = ef._init_args  # type: ignore[attr-defined]
 

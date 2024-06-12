@@ -1,8 +1,6 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Type, Union, cast
-import json
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Union, cast
 import numpy as np
 from uuid import UUID
-import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -41,7 +39,6 @@ from chromadb.api.types import (
     validate_where_document,
     validate_n_results,
     validate_embeddings,
-    validate_embedding_function,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -50,7 +47,6 @@ from chromadb.api.types import (
 # stored / retrieved / transmitted.
 from chromadb.types import Collection as CollectionModel
 import logging
-from chromadb.utils.the_registry import _get
 
 logger = logging.getLogger(__name__)
 
@@ -68,29 +64,14 @@ class Collection:
         self,
         client: "ServerAPI",
         model: CollectionModel,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
         data_loader: Optional[DataLoader[Loadable]] = None,
     ):
         """Initializes a new instance of the Collection class."""
 
         self._client = client
         self._model = model
-
-        # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
-        if embedding_function is not None:
-            validate_embedding_function(embedding_function)
-            self._embedding_function = embedding_function
-
-        if embedding_function is None:
-            if (
-                model["metadata"] is not None
-                and "_ef_metadata" in model["metadata"].keys()
-            ):
-                self._embedding_function = self._ef_from_metadata()
-            else:
-                self._embedding_function = None
+        self._embedding_function = embedding_function
         self._data_loader = data_loader
 
     def __repr__(self) -> str:
@@ -684,19 +665,3 @@ class Collection:
                 "https://docs.trychroma.com/guides/embeddings"
             )
         return self._embedding_function(input=input)
-
-    def _ef_from_metadata(self) -> EmbeddingFunction[Embeddable]:
-        if self.metadata is not None and "_ef_metadata" in self.metadata.keys():
-            ef_metadata = json.loads(self.metadata["_ef_metadata"])
-            ef_name: str = ef_metadata["name"]
-            ef_type: Type[EmbeddingFunction[Embeddable]] = _get(ef_name)
-            if ef_type is None:
-                raise ValueError(
-                    f"Cannot load stored embedding function from metadata. Embedding function with name {ef_name} not registered."
-                )
-            ef_init_args: str = ef_metadata["init_args"]
-            return ef_type.from_init_args(ef_init_args)
-        else:
-            raise ValueError(
-                f"Cannot load stored embedding function from metadata. key '_ef_metadata' not found in collection metadata for collection {self.name}."
-            )

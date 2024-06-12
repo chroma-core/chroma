@@ -1,4 +1,5 @@
-from typing import ClassVar, Dict, Optional, Sequence
+import json
+from typing import ClassVar, Dict, Optional, Sequence, Type
 from uuid import UUID
 import uuid
 
@@ -19,6 +20,8 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    META_KEY_CHROMA_EF_METADATA,
+    validate_embedding_function,
 )
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
@@ -28,6 +31,7 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
+from chromadb.utils.the_registry import _get
 
 
 class SharedSystemClient:
@@ -198,13 +202,15 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        if embedding_function is not None:
-            if metadata is None:
-                metadata = {}
+        if metadata is None:
+            metadata = {}
 
-            metadata["_ef_metadata"] = ef._serialize_embedding_function(
-                ef=embedding_function
-            )
+        if embedding_function is not None:
+            validate_embedding_function(embedding_function)
+
+        metadata[META_KEY_CHROMA_EF_METADATA] = ef._serialize_embedding_function(
+            ef=embedding_function
+        )
 
         model = self._server.create_collection(
             name=name,
@@ -213,6 +219,10 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             get_or_create=get_or_create,
         )
+
+        # We don't want the embedding function metadata to be passed to the Collection
+        model["metadata"] = metadata
+
         return Collection(
             client=self._server,
             model=model,
@@ -225,7 +235,6 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         model = self._server.get_collection(
@@ -234,6 +243,20 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+
+        if (
+            model["metadata"] is not None
+            and META_KEY_CHROMA_EF_METADATA in model["metadata"].keys()
+        ):
+            embedding_function = Client._ef_from_metadata(model["metadata"])  # type: ignore[arg-type]
+
+            # Clean up the metadata
+            model["metadata"].pop(META_KEY_CHROMA_EF_METADATA)  # type: ignore[attr-defined]
+            if len(model["metadata"]) == 0:
+                model["metadata"] = None
+        else:
+            embedding_function = None
+
         return Collection(
             client=self._server,
             model=model,
@@ -251,12 +274,35 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        if metadata is None:
+            metadata = {}
+
+        if embedding_function is not None:
+            validate_embedding_function(embedding_function)
+
+        metadata[META_KEY_CHROMA_EF_METADATA] = ef._serialize_embedding_function(
+            ef=embedding_function
+        )
+
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
         )
+
+        # Check if the returned EF metadata is the same as the one we passed in
+        if (model["metadata"] is not None) and (
+            metadata[META_KEY_CHROMA_EF_METADATA]
+            != model["metadata"][META_KEY_CHROMA_EF_METADATA]
+        ):
+            raise ValueError(
+                f"Collection {name} already exists with a different embedding function. Existing: {model['metadata'][META_KEY_CHROMA_EF_METADATA]}, New: {metadata[META_KEY_CHROMA_EF_METADATA]}."
+            )
+        else:
+            # Strip the EF metadata from the model
+            model["metadata"].pop(META_KEY_CHROMA_EF_METADATA)  # type: ignore[union-attr]
+
         return Collection(
             client=self._server,
             model=model,
@@ -480,6 +526,26 @@ class Client(SharedSystemClient, ClientAPI):
             )
 
     # endregion
+
+    # region Helpers
+    @staticmethod
+    def _ef_from_metadata(
+        metadata: CollectionMetadata,
+    ) -> EmbeddingFunction[Embeddable]:
+        if metadata is not None and META_KEY_CHROMA_EF_METADATA in metadata.keys():
+            ef_metadata = json.loads(metadata[META_KEY_CHROMA_EF_METADATA])
+            ef_name: str = ef_metadata["name"]
+            ef_type: Type[EmbeddingFunction[Embeddable]] = _get(ef_name)
+            if ef_type is None:
+                raise ValueError(
+                    f"Cannot load stored embedding function from metadata. Embedding function with name {ef_name} not registered."
+                )
+            ef_init_args: str = ef_metadata["init_args"]
+            return ef_type.from_init_args(ef_init_args)
+        else:
+            raise ValueError(
+                f"Cannot load stored embedding function from metadata. key {META_KEY_CHROMA_EF_METADATA} not found in collection metadata."
+            )
 
 
 class AdminClient(SharedSystemClient, AdminAPI):

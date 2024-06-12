@@ -33,6 +33,7 @@ import json
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
+META_KEY_CHROMA_EF_METADATA = "chroma:ef_metadata"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
