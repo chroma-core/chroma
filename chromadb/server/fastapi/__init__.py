@@ -627,9 +627,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
-                None,
-                None,
-                None,
+                None,  # id
                 tenant,
                 database,
                 limiter=self._capacity_limiter,
