@@ -174,9 +174,14 @@ def to_proto_segment_scope(segment_scope: SegmentScope) -> proto.SegmentScope:
 
 
 def to_proto_metadata_update_value(
-    value: Union[str, int, float, None]
+    value: Union[str, int, float, bool, None]
 ) -> proto.UpdateMetadataValue:
-    if isinstance(value, str):
+    # Be careful with the order here. Since bools are a subtype of int in python,
+    # isinstance(value, bool) and isinstance(value, int) both return true
+    # for a value of bool type.
+    if isinstance(value, bool):
+        return proto.UpdateMetadataValue(bool_value=value)
+    elif isinstance(value, str):
         return proto.UpdateMetadataValue(string_value=value)
     elif isinstance(value, int):
         return proto.UpdateMetadataValue(int_value=value)
