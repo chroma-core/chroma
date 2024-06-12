@@ -91,7 +91,7 @@ def _test_add(
     should_compact: bool,
     batch_ann_accuracy: bool = False,
 ) -> None:
-    client.reset()
+    reset(client)
 
     # TODO: Generative embedding functions
     coll = client.create_collection(
@@ -114,7 +114,7 @@ def _test_add(
         and len(normalized_record_set["ids"]) > 10
     ):
         # Wait for the model to be updated
-        wait_for_version_increase(api, collection.name, initial_version)
+        wait_for_version_increase(client, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
@@ -166,7 +166,7 @@ def create_large_recordset(
 def test_add_large(
     client: ClientAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:
-    client.reset()
+    reset(client)
 
     record_set = create_large_recordset(
         min_size=client.get_max_batch_size(),
@@ -197,7 +197,7 @@ def test_add_large(
     ):
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
-            api, collection.name, initial_version, additional_time=240
+            client, collection.name, initial_version, additional_time=240
         )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
@@ -222,7 +222,7 @@ def test_add_large_exceeding(
     )
 
     with pytest.raises(Exception) as e:
-        coll.add(**record_set)
+        coll.add(**record_set)  # type: ignore[arg-type]
     assert "exceeds maximum batch size" in str(e.value)
 
 

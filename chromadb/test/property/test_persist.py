@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 from multiprocessing.connection import Connection
+import multiprocessing.context
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
@@ -78,7 +79,7 @@ def test_persist(
     client_1.reset()
     coll = client_1.create_collection(
         name=collection_strategy.name,
-        metadata=collection_strategy.metadata,
+        metadata=collection_strategy.metadata,  # type: ignore[arg-type]
         embedding_function=collection_strategy.embedding_function,
     )
 
@@ -134,7 +135,7 @@ def load_and_check(
 
         coll = client.get_collection(
             name=collection_name,
-            embedding_function=strategies.not_implemented_embedding_function(),
+            embedding_function=strategies.not_implemented_embedding_function(),  # type: ignore[arg-type]
         )
         invariants.count(coll, record_set)
         invariants.metadatas_match(coll, record_set)
@@ -148,7 +149,7 @@ def load_and_check(
         raise e
 
 
-def get_multiprocessing_context():
+def get_multiprocessing_context():  # type: ignore[no-untyped-def]
     try:
         # Run the invariants in a new process to bypass any shared state/caching (which would defeat the purpose of the test)
         # (forkserver is used because it's much faster than spawn—it will spawn a new, minimal singleton process and then fork that singleton)
@@ -184,7 +185,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.client.reset()
         self.collection = self.client.create_collection(
             name=collection.name,
-            metadata=collection.metadata,
+            metadata=collection.metadata,  # type: ignore[arg-type]
             embedding_function=collection.embedding_function,
         )
         self.embedding_function = collection.embedding_function
@@ -204,7 +205,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
         conn1, conn2 = multiprocessing.Pipe()
-        ctx = get_multiprocessing_context()
+        ctx = get_multiprocessing_context()  # type: ignore[no-untyped-call]
         p = ctx.Process(
             target=load_and_check,
             args=(self.settings, collection_name, self.record_set_state, conn2),
@@ -237,8 +238,4 @@ def test_persist_embeddings_state(
     client = chromadb.Client(settings)
     run_state_machine_as_test(
         lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
-        # For small max_example values, the test may not generate any examples that pass the precondition for persist().
-        # This value makes it much more likely that the precondition will be satisfied and thus the rule will be exercised.
-        _min_steps=10,
-        settings=override_hypothesis_profile(fast=hypothesis.settings(max_examples=10)),
     )  # type: ignore
