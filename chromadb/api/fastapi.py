@@ -1,6 +1,6 @@
 import orjson as json
 import logging
-from typing import Any, Dict, Optional, TypeVar, cast, Tuple
+from typing import Any, Dict, Optional, cast, Tuple
 from typing import Sequence
 from uuid import UUID
 import httpx
@@ -8,7 +8,6 @@ import urllib.parse
 from overrides import override
 
 from chromadb.api.base_http_client import BaseHTTPClient
-import chromadb.errors as errors
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
@@ -42,16 +41,6 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.types import Collection as CollectionModel
-
-# todo: factor into helper?
-# requests removes None values from the built query string, but httpx includes it as an empty value
-T = TypeVar("T", bound=Dict[Any, Any])
-
-
-def clean_params(params: T) -> T:
-    """Remove None values from kwargs."""
-    return {k: v for k, v in params.items() if v is not None}  # type: ignore
-
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +82,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         url = self._api_url + escaped_path
 
         response = self._session.request(method, url, **cast(Any, kwargs))
-        raise_chroma_error(response)
+        BaseHTTPClient._raise_chroma_error(response)
         return json.loads(response.text)
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
-        resp = self._session.get(self._api_url)
-        raise_chroma_error(resp)
-        return int(json.loads(resp.text)["nanosecond heartbeat"])
+        resp_json = self._make_request("get", "/heartbeat")
+        return int(resp_json["nanosecond heartbeat"])
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
@@ -160,7 +148,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         json_collections = self._make_request(
             "get",
             "/collections",
-            params=clean_params(
+            params=BaseHTTPClient._clean_params(
                 {
                     "tenant": tenant,
                     "database": database,
@@ -578,30 +566,3 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             resp_json = self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
-
-
-def raise_chroma_error(resp: httpx.Response) -> Any:
-    """Raises an error if the response is not ok, using a ChromaError if possible."""
-    try:
-        resp.raise_for_status()
-        return
-    except httpx.HTTPStatusError:
-        pass
-
-    chroma_error = None
-    try:
-        body = json.loads(resp.text)
-        if "error" in body:
-            if body["error"] in errors.error_types:
-                chroma_error = errors.error_types[body["error"]](body["message"])
-
-    except BaseException:
-        pass
-
-    if chroma_error:
-        raise chroma_error
-
-    try:
-        resp.raise_for_status()
-    except httpx.HTTPStatusError:
-        raise (Exception(resp.text))

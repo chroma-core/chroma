@@ -2,11 +2,10 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson as json
-from typing import Any, Optional, TypeVar, cast, Tuple, Sequence, Dict
+from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
-from chromadb import errors
 from chromadb.api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
@@ -41,15 +40,6 @@ from chromadb.api.types import (
     CollectionMetadata,
     validate_batch,
 )
-
-
-# requests removes None values from the built query string, but httpx includes it as an empty value
-T = TypeVar("T", bound=Dict[Any, Any])
-
-
-def clean_params(params: T) -> T:
-    """Remove None values from kwargs."""
-    return {k: v for k, v in params.items() if v is not None}  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -130,8 +120,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
-        response = await self._get_client().request(method, url, **kwargs)
-        await raise_chroma_error(response)
+        response = await self._get_client().request(method, url, **cast(Any, kwargs))
+        await BaseHTTPClient._raise_chroma_error(response)
         return json.loads(response.text)
 
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
@@ -202,7 +192,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         resp_json = await self._make_request(
             "get",
             "/collections",
-            params=clean_params(
+            params=BaseHTTPClient._clean_params(
                 {
                     "tenant": tenant,
                     "database": database,
@@ -605,30 +595,3 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             resp_json = await self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
-
-
-async def raise_chroma_error(resp: httpx.Response) -> Any:
-    """Raises an error if the response is not ok, using a ChromaError if possible."""
-    try:
-        resp.raise_for_status()
-        return
-    except httpx.HTTPStatusError:
-        pass
-
-    chroma_error = None
-    try:
-        body = json.loads(resp.text)
-        if "error" in body:
-            if body["error"] in errors.error_types:
-                chroma_error = errors.error_types[body["error"]](body["message"])
-
-    except BaseException:
-        pass
-
-    if chroma_error:
-        raise chroma_error
-
-    try:
-        resp.raise_for_status()
-    except httpx.HTTPStatusError:
-        raise (Exception(resp.text))
