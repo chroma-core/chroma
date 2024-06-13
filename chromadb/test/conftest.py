@@ -721,8 +721,10 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
     factories = ClientFactories(system)
     yield factories
 
-    for client in factories._created_clients:
+    while len(factories._created_clients) > 0:
+        client = factories._created_clients.pop()
         client.clear_system_cache()
+        del client
 
 
 @pytest.fixture(scope="function")
