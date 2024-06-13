@@ -331,9 +331,10 @@ def _fastapi_fixture(
         try:
             persist_directory.cleanup()
 
-        except PermissionError as e:
+        # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+        except (PermissionError, NotADirectoryError) as e:
             # todo: what's holding onto directory contents on Windows?
-            if os.name == "nt" and e.winerror:
+            if os.name == "nt":
                 pass
             else:
                 raise e
