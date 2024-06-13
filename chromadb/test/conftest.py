@@ -332,6 +332,7 @@ def _fastapi_fixture(
             persist_directory.cleanup()
 
         # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+        # (when we drop support for Python < 3.10, we should use ignore_cleanup_errors=True with the context manager instead)
         except (PermissionError, NotADirectoryError) as e:
             # todo: what's holding onto directory contents on Windows?
             if os.name == "nt":
@@ -557,21 +558,33 @@ def sqlite() -> Generator[System, None, None]:
 
 def sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
-    with tempfile.TemporaryDirectory() as save_path:
-        settings = Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-            persist_directory=save_path,
-        )
-        system = System(settings)
-        system.start()
-        yield system
-        system.stop()
+    save_path = tempfile.TemporaryDirectory()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=save_path,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+    try:
+        save_path.cleanup()
+
+    # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+    # (when we drop support for Python < 3.10, we should use ignore_cleanup_errors=True with the context manager instead)
+    except (PermissionError, NotADirectoryError) as e:
+        # todo: what's holding onto directory contents on Windows?
+        if os.name == "nt":
+            pass
+        else:
+            raise e
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
