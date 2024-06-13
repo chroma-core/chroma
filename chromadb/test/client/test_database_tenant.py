@@ -1,24 +1,13 @@
-from typing import cast
 import pytest
-from chromadb.api.async_client import AsyncAdminClient
-from chromadb.api.client import AdminClient, Client
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
-from chromadb.utils.async_to_sync import async_class_to_sync
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
+from chromadb.test.conftest import ClientFactories
 
 
-def get_admin_client_from_system(system: System) -> AdminClient:
-    if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-        client = AsyncAdminClient.from_system(system)
-        return cast(AdminClient, async_class_to_sync(client))
-
-    return AdminClient.from_system(system)
-
-
-# todo: use client_factories instead?
-def test_database_tenant_collections(client: Client) -> None:
+def test_database_tenant_collections(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
     client.reset()
     # Create a new database in the default tenant
-    admin_client = get_admin_client_from_system(client._system)
+    admin_client = client_factories.create_admin_client_from_system()
     admin_client.create_database("test_db")
 
     # Create collections in this new database
@@ -75,11 +64,12 @@ def test_database_tenant_collections(client: Client) -> None:
     assert len(collections) == 0
 
 
-def test_database_collections_add(client: Client) -> None:
+def test_database_collections_add(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
     client.reset()
 
     # Create a new database in the default tenant
-    admin_client = get_admin_client_from_system(client._system)
+    admin_client = client_factories.create_admin_client_from_system()
     admin_client.create_database("test_db")
 
     # Create collections in this new database
@@ -120,11 +110,12 @@ def test_database_collections_add(client: Client) -> None:
     assert res["documents"] == records_default["documents"]
 
 
-def test_tenant_collections_add(client: Client) -> None:
+def test_tenant_collections_add(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
     client.reset()
 
     # Create two databases with same name in different tenants
-    admin_client = get_admin_client_from_system(client._system)
+    admin_client = client_factories.create_admin_client_from_system()
     admin_client.create_tenant("test_tenant1")
     admin_client.create_tenant("test_tenant2")
     admin_client.create_database("test_db", tenant="test_tenant1")
@@ -166,12 +157,13 @@ def test_tenant_collections_add(client: Client) -> None:
     assert res["documents"] == records_tenant2["documents"]
 
 
-def test_min_len_name(client: Client) -> None:
+def test_min_len_name(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
     client.reset()
 
     # Create a new database in the default tenant with a name of length 1
     # and expect an error
-    admin_client = get_admin_client_from_system(client._system)
+    admin_client = client_factories.create_admin_client_from_system()
     with pytest.raises(Exception):
         admin_client.create_database("a")
 
