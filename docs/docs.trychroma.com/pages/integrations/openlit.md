@@ -2,7 +2,7 @@
 title: 🔍 OpenLIT
 ---
 
-[OpenLIT](https://github.com/openlit/openlit) is an OpenTelemetry-native LLM Application Observability tool and includes OpenTelemetry auto-instrumention for Chroma with just a single line of code helping you ensure your applications are monitored seamlessly, providing critical insights to improve performance, operations and reliability. 
+[OpenLIT](https://github.com/openlit/openlit) is an OpenTelemetry-native LLM Application Observability tool and includes OpenTelemetry auto-instrumention for Chroma with just a single line of code helping you ensure your applications are monitored seamlessly, providing critical insights to improve performance, operations and reliability.
 
 For more information on how to use OpenLIT, see the [OpenLIT docs](https://docs.openlit.io/).
 
@@ -19,7 +19,7 @@ pip install openlit
 ```
 
 ### Step 2: Initialize OpenLIT in your Application
-Integrating OpenLIT into LLM applications is straightforward. Start monitoring for your LLM Application with just **two lines of code**: 
+Integrating OpenLIT into LLM applications is straightforward. Start monitoring for your LLM Application with just **two lines of code**:
 
 ```python
 import openlit
