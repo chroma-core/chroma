@@ -45,3 +45,4 @@ We welcome pull requests to add new Integrations to the community.
 | [🔭 OpenLLMetry](/integrations/openllmetry) | ✅     | 🔜 |
 | [🎈 Streamlit](/integrations/streamlit) | ✅     | ➖ |
 | [💙 Haystack](/integrations/haystack) | ✅     | ➖ |
+| [📊 Langtrace](/integrations/langtrace) | ✅ | ✅ |

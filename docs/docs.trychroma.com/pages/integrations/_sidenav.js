@@ -22,6 +22,7 @@ export const items = [
         { href: '/integrations/haystack', children: 'Haystack' },
         { href: '/integrations/openllmetry', children: 'OpenLLMetry' },
         { href: '/integrations/streamlit', children: 'Streamlit' },
+        { href: '/integrations/langtrace', children: 'Langtrace'}
       ]
     },
   ];
