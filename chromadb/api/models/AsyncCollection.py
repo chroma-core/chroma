@@ -22,7 +22,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 
-from .CollectionCommon import CollectionCommon
+from chromadb.api.models.CollectionCommon import CollectionCommon
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
