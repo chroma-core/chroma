@@ -56,6 +56,7 @@ impl IndexConfig {
 /// - `add` - Add a vector to the index.
 /// - `delete` - Delete a vector from the index.
 /// - `query` - Query the index for the K nearest neighbors of a given vector.
+/// - `resize` - Resize the index to a new capacity.
 pub(crate) trait Index<C> {
     fn init(
         index_config: &IndexConfig,

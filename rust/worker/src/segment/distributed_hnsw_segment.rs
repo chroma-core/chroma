@@ -194,7 +194,18 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                             }
                         },
                     };
-                    self.index.read().add(record.offset_id as usize, embedding);
+
+                    let mut index = self.index.upgradable_read();
+                    let index_len = index.len();
+                    let index_capacity = index.capacity();
+                    if index_len + 1 > index_capacity {
+                        index.with_upgraded(|index| {
+                            // Bump allocation by 2x
+                            index.resize(index_capacity * 2);
+                        });
+                    }
+
+                    index.add(record.offset_id as usize, embedding);
                 }
                 // This shouldn't be reached since materialization always derefs
                 // upserts into either updates or inserts.
