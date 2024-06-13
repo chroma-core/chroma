@@ -34,8 +34,6 @@ The above docker command will run the server with the `BAAI/bge-small-en-v1.5` m
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-This embedding function relies on the `httpx` python package, which you can install with `pip install httpx`.
-
 ```python
 from chromadb.utils.embedding_functions import HuggingFaceEmbeddingServer
 huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed")

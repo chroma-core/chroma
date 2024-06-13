@@ -14,8 +14,6 @@ Chroma also provides a convenient wrapper around HuggingFace's embedding API. Th
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-This embedding function relies on the `httpx` python package, which you can install with `pip install httpx`.
-
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 huggingface_ef = embedding_functions.HuggingFaceEmbeddingFunction(
