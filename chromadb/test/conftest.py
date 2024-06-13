@@ -682,12 +682,15 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
 
     client: Optional[ClientAPI] = None
 
-    def factory(*args: Any, **kwargs: Any) -> ClientCreator:
+    def client_factory(*args: Any, **kwargs: Any) -> ClientCreator:
+        nonlocal client
+
         if kwargs.get("settings") is None:
             kwargs["settings"] = system.settings
 
         if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-            return cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
+            client = cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
+            return client
         else:
             client = ClientCreator(*args, **kwargs)
             return client
@@ -698,10 +701,9 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
         else:
             return AdminClient(*args, **kwargs)
 
-    yield {"client": factory, "admin": admin_factory}
+    yield {"client": client_factory, "admin": admin_factory}
 
     if client is not None:
-        # todo: does this run?
         client.clear_system_cache()
 
 
