@@ -18,9 +18,11 @@ jobs:
         id: changes
         uses: dorny/paths-filter@v3
         with:
+          predicate-quantifier: 'every'
           filters: |
             outside-docs:
               - '!docs/**'
+              - '!.github/**'
 
   python-tests:
     name: Python tests
