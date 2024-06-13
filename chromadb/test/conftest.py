@@ -19,8 +19,11 @@ import hypothesis
 import pytest
 import uvicorn
 from requests.exceptions import ConnectionError
+from httpx import ConnectError
 from typing_extensions import Protocol
 
+from chromadb.api.async_fastapi import AsyncFastAPI
+from chromadb.api.fastapi import FastAPI
 import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
@@ -28,6 +31,7 @@ from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator
+from chromadb.utils.async_to_sync import async_class_to_sync
 
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
@@ -217,7 +221,9 @@ def _run_server(
 def _await_server(api: ServerAPI, attempts: int = 0) -> None:
     try:
         api.heartbeat()
-    except ConnectionError as e:
+    # First error is from requests, second is from httpx
+    # todo: use httpx for both?
+    except (ConnectionError, ConnectError) as e:
         if attempts > 15:
             raise e
         else:
@@ -227,6 +233,7 @@ def _await_server(api: ServerAPI, attempts: int = 0) -> None:
 
 def _fastapi_fixture(
     is_persistent: bool = False,
+    chroma_api_impl: str = "chromadb.api.fastapi.FastAPI",
     chroma_server_authn_provider: Optional[str] = None,
     chroma_client_auth_provider: Optional[str] = None,
     chroma_server_authn_credentials_file: Optional[str] = None,
@@ -276,7 +283,7 @@ def _fastapi_fixture(
         proc = ctx.Process(target=_run_server, args=args, daemon=True)
         proc.start()
         settings = Settings(
-            chroma_api_impl="chromadb.api.fastapi.FastAPI",
+            chroma_api_impl=chroma_api_impl,
             chroma_server_host="localhost",
             chroma_server_http_port=port,
             allow_reset=True,
@@ -290,7 +297,7 @@ def _fastapi_fixture(
         system = System(settings)
         api = system.instance(ServerAPI)
         system.start()
-        _await_server(api)
+        _await_server(api if isinstance(api, FastAPI) else async_class_to_sync(api))
         yield system
         system.stop()
         proc.kill()
@@ -331,6 +338,13 @@ def _fastapi_fixture(
 
 def fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=False)
+
+
+def async_fastapi() -> Generator[System, None, None]:
+    return _fastapi_fixture(
+        is_persistent=False,
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+    )
 
 
 def fastapi_persistent() -> Generator[System, None, None]:
@@ -554,7 +568,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, fastapi_persistent, sqlite, sqlite_persistent]
+    fixtures = [fastapi, async_fastapi, fastapi_persistent, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
@@ -629,15 +643,25 @@ def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, No
 def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
     api = system.instance(ServerAPI)
-    yield api
+
+    if isinstance(api, AsyncFastAPI):
+        transformed = async_class_to_sync(api)
+        yield transformed
+    else:
+        yield api
 
 
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
-    client = ClientCreator.from_system(system)
-    yield client
-    client.clear_system_cache()
+
+    if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+        # todo: remove this when async client is added
+        pytest.skip("Client with async backing not yet implemented.")
+    else:
+        client = ClientCreator.from_system(system)
+        yield client
+        client.clear_system_cache()
 
 
 @pytest.fixture(scope="function")

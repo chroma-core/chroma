@@ -1,7 +1,10 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Optional,
+    Union,
+)
 import numpy as np
 
-from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -19,25 +22,14 @@ from chromadb.api.types import (
     WhereDocument,
 )
 
-import logging
-
-logger = logging.getLogger(__name__)
+from chromadb.api.models.CollectionCommon import CollectionCommon
 
 if TYPE_CHECKING:
-    from chromadb.api import ServerAPI  # noqa: F401
+    from chromadb.api import AsyncServerAPI  # noqa: F401
 
 
-class Collection(CollectionCommon["ServerAPI"]):
-    def count(self) -> int:
-        """The total number of embeddings added to the database
-
-        Returns:
-            int: The total number of embeddings added to the database
-
-        """
-        return self._client._count(collection_id=self.id)
-
-    def add(
+class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
+    async def add(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -81,9 +73,18 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
-    def get(
+    async def count(self) -> int:
+        """The total number of embeddings added to the database
+
+        Returns:
+            int: The total number of embeddings added to the database
+
+        """
+        return await self._client._count(collection_id=self.id)
+
+    async def get(
         self,
         ids: Optional[OneOrMany[ID]] = None,
         where: Optional[Where] = None,
@@ -97,7 +98,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
@@ -114,7 +115,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             valid_include,
         ) = self._validate_and_prepare_get_request(ids, where, where_document, include)
 
-        get_results = self._client._get(
+        get_results = await self._client._get(
             self.id,
             valid_ids,
             valid_where,
@@ -125,9 +126,9 @@ class Collection(CollectionCommon["ServerAPI"]):
             include=valid_include,
         )
 
-        return self._transform_get_response(get_results, include)
+        return self._transform_get_response(get_results, valid_include)
 
-    def peek(self, limit: int = 10) -> GetResult:
+    async def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
 
         Args:
@@ -136,9 +137,9 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return self._client._peek(self.id, limit)
+        return await self._client._peek(self.id, limit)
 
-    def query(
+    async def query(
         self,
         query_embeddings: Optional[
             Union[
@@ -161,7 +162,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             query_texts: The document texts to get the closes neighbors of. Optional.
             query_images: The images to get the closes neighbors of. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
@@ -192,7 +193,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             include,
         )
 
-        query_results = self._client._query(
+        query_results = await self._client._query(
             collection_id=self.id,
             query_embeddings=valid_query_embeddings,
             n_results=valid_n_results,
@@ -203,7 +204,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         return self._transform_query_response(query_results, include)
 
-    def modify(
+    async def modify(
         self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
     ) -> None:
         """Modify the collection name or metadata
@@ -221,11 +222,11 @@ class Collection(CollectionCommon["ServerAPI"]):
         # Note there is a race condition here where the metadata can be updated
         # but another thread sees the cached local metadata.
         # TODO: fixme
-        self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
+        await self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
 
         self._update_model_after_modify_success(name, metadata)
 
-    def update(
+    async def update(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -260,9 +261,9 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+        await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
 
-    def upsert(
+    async def upsert(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -297,7 +298,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        self._client._upsert(
+        await self._client._upsert(
             collection_id=self.id,
             ids=ids,
             embeddings=embeddings,
@@ -306,7 +307,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris=uris,
         )
 
-    def delete(
+    async def delete(
         self,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
@@ -316,7 +317,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
+            where: A Where type dict used to filter the delection by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{$contains: {"text": "hello"}}`. Optional.
 
         Returns:
@@ -329,4 +330,4 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids, where, where_document
         )
 
-        self._client._delete(self.id, ids, where, where_document)
+        await self._client._delete(self.id, ids, where, where_document)

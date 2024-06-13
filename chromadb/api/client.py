@@ -79,7 +79,10 @@ class SharedSystemClient:
                 identifier = (
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
                 )
-        elif api_impl == "chromadb.api.fastapi.FastAPI":
+        elif api_impl in [
+            "chromadb.api.fastapi.FastAPI",
+            "chromadb.api.async_fastapi.AsyncFastAPI",
+        ]:
             # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
             identifier = str(uuid.uuid4())
         else:
