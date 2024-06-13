@@ -683,10 +683,10 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
     client: Optional[ClientAPI] = None
 
     def factory(*args: Any, **kwargs: Any) -> ClientCreator:
-        if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-            if kwargs.get("settings") is None:
-                kwargs["settings"] = system.settings
+        if kwargs.get("settings") is None:
+            kwargs["settings"] = system.settings
 
+        if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
             return cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
         else:
             client = ClientCreator(*args, **kwargs)
