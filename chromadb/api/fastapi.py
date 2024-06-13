@@ -79,15 +79,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         if self._header is not None:
             self._session.headers.update(self._header)
         if self._settings.chroma_server_ssl_verify is not None:
-            if type(self._settings.chroma_server_ssl_verify) is str:
-                self._session = httpx.Client(
-                    cert=self._settings.chroma_server_ssl_verify
-                )
-            else:
-                # must be bool
-                self._session = httpx.Client(
-                    verify=self._settings.chroma_server_ssl_verify
-                )
+            self._session = httpx.Client(verify=self._settings.chroma_server_ssl_verify)
 
         if system.settings.chroma_client_auth_provider:
             self._auth_provider = self.require(ClientAuthProvider)
@@ -121,7 +113,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> None:
         """Creates a database"""
         self._make_request(
-            "POST",
+            "post",
             "/databases",
             json={"name": name},
             params={"tenant": tenant},
@@ -136,7 +128,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> Database:
         """Returns a database"""
         resp_json = self._make_request(
-            "GET",
+            "get",
             "/databases/" + name,
             params={"tenant": tenant},
         )
@@ -147,12 +139,12 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
-        self._make_request("POST", "/tenants", json={"name": name})
+        self._make_request("post", "/tenants", json={"name": name})
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> Tenant:
-        resp_json = self._make_request("GET", "/tenants/" + name)
+        resp_json = self._make_request("get", "/tenants/" + name)
         return Tenant(name=resp_json["name"])
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
@@ -166,7 +158,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> Sequence[Collection]:
         """Returns a list of all collections"""
         json_collections = self._make_request(
-            "GET",
+            "get",
             "/collections",
             params=clean_params(
                 {
@@ -199,7 +191,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> int:
         """Returns a count of collections"""
         resp_json = self._make_request(
-            "GET",
+            "get",
             "/count_collections",
             params={"tenant": tenant, "database": database},
         )
@@ -221,7 +213,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> Collection:
         """Creates a collection"""
         resp_json = self._make_request(
-            "POST",
+            "post",
             "/collections",
             json={
                 "name": name,
@@ -269,7 +261,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             _params["type"] = str(id)
 
         resp_json = self._make_request(
-            "GET",
+            "get",
             "/collections/" + name if name else str(id),
             params=_params,
         )
@@ -325,7 +317,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> None:
         """Updates a collection"""
         self._make_request(
-            "PUT",
+            "put",
             "/collections/" + str(id),
             json={"new_metadata": new_metadata, "new_name": new_name},
         )
@@ -340,7 +332,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> None:
         """Deletes a collection"""
         self._make_request(
-            "DELETE",
+            "delete",
             "/collections/" + name,
             params={"tenant": tenant, "database": database},
         )
@@ -353,7 +345,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> int:
         """Returns the number of embeddings in the database"""
         resp_json = self._make_request(
-            "GET",
+            "get",
             "/collections/" + str(collection_id) + "/count",
         )
         return cast(int, resp_json)
@@ -394,19 +386,17 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             limit = page_size
 
         resp_json = self._make_request(
-            "GET",
+            "post",
             "/collections/" + str(collection_id) + "/get",
-            params=clean_params(
-                {
-                    "ids": ids,
-                    "where": where,
-                    "sort": sort,
-                    "limit": limit,
-                    "offset": offset,
-                    "where_document": where_document,
-                    "include": include,
-                }
-            ),
+            json={
+                "ids": ids,
+                "where": where,
+                "sort": sort,
+                "limit": limit,
+                "offset": offset,
+                "where_document": where_document,
+                "include": include,
+            },
         )
 
         return GetResult(
@@ -430,7 +420,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> IDs:
         """Deletes embeddings from the database"""
         resp_json = self._make_request(
-            "POST",
+            "post",
             "/collections/" + str(collection_id) + "/delete",
             json={
                 "ids": ids,
@@ -456,7 +446,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Submits a batch of embeddings to the database
         """
         self._make_request(
-            "POST",
+            "post",
             url,
             json={
                 "ids": batch[0],
@@ -540,7 +530,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
         resp_json = self._make_request(
-            "POST",
+            "post",
             "/collections/" + str(collection_id) + "/query",
             json={
                 "query_embeddings": query_embeddings,
@@ -566,14 +556,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def reset(self) -> bool:
         """Resets the database"""
-        resp_json = self._make_request("POST", "/reset")
+        resp_json = self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
     @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
-        resp_json = self._make_request("GET", "/version")
+        resp_json = self._make_request("get", "/version")
         return cast(str, resp_json)
 
     @override
@@ -585,7 +575,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def get_max_batch_size(self) -> int:
         if self._max_batch_size == -1:
-            resp_json = self._make_request("GET", "/pre-flight-checks")
+            resp_json = self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
 

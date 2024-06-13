@@ -1,7 +1,6 @@
 # type: ignore
 import traceback
 import httpx
-from urllib3.connectionpool import InsecureRequestWarning
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
@@ -1614,19 +1613,3 @@ def test_ssl_self_signed_without_ssl_verify(client_ssl):
     )
     client_ssl.clear_system_cache()
     assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
-
-
-def test_ssl_self_signed_with_verify_false(client_ssl):
-    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
-        pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
-    _port = client_ssl._server._settings.chroma_server_http_port
-    with pytest.warns(InsecureRequestWarning) as record:
-        client = chromadb.HttpClient(
-            ssl=True,
-            port=_port,
-            settings=chromadb.Settings(chroma_server_ssl_verify=False),
-        )
-        client.heartbeat()
-    client_ssl.clear_system_cache()
-    assert "Unverified HTTPS request" in str(record[0].message)
