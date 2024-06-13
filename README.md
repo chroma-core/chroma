@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://discord.gg/MMeYNTmh3x" target="_blank">
-      <img src="https://img.shields.io/discord/1073293645303795742" alt="Discord">
+      <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600" alt="Discord">
   </a> |
   <a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
       <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">

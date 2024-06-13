@@ -124,10 +124,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                 }
             }
         };
-        trace!(
-            "[MergeMetadataResultsOperator] Merged offset ids: {:?}",
-            merged_offset_ids
-        );
 
         // Materialize logs.
         let record_segment_reader: Option<RecordSegmentReader>;

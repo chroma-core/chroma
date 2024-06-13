@@ -13,9 +13,10 @@ import { FetchAPI } from "./generated";
 
 function isOfflineError(error: any): boolean {
   return Boolean(
-    error?.name === "TypeError" &&
+    (error?.name === "TypeError" || error?.name === "FetchError") &&
       (error.message?.includes("fetch failed") ||
-        error.message?.includes("Failed to fetch")),
+        error.message?.includes("Failed to fetch") ||
+        error.message?.includes("ENOTFOUND")),
   );
 }
 

@@ -15,7 +15,6 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 from typing import Any, Dict, Mapping, Optional
-
 import numpy
 from chromadb.test.property.strategies import hashing_embedding_function
 

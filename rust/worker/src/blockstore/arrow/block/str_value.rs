@@ -20,6 +20,10 @@ impl ArrowWriteableValue for &str {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
     }
 
+    fn validity_size(item_count: usize) -> usize {
+        0 // We don't support None values for StringArray
+    }
+
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
             BlockStorage::String(builder) => {

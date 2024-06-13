@@ -108,49 +108,6 @@ impl ArrowBlockfileWriter {
         Ok(flusher)
     }
 
-    pub(crate) fn split_and_add<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
-        prefix: &str,
-        key: K,
-        value: V,
-        delta: BlockDelta,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        if delta.can_add(prefix, &key, &value) {
-            delta.add(prefix, key, value);
-        } else {
-            let (split_key, new_delta) = delta.split::<K, V>();
-            self.sparse_index.add_block(split_key, new_delta.id);
-            match new_delta.get_min_key() {
-                Some(min_key) => {
-                    if search_key >= min_key {
-                        // Add to new_delta recursively.
-                        match self.split_and_add(prefix, key, value, new_delta.clone()) {
-                            Ok(()) => (),
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        };
-                    } else {
-                        // Add to old delta recursively.
-                        match self.split_and_add(prefix, key, value, delta.clone()) {
-                            Ok(()) => (),
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        };
-                    }
-                }
-                None => {
-                    panic!("New block after split cannot be empty");
-                }
-            }
-            let mut deltas = self.block_deltas.lock();
-            deltas.insert(new_delta.id, new_delta);
-        }
-        Ok(())
-    }
-
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
@@ -161,10 +118,7 @@ impl ArrowBlockfileWriter {
         let _guard = self.write_mutex.lock().await;
 
         // TODO: value must be smaller than the block size except for position lists, which are a special case
-        //         // where we split the value across multiple blocks
-        //         if !self.in_transaction() {
-        //             return Err(Box::new(BlockfileError::TransactionNotInProgress));
-        //         }
+        //  where we split the value across multiple blocks
 
         // Get the target block id for the key
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
@@ -204,9 +158,19 @@ impl ArrowBlockfileWriter {
             Some(delta) => delta,
         };
 
-        // Add this key-value to the delta splitting it
-        // recursively if it overflows.
-        self.split_and_add(prefix, key, value, delta)
+        // Add the key, value pair to delta.
+        // Then check if its over size and split as needed
+        delta.add(prefix, key, value);
+        if delta.get_size::<K, V>() > MAX_BLOCK_SIZE {
+            let new_blocks = delta.split::<K, V>();
+            for (split_key, new_delta) in new_blocks {
+                self.sparse_index.add_block(split_key, new_delta.id);
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta);
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
@@ -555,16 +519,20 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::arrow::provider::ArrowBlockfileProvider,
+        blockstore::arrow::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockfileProvider},
+        log::config::{self, GrpcLogConfig},
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
-        types::MetadataValue,
+        types::{update_metdata_to_metdata, MetadataValue},
     };
     use arrow::array::Int32Array;
+    use proptest::prelude::*;
     use proptest::test_runner::Config;
-    use proptest::{num, prelude::*};
-    use rand::{seq::IteratorRandom, Rng};
-    use std::collections::HashMap;
+    use rand::seq::IteratorRandom;
+    use std::{
+        collections::HashMap,
+        time::{SystemTime, UNIX_EPOCH},
+    };
     use tokio::runtime::Runtime;
 
     #[tokio::test]
@@ -1000,6 +968,7 @@ mod tests {
         let n = 2000;
         for i in 0..n {
             let key = format!("{:04}", i);
+            println!("Setting key: {}", key);
             let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
@@ -1087,6 +1056,31 @@ mod tests {
                 &MetadataValue::Str("value".to_string())
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_large_split_value() {
+        // Tests the case where a value is larger than half the block size
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+
+        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let id = writer.id();
+
+        let val_1_small = "a";
+        let val_2_large = "a".repeat(MAX_BLOCK_SIZE / 2 + 1);
+
+        writer.set("key", "1", val_1_small).await.unwrap();
+        writer.set("key", "2", val_2_large.as_str()).await.unwrap();
+        writer.commit::<&str, &str>().unwrap();
+
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
+        let val_1 = reader.get("key", "1").await.unwrap();
+        let val_2 = reader.get("key", "2").await.unwrap();
+
+        assert_eq!(val_1, val_1_small);
+        assert_eq!(val_2, val_2_large);
     }
 
     #[tokio::test]

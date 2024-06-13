@@ -176,7 +176,7 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
         </Head>
         <TopNav>
           <Link href="https://discord.gg/MMeYNTmh3x" className='hidden sm:block'>
-            <img src="https://img.shields.io/discord/1073293645303795742"/>
+            <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600"/>
           </Link>
           <Link href="https://github.com/chroma-core/chroma">
             <img src="https://img.shields.io/github/stars/chroma-core/chroma.svg?style=social&label=Star&maxAge=2400"/>

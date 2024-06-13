@@ -12,4 +12,8 @@ services:
       - ALLOW_RESET=True
       - IS_PERSISTENT=True
     ports:
-      - 8000:8000
+      - "${CHROMA_PORT:-8000}:8000"
+
+volumes:
+  chroma-data:
+    driver: local

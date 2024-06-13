@@ -131,10 +131,8 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
                 break;
             }
         }
-        trace!("Log records {:?}", result);
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
-            trace!("Truncated log records {:?}", result);
         }
         // Convert to DataChunk
         let data_chunk = Chunk::new(result.into());

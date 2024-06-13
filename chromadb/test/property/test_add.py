@@ -2,16 +2,23 @@ import random
 import uuid
 from random import randint
 from typing import cast, List, Any, Dict
+import hypothesis
 import pytest
 import time
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ServerAPI
 from chromadb.api.types import Embeddings, Metadatas
-from chromadb.test.conftest import MEMBERLIST_SLEEP, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import (
+    MEMBERLIST_SLEEP,
+    NOT_CLUSTER_ONLY,
+    override_hypothesis_profile,
+)
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
+
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
@@ -22,21 +29,32 @@ def reset(api: ServerAPI) -> None:
         time.sleep(MEMBERLIST_SLEEP)
 
 
-@given(collection=collection_st, record_set=strategies.recordsets(collection_st))
-@settings(deadline=None)
+@given(
+    collection=collection_st,
+    record_set=strategies.recordsets(collection_st),
+    should_compact=st.booleans(),
+)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=500),
+        fast=hypothesis.settings(max_examples=200),
+    ),
+)
 def test_add(
     api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
+    should_compact: bool,
 ) -> None:
     reset(api)
-
     # TODO: Generative embedding functions
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
+
     normalized_record_set = invariants.wrap_all(record_set)
 
     if not invariants.is_metadata_valid(normalized_record_set):
@@ -45,6 +63,14 @@ def test_add(
         return
 
     coll.add(**record_set)
+
+    if not NOT_CLUSTER_ONLY:
+        # Only wait for compaction if the size of the collection is
+        # some minimal size
+        if should_compact and len(normalized_record_set["ids"]) > 10:
+            initial_version = coll.get_model()["version"]
+            # Wait for the model to be updated
+            wait_for_version_increase(api, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
