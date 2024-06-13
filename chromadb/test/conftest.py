@@ -335,8 +335,8 @@ def _fastapi_fixture(
             # todo: what's holding onto directory contents on Windows?
             if os.name == "nt" and e.winerror:
                 pass
-
-            raise e
+            else:
+                raise e
 
     else:
         yield from run(args)
