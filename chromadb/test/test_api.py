@@ -1,6 +1,6 @@
 # type: ignore
 import traceback
-import requests
+import httpx
 from urllib3.connectionpool import InsecureRequestWarning
 
 import chromadb
@@ -203,7 +203,7 @@ def test_pre_flight_checks(api):
     if not isinstance(api, FastAPI):
         pytest.skip("Not a FastAPI instance")
 
-    resp = requests.get(f"{api._api_url}/pre-flight-checks")
+    resp = httpx.get(f"{api._api_url}/pre-flight-checks")
     assert resp.status_code == 200
     assert resp.json() is not None
     assert "max_batch_size" in resp.json().keys()

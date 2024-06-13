@@ -11,4 +11,3 @@ pytest-asyncio
 pytest-xdist
 setuptools_scm
 types-protobuf
-types-requests==2.30.0.0

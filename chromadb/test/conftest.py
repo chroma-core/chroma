@@ -18,7 +18,6 @@ from uuid import UUID
 import hypothesis
 import pytest
 import uvicorn
-from requests.exceptions import ConnectionError
 from httpx import ConnectError
 from typing_extensions import Protocol
 
@@ -221,9 +220,7 @@ def _run_server(
 def _await_server(api: ServerAPI, attempts: int = 0) -> None:
     try:
         api.heartbeat()
-    # First error is from requests, second is from httpx
-    # todo: use httpx for both?
-    except (ConnectionError, ConnectError) as e:
+    except ConnectError as e:
         if attempts > 15:
             raise e
         else:

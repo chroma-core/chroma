@@ -14,7 +14,7 @@ Chroma provides a convenient wrapper around JinaAI's embedding API. This embeddi
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-This embedding function relies on the `requests` python package, which you can install with `pip install requests`.
+This embedding function relies on the `httpx` python package, which you can install with `pip install httpx`.
 
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
