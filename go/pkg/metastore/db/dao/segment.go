@@ -56,7 +56,7 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 	var segments []*dbmodel.SegmentAndMetadata
 
 	query := s.db.Table("segments").
-		Select("segments.id, segments.collection_id, segments.type, segments.scope, segments.file_paths, segment_metadata.key, segment_metadata.str_value, segment_metadata.int_value, segment_metadata.float_value").
+		Select("segments.id, segments.collection_id, segments.type, segments.scope, segments.file_paths, segment_metadata.key, segment_metadata.str_value, segment_metadata.int_value, segment_metadata.float_value, segment_metadata.bool_value").
 		Joins("LEFT JOIN segment_metadata ON segments.id = segment_metadata.segment_id").
 		Order("segments.id")
 

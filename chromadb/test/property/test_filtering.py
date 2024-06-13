@@ -14,19 +14,12 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
-from chromadb.test.conftest import MEMBERLIST_SLEEP, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
 import random
 import re
-import time
-
-
-def reset(api: ServerAPI) -> None:
-    api.reset()
-    if not NOT_CLUSTER_ONLY:
-        time.sleep(MEMBERLIST_SLEEP)
 
 
 def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:

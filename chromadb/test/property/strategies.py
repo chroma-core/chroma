@@ -117,6 +117,7 @@ safe_floats = st.floats(
     allow_infinity=False,
     allow_nan=False,
     allow_subnormal=False,
+    width=32,
     min_value=-1e6,
     max_value=1e6,
 )  # TODO: handle infinity and NAN
@@ -537,6 +538,8 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))
+        # Truncate to 32 bit
+        value = float(np.float32(value))
 
     op: WhereOperator = draw(st.sampled_from(legal_ops))
 
@@ -562,13 +565,15 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         word = draw(safe_text)
 
+    # This is hacky, but the distributed system does not support $not_contains
+    # so we need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $not_contains
     op: WhereOperator
     if not NOT_CLUSTER_ONLY:
         op = draw(st.sampled_from(["$contains"]))
     else:
         op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
-    # op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
     if op == "$contains":
         return {"$contains": word}
     else:

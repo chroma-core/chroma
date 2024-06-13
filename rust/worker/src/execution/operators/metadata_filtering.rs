@@ -697,17 +697,13 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                                 Ok(offset_id) => {
                                     user_supplied_offset_ids.push(offset_id);
                                 }
-                                Err(_) => {
-                                    return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderError);
-                                }
+                                // It's ok for the user to supply a non existent id.
+                                Err(_) => (),
                             }
                         }
                     }
-                    None => {
-                        if !remaining_id_set.is_empty() {
-                            return Err(MetadataFilteringError::MetadataFilteringInvalidInput);
-                        }
-                    }
+                    // It's ok for the user to supply a non existent id.
+                    None => (),
                 }
             }
             None => {
