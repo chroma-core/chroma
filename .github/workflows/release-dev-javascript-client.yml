@@ -33,6 +33,8 @@ jobs:
         with:
           node-version: "16.x"
           registry-url: ${{ matrix.registry }}
+          check-latest: false
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install dependencies
         run: npm install
         working-directory: ./clients/js/
@@ -54,7 +56,7 @@ jobs:
           echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
         working-directory: ./clients/js/
       - name: Test & publish
-        run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
+        run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT --registry=${{ matrix.registry }}
         working-directory: ./clients/js/
         env:
           NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
