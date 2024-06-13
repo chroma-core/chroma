@@ -7,7 +7,7 @@ from chromadb.telemetry.product import ProductTelemetryClient
 
 
 class SharedSystemClient:
-    _identifer_to_system: ClassVar[Dict[str, System]] = {}
+    _identifier_to_system: ClassVar[Dict[str, System]] = {}
     _identifier: str
 
     def __init__(
@@ -21,16 +21,16 @@ class SharedSystemClient:
     def _create_system_if_not_exists(
         cls, identifier: str, settings: Settings
     ) -> System:
-        if identifier not in cls._identifer_to_system:
+        if identifier not in cls._identifier_to_system:
             new_system = System(settings)
-            cls._identifer_to_system[identifier] = new_system
+            cls._identifier_to_system[identifier] = new_system
 
             new_system.instance(ProductTelemetryClient)
             new_system.instance(ServerAPI)
 
             new_system.start()
         else:
-            previous_system = cls._identifer_to_system[identifier]
+            previous_system = cls._identifier_to_system[identifier]
 
             # For now, the settings must match
             if previous_system.settings != settings:
@@ -38,7 +38,7 @@ class SharedSystemClient:
                     f"An instance of Chroma already exists for {identifier} with different settings"
                 )
 
-        return cls._identifer_to_system[identifier]
+        return cls._identifier_to_system[identifier]
 
     @staticmethod
     def _get_identifier_from_settings(settings: Settings) -> str:
@@ -68,7 +68,7 @@ class SharedSystemClient:
     @staticmethod
     def _populate_data_from_system(system: System) -> str:
         identifier = SharedSystemClient._get_identifier_from_settings(system.settings)
-        SharedSystemClient._identifer_to_system[identifier] = system
+        SharedSystemClient._identifier_to_system[identifier] = system
         return identifier
 
     @classmethod
@@ -81,8 +81,8 @@ class SharedSystemClient:
 
     @staticmethod
     def clear_system_cache() -> None:
-        SharedSystemClient._identifer_to_system = {}
+        SharedSystemClient._identifier_to_system = {}
 
     @property
     def _system(self) -> System:
-        return SharedSystemClient._identifer_to_system[self._identifier]
+        return SharedSystemClient._identifier_to_system[self._identifier]
