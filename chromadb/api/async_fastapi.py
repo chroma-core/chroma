@@ -121,7 +121,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         url = self._api_url + escaped_path
 
         response = await self._get_client().request(method, url, **cast(Any, kwargs))
-        await BaseHTTPClient._raise_chroma_error(response)
+        BaseHTTPClient._raise_chroma_error(response)
         return json.loads(response.text)
 
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)

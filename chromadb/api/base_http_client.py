@@ -70,7 +70,7 @@ class BaseHTTPClient:
         return {k: v for k, v in params.items() if v is not None}  # type: ignore
 
     @staticmethod
-    def _raise_chroma_error(resp: httpx.Response) -> Any:
+    def _raise_chroma_error(resp: httpx.Response) -> None:
         """Raises an error if the response is not ok, using a ChromaError if possible."""
         try:
             resp.raise_for_status()
