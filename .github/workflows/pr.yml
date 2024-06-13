@@ -18,9 +18,11 @@ jobs:
         id: changes
         uses: dorny/paths-filter@v3
         with:
+          predicate-quantifier: 'every'
           filters: |
             outside-docs:
               - '!docs/**'
+              - '!.github/**'
 
   python-tests:
     name: Python tests
@@ -127,3 +129,4 @@ jobs:
       uses: re-actors/alls-green@release/v1
       with:
         jobs: ${{ toJSON(needs) }}
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests
