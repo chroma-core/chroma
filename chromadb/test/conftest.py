@@ -13,7 +13,6 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
-    TypedDict,
     cast,
 )
 from uuid import UUID
@@ -668,42 +667,60 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
         yield api
 
 
-class ClientFactories(TypedDict):
-    client: Callable[..., ClientCreator]
-    admin: Callable[..., AdminClient]
+class ClientFactories:
+    """This allows consuming tests to be parameterized by async/sync versions of the client and papers over the async implementation.
+    If you don't need to manually construct clients, use the `client` fixture instead.
+    """
+
+    _system: System
+    _created_clients: List[ClientAPI] = []
+
+    def __init__(self, system: System):
+        self._system = system
+
+    def create_client(self, *args: Any, **kwargs: Any) -> ClientCreator:
+        if kwargs.get("settings") is None:
+            kwargs["settings"] = self._system.settings
+
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            client = cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
+            self._created_clients.append(client)
+            return client
+
+        client = ClientCreator(*args, **kwargs)
+        self._created_clients.append(client)
+        return client
+
+    def create_admin_client(self, *args: Any, **kwargs: Any) -> AdminClient:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            return cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+
+        return AdminClient(*args, **kwargs)
+
+    def create_admin_client_from_system(self) -> AdminClient:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            return cast(AdminClient, AsyncAdminClientSync.from_system(self._system))
+
+        return AdminClient.from_system(self._system)
 
 
 @pytest.fixture(scope="function")
 def client_factories(system: System) -> Generator[ClientFactories, None, None]:
-    """This allows consuming tests to be parameterized by async/sync versions of the client and papers over the async implementation.
-    If you don't need to manually construct clients, use the `client` fixture instead.
-    """
     system.reset_state()
 
-    client: Optional[ClientAPI] = None
+    factories = ClientFactories(system)
+    yield factories
 
-    def client_factory(*args: Any, **kwargs: Any) -> ClientCreator:
-        nonlocal client
-
-        if kwargs.get("settings") is None:
-            kwargs["settings"] = system.settings
-
-        if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-            client = cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
-            return client
-        else:
-            client = ClientCreator(*args, **kwargs)
-            return client
-
-    def admin_factory(*args: Any, **kwargs: Any) -> AdminClient:
-        if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-            return cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
-        else:
-            return AdminClient(*args, **kwargs)
-
-    yield {"client": client_factory, "admin": admin_factory}
-
-    if client is not None:
+    for client in factories._created_clients:
         client.clear_system_cache()
 
 
