@@ -73,7 +73,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        self._session = httpx.Client()
+        self._session = httpx.Client(timeout=None)
 
         self._header = system.settings.chroma_server_headers
         if self._header is not None:
