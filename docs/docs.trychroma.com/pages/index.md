@@ -6,7 +6,7 @@ title: Chroma
 
 New to Chroma? [🔑 Getting Started](./getting-started).
 
-[![Discord](https://img.shields.io/discord/1073293645303795742)](https://discord.gg/MMeYNTmh3x)
+[![Discord](https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600)](https://discord.gg/MMeYNTmh3x)
 {% br %}{% /br %}
 [![GitHub stars](https://img.shields.io/github/stars/chroma-core/chroma.svg?style=social&label=Star&maxAge=2400)](https://GitHub.com/chroma-core/chroma/stargazers/)
 
