@@ -13,6 +13,7 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
+    TypedDict,
     cast,
 )
 from uuid import UUID
@@ -32,8 +33,11 @@ from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
-from chromadb.api.client import Client as ClientCreator
-from chromadb.api.async_client import AsyncClient as AsyncClientCreator
+from chromadb.api.client import Client as ClientCreator, AdminClient
+from chromadb.api.async_client import (
+    AsyncAdminClient,
+    AsyncClient as AsyncClientCreator,
+)
 from chromadb.utils.async_to_sync import async_class_to_sync
 
 VALID_PRESETS = ["fast", "normal", "slow"]
@@ -647,6 +651,11 @@ class AsyncClientCreatorSync(AsyncClientCreator):
     pass
 
 
+@async_class_to_sync
+class AsyncAdminClientSync(AsyncAdminClient):
+    pass
+
+
 @pytest.fixture(scope="function")
 def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
@@ -657,6 +666,43 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
         yield transformed
     else:
         yield api
+
+
+class ClientFactories(TypedDict):
+    client: Callable[..., ClientCreator]
+    admin: Callable[..., AdminClient]
+
+
+@pytest.fixture(scope="function")
+def client_factories(system: System) -> Generator[ClientFactories, None, None]:
+    """This allows consuming tests to be parameterized by async/sync versions of the client and papers over the async implementation.
+    If you don't need to manually construct clients, use the `client` fixture instead.
+    """
+    system.reset_state()
+
+    client: Optional[ClientAPI] = None
+
+    def factory(*args: Any, **kwargs: Any) -> ClientCreator:
+        if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+            if kwargs.get("settings") is None:
+                kwargs["settings"] = system.settings
+
+            return cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
+        else:
+            client = ClientCreator(*args, **kwargs)
+            return client
+
+    def admin_factory(*args: Any, **kwargs: Any) -> AdminClient:
+        if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+            return cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+        else:
+            return AdminClient(*args, **kwargs)
+
+    yield {"client": factory, "admin": admin_factory}
+
+    if client is not None:
+        # todo: does this run?
+        client.clear_system_cache()
 
 
 @pytest.fixture(scope="function")

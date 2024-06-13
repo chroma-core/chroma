@@ -1,13 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor
 
-from chromadb.api.client import AdminClient, Client
 from chromadb.config import DEFAULT_TENANT
+from chromadb.test.conftest import ClientFactories
 
 
-def test_multiple_clients_concurrently(client: Client) -> None:
+def test_multiple_clients_concurrently(client_factories: ClientFactories) -> None:
     """Tests running multiple clients, each against their own database, concurrently."""
+    client = client_factories["client"]()
     client.reset()
-    admin_client = AdminClient.from_system(client._system)
+    admin_client = client_factories["admin"]().from_system(client._system)
     admin_client.create_database("test_db")
 
     CLIENT_COUNT = 50
@@ -22,7 +23,7 @@ def test_multiple_clients_concurrently(client: Client) -> None:
 
     # Create N clients, each on a seperate thread, each with their own database
     def run_target(n: int) -> None:
-        thread_client = Client(
+        thread_client = client_factories["client"](
             tenant=DEFAULT_TENANT,
             database=databases[n],
             settings=client._system.settings,
@@ -36,7 +37,7 @@ def test_multiple_clients_concurrently(client: Client) -> None:
         executor.map(run_target, range(CLIENT_COUNT))
     executor.shutdown(wait=True)
     # Create a final client, which will be used to verify the collections were created
-    client = Client(settings=client._system.settings)
+    client = client_factories["client"](settings=client._system.settings)
 
     # Verify that the collections were created
     for database in databases:
