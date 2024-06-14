@@ -1,4 +1,5 @@
 from chromadb.api import ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer, Resource
@@ -146,6 +147,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration],
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -159,11 +161,24 @@ class SegmentAPI(ServerAPI):
 
         id = uuid4()
 
-        coll, created = self._sysdb.create_collection(
+        model = CollectionModel(
             id=id,
             name=name,
             metadata=metadata,
+            configuration=configuration
+            if configuration is not None
+            else CollectionConfiguration(),  # Use default configuration if none is provided
+            tenant=tenant,
+            database=database,
             dimension=None,
+        )
+        # TODO: Let sysdb create the collection directly from the model
+        coll, created = self._sysdb.create_collection(
+            id=model.id,
+            name=model.name,
+            configuration=model.get_configuration(),
+            metadata=model.metadata,
+            dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
             tenant=tenant,
             database=database,
@@ -198,6 +213,7 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration],
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -205,6 +221,7 @@ class SegmentAPI(ServerAPI):
         return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
+            configuration=configuration,
             get_or_create=True,
             tenant=tenant,
             database=database,
@@ -299,12 +316,12 @@ class SegmentAPI(ServerAPI):
 
         if existing:
             self._sysdb.delete_collection(
-                existing[0]["id"], tenant=tenant, database=database
+                existing[0].id, tenant=tenant, database=database
             )
-            for s in self._manager.delete_segments(existing[0]["id"]):
+            for s in self._manager.delete_segments(existing[0].id):
                 self._sysdb.delete_segment(s)
-            if existing and existing[0]["id"] in self._collection_cache:
-                del self._collection_cache[existing[0]["id"]]
+            if existing and existing[0].id in self._collection_cache:
+                del self._collection_cache[existing[0].id]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -796,7 +813,7 @@ class SegmentAPI(ServerAPI):
         dimension."""
         if collection["dimension"] is None:
             if update:
-                id = collection["id"]
+                id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
                 self._collection_cache[id]["dimension"] = dim
         elif collection["dimension"] != dim:

@@ -1,7 +1,7 @@
 exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2|chroma_pb2_grpc|coordinator_pb2_grpc|logservice_pb2_grpc)\.(py|pyi)' # Generated files
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v4.6.0
     hooks:
       - id: trailing-whitespace
       - id: mixed-line-ending
@@ -17,14 +17,14 @@ repos:
       - id: check-case-conflict
       - id: check-docstring-first
 
-  - repo: https://github.com/psf/black
+  - repo: https://github.com/psf/black-pre-commit-mirror
     # https://github.com/psf/black/issues/2493
-    rev: "refs/tags/23.3.0:refs/tags/23.3.0"
+    rev: "23.3.0"
     hooks:
       - id: black
 
   - repo: https://github.com/PyCQA/flake8
-    rev: 6.1.0
+    rev: 7.0.0
     hooks:
       - id: flake8
         args:
@@ -32,7 +32,7 @@ repos:
           - "--max-line-length=88"
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: "v1.2.0"
+    rev: "v1.10.0"
     hooks:
       - id: mypy
         args:
