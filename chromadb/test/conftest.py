@@ -687,6 +687,7 @@ class ClientFactories:
     """
 
     _system: System
+    # Need to track created clients so we can call .clear_system_cache() during teardown
     _created_clients: List[ClientAPI] = []
 
     def __init__(self, system: System):
