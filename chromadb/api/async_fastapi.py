@@ -6,8 +6,9 @@ from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
-from chromadb.api import AsyncServerAPI, json_to_collection_model
+from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -196,7 +197,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         )
 
         models = [
-            json_to_collection_model(json_collection) for json_collection in resp_json
+            CollectionModel.from_json(json_collection) for json_collection in resp_json
         ]
         return models
 
@@ -218,6 +219,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -230,12 +232,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
+                "configuration": configuration.to_json() if configuration else None,
                 "get_or_create": get_or_create,
             },
             params={"tenant": tenant, "database": database},
         )
 
-        model = json_to_collection_model(resp_json)
+        model = CollectionModel.from_json(resp_json)
 
         return model
 
@@ -261,7 +264,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             params=params,
         )
 
-        model = json_to_collection_model(resp_json)
+        model = CollectionModel.from_json(resp_json)
 
         return model
 
@@ -272,12 +275,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         return await self.create_collection(
             name=name,
+            configuration=configuration,
             metadata=metadata,
             get_or_create=True,
             tenant=tenant,

@@ -7,6 +7,7 @@ import httpx
 import urllib.parse
 from overrides import override
 
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
@@ -152,15 +153,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             ),
         )
         collection_models = [
-            CollectionModel(
-                id=json_collection["id"],
-                name=json_collection["name"],
-                metadata=json_collection["metadata"],
-                dimension=json_collection["dimension"],
-                tenant=json_collection["tenant"],
-                database=json_collection["database"],
-                version=json_collection["version"],
-            )
+            CollectionModel.from_json(json_collection)
             for json_collection in json_collections
         ]
 
@@ -184,6 +177,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -196,20 +190,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
+                "configuration": configuration.to_json() if configuration else None,
                 "get_or_create": get_or_create,
             },
             params={"tenant": tenant, "database": database},
         )
 
-        model = CollectionModel(
-            id=resp_json["id"],
-            name=resp_json["name"],
-            metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
-            tenant=resp_json["tenant"],
-            database=resp_json["database"],
-            version=resp_json["version"],
-        )
+        model = CollectionModel.from_json(resp_json)
         return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -235,15 +222,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             params=_params,
         )
 
-        model = CollectionModel(
-            id=resp_json["id"],
-            name=resp_json["name"],
-            metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
-            tenant=resp_json["tenant"],
-            database=resp_json["database"],
-            version=resp_json["version"],
-        )
+        model = CollectionModel.from_json(resp_json)
         return model
 
     @trace_method(
@@ -253,19 +232,18 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return cast(
-            CollectionModel,
-            self.create_collection(
-                name=name,
-                metadata=metadata,
-                get_or_create=True,
-                tenant=tenant,
-                database=database,
-            ),
+        return self.create_collection(
+            name=name,
+            metadata=metadata,
+            configuration=configuration,
+            get_or_create=True,
+            tenant=tenant,
+            database=database,
         )
 
     @trace_method("FastAPI._modify", OpenTelemetryGranularity.OPERATION)

@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 from uuid import UUID
 
 # from chromadb.api.models.Collection import Collection
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzAction,
@@ -120,7 +121,6 @@ class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
 
 class FastAPI(Server):
     def __init__(self, settings: Settings):
-        super().__init__(settings)
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         # https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
         self._app = fastapi.FastAPI(debug=True, default_response_class=ORJSONResponse)
@@ -569,6 +569,12 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = CreateCollection.model_validate(orjson.loads(raw_body))
 
+            configuration = (
+                CollectionConfiguration()
+                if not create.configuration
+                else CollectionConfiguration.from_json(create.configuration)
+            )
+
             (
                 maybe_tenant,
                 maybe_database,
@@ -586,6 +592,7 @@ class FastAPI(Server):
 
             return self._api.create_collection(
                 name=create.name,
+                configuration=configuration,
                 metadata=create.metadata,
                 get_or_create=create.get_or_create,
                 tenant=tenant,

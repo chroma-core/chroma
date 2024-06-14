@@ -19,16 +19,18 @@ from chromadb.db.system import SysDB
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
+from chromadb.api.configuration import CollectionConfiguration
 
 TENANT = "default"
 NAMESPACE = "default"
 
 # These are the sample collections that are used in the tests below. Tests can override
 # the fields as needed.
-sample_collections = [
+sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
+        configuration=CollectionConfiguration(),
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -38,6 +40,7 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
+        configuration=CollectionConfiguration(),
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -47,6 +50,7 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
+        configuration=CollectionConfiguration(),
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -139,8 +143,9 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     for collection in sample_collections:
         sysdb.create_collection(
-            id=collection["id"],
-            name=collection["name"],
+            id=collection.id,
+            name=collection.name,
+            configuration=collection.get_configuration(),
             metadata=collection["metadata"],
             dimension=collection["dimension"],
         )
@@ -148,14 +153,16 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
         collection["tenant"] = DEFAULT_TENANT
 
     results = sysdb.get_collections()
-    results = sorted(results, key=lambda c: c["name"])
+    results = sorted(results, key=lambda c: c.name)
 
-    assert sorted(results, key=lambda c: c["name"]) == sample_collections
+    assert sorted(results, key=lambda c: c.name) == sample_collections
 
     # Duplicate create fails
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
-            name=sample_collections[0]["name"], id=sample_collections[0]["id"]
+            name=sample_collections[0].name,
+            id=sample_collections[0].id,
+            configuration=sample_collections[0].get_configuration(),
         )
 
     # Find by name
@@ -170,25 +177,26 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     # Delete
     c1 = sample_collections[0]
-    sysdb.delete_collection(c1["id"])
+    sysdb.delete_collection(c1.id)
 
     results = sysdb.get_collections()
     assert c1 not in results
     assert len(results) == len(sample_collections) - 1
-    assert sorted(results, key=lambda c: c["name"]) == sample_collections[1:]
+    assert sorted(results, key=lambda c: c.name) == sample_collections[1:]
 
     by_id_result = sysdb.get_collections(id=c1["id"])
     assert by_id_result == []
 
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
-        sysdb.delete_collection(c1["id"])
+        sysdb.delete_collection(c1.id)
 
 
 def test_update_collections(sysdb: SysDB) -> None:
     coll = Collection(
-        name=sample_collections[0]["name"],
-        id=sample_collections[0]["id"],
+        name=sample_collections[0].name,
+        id=sample_collections[0].id,
+        configuration=sample_collections[0].get_configuration(),
         metadata=sample_collections[0]["metadata"],
         dimension=sample_collections[0]["dimension"],
         database=DEFAULT_DATABASE,
@@ -199,33 +207,34 @@ def test_update_collections(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
     sysdb.create_collection(
-        id=coll["id"],
-        name=coll["name"],
+        id=coll.id,
+        name=coll.name,
+        configuration=coll.get_configuration(),
         metadata=coll["metadata"],
         dimension=coll["dimension"],
     )
 
     # Update name
     coll["name"] = "new_name"
-    sysdb.update_collection(coll["id"], name=coll["name"])
-    result = sysdb.get_collections(name=coll["name"])
+    sysdb.update_collection(coll.id, name=coll.name)
+    result = sysdb.get_collections(name=coll.name)
     assert result == [coll]
 
     # Update dimension
     coll["dimension"] = 128
-    sysdb.update_collection(coll["id"], dimension=coll["dimension"])
+    sysdb.update_collection(coll.id, dimension=coll.dimension)
     result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 
     # Reset the metadata
     coll["metadata"] = {"test_str2": "str2"}
-    sysdb.update_collection(coll["id"], metadata=coll["metadata"])
+    sysdb.update_collection(coll.id, metadata=coll["metadata"])
     result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 
     # Delete all metadata keys
     coll["metadata"] = None
-    sysdb.update_collection(coll["id"], metadata=None)
+    sysdb.update_collection(coll.id, metadata=None)
     result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 
@@ -237,15 +246,17 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
     collection = sample_collections[0]
 
     sysdb.create_collection(
-        id=collection["id"],
-        name=collection["name"],
+        id=collection.id,
+        name=collection.name,
+        configuration=collection.get_configuration(),
         metadata=collection["metadata"],
         dimension=collection["dimension"],
     )
 
     result, created = sysdb.create_collection(
-        name=collection["name"],
+        name=collection.name,
         id=uuid.uuid4(),
+        configuration=CollectionConfiguration(),
         get_or_create=True,
         metadata=collection["metadata"],
     )
@@ -257,8 +268,9 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
 
     # get_or_create = True creates new collection
     result, created = sysdb.create_collection(
-        name=sample_collections[1]["name"],
-        id=sample_collections[1]["id"],
+        name=sample_collections[1].name,
+        id=sample_collections[1].id,
+        configuration=sample_collections[1].get_configuration(),
         get_or_create=True,
         metadata=sample_collections[1]["metadata"],
     )
@@ -266,8 +278,9 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
 
     # get_or_create = False creates new collection
     result, created = sysdb.create_collection(
-        name=sample_collections[2]["name"],
-        id=sample_collections[2]["id"],
+        name=sample_collections[2].name,
+        id=sample_collections[2].id,
+        configuration=sample_collections[2].get_configuration(),
         get_or_create=False,
         metadata=sample_collections[2]["metadata"],
     )
@@ -276,8 +289,9 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
     # get_or_create = False fails if collection already exists
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
-            name=sample_collections[2]["name"],
-            id=sample_collections[2]["id"],
+            name=sample_collections[2].name,
+            id=sample_collections[2].id,
+            configuration=sample_collections[2].get_configuration(),
             get_or_create=False,
             metadata=collection["metadata"],
         )
@@ -288,8 +302,9 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         "test_int": 1,
     }
     result, created = sysdb.create_collection(
-        name=sample_collections[2]["name"],
-        id=sample_collections[2]["id"],
+        name=sample_collections[2].name,
+        id=sample_collections[2].id,
+        configuration=sample_collections[2].get_configuration(),
         get_or_create=True,
         metadata=overlayed_metadata,
     )
@@ -298,8 +313,9 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
 
     # get_or_create = False with None metadata does not overwrite metadata
     result, created = sysdb.create_collection(
-        name=sample_collections[2]["name"],
-        id=sample_collections[2]["id"],
+        name=sample_collections[2].name,
+        id=sample_collections[2].id,
+        configuration=sample_collections[2].get_configuration(),
         get_or_create=True,
         metadata=None,
     )
@@ -314,8 +330,9 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
 
     # Create a new collection in the new database
     sysdb.create_collection(
-        id=sample_collections[0]["id"],
-        name=sample_collections[0]["name"],
+        id=sample_collections[0].id,
+        name=sample_collections[0].name,
+        configuration=sample_collections[0].get_configuration(),
         metadata=sample_collections[0]["metadata"],
         dimension=sample_collections[0]["dimension"],
         database="new_database",
@@ -325,8 +342,9 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
     # and expect an error
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
-            id=sample_collections[0]["id"],
+            id=sample_collections[0].id,
             name="new_name",
+            configuration=sample_collections[0].get_configuration(),
             metadata=sample_collections[0]["metadata"],
             dimension=sample_collections[0]["dimension"],
             database="new_database",
@@ -335,8 +353,9 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
 
     # Create a new collection in the default database
     sysdb.create_collection(
-        id=sample_collections[1]["id"],
-        name=sample_collections[1]["name"],
+        id=sample_collections[1].id,
+        name=sample_collections[1].name,
+        configuration=sample_collections[1].get_configuration(),
         metadata=sample_collections[1]["metadata"],
         dimension=sample_collections[1]["dimension"],
     )
@@ -365,24 +384,24 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
     )
 
     # Delete the collection in the new database
-    sysdb.delete_collection(id=sample_collections[0]["id"], database="new_database")
+    sysdb.delete_collection(id=sample_collections[0].id, database="new_database")
 
     # Check that the collection in the new database was deleted
     result = sysdb.get_collections(database="new_database")
     assert len(result) == 0
 
     # Check that the collection in the default database still exists
-    result = sysdb.get_collections(name=sample_collections[1]["name"])
+    result = sysdb.get_collections(name=sample_collections[1].name)
     assert len(result) == 1
     assert result[0] == sample_collections[1]
 
     # Delete the deleted collection in the default database and expect an error
     with pytest.raises(NotFoundError):
-        sysdb.delete_collection(id=sample_collections[0]["id"])
+        sysdb.delete_collection(id=sample_collections[0].id)
 
     # Delete the existing collection in the new database and expect an error
     with pytest.raises(NotFoundError):
-        sysdb.delete_collection(id=sample_collections[1]["id"], database="new_database")
+        sysdb.delete_collection(id=sample_collections[1].id, database="new_database")
 
 
 def test_create_update_with_database(sysdb: SysDB) -> None:
@@ -393,8 +412,9 @@ def test_create_update_with_database(sysdb: SysDB) -> None:
 
     # Create a new collection in the new database
     sysdb.create_collection(
-        id=sample_collections[0]["id"],
-        name=sample_collections[0]["name"],
+        id=sample_collections[0].id,
+        name=sample_collections[0].name,
+        configuration=sample_collections[0].get_configuration(),
         metadata=sample_collections[0]["metadata"],
         dimension=sample_collections[0]["dimension"],
         database="new_database",
@@ -402,15 +422,16 @@ def test_create_update_with_database(sysdb: SysDB) -> None:
 
     # Create a new collection in the default database
     sysdb.create_collection(
-        id=sample_collections[1]["id"],
-        name=sample_collections[1]["name"],
+        id=sample_collections[1].id,
+        name=sample_collections[1].name,
+        configuration=sample_collections[1].get_configuration(),
         metadata=sample_collections[1]["metadata"],
         dimension=sample_collections[1]["dimension"],
     )
 
     # Update the collection in the default database
     sysdb.update_collection(
-        id=sample_collections[1]["id"],
+        id=sample_collections[1].id,
         name="new_name_1",
     )
 
@@ -421,7 +442,7 @@ def test_create_update_with_database(sysdb: SysDB) -> None:
 
     # Update the collection in the new database
     sysdb.update_collection(
-        id=sample_collections[0]["id"],
+        id=sample_collections[0].id,
         name="new_name_0",
     )
 
@@ -435,8 +456,9 @@ def test_create_update_with_database(sysdb: SysDB) -> None:
     # Try to create the collection in the default database in the new database and expect an error
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
-            id=sample_collections[1]["id"],
-            name=sample_collections[1]["name"],
+            id=sample_collections[1].id,
+            name=sample_collections[1].name,
+            configuration=sample_collections[1].get_configuration(),
             metadata=sample_collections[1]["metadata"],
             dimension=sample_collections[1]["dimension"],
             database="new_database",
@@ -452,8 +474,9 @@ def test_get_multiple_with_database(sysdb: SysDB) -> None:
     # Create sample collections in the new database
     for collection in sample_collections:
         sysdb.create_collection(
-            id=collection["id"],
-            name=collection["name"],
+            id=collection.id,
+            name=collection.name,
+            configuration=collection.get_configuration(),
             metadata=collection["metadata"],
             dimension=collection["dimension"],
             database="new_database",
@@ -463,7 +486,7 @@ def test_get_multiple_with_database(sysdb: SysDB) -> None:
     # Get all collections in the new database
     result = sysdb.get_collections(database="new_database")
     assert len(result) == len(sample_collections)
-    assert sorted(result, key=lambda c: c["name"]) == sample_collections
+    assert sorted(result, key=lambda c: c.name) == sample_collections
 
     # Get all collections in the default database
     result = sysdb.get_collections()
@@ -489,8 +512,9 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
 
     # Create a new collection in the new tenant
     sysdb.create_collection(
-        id=sample_collections[0]["id"],
-        name=sample_collections[0]["name"],
+        id=sample_collections[0].id,
+        name=sample_collections[0].name,
+        configuration=sample_collections[0].get_configuration(),
         metadata=sample_collections[0]["metadata"],
         dimension=sample_collections[0]["dimension"],
         database="new_database",
@@ -501,8 +525,9 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
 
     # Create a new collection in the default tenant
     sysdb.create_collection(
-        id=sample_collections[1]["id"],
-        name=sample_collections[1]["name"],
+        id=sample_collections[1].id,
+        name=sample_collections[1].name,
+        configuration=sample_collections[1].get_configuration(),
         metadata=sample_collections[1]["metadata"],
         dimension=sample_collections[1]["dimension"],
         database="new_database",
@@ -523,8 +548,9 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
     # should error
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
-            id=sample_collections[0]["id"],
-            name=sample_collections[0]["name"],
+            id=sample_collections[0].id,
+            name=sample_collections[0].name,
+            configuration=sample_collections[0].get_configuration(),
             metadata=sample_collections[0]["metadata"],
             dimension=sample_collections[0]["dimension"],
             database="new_database",
@@ -532,8 +558,9 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
 
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
-            id=sample_collections[1]["id"],
-            name=sample_collections[1]["name"],
+            id=sample_collections[1].id,
+            name=sample_collections[1].name,
+            configuration=sample_collections[1].get_configuration(),
             metadata=sample_collections[1]["metadata"],
             dimension=sample_collections[1]["dimension"],
             database="new_database",
@@ -611,8 +638,9 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
 
     for collection in sample_collections:
         sysdb.create_collection(
-            id=collection["id"],
-            name=collection["name"],
+            id=collection.id,
+            name=collection.name,
+            configuration=collection.get_configuration(),
             metadata=collection["metadata"],
             dimension=collection["dimension"],
         )
@@ -688,7 +716,11 @@ def test_update_segment(sysdb: SysDB) -> None:
     sysdb.reset_state()
     for c in sample_collections:
         sysdb.create_collection(
-            id=c["id"], name=c["name"], metadata=c["metadata"], dimension=c["dimension"]
+            id=c.id,
+            name=c.name,
+            configuration=c.get_configuration(),
+            metadata=c["metadata"],
+            dimension=c["dimension"],
         )
 
     sysdb.create_segment(segment)
