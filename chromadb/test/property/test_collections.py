@@ -46,17 +46,17 @@ class CollectionStateMachine(RuleBasedStateMachine):
             with pytest.raises(Exception):
                 c = self.client.create_collection(
                     name=coll.name,
-                    metadata=coll.metadata,
+                    metadata=coll.metadata,  # type: ignore[arg-type]
                     embedding_function=coll.embedding_function,
                 )
             return multiple()
 
         c = self.client.create_collection(
             name=coll.name,
-            metadata=coll.metadata,
+            metadata=coll.metadata,  # type: ignore[arg-type]
             embedding_function=coll.embedding_function,
         )
-        self.set_model(coll.name, coll.metadata)
+        self.set_model(coll.name, coll.metadata)  # type: ignore[arg-type]
 
         assert c.name == coll.name
         assert c.metadata == self.model[coll.name]
@@ -151,7 +151,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             with pytest.raises(Exception):
                 c = self.client.get_or_create_collection(
                     name=coll.name,
-                    metadata=new_metadata,
+                    metadata=new_metadata,  # type: ignore[arg-type]
                     embedding_function=coll.embedding_function,
                 )
             return multiple()
@@ -165,12 +165,12 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll.metadata = (
                 self.model[coll.name] if new_metadata is None else new_metadata
             )
-        self.set_model(coll.name, coll.metadata)
+        self.set_model(coll.name, coll.metadata)  # type: ignore[arg-type]
 
         # Update API
         c = self.client.get_or_create_collection(
             name=coll.name,
-            metadata=new_metadata,
+            metadata=new_metadata,  # type: ignore[arg-type]
             embedding_function=coll.embedding_function,
         )
 
@@ -200,29 +200,31 @@ class CollectionStateMachine(RuleBasedStateMachine):
         _metadata: Optional[Mapping[str, Any]] = self.model[coll.name]
         _name: str = coll.name
         if new_metadata is not None:
+            # Can't set metadata to an empty dict
             if len(new_metadata) == 0:
                 with pytest.raises(Exception):
                     c = self.client.get_or_create_collection(
                         name=coll.name,
-                        metadata=new_metadata,
+                        metadata=new_metadata,  # type: ignore[arg-type]
                         embedding_function=coll.embedding_function,
                     )
                 return multiple()
+
             coll.metadata = new_metadata
             _metadata = new_metadata
 
         if new_name is not None:
             if new_name in self.model and new_name != coll.name:
                 with pytest.raises(Exception):
-                    c.modify(metadata=new_metadata, name=new_name)
+                    c.modify(metadata=new_metadata, name=new_name)  # type: ignore[arg-type]
                 return multiple()
 
             self.delete_from_model(coll.name)
             coll.name = new_name
             _name = new_name
 
-        self.set_model(_name, _metadata)
-        c.modify(metadata=_metadata, name=_name)
+        self.set_model(_name, _metadata)  # type: ignore[arg-type]
+        c.modify(metadata=_metadata, name=_name)  # type: ignore[arg-type]
         c = self.client.get_collection(name=coll.name)
 
         assert c.name == coll.name
@@ -261,19 +263,19 @@ def test_previously_failing_one(client: ClientAPI) -> None:
     state.initialize()
     # I don't know why the typechecker is red here. This code is correct and is
     # pulled from the logs.
-    (v1,) = state.get_or_create_coll(
+    (v1,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
             name="jjn2yjLW1zp2T\n",
             metadata=None,
-            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),
+            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
         ),
         new_metadata=None,
     )
-    (v6,) = state.get_or_create_coll(
+    (v6,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
             name="jjn2yjLW1zp2T\n",
             metadata=None,
-            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),
+            embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
         ),
         new_metadata=None,
     )
@@ -287,15 +289,15 @@ def test_previously_failing_one(client: ClientAPI) -> None:
 def test_previously_failing_two(client: ClientAPI) -> None:
     state = CollectionStateMachine(client)
     state.initialize()
-    (v13,) = state.get_or_create_coll(
+    (v13,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
             name="C1030",
             metadata={},
-            embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32),
+            embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32),  # type: ignore[arg-type]
         ),
         new_metadata=None,
     )
-    (v15,) = state.modify_coll(
+    (v15,) = state.modify_coll(  # type: ignore[misc]
         coll=v13,
         new_metadata={
             "0": "10",
@@ -317,7 +319,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
                 "B3DSaP": False,
                 "6H533K": 1.192092896e-07,
             },
-            embedding_function=hashing_embedding_function(
+            embedding_function=hashing_embedding_function(  # type: ignore[arg-type]
                 dim=1915, dtype=numpy.float32
             ),
         ),
@@ -329,15 +331,15 @@ def test_previously_failing_two(client: ClientAPI) -> None:
             "ugXZ_hK": 5494,
         },
     )
-    (v17,) = state.modify_coll(
+    v17 = state.modify_coll(  # noqa: F841
         coll=v15, new_metadata={"L35J2S": "K0l026"}, new_name="Ai1\n"
     )
-    (v18,) = state.get_or_create_coll(coll=v13, new_metadata=None)
+    v18 = state.get_or_create_coll(coll=v13, new_metadata=None)  # noqa: F841
     state.get_or_create_coll(
         coll=strategies.ExternalCollection(
             name="VS0QGh",
             metadata=None,
-            embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16),
+            embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16),  # type: ignore[arg-type]
         ),
         new_metadata=None,
     )
