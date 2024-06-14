@@ -22,8 +22,6 @@ from chromadb.api.types import (
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
-from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
@@ -65,9 +63,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Get the root system component we want to interact with
         self._server = self._system.instance(AsyncServerAPI)
 
-        # Submit event for a client start
-        telemetry_client = self._system.instance(ProductTelemetryClient)
-        telemetry_client.capture(ClientStartEvent())
+        self._submit_client_start_event()
 
         return self
 
