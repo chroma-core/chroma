@@ -38,7 +38,10 @@ __all__ = [
     "QueryResult",
     "GetResult",
     "TokenTransportHeader",
+    "RetryStrategy",
 ]
+
+from chromadb.utils.net import RetryStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +163,7 @@ def HttpClient(
     settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
+    retry: Optional[RetryStrategy] = None,
 ) -> ClientAPI:
     """
     Creates a client that connects to a remote Chroma server. This supports
@@ -174,6 +178,7 @@ def HttpClient(
         settings: A dictionary of settings to communicate with the chroma server.
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
+        retry: The retry strategy to use for this client. Defaults to None.
     """
 
     if settings is None:
@@ -185,6 +190,7 @@ def HttpClient(
     ssl = bool(ssl)
     tenant = str(tenant)
     database = str(database)
+    settings.chroma_client_retry_strategy = retry
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
@@ -208,6 +214,7 @@ def CloudClient(
     database: str,
     api_key: Optional[str] = None,
     settings: Optional[Settings] = None,
+    retry: Optional[RetryStrategy] = None,
     *,  # Following arguments are keyword-only, intended for testing only.
     cloud_host: str = "api.trychroma.com",
     cloud_port: int = 8000,
@@ -220,6 +227,8 @@ def CloudClient(
         tenant: The tenant to use for this client.
         database: The database to use for this client.
         api_key: The api key to use for this client.
+        settings: A dictionary of settings to communicate with the chroma server.
+        retry: The retry strategy to use for this client.
     """
 
     # If no API key is provided, try to load it from the environment variable
@@ -237,6 +246,10 @@ def CloudClient(
 
     if settings is None:
         settings = Settings()
+
+    settings.chroma_client_retry_strategy = (
+        retry  # for hosted: default to a cloud-specific retry strategy
+    )
 
     # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)

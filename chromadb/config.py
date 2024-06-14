@@ -11,6 +11,7 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
+from chromadb.utils.net import RetryStrategy
 
 in_pydantic_v2 = False
 try:
@@ -125,6 +126,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_api_default_path: Optional[str] = "/api/v1"
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
+
+    chroma_client_retry_strategy: Optional[RetryStrategy] = None
 
     # ==================
     # Server config
