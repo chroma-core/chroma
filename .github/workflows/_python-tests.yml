@@ -116,6 +116,11 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [ubuntu-latest, windows-latest]
+        include:
+          - platform: ubuntu-latest
+            env-file: compose-env.linux
+          - platform: windows-latest
+            env-file: compose-env.windows
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -127,6 +132,7 @@ jobs:
         run: clients/python/integration-test.sh
         shell: bash
         env:
+          ENV_FILE: ${{ matrix.env-file }}
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-stress:
@@ -152,6 +158,11 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [ubuntu-latest, windows-latest]
+        include:
+          - platform: ubuntu-latest
+            env-file: compose-env.linux
+          - platform: windows-latest
+            env-file: compose-env.windows
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -162,4 +173,5 @@ jobs:
       run: bin/python-integration-test chromadb/test/stress/
       shell: bash
       env:
+        ENV_FILE: ${{ matrix.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
