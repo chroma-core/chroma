@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
+from chromadb.db.impl.sqlite_utils import get_drop_order
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
@@ -34,6 +37,7 @@ class TxWrapper(base.TxWrapper):
     @override
     def __enter__(self) -> base.Cursor:
         if len(self._tx_stack.stack) == 0:
+            self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.execute("PRAGMA case_sensitive_like = ON")
             self._conn.execute("BEGIN;")
         self._tx_stack.stack.append(self)
@@ -139,15 +143,16 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
         with self.tx() as cur:
-            # Drop all tables
             cur.execute(
                 """
                     SELECT name FROM sqlite_master
                     WHERE type='table'
                     """
             )
-            for row in cur.fetchall():
-                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
+            drop_statement = ""
+            for t in get_drop_order(cur):
+                drop_statement += f"DROP TABLE IF EXISTS {t};\n"
+            cur.executescript(drop_statement)
         self._conn_pool.close()
         self.start()
         super().reset_state()
@@ -218,7 +223,16 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
-        cur.executescript(migration["sql"])
+        if any(item.name == f".{migration['filename']}.disable_fk"
+               for traversable in self.migration_dirs()
+               for item in traversable.iterdir() if item.is_file()):
+            cur.executescript(
+                "PRAGMA foreign_keys = OFF;\n"
+                + migration["sql"]
+                + ";\nPRAGMA foreign_keys = ON;"
+            )
+        else:
+            cur.executescript(migration["sql"])
         cur.execute(
             """
             INSERT INTO migrations (dir, version, filename, sql, hash)
