@@ -14,6 +14,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
+from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
@@ -182,7 +183,7 @@ def test_filterable_metadata_get(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    api.reset()
+    reset(api)
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
@@ -225,7 +226,12 @@ def test_filterable_metadata_get_limit_offset(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    api.reset()
+    # The distributed system does not support limit/offset yet
+    # so we skip this test for now if the system is distributed
+    if not NOT_CLUSTER_ONLY:
+        pytest.skip("Distributed system does not support limit/offset yet")
+
+    reset(api)
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
@@ -270,7 +276,7 @@ def test_filterable_metadata_query(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    api.reset()
+    reset(api)
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
@@ -318,7 +324,7 @@ def test_filterable_metadata_query(
 
 def test_empty_filter(api: ServerAPI) -> None:
     """Test that a filter where no document matches returns an empty result"""
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
@@ -354,7 +360,7 @@ def test_empty_filter(api: ServerAPI) -> None:
 
 def test_boolean_metadata(api: ServerAPI) -> None:
     """Test that metadata with boolean values is correctly filtered"""
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
@@ -371,7 +377,7 @@ def test_boolean_metadata(api: ServerAPI) -> None:
 def test_get_empty(api: ServerAPI) -> None:
     """Tests that calling get() with empty filters returns nothing"""
 
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]

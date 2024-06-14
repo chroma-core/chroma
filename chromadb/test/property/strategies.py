@@ -9,6 +9,7 @@ import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
+from chromadb.test.conftest import NOT_CLUSTER_ONLY
 
 from dataclasses import dataclass
 
@@ -110,10 +111,13 @@ tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_
 safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1
 )  # TODO: handle longs
+# In distributed chroma, floats are 32 bit hence we need to
+# restrict the generation to generate only 32 bit floats.
 safe_floats = st.floats(
     allow_infinity=False,
     allow_nan=False,
     allow_subnormal=False,
+    width=32,
     min_value=-1e6,
     max_value=1e6,
 )  # TODO: handle infinity and NAN
@@ -469,12 +473,21 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+    # This is hacky, but the distributed system does not support $in or $in so we
+    # need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $in and $nin
+    if not NOT_CLUSTER_ONLY:
+        legal_ops: List[Optional[str]] = [None, "$eq"]
+    else:
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))
+        # Truncate to 32 bit
+        value = float(np.float32(value))
 
     op: WhereOperator = draw(st.sampled_from(legal_ops))
 
@@ -500,7 +513,15 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         word = draw(safe_text)
 
-    op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
+    # This is hacky, but the distributed system does not support $not_contains
+    # so we need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $not_contains
+    op: WhereOperator
+    if not NOT_CLUSTER_ONLY:
+        op = draw(st.sampled_from(["$contains"]))
+    else:
+        op = draw(st.sampled_from(["$contains", "$not_contains"]))
+
     if op == "$contains":
         return {"$contains": word}
     else:

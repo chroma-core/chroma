@@ -65,6 +65,12 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(CURRENT_PRESET)
 
 
+def reset(api: ServerAPI) -> None:
+    api.reset()
+    if not NOT_CLUSTER_ONLY:
+        time.sleep(MEMBERLIST_SLEEP)
+
+
 def override_hypothesis_profile(
     fast: Optional[hypothesis.settings] = None,
     normal: Optional[hypothesis.settings] = None,

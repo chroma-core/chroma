@@ -4,13 +4,12 @@ from random import randint
 from typing import cast, List, Any, Dict
 import hypothesis
 import pytest
-import time
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ServerAPI
 from chromadb.api.types import Embeddings, Metadatas
 from chromadb.test.conftest import (
-    MEMBERLIST_SLEEP,
+    reset,
     NOT_CLUSTER_ONLY,
     override_hypothesis_profile,
 )
@@ -21,12 +20,6 @@ from chromadb.utils.batch_utils import create_batches
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
-
-
-def reset(api: ServerAPI) -> None:
-    api.reset()
-    if not NOT_CLUSTER_ONLY:
-        time.sleep(MEMBERLIST_SLEEP)
 
 
 @given(

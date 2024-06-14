@@ -123,6 +123,43 @@ pub(crate) fn process_where_clause_with_callback<
                         }
                     }
                 }
+                WhereComparison::SingleBoolComparison(operand, comparator) => {
+                    match comparator {
+                        WhereClauseComparator::Equal => {
+                            let metadata_value_keywrapper = (*operand).try_into();
+                            match metadata_value_keywrapper {
+                                Ok(keywrapper) => {
+                                    let result = callback(
+                                        &direct_where_comparison.key,
+                                        &keywrapper,
+                                        MetadataType::BoolType,
+                                        WhereClauseComparator::Equal,
+                                    );
+                                    results = result.iter().map(|x| x as usize).collect();
+                                }
+                                Err(_) => {
+                                    panic!("Error converting bool to keywrapper")
+                                }
+                            }
+                        }
+                        WhereClauseComparator::NotEqual => {
+                            todo!();
+                        }
+                        // We don't allow these comparators for booleans.
+                        WhereClauseComparator::LessThan => {
+                            unimplemented!();
+                        }
+                        WhereClauseComparator::LessThanOrEqual => {
+                            unimplemented!();
+                        }
+                        WhereClauseComparator::GreaterThan => {
+                            unimplemented!();
+                        }
+                        WhereClauseComparator::GreaterThanOrEqual => {
+                            unimplemented!();
+                        }
+                    }
+                }
                 WhereComparison::SingleIntComparison(operand, comparator) => match comparator {
                     WhereClauseComparator::Equal => {
                         let metadata_value_keywrapper = (*operand).try_into();
@@ -312,10 +349,12 @@ pub(crate) fn process_where_clause_with_callback<
                 WhereComparison::DoubleListComparison(..) => {
                     todo!();
                 }
+                WhereComparison::BoolListComparison(..) => {
+                    todo!();
+                }
             }
         }
         Where::WhereChildren(where_children) => {
-            // This feels like a crime.
             let mut first_iteration = true;
             for child in where_children.children.iter() {
                 let child_results: Vec<usize> =
