@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
@@ -16,8 +18,11 @@ use crate::execution::orchestration::{
 };
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
+use crate::memberlist::Memberlist;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::{Receiver, System};
+use crate::system::ComponentContext;
+use crate::system::Handler;
+use crate::system::{Component, Receiver, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
@@ -28,7 +33,7 @@ use tracing::{trace, trace_span, Instrument};
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct WorkerServer {
+pub struct QueryServer {
     // System
     system: Option<System>,
     // Component dependencies
@@ -39,10 +44,18 @@ pub struct WorkerServer {
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
+    memberlist: Option<Memberlist>,
+    server_state: QueryServerState,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum QueryServerState {
+    Pending,
+    Running,
 }
 
 #[async_trait]
-impl Configurable<QueryServiceConfig> for WorkerServer {
+impl Configurable<QueryServiceConfig> for QueryServer {
     async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = &config.sysdb;
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
@@ -71,7 +84,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         // TODO: inject blockfile provider somehow
         // TODO: real path
         let path = PathBuf::from("~/tmp");
-        Ok(WorkerServer {
+        Ok(QueryServer {
             dispatcher: None,
             system: None,
             sysdb,
@@ -79,20 +92,67 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
             blockfile_provider: BlockfileProvider::new_arrow(storage),
             port: config.my_port,
+            memberlist: None,
+            server_state: QueryServerState::Pending,
         })
     }
 }
 
-impl WorkerServer {
-    pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("[::]:{}", worker.port).parse().unwrap();
-        println!("Worker listening on {}", addr);
+// ============== Component Implementation ==============
+#[async_trait]
+impl Component for QueryServer {
+    fn get_name() -> &'static str {
+        "QueryServer"
+    }
+
+    fn queue_size(&self) -> usize {
+        1000
+    }
+
+    async fn on_start(&mut self, _ctx: &crate::system::ComponentContext<Self>) -> () {}
+}
+
+impl Debug for QueryServer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "QueryServer")
+    }
+}
+
+#[async_trait]
+impl Handler<Memberlist> for QueryServer {
+    async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<QueryServer>) {
+        // TODO: for now we just overwrite the memberlist, we will need to check
+        // the version and only update if the version is newer
+        self.memberlist = Some(message);
+
+        let self_clone = self.clone();
+        if self.server_state == QueryServerState::Pending {
+            tracing::info!("Memberlist is set, starting server");
+            tokio::spawn(async move {
+                match self_clone.run().await {
+                    Ok(_) => {
+                        tracing::info!("QueryServer started");
+                    }
+                    Err(e) => {
+                        tracing::error!("QueryServer failed to start: {:?}", e);
+                    }
+                }
+            });
+            self.server_state = QueryServerState::Running;
+        }
+    }
+}
+
+impl QueryServer {
+    pub(crate) async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let addr = format!("[::]:{}", self.port).parse().unwrap();
+        tracing::info!("Worker listening on {}", addr);
         let server = Server::builder()
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
-                worker.clone(),
+                self.clone(),
             ))
             .add_service(
-                chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker.clone()),
+                chroma_proto::metadata_reader_server::MetadataReaderServer::new(self.clone()),
             )
             .serve_with_shutdown(addr, async {
                 let mut sigterm = match signal(SignalKind::terminate()) {
@@ -348,7 +408,7 @@ impl WorkerServer {
 }
 
 #[tonic::async_trait]
-impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
+impl chroma_proto::vector_reader_server::VectorReader for QueryServer {
     async fn get_vectors(
         &self,
         request: Request<GetVectorsRequest>,
@@ -385,7 +445,7 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
 }
 
 #[tonic::async_trait]
-impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
+impl chroma_proto::metadata_reader_server::MetadataReader for QueryServer {
     async fn count_records(
         &self,
         request: Request<CountRecordsRequest>,

@@ -44,6 +44,19 @@ pub async fn query_service_entrypoint() {
     );
 
     let system: system::System = system::System::new();
+
+    let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
+        &config.memberlist_provider,
+    )
+    .await
+    {
+        Ok(memberlist) => memberlist,
+        Err(err) => {
+            println!("Failed to create memberlist component: {:?}", err);
+            return;
+        }
+    };
+
     let dispatcher =
         match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
             Ok(dispatcher) => dispatcher,
@@ -53,19 +66,20 @@ pub async fn query_service_entrypoint() {
             }
         };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
-        Ok(worker_server) => worker_server,
+    let mut query_server = match server::QueryServer::try_from_config(&config).await {
+        Ok(query_server) => query_server,
         Err(err) => {
             println!("Failed to create worker server component: {:?}", err);
             return;
         }
     };
-    worker_server.set_system(system.clone());
-    worker_server.set_dispatcher(dispatcher_handle.receiver());
+    query_server.set_system(system.clone());
+    query_server.set_dispatcher(dispatcher_handle.receiver());
 
-    let server_join_handle = tokio::spawn(async move {
-        let _ = crate::server::WorkerServer::run(worker_server).await;
-    });
+    let mut query_server_handle = system.start_component(query_server);
+    memberlist.subscribe(query_server_handle.receiver());
+
+    let mut memberlist_handle = system.start_component(memberlist);
 
     let mut sigterm = match signal(SignalKind::terminate()) {
         Ok(sigterm) => sigterm,
@@ -80,6 +94,10 @@ pub async fn query_service_entrypoint() {
         // Kubernetes will send SIGTERM to stop the pod gracefully
         // TODO: add more signal handling
         _ = sigterm.recv() => {
+            memberlist_handle.stop();
+            memberlist_handle.join().await;
+            query_server_handle.stop();
+            query_server_handle.join().await;
             dispatcher_handle.stop();
             dispatcher_handle.join().await;
             system.stop().await;
