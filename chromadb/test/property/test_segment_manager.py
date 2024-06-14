@@ -1,3 +1,4 @@
+import os
 import uuid
 
 import pytest
@@ -116,7 +117,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
 
     @staticmethod
     def mock_directory_size(directory: str):
-        path_id = directory.split("/").pop()
+        path_id = os.path.basename(os.path.normpath(directory))
         collection_id = SegmentManagerStateMachine.segment_collection[
             uuid.UUID(path_id)
         ]
