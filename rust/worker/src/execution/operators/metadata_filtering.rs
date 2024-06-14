@@ -224,6 +224,44 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         unimplemented!();
                     }
                 },
+                crate::types::MetadataType::BoolType => match comparator {
+                    WhereClauseComparator::Equal => {
+                        let mut result = RoaringBitmap::new();
+                        // Construct a bitmap consisting of all offset ids
+                        // that have this key equal to this value.
+                        for (offset_id, meta_map) in &ids_to_metadata {
+                            if let Some(val) = meta_map.get(metadata_key) {
+                                match *val {
+                                    MetadataValue::Bool(bool_value) => {
+                                        if let KeyWrapper::Bool(where_value) = metadata_value {
+                                            if *bool_value == *where_value {
+                                                result.insert(*offset_id);
+                                            }
+                                        }
+                                    }
+                                    _ => (),
+                                }
+                            }
+                        }
+                        return result;
+                    }
+                    WhereClauseComparator::NotEqual => {
+                        todo!();
+                    }
+                    // We don't allow these comparators for booleans.
+                    WhereClauseComparator::LessThan => {
+                        unimplemented!();
+                    }
+                    WhereClauseComparator::LessThanOrEqual => {
+                        unimplemented!();
+                    }
+                    WhereClauseComparator::GreaterThan => {
+                        unimplemented!();
+                    }
+                    WhereClauseComparator::GreaterThanOrEqual => {
+                        unimplemented!();
+                    }
+                },
                 crate::types::MetadataType::IntType => match comparator {
                     WhereClauseComparator::Equal => {
                         let mut result = RoaringBitmap::new();
@@ -443,6 +481,9 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 crate::types::MetadataType::DoubleListType => {
                     todo!();
                 }
+                crate::types::MetadataType::BoolListType => {
+                    todo!();
+                }
             }
         };
         // This will be sorted by offset ids since rbms.insert() insert in sorted order.
@@ -656,17 +697,13 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                                 Ok(offset_id) => {
                                     user_supplied_offset_ids.push(offset_id);
                                 }
-                                Err(_) => {
-                                    return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderError);
-                                }
+                                // It's ok for the user to supply a non existent id.
+                                Err(_) => (),
                             }
                         }
                     }
-                    None => {
-                        if !remaining_id_set.is_empty() {
-                            return Err(MetadataFilteringError::MetadataFilteringInvalidInput);
-                        }
-                    }
+                    // It's ok for the user to supply a non existent id.
+                    None => (),
                 }
             }
             None => {

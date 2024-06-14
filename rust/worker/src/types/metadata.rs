@@ -10,6 +10,7 @@ pub(crate) enum UpdateMetadataValue {
     Int(i32),
     Float(f64),
     Str(String),
+    Bool(bool),
     None,
 }
 
@@ -41,6 +42,10 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::BoolValue(value)) => {
+                Ok(UpdateMetadataValue::Bool(*value))
+            }
+            // Used to communicate that the user wants to delete this key.
             None => Ok(UpdateMetadataValue::None),
             _ => Err(UpdateMetadataValueConversionError::InvalidValue),
         }
@@ -65,6 +70,9 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
+            UpdateMetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
+            },
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
         };
         proto_value
@@ -79,6 +87,7 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::Int(value) => Ok(MetadataValue::Int(*value)),
             UpdateMetadataValue::Float(value) => Ok(MetadataValue::Float(*value)),
             UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
+            UpdateMetadataValue::Bool(value) => Ok(MetadataValue::Bool(*value)),
             UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -95,6 +104,7 @@ pub(crate) enum MetadataValue {
     Int(i32),
     Float(f64),
     Str(String),
+    Bool(bool),
 }
 
 impl TryFrom<&MetadataValue> for i32 {
@@ -114,6 +124,17 @@ impl TryFrom<&MetadataValue> for f64 {
     fn try_from(value: &MetadataValue) -> Result<Self, Self::Error> {
         match value {
             MetadataValue::Float(value) => Ok(*value),
+            _ => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
+impl TryFrom<&MetadataValue> for bool {
+    type Error = MetadataValueConversionError;
+
+    fn try_from(value: &MetadataValue) -> Result<Self, Self::Error> {
+        match value {
+            MetadataValue::Bool(value) => Ok(*value),
             _ => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -158,6 +179,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(MetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::BoolValue(value)) => {
+                Ok(MetadataValue::Bool(*value))
+            }
             _ => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -180,6 +204,9 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::StringValue(
                     value,
                 )),
+            },
+            MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
             },
         };
         proto_value
@@ -306,6 +333,8 @@ pub(crate) enum WhereComparison {
     StringListComparison(Vec<String>, WhereClauseListOperator),
     IntListComparison(Vec<u32>, WhereClauseListOperator),
     DoubleListComparison(Vec<f64>, WhereClauseListOperator),
+    BoolListComparison(Vec<bool>, WhereClauseListOperator),
+    SingleBoolComparison(bool, WhereClauseComparator),
 }
 
 #[derive(Debug)]
@@ -316,6 +345,8 @@ pub(crate) enum MetadataType {
     StringListType,
     IntListType,
     DoubleListType,
+    BoolListType,
+    BoolType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -430,6 +461,18 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
                     comparator.try_into()?,
                 ))
             }
+            Some(chroma_proto::direct_comparison::Comparison::SingleBoolOperand(proto_bool)) => {
+                let comparator = match TryInto::<chroma_proto::GenericComparator>::try_into(
+                    proto_bool.comparator,
+                ) {
+                    Ok(comparator) => comparator,
+                    Err(_) => return Err(WhereConversionError::InvalidWhereComparison),
+                };
+                Ok(WhereComparison::SingleBoolComparison(
+                    proto_bool.value,
+                    comparator.try_into()?,
+                ))
+            }
             Some(chroma_proto::direct_comparison::Comparison::SingleIntOperand(proto_int)) => {
                 let comparator: WhereClauseComparator = match proto_int.comparator {
                     Some(comparator) => match comparator {
@@ -526,6 +569,18 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
                         Err(_) => return Err(WhereConversionError::InvalidWhereComparison),
                     };
                 Ok(WhereComparison::DoubleListComparison(
+                    proto_list.values,
+                    list_operator.try_into()?,
+                ))
+            }
+            Some(chroma_proto::direct_comparison::Comparison::BoolListOperand(proto_list)) => {
+                let list_operator =
+                    match TryInto::<chroma_proto::ListOperator>::try_into(proto_list.list_operator)
+                    {
+                        Ok(list_operator) => list_operator,
+                        Err(_) => return Err(WhereConversionError::InvalidWhereComparison),
+                    };
+                Ok(WhereComparison::BoolListComparison(
                     proto_list.values,
                     list_operator.try_into()?,
                 ))
