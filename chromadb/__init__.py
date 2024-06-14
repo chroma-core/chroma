@@ -238,7 +238,7 @@ async def AsyncHttpClient(
     tenant = str(tenant)
     database = str(database)
 
-    settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+    settings.chroma_api_impl = "chromadb.api.async_fastapi.AsyncFastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
         raise ValueError(
             f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
