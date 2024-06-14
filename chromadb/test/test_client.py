@@ -66,7 +66,10 @@ def test_persistent_client(persistent_api: ClientAPI) -> None:
 
 def test_http_client(http_api: ClientAPI) -> None:
     settings = http_api.get_settings()
-    assert settings.chroma_api_impl == "chromadb.api.fastapi.FastAPI"
+    assert (
+        settings.chroma_api_impl == "chromadb.api.fastapi.FastAPI"
+        or settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI"
+    )
 
 
 def test_http_client_with_inconsistent_host_settings(
