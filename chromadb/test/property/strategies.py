@@ -9,8 +9,6 @@ import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
-from hypothesis.errors import InvalidDefinition
-from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
 
