@@ -68,6 +68,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return self
 
     @classmethod
+    # (we can't override and use from_system() because it's synchronous)
     async def from_system_async(
         cls,
         system: System,
