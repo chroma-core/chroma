@@ -523,7 +523,7 @@ mod tests {
         log::config::{self, GrpcLogConfig},
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
-        types::{update_metdata_to_metdata, MetadataValue},
+        types::MetadataValue,
     };
     use arrow::array::Int32Array;
     use proptest::prelude::*;

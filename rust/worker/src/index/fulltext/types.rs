@@ -21,6 +21,8 @@ use super::tokenizer::ChromaTokenStream;
 pub enum FullTextIndexError {
     #[error("Multiple tokens found in frequencies blockfile")]
     MultipleTokenFrequencies,
+    #[error("Zero frequency token found")]
+    ZeroFrequencyToken,
     #[error("Empty value in positional posting list")]
     EmptyValueInPositionalPostingList,
     #[error("Invariant violation")]
@@ -37,9 +39,24 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
+pub(crate) struct UncommittedPostings {
+    // token -> {doc -> [start positions]}
+    positional_postings: HashMap<String, PositionalPostingListBuilder>,
+    // (token, doc) pairs that should be deleted from storage.
+    deleted_token_doc_pairs: Vec<(String, i32)>,
+}
+
+impl UncommittedPostings {
+    pub(crate) fn new() -> Self {
+        Self {
+            positional_postings: HashMap::new(),
+            deleted_token_doc_pairs: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct FullTextIndexWriter<'me> {
-    // We use this to implement updates which require read-then-write semantics.
     full_text_index_reader: Option<FullTextIndexReader<'me>>,
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
@@ -49,11 +66,12 @@ pub(crate) struct FullTextIndexWriter<'me> {
     // a lightweight lock instead. This is needed currently to
     // keep holding the lock across an await point.
     // term -> positional posting list builder for that term
-    uncommitted: Arc<tokio::sync::Mutex<HashMap<String, PositionalPostingListBuilder>>>,
+    uncommitted_postings: Arc<tokio::sync::Mutex<UncommittedPostings>>,
     // TODO(Sanket): Move off this tokio::sync::mutex and use
     // a lightweight lock instead. This is needed currently to
     // keep holding the lock across an await point.
-    // Value of this map is a tuple because we also need to keep the old frequency
+    // Value of this map is a tuple (old freq and new freq)
+    // because we also need to keep the old frequency
     // around. The reason is (token, freq) is the key in the blockfile hence
     // when freq changes, we need to delete the old (token, freq) key.
     uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
@@ -71,7 +89,7 @@ impl<'me> FullTextIndexWriter<'me> {
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
             tokenizer: Arc::new(Mutex::new(tokenizer)),
-            uncommitted: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            uncommitted_postings: Arc::new(tokio::sync::Mutex::new(UncommittedPostings::new())),
             uncommitted_frequencies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -85,9 +103,12 @@ impl<'me> FullTextIndexWriter<'me> {
             Some(_) => return Ok(()),
             None => {
                 let frequency = match &self.full_text_index_reader {
+                    // Readers are uninitialized until the first compaction finishes
+                    // so there is a case when this is none hence not an error.
                     None => 0,
                     Some(reader) => match reader.get_frequencies_for_token(token).await {
                         Ok(frequency) => frequency,
+                        // New token so start with frequency of 0.
                         Err(_) => 0,
                     },
                 };
@@ -95,8 +116,8 @@ impl<'me> FullTextIndexWriter<'me> {
                     .insert(token.to_string(), (frequency as i32, frequency as i32));
             }
         }
-        let mut uncommitted = self.uncommitted.lock().await;
-        match uncommitted.get(token) {
+        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+        match uncommitted_postings.positional_postings.get(token) {
             Some(_) => {
                 // This should never happen -- if uncommitted has the token, then
                 // uncommitted_frequencies should have had it as well.
@@ -108,9 +129,12 @@ impl<'me> FullTextIndexWriter<'me> {
             None => {
                 let mut builder = PositionalPostingListBuilder::new();
                 let results = match &self.full_text_index_reader {
+                    // Readers are uninitialized until the first compaction finishes
+                    // so there is a case when this is none hence not an error.
                     None => vec![],
                     Some(reader) => match reader.get_all_results_for_token(token).await {
                         Ok(results) => results,
+                        // New token so start with empty postings list.
                         Err(_) => vec![],
                     },
                 };
@@ -123,7 +147,9 @@ impl<'me> FullTextIndexWriter<'me> {
                         }
                     }
                 }
-                uncommitted.insert(token.to_string(), builder);
+                uncommitted_postings
+                    .positional_postings
+                    .insert(token.to_string(), builder);
             }
         }
         Ok(())
@@ -145,11 +171,16 @@ impl<'me> FullTextIndexWriter<'me> {
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
                 .await?;
             let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+            // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
+            // will have created it if this token is new to the system.
             uncommitted_frequencies
                 .entry(token.text.to_string())
                 .and_modify(|e| (*e).0 += 1);
-            let mut uncommitted = self.uncommitted.lock().await;
-            let builder = uncommitted
+            let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+            // For a new token, the uncommitted list will not contain any entry so insert
+            // an empty builder in that case.
+            let builder = uncommitted_postings
+                .positional_postings
                 .entry(token.text.to_string())
                 .or_insert(PositionalPostingListBuilder::new());
 
@@ -198,10 +229,19 @@ impl<'me> FullTextIndexWriter<'me> {
                     return Err(FullTextIndexError::InvariantViolation);
                 }
             }
-            let mut uncommitted = self.uncommitted.lock().await;
-            match uncommitted.get_mut(token.text.as_str()) {
+            let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+            match uncommitted_postings
+                .positional_postings
+                .get_mut(token.text.as_str())
+            {
                 Some(builder) => match builder.delete_doc_id(offset_id as i32) {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        // Track all the deleted (token, doc) pairs. This is needed
+                        // to remove the old postings list for this pair from storage.
+                        uncommitted_postings
+                            .deleted_token_doc_pairs
+                            .push((token.text.clone(), offset_id as i32));
+                    }
                     Err(e) => {
                         // This is a fatal invariant violation: we've been asked to
                         // delete a document which doesn't appear in the positional posting list.
@@ -234,10 +274,24 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
-    // TODO(Sanket): Handle document and metadata deletes.
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
-        let mut uncommitted = self.uncommitted.lock().await;
-        for (key, mut value) in uncommitted.drain() {
+        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+        // Delete (token, doc) pairs from blockfile first. Note that the ordering is
+        // important here i.e. we need to delete before inserting the new postings
+        // list otherwise we could incorrectly delete posting lists that shouldn't be deleted.
+        for (token, offset_id) in uncommitted_postings.deleted_token_doc_pairs.drain(..) {
+            match self
+                .posting_lists_blockfile_writer
+                .delete::<u32, &Int32Array>(token.as_str(), offset_id as u32)
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(FullTextIndexError::BlockfileWriteError(e));
+                }
+            }
+        }
+        for (key, mut value) in uncommitted_postings.positional_postings.drain() {
             let built_list = value.build();
             for doc_id in built_list.doc_ids.iter() {
                 match doc_id {
@@ -275,15 +329,19 @@ impl<'me> FullTextIndexWriter<'me> {
                 }
             }
             // Insert the new frequency.
+            // Add only if the frequency is not zero. This can happen in case of document
+            // deletes.
             // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
-            match self
-                .frequencies_blockfile_writer
-                .set(key.as_str(), value.0 as u32, 0)
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(FullTextIndexError::BlockfileWriteError(e));
+            if value.0 > 0 {
+                match self
+                    .frequencies_blockfile_writer
+                    .set(key.as_str(), value.0 as u32, 0)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        return Err(FullTextIndexError::BlockfileWriteError(e));
+                    }
                 }
             }
         }
@@ -388,6 +446,9 @@ impl<'me> FullTextIndexReader<'me> {
                 return Err(FullTextIndexError::MultipleTokenFrequencies);
             }
             let res = res[0];
+            if res.1 <= 0 {
+                return Err(FullTextIndexError::ZeroFrequencyToken);
+            }
             // Throw away the "value" since we store frequencies in the keys.
             token_frequencies.push((token.text.to_string(), res.1));
         }

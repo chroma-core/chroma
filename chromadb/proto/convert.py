@@ -189,6 +189,7 @@ def to_proto_metadata_update_value(
         return proto.UpdateMetadataValue(int_value=value)
     elif isinstance(value, float):
         return proto.UpdateMetadataValue(float_value=value)
+    # None is used to delete the metadata key.
     elif value is None:
         return proto.UpdateMetadataValue()
     else:

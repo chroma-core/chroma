@@ -1,23 +1,107 @@
+use crate::errors::{ChromaError, ErrorCodes};
+use crate::execution::data::data_chunk::Chunk;
+use crate::types::{
+    DeletedMetadata, LogRecord, Metadata, MetadataValue, MetadataValueConversionError, Operation,
+    OperationRecord, UpdateMetadata, UpdateMetadataValue,
+};
+use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-
-use crate::blockstore::key::KeyWrapper;
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
-use crate::index::metadata::types::MetadataIndexError;
-use crate::types::{
-    merge_update_metadata, update_metdata_to_metdata, BooleanOperator, LogRecord, Metadata,
-    MetadataType, MetadataValue, MetadataValueConversionError, Operation, OperationRecord, Where,
-    WhereClauseComparator, WhereComparison,
-};
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
-use async_trait::async_trait;
-use futures::future::BoxFuture;
-use roaring::RoaringBitmap;
 use thiserror::Error;
 
 use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+
+// Materializes metadata from update metadata, populating the delete list
+// and upsert list.
+pub(crate) fn materialize_update_metadata(
+    update_metdata: &UpdateMetadata,
+) -> Result<(Metadata, DeletedMetadata), MetadataValueConversionError> {
+    let mut metadata = Metadata::new();
+    let mut deleted_metadata = DeletedMetadata::new();
+    for (key, value) in update_metdata {
+        match value {
+            UpdateMetadataValue::None => {
+                deleted_metadata.insert(key.clone());
+                continue;
+            }
+            _ => {}
+        }
+        // Should be a valid conversion for not None values.
+        let res = value.try_into();
+        match res {
+            Ok(value) => {
+                metadata.insert(key.clone(), value);
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        }
+    }
+    Ok((metadata, deleted_metadata))
+}
+
+// Merges update metadata to base metadata, updating
+// the delete list and upsert list.
+pub(crate) fn merge_update_metadata(
+    base_metadata: (&Option<Metadata>, &Option<DeletedMetadata>),
+    update_metadata: &Option<UpdateMetadata>,
+) -> Result<(Option<Metadata>, Option<DeletedMetadata>), MetadataValueConversionError> {
+    let mut merged_metadata = HashMap::new();
+    let mut deleted_metadata = DeletedMetadata::new();
+    match base_metadata.0 {
+        Some(base_mt) => {
+            merged_metadata = base_mt.clone();
+        }
+        None => (),
+    }
+    match base_metadata.1 {
+        Some(deleted_mt) => {
+            deleted_metadata = deleted_mt.clone();
+        }
+        None => (),
+    }
+    match update_metadata {
+        Some(update_metadata) => {
+            match materialize_update_metadata(update_metadata) {
+                Ok((metadata, deleted_mt)) => {
+                    // Overwrite with new kv.
+                    for (key, value) in metadata {
+                        merged_metadata.insert(key.clone(), value);
+                        // Also remove from deleted list. This is important
+                        // because it can happen that the user deleted and then
+                        // reinserted the key.
+                        deleted_metadata.remove(&key);
+                    }
+                    // apply the deletes.
+                    for key in deleted_mt {
+                        deleted_metadata.insert(key.clone());
+                        // Again important to remove from this map since the user
+                        // could have previously update the key (and is now deleting it).
+                        merged_metadata.remove(&key);
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            };
+        }
+        None => (),
+    }
+    let mut final_mt;
+    if merged_metadata.is_empty() {
+        final_mt = None;
+    } else {
+        final_mt = Some(merged_metadata);
+    }
+    let mut final_deleted;
+    if deleted_metadata.is_empty() {
+        final_deleted = None;
+    } else {
+        final_deleted = Some(deleted_metadata);
+    }
+    Ok((final_mt, final_deleted))
+}
 
 #[derive(Error, Debug)]
 pub enum LogMaterializerError {
@@ -67,9 +151,12 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     // This is the metadata obtained by combining all the operations
     // present in the log for this id.
     // E.g. if has log has [Insert(a: h), Update(a: b, c: d), Update(a: e, f: g)] then this
-    // will contain (a: e, c: d, f: g). This is None if the final operation
-    // above is Delete.
+    // will contain (a: e, c: d, f: g).
     pub(crate) metadata_to_be_merged: Option<Metadata>,
+    // Keys from the metadata that the user wants to delete. This is guaranteed
+    // to be disjoint from metadata_to_be_merged i.e. there won't be keys
+    // present in both the places.
+    pub(crate) metadata_to_be_deleted: Option<HashSet<String>>,
     // This is the final document obtained from the last non null operation.
     // E.g. if log has [Insert(str0), Update(str1), Update(str2), Update()] then this will contain
     // str2. None if final operation is Delete.
@@ -79,6 +166,25 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
     pub(crate) final_embedding: Option<&'referred_data [f32]>,
+}
+
+pub(crate) struct MetadataDelta<'referred_data> {
+    pub(crate) metadata_to_update: HashMap<
+        &'referred_data str,
+        (&'referred_data MetadataValue, &'referred_data MetadataValue),
+    >,
+    pub(crate) metadata_to_delete: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+    pub(crate) metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+}
+
+impl<'referred_data> MetadataDelta<'referred_data> {
+    pub(crate) fn new() -> Self {
+        Self {
+            metadata_to_update: HashMap::new(),
+            metadata_to_delete: HashMap::new(),
+            metadata_to_insert: HashMap::new(),
+        }
+    }
 }
 
 impl<'referred_data> MaterializedLogRecord<'referred_data> {
@@ -151,7 +257,68 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
             }
             None => {}
         }
+        match self.metadata_to_be_deleted.as_ref() {
+            Some(metadata) => {
+                for key in metadata {
+                    final_metadata.remove(key);
+                }
+            }
+            None => {}
+        }
         final_metadata
+    }
+
+    pub(crate) fn metadata_delta(&'referred_data self) -> MetadataDelta<'referred_data> {
+        let mut metadata_delta = MetadataDelta::new();
+        let mut base_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
+        match &self.data_record {
+            Some(data_record) => match &data_record.metadata {
+                Some(meta) => {
+                    for (meta_key, meta_val) in meta {
+                        base_metadata.insert(meta_key, meta_val);
+                    }
+                }
+                None => (),
+            },
+            None => (),
+        };
+        // Populate updates.
+        match &self.metadata_to_be_merged {
+            Some(meta) => {
+                for (meta_key, meta_val) in meta {
+                    match base_metadata.get(meta_key.as_str()) {
+                        Some(old_value) => {
+                            metadata_delta
+                                .metadata_to_update
+                                .insert(meta_key.as_str(), (old_value, meta_val));
+                        }
+                        None => {
+                            metadata_delta
+                                .metadata_to_insert
+                                .insert(meta_key.as_str(), meta_val);
+                        }
+                    }
+                }
+            }
+            None => (),
+        };
+        // Populate deletes.
+        match &self.metadata_to_be_deleted {
+            Some(meta) => {
+                for key in meta {
+                    match base_metadata.get(key.as_str()) {
+                        Some(old_value) => {
+                            metadata_delta
+                                .metadata_to_delete
+                                .insert(key.as_str(), old_value);
+                        }
+                        None => {}
+                    }
+                }
+            }
+            None => (),
+        }
+        metadata_delta
     }
 
     // Returns references to metadata present in the materialized log record.
@@ -176,6 +343,15 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
             }
             None => (),
         };
+        // Remove the deleted metadatas.
+        match &self.metadata_to_be_deleted {
+            Some(meta) => {
+                for key in meta {
+                    final_metadata.remove(key.as_str());
+                }
+            }
+            None => (),
+        }
         final_metadata
     }
 
@@ -202,6 +378,7 @@ impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
             user_id: None,
             final_operation: Operation::Add,
             metadata_to_be_merged: None,
+            metadata_to_be_deleted: None,
             final_document: None,
             final_embedding: None,
         }
@@ -222,14 +399,22 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
         let log_record = log_operation_info.0;
         let offset_id = log_operation_info.1;
         let user_id = log_operation_info.2;
-        let metadata = match &log_record.metadata {
-            Some(metadata) => match update_metdata_to_metdata(metadata) {
-                Ok(m) => Some(m),
+        let merged_metadata;
+        let deleted_metadata;
+        match &log_record.metadata {
+            Some(metadata) => match materialize_update_metadata(metadata) {
+                Ok(m) => {
+                    merged_metadata = Some(m.0);
+                    deleted_metadata = Some(m.1);
+                }
                 Err(e) => {
                     return Err(LogMaterializerError::MetadataMaterializationError(e));
                 }
             },
-            None => None,
+            None => {
+                merged_metadata = None;
+                deleted_metadata = None;
+            }
         };
 
         let document = match &log_record.document {
@@ -249,7 +434,8 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
             offset_id,
             user_id: Some(user_id),
             final_operation: Operation::Add,
-            metadata_to_be_merged: metadata,
+            metadata_to_be_merged: merged_metadata,
+            metadata_to_be_deleted: deleted_metadata,
             final_document: document,
             final_embedding: embedding,
         })
@@ -353,7 +539,7 @@ impl<'me> LogMaterializer<'me> {
                     // If the delete is for a record that is currently not in the
                     // record segment, then we can just NOT process these records
                     // at all. On the other hand if it is for a record that is currently
-                    // in the record segment then we'll have to pass it as a delete
+                    // in segment then we'll have to pass it as a delete
                     // to the compactor so that it can be deleted.
                     if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
                         new_id_to_materialized.remove(log_record.record.id.as_str());
@@ -370,6 +556,7 @@ impl<'me> LogMaterializer<'me> {
                         record_from_map.final_document = None;
                         record_from_map.final_embedding = None;
                         record_from_map.metadata_to_be_merged = None;
+                        record_from_map.metadata_to_be_deleted = None;
                         record_from_map.user_id = None;
                     }
                 }
@@ -392,11 +579,17 @@ impl<'me> LogMaterializer<'me> {
                         },
                     };
 
-                    record_from_map.metadata_to_be_merged = match merge_update_metadata(
-                        &record_from_map.metadata_to_be_merged,
+                    match merge_update_metadata(
+                        (
+                            &record_from_map.metadata_to_be_merged,
+                            &record_from_map.metadata_to_be_deleted,
+                        ),
                         &log_record.record.metadata,
                     ) {
-                        Ok(meta) => meta,
+                        Ok(meta) => {
+                            record_from_map.metadata_to_be_merged = meta.0;
+                            record_from_map.metadata_to_be_deleted = meta.1;
+                        }
                         Err(e) => {
                             return Err(LogMaterializerError::MetadataMaterializationError(e));
                         }
@@ -421,11 +614,17 @@ impl<'me> LogMaterializer<'me> {
                         let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
-                        record_from_map.metadata_to_be_merged = match merge_update_metadata(
-                            &record_from_map.metadata_to_be_merged,
+                        match merge_update_metadata(
+                            (
+                                &record_from_map.metadata_to_be_merged,
+                                &record_from_map.metadata_to_be_deleted,
+                            ),
                             &log_record.record.metadata,
                         ) {
-                            Ok(meta) => meta,
+                            Ok(meta) => {
+                                record_from_map.metadata_to_be_merged = meta.0;
+                                record_from_map.metadata_to_be_deleted = meta.1;
+                            }
                             Err(e) => {
                                 return Err(LogMaterializerError::MetadataMaterializationError(e));
                             }
@@ -446,11 +645,17 @@ impl<'me> LogMaterializer<'me> {
                         let record_from_map = new_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
-                        record_from_map.metadata_to_be_merged = match merge_update_metadata(
-                            &record_from_map.metadata_to_be_merged,
+                        match merge_update_metadata(
+                            (
+                                &record_from_map.metadata_to_be_merged,
+                                &record_from_map.metadata_to_be_deleted,
+                            ),
                             &log_record.record.metadata,
                         ) {
-                            Ok(meta) => meta,
+                            Ok(meta) => {
+                                record_from_map.metadata_to_be_merged = meta.0;
+                                record_from_map.metadata_to_be_deleted = meta.1;
+                            }
                             Err(e) => {
                                 return Err(LogMaterializerError::MetadataMaterializationError(e));
                             }
