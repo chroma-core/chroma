@@ -1,3 +1,5 @@
+import hypothesis.stateful
+import hypothesis.strategies
 import pytest
 import logging
 import hypothesis
@@ -70,7 +72,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def __init__(self, api: ServerAPI):
         super().__init__()
         self.api = api
-        self._rules_strategy = strategies.DeterministicRuleStrategy(self)  # type: ignore
+        self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
