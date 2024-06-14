@@ -115,7 +115,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest] # # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        platform: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -151,7 +151,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        platform: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
