@@ -243,10 +243,6 @@ impl From<UpdateMetadata> for chroma_proto::UpdateMetadata {
             metadata: HashMap::new(),
         };
         for (key, value) in metadata.drain() {
-            println!(
-                "From<UpdateMetadata> for chroma_proto::UpdateMetadata, k: {}, v: {:?}",
-                key, value
-            );
             let proto_value = value.into();
             proto_metadata.metadata.insert(key.clone(), proto_value);
         }

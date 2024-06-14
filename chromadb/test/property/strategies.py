@@ -113,6 +113,8 @@ tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_
 safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1
 )  # TODO: handle longs
+# In distributed chroma, floats are 32 bit hence we need to
+# restrict the generation to generate only 32 bit floats.
 safe_floats = st.floats(
     allow_infinity=False,
     allow_nan=False,

@@ -694,6 +694,8 @@ class SqlSysDB(SqlDB, SysDB):
         )
         sql_id = self.uuid_to_db(id)
         for k, v in metadata.items():
+            # Note: The order is important here because isinstance(v, bool)
+            # and isinstance(v, int) both are true for v of bool type.
             if isinstance(v, bool):
                 q = q.insert(
                     ParameterValue(sql_id),
