@@ -68,7 +68,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return self
 
     @classmethod
-    async def create_from_system(
+    async def from_system_async(
         cls,
         system: System,
         tenant: str = DEFAULT_TENANT,
@@ -83,9 +83,9 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         cls,
         system: System,
     ) -> "SharedSystemClient":
-        """AsyncClient cannot be created synchronously. Use .create_from_system() instead."""
+        """AsyncClient cannot be created synchronously. Use .from_system_async() instead."""
         raise NotImplementedError(
-            "AsyncClient cannot be created synchronously. Use .create_from_system() instead."
+            "AsyncClient cannot be created synchronously. Use .from_system_async() instead."
         )
 
     @override
