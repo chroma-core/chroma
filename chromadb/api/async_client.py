@@ -3,6 +3,7 @@ from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -157,6 +158,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -166,6 +168,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         model = await self._server.create_collection(
             name=name,
+            configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
@@ -205,6 +208,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -213,6 +217,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         model = await self._server.get_or_create_collection(
             name=name,
+            configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
