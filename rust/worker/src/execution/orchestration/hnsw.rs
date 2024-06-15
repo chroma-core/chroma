@@ -676,7 +676,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestrator {
+impl Handler<TaskResult<BruteForceKnnOperatorOutput<'_>, ()>> for HnswQueryOrchestrator {
     async fn handle(
         &mut self,
         message: TaskResult<BruteForceKnnOperatorOutput, ()>,
@@ -704,15 +704,13 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
                             return;
                         }
                     };
-                    user_ids.push(record.record.id.clone());
+                    user_ids.push(record.merged_user_id());
                     if let Some(embeddings) = embeddings.as_mut() {
                         embeddings.push(
                             record
-                                .record
-                                .embedding
-                                .as_ref()
+                                .final_embedding
                                 .expect("Brute force result log record should have embedding set")
-                                .clone(),
+                                .to_owned(),
                         );
                     }
                 }
