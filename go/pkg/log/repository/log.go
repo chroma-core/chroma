@@ -3,10 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
+
 	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"time"
 )
 
 type LogRepository struct {
@@ -76,8 +77,8 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	return
 }
 
-func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
-	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx)
+func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize int64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
+	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, minCompactionSize)
 	if collectionToCompact == nil {
 		collectionToCompact = []log.GetAllCollectionsToCompactRow{}
 	}

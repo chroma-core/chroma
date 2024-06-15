@@ -222,6 +222,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
         let log_record = log_operation_info.0;
         let offset_id = log_operation_info.1;
         let user_id = log_operation_info.2;
+        let metadata: Metadata = log_record.metadata.unwrap().try_into().unwrap();
         let metadata = match &log_record.metadata {
             Some(metadata) => match update_metdata_to_metdata(metadata) {
                 Ok(m) => Some(m),
