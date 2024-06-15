@@ -37,6 +37,14 @@ jobs:
     - name: Install dependencies
       run: npm install
       working-directory: ./clients/js/
+    - name: Update package.json with organization scope
+      if: matrix.registry == 'https://npm.pkg.github.com'
+      run: |
+        # needed to publish to GitHub packages only
+        ORG_NAME="@chroma-core"
+        PACKAGE_NAME=$(jq -r '.name' package.json)
+        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' package.json > tmp.$$.json && mv tmp.$$.json package.json
+      working-directory: ./clients/js/
     - name: Test & publish
       run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
       working-directory: ./clients/js/
