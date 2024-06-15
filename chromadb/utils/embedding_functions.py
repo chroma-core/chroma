@@ -371,6 +371,10 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 
         return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
+def get_base_path() -> Path:
+    if "CHROMA_HOME" in os.environ:
+        return Path(os.environ["CHROMA_HOME"])
+    return Path.home()
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
@@ -379,7 +383,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    DOWNLOAD_PATH = get_base_path() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
