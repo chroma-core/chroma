@@ -240,7 +240,7 @@ impl HnswQueryOrchestrator {
     async fn brute_force_query(
         &mut self,
         logs: Chunk<LogRecord>,
-        self_address: Box<dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, ()>>>,
+        self_address: Box<dyn Receiver<TaskResult<BruteForceKnnOperatorOutput<'_>, ()>>>,
     ) {
         self.state = ExecutionState::QueryKnn;
         let distance_function = &self
