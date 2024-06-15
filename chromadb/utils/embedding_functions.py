@@ -63,6 +63,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        # Since we do dynamic imports we have to type this as Any
+        model: Any = None,
         **kwargs: Any,
     ):
         """Initialize SentenceTransformerEmbeddingFunction.
@@ -71,18 +73,27 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
             device (str, optional): Device used for computation, defaults to "cpu"
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
+            model (SentenceTransformer, optional): SentenceTransformer model
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
-        if model_name not in self.models:
+        if model is not None or model_name not in self.models:
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError:
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(
-                model_name, device=device, **kwargs
-            )
+            if model is not None:
+                if not isinstance(model, SentenceTransformer):
+                    raise TypeError(
+                        "The provided model is not an instance of SentenceTransformer" 
+                    )
+                model_name = str(id(model))
+                self.models[model_name] = model
+            else:
+                self.models[model_name] = SentenceTransformer(
+                    model_name, device=device, **kwargs
+                )
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
