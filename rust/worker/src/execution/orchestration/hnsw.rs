@@ -1,6 +1,8 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator};
-use super::common::{get_collection_by_id, get_hnsw_segment_by_id};
+use super::common::{
+    get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
+};
 use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
@@ -418,42 +420,6 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn get_record_segment_for_collection(
-        &self,
-        mut sysdb: Box<dyn SysDb>,
-        collection_id: &Uuid,
-    ) -> Result<Segment, Box<dyn ChromaError>> {
-        let segments = sysdb
-            .get_segments(
-                None,
-                Some(SegmentType::BlockfileRecord.into()),
-                None,
-                Some(*collection_id),
-            )
-            .await;
-
-        let segment = match segments {
-            Ok(mut segments) => {
-                if segments.is_empty() {
-                    return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
-                        *collection_id,
-                    )));
-                }
-                segments.drain(..).next().unwrap()
-            }
-            Err(e) => {
-                return Err(Box::new(HnswSegmentQueryError::GetSegmentsError(e)));
-            }
-        };
-
-        if segment.r#type != SegmentType::BlockfileRecord {
-            return Err(Box::new(HnswSegmentQueryError::RecordSegmentNotFound(
-                *collection_id,
-            )));
-        }
-        Ok(segment)
-    }
-
     fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
         let result_channel = self
             .result_channel
@@ -536,16 +502,14 @@ impl Component for HnswQueryOrchestrator {
             return;
         };
 
-        let record_segment = match self
-            .get_record_segment_for_collection(self.sysdb.clone(), collection_id)
-            .await
-        {
-            Ok(segment) => segment,
-            Err(e) => {
-                self.terminate_with_error(e, ctx);
-                return;
-            }
-        };
+        let record_segment =
+            match get_record_segment_by_collection_id(self.sysdb.clone(), collection_id).await {
+                Ok(segment) => segment,
+                Err(e) => {
+                    self.terminate_with_error(e, ctx);
+                    return;
+                }
+            };
 
         match IndexConfig::from_segment(&hnsw_segment, collection.dimension.unwrap()) {
             Ok(index_config) => {

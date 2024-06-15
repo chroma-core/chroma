@@ -1,14 +1,16 @@
-use super::common::{get_collection_by_id, get_hnsw_segment_by_id};
+use super::common::{
+    get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
+};
 use crate::{
     errors::{ChromaError, ErrorCodes},
     execution::{
-        operator::{wrap, TaskResult},
+        operator::{wrap, TaskMessage, TaskResult},
         operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput},
     },
     log::log::{Log, PullLogsError},
     sysdb::{self, sysdb::SysDb},
-    system::{Component, ComponentContext, Receiver, System},
-    types::{GetVectorsResult, Segment},
+    system::{ChannelError, Component, ComponentContext, Receiver, System},
+    types::{Collection, GetVectorsResult, Segment},
 };
 use async_trait::async_trait;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,12 +31,15 @@ enum ExecutionState {
 enum GetVectorsError {
     #[error("Hnsw segment has no collection")]
     HnswSegmentHasNoCollection,
+    #[error("Error sending task to dispatcher")]
+    TaskSendError(#[from] ChannelError),
 }
 
 impl ChromaError for GetVectorsError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetVectorsError::HnswSegmentHasNoCollection => ErrorCodes::Internal,
+            GetVectorsError::TaskSendError(e) => e.code(),
         }
     }
 }
@@ -49,6 +54,7 @@ pub struct GetVectorsOrchestrator {
     hnsw_segment_id: Uuid,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
+    collection: Option<Collection>,
     // // query_vectors index to the result
     // hnsw_result_offset_ids: HashMap<usize, Vec<usize>>,
     // hnsw_result_distances: HashMap<usize, Vec<f32>>,
@@ -67,7 +73,7 @@ pub struct GetVectorsOrchestrator {
     // // Services
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
-    // dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: Box<dyn Receiver<TaskMessage>>,
     // hnsw_index_provider: HnswIndexProvider,
     // blockfile_provider: BlockfileProvider,
     // Result channel
@@ -82,6 +88,7 @@ impl GetVectorsOrchestrator {
         hnsw_segment_id: Uuid,
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
+        dispatcher: Box<dyn Receiver<TaskMessage>>,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
@@ -90,7 +97,9 @@ impl GetVectorsOrchestrator {
             hnsw_segment_id,
             log,
             sysdb,
+            dispatcher,
             record_segment: None,
+            collection: None,
             result_channel: None,
         }
     }
@@ -98,6 +107,7 @@ impl GetVectorsOrchestrator {
     async fn pull_logs(
         &mut self,
         self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        ctx: &ComponentContext<Self>,
     ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -111,28 +121,29 @@ impl GetVectorsOrchestrator {
             }
         };
 
-        // let collection = self
-        //     .collection
-        //     .as_ref()
-        //     .expect("State machine invariant violation. The collection is not set when pulling logs. This should never happen.");
+        let collection = self
+            .collection
+            .as_ref()
+            .expect("State machine invariant violation. The collection is not set when pulling logs. This should never happen.");
 
-        // let input = PullLogsInput::new(
-        //     collection.id,
-        //     // The collection log position is inclusive, and we want to start from the next log
-        //     collection.log_position + 1,
-        //     100,
-        //     None,
-        //     Some(end_timestamp),
-        // );
-        // let task = wrap(operator, input, self_address);
-        // // Wrap the task with current span as the parent. The worker then executes it
-        // // inside a child span with this parent.
-        // match self.dispatcher.send(task, Some(Span::current())).await {
-        //     Ok(_) => (),
-        //     Err(e) => {
-        //         // TODO: log an error and reply to caller
-        //     }
-        // }
+        let input = PullLogsInput::new(
+            collection.id,
+            // The collection log position is inclusive, and we want to start from the next log
+            collection.log_position + 1,
+            100,
+            None,
+            Some(end_timestamp),
+        );
+
+        let task = wrap(operator, input, self_address);
+        // Wrap the task with current span as the parent. The worker then executes it
+        // inside a child span with this parent.
+        match self.dispatcher.send(task, Some(Span::current())).await {
+            Ok(_) => (),
+            Err(e) => {
+                self.terminate_with_error(Box::new(GetVectorsError::TaskSendError(e)), ctx);
+            }
+        }
     }
 
     fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
@@ -207,34 +218,14 @@ impl Component for GetVectorsOrchestrator {
             }
         };
 
-        // let record_segment = match self
-        //     .get_record_segment_for_collection(self.sysdb.clone(), collection_id)
-        //     .await
-        // {
-        //     Ok(segment) => segment,
-        //     Err(e) => {
-        //         self.terminate_with_error(e, ctx);
-        //         return;
-        //     }
-        // };
-
-        // match IndexConfig::from_segment(&hnsw_segment, collection.dimension.unwrap()) {
-        //     Ok(index_config) => {
-        //         self.index_config = Some(index_config);
-
-        //         // Normalize the query vectors if we are using the cosine similarity
-        //         if self.index_config.as_ref().unwrap().distance_function == DistanceFunction::Cosine
-        //         {
-        //             for query_vector in self.query_vectors.iter_mut() {
-        //                 *query_vector = normalize(query_vector);
-        //             }
-        //         }
-        //     }
-        //     Err(e) => {
-        //         self.terminate_with_error(e, ctx);
-        //         return;
-        //     }
-        // }
+        let record_segment =
+            match get_record_segment_by_collection_id(self.sysdb.clone(), collection_id).await {
+                Ok(segment) => segment,
+                Err(e) => {
+                    self.terminate_with_error(e, ctx);
+                    return;
+                }
+            };
 
         // self.record_segment = Some(record_segment);
         // self.hnsw_segment = Some(hnsw_segment);

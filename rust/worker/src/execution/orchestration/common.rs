@@ -94,3 +94,57 @@ pub(super) async fn get_collection_by_id(
         }
     }
 }
+
+#[derive(Debug, Error)]
+pub(super) enum GetRecordSegmentByCollectionIdError {
+    #[error("Record segment for collection with id: {0} not found")]
+    RecordSegmentNotFound(Uuid),
+    #[error("Get segments error")]
+    GetSegmentsError(#[from] GetSegmentsError),
+}
+
+impl ChromaError for GetRecordSegmentByCollectionIdError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetRecordSegmentByCollectionIdError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
+            GetRecordSegmentByCollectionIdError::GetSegmentsError(e) => e.code(),
+        }
+    }
+}
+
+pub(super) async fn get_record_segment_by_collection_id(
+    mut sysdb: Box<dyn SysDb>,
+    collection_id: &Uuid,
+) -> Result<Segment, Box<GetRecordSegmentByCollectionIdError>> {
+    let segments = sysdb
+        .get_segments(
+            None,
+            Some(SegmentType::BlockfileRecord.into()),
+            None,
+            Some(*collection_id),
+        )
+        .await;
+
+    let segment = match segments {
+        Ok(mut segments) => {
+            if segments.is_empty() {
+                return Err(Box::new(
+                    GetRecordSegmentByCollectionIdError::RecordSegmentNotFound(*collection_id),
+                ));
+            }
+            segments.drain(..).next().unwrap()
+        }
+        Err(e) => {
+            return Err(Box::new(
+                GetRecordSegmentByCollectionIdError::GetSegmentsError(e),
+            ));
+        }
+    };
+
+    if segment.r#type != SegmentType::BlockfileRecord {
+        return Err(Box::new(
+            GetRecordSegmentByCollectionIdError::RecordSegmentNotFound(*collection_id),
+        ));
+    }
+    Ok(segment)
+}
