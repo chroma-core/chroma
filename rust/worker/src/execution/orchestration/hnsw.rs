@@ -1,5 +1,6 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator};
+use super::common::get_hnsw_segment_from_id;
 use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
@@ -65,8 +66,8 @@ enum ExecutionState {
 
 #[derive(Error, Debug)]
 enum HnswSegmentQueryError {
-    #[error("Hnsw segment with id: {0} not found")]
-    HnswSegmentNotFound(Uuid),
+    #[error(transparent)]
+    HnswSegmentQueryError(#[from] super::common::HnswSegmentQueryError),
     #[error("Get segments error")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Collection: {0} not found")]
@@ -84,7 +85,7 @@ enum HnswSegmentQueryError {
 impl ChromaError for HnswSegmentQueryError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswSegmentQueryError::HnswSegmentNotFound(_) => ErrorCodes::NotFound,
+            HnswSegmentQueryError::HnswSegmentQueryError(e) => e.code(),
             HnswSegmentQueryError::GetSegmentsError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
@@ -417,36 +418,6 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn get_hnsw_segment_from_id(
-        &self,
-        mut sysdb: Box<dyn SysDb>,
-        hnsw_segment_id: &Uuid,
-    ) -> Result<Segment, Box<dyn ChromaError>> {
-        let segments = sysdb
-            .get_segments(Some(*hnsw_segment_id), None, None, None)
-            .await;
-        let segment = match segments {
-            Ok(segments) => {
-                if segments.is_empty() {
-                    return Err(Box::new(HnswSegmentQueryError::HnswSegmentNotFound(
-                        *hnsw_segment_id,
-                    )));
-                }
-                segments[0].clone()
-            }
-            Err(e) => {
-                return Err(Box::new(HnswSegmentQueryError::GetSegmentsError(e)));
-            }
-        };
-
-        if segment.r#type != SegmentType::HnswDistributed {
-            return Err(Box::new(HnswSegmentQueryError::HnswSegmentNotFound(
-                *hnsw_segment_id,
-            )));
-        }
-        Ok(segment)
-    }
-
     async fn get_collection(
         &self,
         mut sysdb: Box<dyn SysDb>,
@@ -553,16 +524,14 @@ impl Component for HnswQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         // Populate the orchestrator with the initial state - The HNSW Segment, The Record Segment and the Collection
-        let hnsw_segment = match self
-            .get_hnsw_segment_from_id(self.sysdb.clone(), &self.hnsw_segment_id)
-            .await
-        {
-            Ok(segment) => segment,
-            Err(e) => {
-                self.terminate_with_error(e, ctx);
-                return;
-            }
-        };
+        let hnsw_segment =
+            match get_hnsw_segment_from_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
+                Ok(segment) => segment,
+                Err(e) => {
+                    self.terminate_with_error(e, ctx);
+                    return;
+                }
+            };
 
         let collection_id = match &hnsw_segment.collection {
             Some(collection_id) => collection_id,

@@ -252,7 +252,13 @@ impl WorkerServer {
             }
         };
 
-        let orchestrator = GetVectorsOrchestrator::new(system.clone(), request.ids, segment_uuid);
+        let orchestrator = GetVectorsOrchestrator::new(
+            system.clone(),
+            request.ids,
+            segment_uuid,
+            self.log.clone(),
+            self.sysdb.clone(),
+        );
         let result = orchestrator.run().await;
         let mut result = match result {
             Ok(result) => result,
