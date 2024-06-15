@@ -429,6 +429,28 @@ impl HnswQueryOrchestrator {
         }
     }
 
+    fn terminate_with_empty_response(&mut self, ctx: &ComponentContext<Self>) {
+        let result_channel = self
+            .result_channel
+            .take()
+            .expect("Invariant violation. Result channel is not set.");
+        let mut empty_resp = vec![];
+        for _ in 1..=self.query_vectors.len() {
+            empty_resp.push(vec![]);
+        }
+        match result_channel.send(Ok(empty_resp)) {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error - this implied the listener was dropped
+                tracing::error!(
+                    "[HnswQueryOrchestrator] Result channel dropped before sending empty response"
+                );
+            }
+        }
+        // Cancel the orchestrator so it stops processing
+        ctx.cancellation_token.cancel();
+    }
+
     fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
         let result_channel = self
             .result_channel
@@ -500,6 +522,13 @@ impl Component for HnswQueryOrchestrator {
                 return;
             }
         };
+
+        // If segment is uninitialized and dimension is not set then we assume
+        // that this is a query before any add so return empty response.
+        if hnsw_segment.file_path.len() <= 0 && collection.dimension.is_none() {
+            self.terminate_with_empty_response(ctx);
+            return;
+        }
 
         // Validate that the collection has a dimension set. Downstream steps will rely on this
         // so that they can unwrap the dimension without checking for None
