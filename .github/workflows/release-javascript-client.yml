@@ -34,6 +34,8 @@ jobs:
       with:
         node-version: "16.x"
         registry-url: ${{ matrix.registry }}
+        check-latest: false
+        token: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
     - name: Install dependencies
       run: npm install
       working-directory: ./clients/js/
