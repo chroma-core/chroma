@@ -61,35 +61,35 @@ impl GetVectorsOrchestrator {
             record_segment: None,
         }
     }
-}
 
-fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-    let result_channel = self
-        .result_channel
-        .take()
-        .expect("Invariant violation. Result channel is not set.");
-    match result_channel.send(Err(error)) {
-        Ok(_) => (),
-        Err(e) => {
-            // Log an error - this implied the listener was dropped
-            println!("[HnswQueryOrchestrator] Result channel dropped before sending error");
+    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
+        let result_channel = self
+            .result_channel
+            .take()
+            .expect("Invariant violation. Result channel is not set.");
+        match result_channel.send(Err(error)) {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error - this implied the listener was dropped
+                println!("[HnswQueryOrchestrator] Result channel dropped before sending error");
+            }
         }
+        // Cancel the orchestrator so it stops processing
+        ctx.cancellation_token.cancel();
     }
-    // Cancel the orchestrator so it stops processing
-    ctx.cancellation_token.cancel();
-}
 
-///  Run the orchestrator and return the result.
-///  # Note
-///  Use this over spawning the component directly. This method will start the component and
-///  wait for it to finish before returning the result.
-pub(crate) async fn run(mut self) -> Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    self.result_channel = Some(tx);
-    let mut handle = self.system.clone().start_component(self);
-    let result = rx.await;
-    handle.stop();
-    result.unwrap()
+    ///  Run the orchestrator and return the result.
+    ///  # Note
+    ///  Use this over spawning the component directly. This method will start the component and
+    ///  wait for it to finish before returning the result.
+    pub(crate) async fn run(mut self) -> Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.result_channel = Some(tx);
+        let mut handle = self.system.clone().start_component(self);
+        let result = rx.await;
+        handle.stop();
+        result.unwrap()
+    }
 }
 
 // ============== Component Implementation ==============
