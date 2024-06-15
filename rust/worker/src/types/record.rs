@@ -239,6 +239,18 @@ pub(crate) struct VectorQueryResult {
 
 /*
 ===========================================
+Get Vector Results
+===========================================
+*/
+
+#[derive(Debug)]
+pub(crate) struct GetVectorsResult {
+    pub(crate) ids: Vec<String>,
+    pub(crate) vectors: Vec<Vec<f32>>,
+}
+
+/*
+===========================================
 Metadata Embedding Record
 ===========================================
 */

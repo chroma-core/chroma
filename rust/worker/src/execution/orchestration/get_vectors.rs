@@ -1,6 +1,7 @@
 use crate::{
-    system::{Component, System},
-    types::Segment,
+    errors::ChromaError,
+    system::{Component, ComponentContext, System},
+    types::{GetVectorsResult, Segment},
 };
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -46,9 +47,8 @@ pub struct GetVectorsOrchestrator {
     // hnsw_index_provider: HnswIndexProvider,
     // blockfile_provider: BlockfileProvider,
     // Result channel
-    // result_channel: Option<
-    //     tokio::sync::oneshot::Sender<Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>>>,
-    // >,
+    result_channel:
+        Option<tokio::sync::oneshot::Sender<Result<Vec<GetVectorsResult>, Box<dyn ChromaError>>>>,
 }
 
 impl GetVectorsOrchestrator {
@@ -59,6 +59,7 @@ impl GetVectorsOrchestrator {
             get_ids,
             hnsw_segment_id,
             record_segment: None,
+            result_channel: None,
         }
     }
 
@@ -82,7 +83,7 @@ impl GetVectorsOrchestrator {
     ///  # Note
     ///  Use this over spawning the component directly. This method will start the component and
     ///  wait for it to finish before returning the result.
-    pub(crate) async fn run(mut self) -> Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>> {
+    pub(crate) async fn run(mut self) -> Result<Vec<GetVectorsResult>, Box<dyn ChromaError>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.result_channel = Some(tx);
         let mut handle = self.system.clone().start_component(self);
