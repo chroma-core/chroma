@@ -661,8 +661,8 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         api_key: str,
+        project_id: str,
         model_name: str = "textembedding-gecko",
-        project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
     ):
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
@@ -676,8 +676,12 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 self._api_url, json={"instances": [{"content": text}]}
             ).json()
 
-            if "predictions" in response:
-                embeddings.append(response["predictions"]["embeddings"]["values"])
+            predictions = response.get('predictions')
+            if isinstance(predictions, List) and predictions:
+                for prediction in predictions:
+                    embeddings.append(prediction["embeddings"]["values"])
+            else:
+                raise KeyError(f'Something went wrong -- Response: {response}')
 
         return embeddings
 
