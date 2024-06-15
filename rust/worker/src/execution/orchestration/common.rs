@@ -1,53 +1,96 @@
 use crate::{
     errors::{ChromaError, ErrorCodes},
-    sysdb::sysdb::{GetSegmentsError, SysDb},
-    types::{Segment, SegmentType},
+    sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb},
+    types::{Collection, Segment, SegmentType},
 };
 use thiserror::Error;
+use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
-pub(super) enum HnswSegmentQueryError {
+pub(super) enum GetHnswSegmentByIdError {
     #[error("Hnsw segment with id: {0} not found")]
     HnswSegmentNotFound(Uuid),
     #[error("Get segments error")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
 
-impl ChromaError for HnswSegmentQueryError {
+impl ChromaError for GetHnswSegmentByIdError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswSegmentQueryError::HnswSegmentNotFound(_) => ErrorCodes::NotFound,
-            HnswSegmentQueryError::GetSegmentsError(_) => ErrorCodes::Internal,
+            GetHnswSegmentByIdError::HnswSegmentNotFound(_) => ErrorCodes::NotFound,
+            GetHnswSegmentByIdError::GetSegmentsError(e) => e.code(),
         }
     }
 }
 
-pub(super) async fn get_hnsw_segment_from_id(
+pub(super) async fn get_hnsw_segment_by_id(
     mut sysdb: Box<dyn SysDb>,
     hnsw_segment_id: &Uuid,
-) -> Result<Segment, Box<dyn ChromaError>> {
+) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
         .get_segments(Some(*hnsw_segment_id), None, None, None)
         .await;
     let segment = match segments {
         Ok(segments) => {
             if segments.is_empty() {
-                return Err(Box::new(HnswSegmentQueryError::HnswSegmentNotFound(
+                return Err(Box::new(GetHnswSegmentByIdError::HnswSegmentNotFound(
                     *hnsw_segment_id,
                 )));
             }
             segments[0].clone()
         }
         Err(e) => {
-            return Err(Box::new(HnswSegmentQueryError::GetSegmentsError(e)));
+            return Err(Box::new(GetHnswSegmentByIdError::GetSegmentsError(e)));
         }
     };
 
     if segment.r#type != SegmentType::HnswDistributed {
-        return Err(Box::new(HnswSegmentQueryError::HnswSegmentNotFound(
+        return Err(Box::new(GetHnswSegmentByIdError::HnswSegmentNotFound(
             *hnsw_segment_id,
         )));
     }
     Ok(segment)
+}
+
+#[derive(Debug, Error)]
+pub(super) enum GetCollectionByIdError {
+    #[error("Collection with id: {0} not found")]
+    CollectionNotFound(Uuid),
+    #[error("Get collection error")]
+    GetCollectionError(#[from] GetCollectionsError),
+}
+
+impl ChromaError for GetCollectionByIdError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionByIdError::CollectionNotFound(_) => ErrorCodes::NotFound,
+            GetCollectionByIdError::GetCollectionError(e) => e.code(),
+        }
+    }
+}
+
+pub(super) async fn get_collection_by_id(
+    mut sysdb: Box<dyn SysDb>,
+    collection_id: &Uuid,
+) -> Result<Collection, Box<GetCollectionByIdError>> {
+    let child_span: tracing::Span =
+        trace_span!(parent: Span::current(), "get collection for collection id");
+    let collections = sysdb
+        .get_collections(Some(*collection_id), None, None, None)
+        .instrument(child_span.clone())
+        .await;
+    match collections {
+        Ok(mut collections) => {
+            if collections.is_empty() {
+                return Err(Box::new(GetCollectionByIdError::CollectionNotFound(
+                    *collection_id,
+                )));
+            }
+            Ok(collections.drain(..).next().unwrap())
+        }
+        Err(e) => {
+            return Err(Box::new(GetCollectionByIdError::GetCollectionError(e)));
+        }
+    }
 }

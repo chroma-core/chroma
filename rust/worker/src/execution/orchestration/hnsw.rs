@@ -1,6 +1,6 @@
 use super::super::operator::{wrap, TaskMessage};
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator};
-use super::common::get_hnsw_segment_from_id;
+use super::common::{get_collection_by_id, get_hnsw_segment_by_id};
 use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
@@ -67,7 +67,7 @@ enum ExecutionState {
 #[derive(Error, Debug)]
 enum HnswSegmentQueryError {
     #[error(transparent)]
-    HnswSegmentQueryError(#[from] super::common::HnswSegmentQueryError),
+    HnswSegmentQueryError(#[from] super::common::GetHnswSegmentByIdError),
     #[error("Get segments error")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Collection: {0} not found")]
@@ -418,32 +418,6 @@ impl HnswQueryOrchestrator {
         }
     }
 
-    async fn get_collection(
-        &self,
-        mut sysdb: Box<dyn SysDb>,
-        collection_id: &Uuid,
-    ) -> Result<Collection, Box<dyn ChromaError>> {
-        let child_span: tracing::Span =
-            trace_span!(parent: Span::current(), "get collection for collection id");
-        let collections = sysdb
-            .get_collections(Some(*collection_id), None, None, None)
-            .instrument(child_span.clone())
-            .await;
-        match collections {
-            Ok(mut collections) => {
-                if collections.is_empty() {
-                    return Err(Box::new(HnswSegmentQueryError::CollectionNotFound(
-                        *collection_id,
-                    )));
-                }
-                Ok(collections.drain(..).next().unwrap())
-            }
-            Err(e) => {
-                return Err(Box::new(HnswSegmentQueryError::GetCollectionError(e)));
-            }
-        }
-    }
-
     async fn get_record_segment_for_collection(
         &self,
         mut sysdb: Box<dyn SysDb>,
@@ -525,7 +499,7 @@ impl Component for HnswQueryOrchestrator {
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         // Populate the orchestrator with the initial state - The HNSW Segment, The Record Segment and the Collection
         let hnsw_segment =
-            match get_hnsw_segment_from_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
+            match get_hnsw_segment_by_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
                 Ok(segment) => segment,
                 Err(e) => {
                     self.terminate_with_error(e, ctx);
@@ -544,7 +518,7 @@ impl Component for HnswQueryOrchestrator {
             }
         };
 
-        let collection = match self.get_collection(self.sysdb.clone(), collection_id).await {
+        let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,
             Err(e) => {
                 self.terminate_with_error(e, ctx);

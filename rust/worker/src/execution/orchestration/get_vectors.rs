@@ -1,7 +1,6 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
+use super::common::{get_collection_by_id, get_hnsw_segment_by_id};
 use crate::{
-    errors::ChromaError,
+    errors::{ChromaError, ErrorCodes},
     execution::{
         operator::{wrap, TaskResult},
         operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput},
@@ -12,10 +11,10 @@ use crate::{
     types::{GetVectorsResult, Segment},
 };
 use async_trait::async_trait;
+use std::time::{SystemTime, UNIX_EPOCH};
+use thiserror::Error;
 use tracing::Span;
 use uuid::Uuid;
-
-use super::common::get_hnsw_segment_from_id;
 
 #[derive(Debug)]
 enum ExecutionState {
@@ -24,6 +23,20 @@ enum ExecutionState {
     // IMPL NOTE: read vectors should filter out the vectors that are not present in the index.
     ReadVectors,
     MergeResults,
+}
+
+#[derive(Debug, Error)]
+enum GetVectorsError {
+    #[error("Hnsw segment has no collection")]
+    HnswSegmentHasNoCollection,
+}
+
+impl ChromaError for GetVectorsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetVectorsError::HnswSegmentHasNoCollection => ErrorCodes::Internal,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -75,8 +88,8 @@ impl GetVectorsOrchestrator {
             system,
             get_ids,
             hnsw_segment_id,
-            log: log,
-            sysdb: sysdb,
+            log,
+            sysdb,
             record_segment: None,
             result_channel: None,
         }
@@ -167,7 +180,7 @@ impl Component for GetVectorsOrchestrator {
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         // Populate the orchestrator with the initial state - The HNSW Segment, The Record Segment and the Collection
         let hnsw_segment =
-            match get_hnsw_segment_from_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
+            match get_hnsw_segment_by_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
                 Ok(segment) => segment,
                 Err(e) => {
                     self.terminate_with_error(e, ctx);
@@ -175,34 +188,24 @@ impl Component for GetVectorsOrchestrator {
                 }
             };
 
-        // let collection_id = match &hnsw_segment.collection {
-        //     Some(collection_id) => collection_id,
-        //     None => {
-        //         self.terminate_with_error(
-        //             Box::new(HnswSegmentQueryError::HnswSegmentHasNoCollection),
-        //             ctx,
-        //         );
-        //         return;
-        //     }
-        // };
+        let collection_id = match &hnsw_segment.collection {
+            Some(collection_id) => collection_id,
+            None => {
+                self.terminate_with_error(
+                    Box::new(GetVectorsError::HnswSegmentHasNoCollection),
+                    ctx,
+                );
+                return;
+            }
+        };
 
-        // let collection = match self.get_collection(self.sysdb.clone(), collection_id).await {
-        //     Ok(collection) => collection,
-        //     Err(e) => {
-        //         self.terminate_with_error(e, ctx);
-        //         return;
-        //     }
-        // };
-
-        // // Validate that the collection has a dimension set. Downstream steps will rely on this
-        // // so that they can unwrap the dimension without checking for None
-        // if collection.dimension.is_none() {
-        //     self.terminate_with_error(
-        //         Box::new(HnswSegmentQueryError::CollectionHasNoDimension),
-        //         ctx,
-        //     );
-        //     return;
-        // };
+        let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
+            Ok(collection) => collection,
+            Err(e) => {
+                self.terminate_with_error(e, ctx);
+                return;
+            }
+        };
 
         // let record_segment = match self
         //     .get_record_segment_for_collection(self.sysdb.clone(), collection_id)
