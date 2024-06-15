@@ -12,7 +12,8 @@ use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::{
-    CountQueryOrchestrator, HnswQueryOrchestrator, MetadataQueryOrchestrator,
+    CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
+    MetadataQueryOrchestrator,
 };
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
@@ -225,6 +226,68 @@ impl WorkerServer {
         return Ok(Response::new(resp));
     }
 
+    async fn get_vectors_instrumented(
+        &self,
+        request: Request<GetVectorsRequest>,
+    ) -> Result<Response<GetVectorsResponse>, Status> {
+        let request = request.into_inner();
+        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher,
+            None => {
+                return Err(Status::internal("No dispatcher found"));
+            }
+        };
+
+        let system = match self.system {
+            Some(ref system) => system,
+            None => {
+                return Err(Status::internal("No system found"));
+            }
+        };
+
+        let orchestrator = GetVectorsOrchestrator::new(system.clone(), request.ids, segment_uuid);
+        let result = orchestrator.run().await;
+        let mut result = match result {
+            Ok(result) => result,
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "Error running orchestrator: {}",
+                    e
+                )));
+            }
+        };
+
+        let mut output = Vec::new();
+        let id_drain = result.ids.drain(..);
+        let vector_drain = result.vectors.drain(..);
+
+        for (id, vector) in id_drain.zip(vector_drain) {
+            let vector_len = vector.len();
+            let proto_vector = match (vector, ScalarEncoding::FLOAT32, vector_len).try_into() {
+                Ok(vector) => vector,
+                Err(_) => {
+                    return Err(Status::internal("Error converting vector"));
+                }
+            };
+
+            let proto_vector_record = chroma_proto::VectorEmbeddingRecord {
+                id,
+                vector: Some(proto_vector),
+            };
+            output.push(proto_vector_record);
+        }
+
+        let response = chroma_proto::GetVectorsResponse { records: output };
+        Ok(Response::new(response))
+    }
+
     async fn query_metadata_instrumented(
         &self,
         request: Request<QueryMetadataRequest>,
@@ -353,15 +416,18 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         &self,
         request: Request<GetVectorsRequest>,
     ) -> Result<Response<GetVectorsResponse>, Status> {
-        let request = request.into_inner();
-        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid UUID"));
-            }
-        };
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let request_span = trace_span!(
+            "Get vectors",
+            segment_id = request.get_ref().segment_id,
+            ids = ?request.get_ref().ids
+        );
 
-        Err(Status::unimplemented("Not yet implemented"))
+        let instrumented_span = wrap_span_with_parent_context(request_span, request.metadata());
+        self.get_vectors_instrumented(request)
+            .instrument(instrumented_span)
+            .await
     }
 
     async fn query_vectors(

@@ -48,7 +48,7 @@ pub struct GetVectorsOrchestrator {
     // blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel:
-        Option<tokio::sync::oneshot::Sender<Result<Vec<GetVectorsResult>, Box<dyn ChromaError>>>>,
+        Option<tokio::sync::oneshot::Sender<Result<GetVectorsResult, Box<dyn ChromaError>>>>,
 }
 
 impl GetVectorsOrchestrator {
@@ -83,7 +83,7 @@ impl GetVectorsOrchestrator {
     ///  # Note
     ///  Use this over spawning the component directly. This method will start the component and
     ///  wait for it to finish before returning the result.
-    pub(crate) async fn run(mut self) -> Result<Vec<GetVectorsResult>, Box<dyn ChromaError>> {
+    pub(crate) async fn run(mut self) -> Result<GetVectorsResult, Box<dyn ChromaError>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.result_channel = Some(tx);
         let mut handle = self.system.clone().start_component(self);
