@@ -2,18 +2,30 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
 };
 use crate::{
+    blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
     execution::{
+        data::data_chunk::Chunk,
         operator::{wrap, TaskMessage, TaskResult},
-        operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput},
+        operators::{
+            get_vectors_operator::{
+                GetVectorsOperator, GetVectorsOperatorError, GetVectorsOperatorInput,
+                GetVectorsOperatorOutput,
+            },
+            pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput},
+        },
     },
     log::log::{Log, PullLogsError},
     sysdb::{self, sysdb::SysDb},
-    system::{ChannelError, Component, ComponentContext, Receiver, System},
-    types::{Collection, GetVectorsResult, Segment},
+    system::{ChannelError, Component, ComponentContext, Handler, Receiver, System},
+    types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
 use async_trait::async_trait;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use tracing::Span;
 use uuid::Uuid;
@@ -22,9 +34,7 @@ use uuid::Uuid;
 enum ExecutionState {
     Pending,
     PullLogs,
-    // IMPL NOTE: read vectors should filter out the vectors that are not present in the index.
-    ReadVectors,
-    MergeResults,
+    GetVectors,
 }
 
 #[derive(Debug, Error)]
@@ -50,7 +60,7 @@ pub struct GetVectorsOrchestrator {
     // Component Execution
     system: System,
     // Query state
-    get_ids: Vec<String>,
+    search_user_ids: Vec<String>,
     hnsw_segment_id: Uuid,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
@@ -67,15 +77,11 @@ pub struct GetVectorsOrchestrator {
     // merge_task_id_to_query_index: HashMap<Uuid, usize>,
     // // Result state
     // results: Option<Vec<Vec<VectorQueryResult>>>,
-    // // State machine management
-    // merge_dependency_count: u32,
-    // finish_dependency_count: u32,
     // // Services
     log: Box<dyn Log>,
     sysdb: Box<dyn SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
-    // hnsw_index_provider: HnswIndexProvider,
-    // blockfile_provider: BlockfileProvider,
+    blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<GetVectorsResult, Box<dyn ChromaError>>>>,
@@ -89,15 +95,17 @@ impl GetVectorsOrchestrator {
         log: Box<dyn Log>,
         sysdb: Box<dyn SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
+        blockfile_provider: BlockfileProvider,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
             system,
-            get_ids,
+            search_user_ids: get_ids,
             hnsw_segment_id,
             log,
             sysdb,
             dispatcher,
+            blockfile_provider,
             record_segment: None,
             collection: None,
             result_channel: None,
@@ -138,6 +146,37 @@ impl GetVectorsOrchestrator {
         let task = wrap(operator, input, self_address);
         // Wrap the task with current span as the parent. The worker then executes it
         // inside a child span with this parent.
+        match self.dispatcher.send(task, Some(Span::current())).await {
+            Ok(_) => (),
+            Err(e) => {
+                self.terminate_with_error(Box::new(GetVectorsError::TaskSendError(e)), ctx);
+            }
+        }
+    }
+
+    async fn get_vectors(
+        &mut self,
+        self_address: Box<
+            dyn Receiver<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
+        >,
+        log: Chunk<LogRecord>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        self.state = ExecutionState::GetVectors;
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record segment is not set.");
+        let blockfile_provider = self.blockfile_provider.clone();
+        let operator = GetVectorsOperator::new();
+        let input = GetVectorsOperatorInput::new(
+            record_segment.clone(),
+            blockfile_provider,
+            log,
+            self.search_user_ids.clone(),
+        );
+
+        let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -227,12 +266,44 @@ impl Component for GetVectorsOrchestrator {
                 }
             };
 
-        // self.record_segment = Some(record_segment);
-        // self.hnsw_segment = Some(hnsw_segment);
-        // self.collection = Some(collection);
+        self.record_segment = Some(record_segment);
+        self.collection = Some(collection);
 
-        // self.pull_logs(ctx.sender.as_receiver()).await;
+        self.pull_logs(ctx.sender.as_receiver(), ctx).await;
     }
 }
 
 // ============== Handlers ==============
+
+#[async_trait]
+impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrator {
+    async fn handle(
+        &mut self,
+        message: TaskResult<PullLogsOutput, PullLogsError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
+        match message {
+            Ok(output) => {
+                let logs = output.logs();
+                self.get_vectors(ctx.sender.as_receiver(), logs, ctx).await;
+            }
+            Err(e) => {
+                self.terminate_with_error(Box::new(e), ctx);
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>
+    for GetVectorsOrchestrator
+{
+    async fn handle(
+        &mut self,
+        message: TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
+    }
+}

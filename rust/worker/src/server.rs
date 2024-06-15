@@ -258,6 +258,8 @@ impl WorkerServer {
             segment_uuid,
             self.log.clone(),
             self.sysdb.clone(),
+            dispatcher.clone(),
+            self.blockfile_provider.clone(),
         );
         let result = orchestrator.run().await;
         let mut result = match result {
