@@ -36,7 +36,7 @@ pub(crate) struct CompactionManager {
     system: Option<System>,
     scheduler: Scheduler,
     // Dependencies
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     storage: Storage,
     blockfile_provider: BlockfileProvider,
@@ -65,7 +65,7 @@ impl ChromaError for CompactionError {
 impl CompactionManager {
     pub(crate) fn new(
         scheduler: Scheduler,
-        log: Box<dyn Log>,
+        log: Box<Log>,
         sysdb: Box<SysDb>,
         storage: Storage,
         blockfile_provider: BlockfileProvider,
@@ -311,12 +311,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_manager() {
-        let mut log = Box::new(InMemoryLog::new());
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
+        let mut in_memory_log = match *log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
         let tmpdir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
@@ -337,7 +341,7 @@ mod tests {
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_2.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_2.clone(),
