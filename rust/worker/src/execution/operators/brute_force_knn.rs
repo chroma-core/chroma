@@ -1,13 +1,22 @@
+use crate::blockstore::provider::BlockfileProvider;
+use crate::errors::ChromaError;
+use crate::errors::ErrorCodes;
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operators::normalize_vectors::normalize;
+use crate::segment::record_segment::RecordSegmentReader;
+use crate::segment::LogMaterializer;
+use crate::segment::LogMaterializerError;
 use crate::segment::MaterializedLogRecord;
 use crate::types::LogRecord;
 use crate::types::Operation;
+use crate::types::Segment;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use thiserror::Error;
 use tracing::trace;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
@@ -24,8 +33,8 @@ pub struct BruteForceKnnOperator {}
 /// * `k` - The number of nearest neighbors to find.
 /// * `distance_metric` - The distance metric to use.
 #[derive(Debug)]
-pub struct BruteForceKnnOperatorInput<'materialized_log_record> {
-    pub data: Chunk<MaterializedLogRecord<'materialized_log_record>>,
+pub struct BruteForceKnnOperatorInput {
+    pub log: Chunk<LogRecord>,
     pub query: Vec<f32>,
     pub k: usize,
     pub distance_metric: DistanceFunction,
@@ -33,29 +42,32 @@ pub struct BruteForceKnnOperatorInput<'materialized_log_record> {
     // This is just a subset of allowed_ids containing
     // only the ids that are allowed and present in the log.
     pub allowed_ids_brute_force: Arc<[String]>,
+    // Deps to create the log materializer
+    pub record_segment_definition: Segment,
+    pub blockfile_provider: BlockfileProvider,
 }
 
 /// The output of the brute force k-nearest neighbors operator.
 /// # Parameters
-/// * `data` - The vectors to query against. Only the vectors that are nearest neighbors are visible.
-/// * `indices` - The indices of the nearest neighbors. This is a mask against the `data` input.
-/// One row for each query vector.
+/// * `user_ids` - The user ids of the nearest neighbors.
+/// * `embeddings` - The embeddings of the nearest neighbors.
 /// * `distances` - The distances of the nearest neighbors.
 /// One row for each query vector.
 #[derive(Debug)]
-pub struct BruteForceKnnOperatorOutput<'materialized_log_record> {
-    pub data: Chunk<MaterializedLogRecord<'materialized_log_record>>,
-    pub indices: Vec<usize>,
+pub struct BruteForceKnnOperatorOutput {
+    pub user_ids: Vec<String>,
+    pub embeddings: Vec<Vec<f32>>,
     pub distances: Vec<f32>,
 }
 
 #[derive(Debug)]
-struct Entry {
-    index: usize,
+struct Entry<'record> {
+    user_id: &'record str,
+    embedding: &'record [f32],
     distance: f32,
 }
 
-impl Ord for Entry {
+impl Ord for Entry<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         if self.distance == other.distance {
             Ordering::Equal
@@ -69,31 +81,75 @@ impl Ord for Entry {
     }
 }
 
-impl PartialOrd for Entry {
+impl PartialOrd for Entry<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for Entry {
+impl PartialEq for Entry<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.distance == other.distance
     }
 }
 
-impl Eq for Entry {}
+impl Eq for Entry<'_> {}
+
+#[derive(Debug, Error)]
+pub enum BruteForceKnnOperatorError {
+    #[error(transparent)]
+    RecordSegmentReaderCreationError(
+        #[from] crate::segment::record_segment::RecordSegmentReaderCreationError,
+    ),
+    #[error("Error while materializing log records: {0}")]
+    LogMaterializationError(#[from] LogMaterializerError),
+}
+
+impl ChromaError for BruteForceKnnOperatorError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BruteForceKnnOperatorError::RecordSegmentReaderCreationError(e) => e.code(),
+            BruteForceKnnOperatorError::LogMaterializationError(e) => e.code(),
+        }
+    }
+}
 
 #[async_trait]
-impl<'input, 'output>
-    Operator<BruteForceKnnOperatorInput<'input>, BruteForceKnnOperatorOutput<'output>>
-    for BruteForceKnnOperator
-{
-    type Error = ();
+impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for BruteForceKnnOperator {
+    type Error = BruteForceKnnOperatorError;
 
     async fn run(
         &self,
-        input: &BruteForceKnnOperatorInput<'input>,
-    ) -> Result<BruteForceKnnOperatorOutput<'output>, Self::Error> {
+        input: &BruteForceKnnOperatorInput,
+    ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
+        // Materialize the log records
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment_definition,
+            &input.blockfile_provider,
+        )
+        .await {
+            Ok(reader) => Some(reader),
+            Err(e) => {
+                match *e {
+                    crate::segment::record_segment::RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    _ => return Err(BruteForceKnnOperatorError::RecordSegmentReaderCreationError(*e))
+                }
+            }
+        };
+        // We use this really confusing pattern found in the rest of the code
+        // Where we create an effectively unused offset id for the read path
+        // This is very odd and confusing, and should be refactored, for now
+        // we just replicate the pattern here.
+        let offset_id = Arc::new(AtomicU32::new(1));
+        let log_materializer =
+            LogMaterializer::new(record_segment_reader, input.log.clone(), offset_id);
+        let logs = match log_materializer.materialize().await {
+            Ok(logs) => logs,
+            Err(e) => {
+                return Err(BruteForceKnnOperatorError::LogMaterializationError(e));
+            }
+        };
+
         let should_normalize = match input.distance_metric {
             DistanceFunction::Cosine => true,
             _ => false,
@@ -105,7 +161,7 @@ impl<'input, 'output>
         };
 
         let mut heap = BinaryHeap::with_capacity(input.k);
-        let data_chunk = &input.data;
+        let data_chunk = logs;
         for data in data_chunk.iter() {
             let log_record = data.0;
             let index = data.1;
@@ -139,16 +195,24 @@ impl<'input, 'output>
                 let distance = input
                     .distance_metric
                     .distance(&normalized_embedding[..], &normalized_query[..]);
-                heap.push(Entry { index, distance });
+                heap.push(Entry {
+                    user_id: log_record.merged_user_id_ref(),
+                    embedding,
+                    distance,
+                });
             } else {
                 let distance = input.distance_metric.distance(&embedding[..], &input.query);
-                heap.push(Entry { index, distance });
+                heap.push(Entry {
+                    user_id: log_record.merged_user_id_ref(),
+                    embedding,
+                    distance,
+                });
             }
         }
 
-        let mut visibility = vec![false; data_chunk.total_len()];
-        let mut sorted_indices = Vec::with_capacity(input.k);
+        let mut sorted_embeddings = Vec::with_capacity(input.k);
         let mut sorted_distances = Vec::with_capacity(input.k);
+        let mut sorted_user_ids = Vec::with_capacity(input.k);
         let mut i = 0;
         while i < input.k {
             let entry = match heap.pop() {
@@ -157,22 +221,16 @@ impl<'input, 'output>
                     break;
                 }
             };
-            sorted_indices.push(entry.index);
+            sorted_user_ids.push(entry.user_id.to_string());
+            sorted_embeddings.push(entry.embedding.to_vec());
             sorted_distances.push(entry.distance);
-            visibility[entry.index] = true;
             i += 1;
         }
-        let mut data_chunk = data_chunk.clone();
-        data_chunk.set_visibility(visibility);
-        trace!(
-            "Brute force Knn result. data: {:?}, indices: {:?}, distances: {:?}",
-            data_chunk,
-            sorted_indices,
-            sorted_distances
-        );
+
+        trace!("Brute force Knn result. distances: {:?}", sorted_distances);
         Ok(BruteForceKnnOperatorOutput {
-            data: data_chunk,
-            indices: sorted_indices,
+            user_ids: sorted_user_ids,
+            embeddings: sorted_embeddings,
             distances: sorted_distances,
         })
     }
