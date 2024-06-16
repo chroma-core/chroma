@@ -63,7 +63,7 @@ pub async fn query_service_entrypoint() {
     worker_server.set_system(system.clone());
     worker_server.set_dispatcher(dispatcher_handle.receiver());
 
-    let server_join_handle = tokio::spawn(async move {
+    let _server_join_handle = tokio::spawn(async move {
         let _ = crate::server::WorkerServer::run(worker_server).await;
     });
 

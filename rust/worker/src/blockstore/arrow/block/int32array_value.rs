@@ -19,7 +19,7 @@ impl ArrowWriteableValue for &Int32Array {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
     }
 
-    fn validity_size(item_count: usize) -> usize {
+    fn validity_size(_item_count: usize) -> usize {
         0 // We don't support None values for Int32Array
     }
 

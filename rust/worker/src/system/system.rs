@@ -57,7 +57,7 @@ impl System {
                 println!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
-                let join_handle = std::thread::spawn(move || {
+                let _join_handle = std::thread::spawn(move || {
                     rt.block_on(async move { executor.run(rx).await });
                 });
                 // TODO: Implement Join for dedicated threads

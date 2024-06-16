@@ -207,7 +207,7 @@ impl HnswQueryOrchestrator {
         let end_timestamp = match end_timestamp {
             // TODO: change protobuf definition to use u64 instead of i64
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
-            Err(e) => {
+            Err(_e) => {
                 // Log an error and reply + return
                 return;
             }
@@ -231,7 +231,7 @@ impl HnswQueryOrchestrator {
         // inside a child span with this parent.
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // TODO: log an error and reply to caller
             }
         }
@@ -516,7 +516,7 @@ impl HnswQueryOrchestrator {
             .expect("Invariant violation. Result channel is not set.");
         match result_channel.send(Err(error)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // Log an error - this implied the listener was dropped
                 println!("[HnswQueryOrchestrator] Result channel dropped before sending error");
             }
@@ -725,7 +725,7 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
                         .insert(query_index, embeddings);
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 // TODO: handle this error, technically never happens
             }
         }
@@ -857,7 +857,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
                 .expect("Invariant violation. Results are not set")))
             {
                 Ok(_) => (),
-                Err(e) => {
+                Err(_e) => {
                     // Log an error
                 }
             }

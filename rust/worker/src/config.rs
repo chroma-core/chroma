@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use figment::providers::{Env, Format, Serialized, Yaml};
+use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 
 use crate::errors::ChromaError;

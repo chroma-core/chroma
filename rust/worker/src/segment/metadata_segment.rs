@@ -14,16 +14,16 @@ use uuid::Uuid;
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
-use crate::blockstore::key::KeyWrapper;
+
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
 use crate::index::fulltext::types::{
-    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher,
+    FullTextIndexError, FullTextIndexFlusher,
     FullTextIndexReader, FullTextIndexWriter,
 };
 use crate::index::metadata::types::{
-    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher,
+    MetadataIndexError, MetadataIndexFlusher,
     MetadataIndexReader, MetadataIndexWriter,
 };
 use crate::types::{
@@ -441,7 +441,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     MetadataValue::Str(value) => {
                                         match &self.string_metadata_index_writer {
                                             Some(writer) => {
-                                                let a = writer
+                                                let _a = writer
                                                     .set(key, value.as_str(), segment_offset_id)
                                                     .await;
                                             }
@@ -1786,7 +1786,7 @@ impl MetadataSegmentReader<'_> {
                                 }
                             }
                         }
-                        WhereComparison::StringListComparison(operand, list_operator) => {
+                        WhereComparison::StringListComparison(_operand, _list_operator) => {
                             todo!();
                         }
                         WhereComparison::IntListComparison(..) => {

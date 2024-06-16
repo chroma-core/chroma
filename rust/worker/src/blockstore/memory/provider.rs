@@ -51,7 +51,7 @@ impl HashMapBlockfileProvider {
 
     pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
-        id: &uuid::Uuid,
+        _id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         todo!();
     }

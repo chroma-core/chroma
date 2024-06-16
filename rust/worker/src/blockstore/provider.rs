@@ -22,10 +22,10 @@ pub(crate) enum BlockfileProvider {
 impl Debug for BlockfileProvider {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+            BlockfileProvider::HashMapBlockfileProvider(_provider) => {
                 write!(f, "HashMapBlockfileProvider")
             }
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+            BlockfileProvider::ArrowBlockfileProvider(_provider) => {
                 write!(f, "ArrowBlockfileProvider")
             }
         }

@@ -93,7 +93,7 @@ impl HnswIndexProvider {
         };
 
         let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path);
-        let hnsw_config = match hnsw_config {
+        let _hnsw_config = match hnsw_config {
             Ok(hnsw_config) => hnsw_config,
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderForkError::HnswConfigError(*e)));
@@ -202,7 +202,7 @@ impl HnswIndexProvider {
         };
 
         let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path);
-        let hnsw_config = match hnsw_config {
+        let _hnsw_config = match hnsw_config {
             Ok(hnsw_config) => hnsw_config,
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderOpenError::HnswConfigError(*e)));

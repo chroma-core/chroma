@@ -12,10 +12,10 @@ use crate::blockstore::positional_posting_list_value::PositionalPostingList;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
-use futures::{Stream, StreamExt};
+use futures::{StreamExt};
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
-use std::pin::Pin;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
