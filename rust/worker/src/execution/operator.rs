@@ -76,7 +76,7 @@ where
             result,
             task_id: self.task_id,
         };
-        let res = self.reply_channel.send(task_result, None).await;
+        let _res = self.reply_channel.send(task_result, None).await;
         // TODO: if this errors, it means the caller was dropped
     }
 

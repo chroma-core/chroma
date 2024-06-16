@@ -1,25 +1,24 @@
 use super::{
     delta::BlockDelta,
-    delta_storage::{BlockStorage, StringValueStorage, UInt32Storage},
+    delta_storage::{BlockStorage, UInt32Storage},
 };
 use crate::blockstore::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::{
-    array::{Array, StringArray, UInt32Array},
-    util::bit_util,
+    array::{Array, UInt32Array},
 };
 use std::sync::Arc;
 
 impl ArrowWriteableValue for u32 {
     type ReadableValue<'referred_data> = u32;
 
-    fn offset_size(item_count: usize) -> usize {
+    fn offset_size(_item_count: usize) -> usize {
         0
     }
 
-    fn validity_size(item_count: usize) -> usize {
+    fn validity_size(_item_count: usize) -> usize {
         0 // We don't support None values for UInt32Array
     }
 

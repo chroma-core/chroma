@@ -9,7 +9,7 @@ use crate::{
     segment::{
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
+        LogMaterializer, LogMaterializerError,
     },
     types::{
         LogRecord, MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
@@ -18,12 +18,12 @@ use crate::{
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use core::panic;
-use futures::stream::Count;
+
 use roaring::RoaringBitmap;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicU16, AtomicU32},
+        atomic::{AtomicU32},
         Arc,
     },
 };

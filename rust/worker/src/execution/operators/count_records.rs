@@ -1,5 +1,5 @@
 use crate::{
-    blockstore::provider::{BlockfileProvider, OpenError},
+    blockstore::provider::{BlockfileProvider},
     errors::{ChromaError, ErrorCodes},
     execution::{data::data_chunk::Chunk, operator::Operator},
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},

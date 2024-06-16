@@ -219,7 +219,7 @@ impl Block {
 
     pub fn save(&self, path: &str) -> Result<(), Box<dyn ChromaError>> {
         let file = std::fs::File::create(path);
-        let mut file = match file {
+        let file = match file {
             Ok(file) => file,
             Err(e) => {
                 // TODO: Return a proper error
@@ -263,7 +263,7 @@ impl Block {
 
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, Box<dyn ChromaError>> {
         let cursor = std::io::Cursor::new(bytes);
-        let mut reader =
+        let reader =
             arrow::ipc::reader::FileReader::try_new(cursor, None).expect("Error creating reader");
         return Self::load_with_reader(reader, id);
     }
@@ -279,7 +279,7 @@ impl Block {
         };
         let mut reader = std::io::BufReader::new(file);
         let reader = arrow::ipc::reader::FileReader::try_new(&mut reader, None);
-        let mut reader = match reader {
+        let reader = match reader {
             Ok(reader) => reader,
             Err(e) => {
                 // TODO: Return a proper error

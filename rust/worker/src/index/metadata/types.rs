@@ -7,7 +7,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use core::ops::BitOr;
-use parking_lot::Mutex;
+
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -340,7 +340,7 @@ pub(crate) fn process_where_clause_with_callback<
                         }
                     }
                 },
-                WhereComparison::StringListComparison(operand, list_operator) => {
+                WhereComparison::StringListComparison(_operand, _list_operator) => {
                     todo!();
                 }
                 WhereComparison::IntListComparison(..) => {

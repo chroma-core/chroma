@@ -189,7 +189,7 @@ impl CompactOrchestrator {
         let end_timestamp = match end_timestamp {
             // TODO: change protobuf definition to use u64 instead of i64
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
-            Err(e) => {
+            Err(_e) => {
                 // Log an error and reply + return
                 return;
             }
@@ -206,7 +206,7 @@ impl CompactOrchestrator {
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, None).await {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // TODO: log an error and reply to caller
             }
         }
@@ -226,7 +226,7 @@ impl CompactOrchestrator {
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, None).await {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // TODO: log an error and reply to caller
             }
         }
@@ -296,7 +296,7 @@ impl CompactOrchestrator {
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // Log an error and reply to caller
             }
         }
@@ -323,7 +323,7 @@ impl CompactOrchestrator {
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, None).await {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // TODO: log an error and reply to caller
             }
         }
@@ -579,7 +579,7 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
                 self.num_write_tasks -= 1;
                 output
             }
-            Err(e) => {
+            Err(_e) => {
                 // Log an error
                 return;
             }
@@ -627,7 +627,7 @@ impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchest
                 )
                 .await;
             }
-            Err(e) => {
+            Err(_e) => {
                 // Log an error
             }
         }

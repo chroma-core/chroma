@@ -5,7 +5,6 @@ use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
-    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata, MetadataValue,
     Operation, Segment, SegmentType,
 };
 use async_trait::async_trait;
@@ -525,7 +524,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         let mut flushed_files = HashMap::new();
 
         match res_user_id_to_id {
-            Ok(f) => {
+            Ok(_f) => {
                 flushed_files.insert(
                     USER_ID_TO_OFFSET_ID.to_string(),
                     vec![user_id_to_id_bf_id.to_string()],
@@ -537,7 +536,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_user_id {
-            Ok(f) => {
+            Ok(_f) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_USER_ID.to_string(),
                     vec![id_to_user_id_bf_id.to_string()],
@@ -549,7 +548,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_data {
-            Ok(f) => {
+            Ok(_f) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_DATA.to_string(),
                     vec![id_to_data_bf_id.to_string()],
@@ -561,7 +560,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_max_offset_id {
-            Ok(f) => {
+            Ok(_f) => {
                 flushed_files.insert(
                     MAX_OFFSET_ID.to_string(),
                     vec![max_offset_id_bf_id.to_string()],

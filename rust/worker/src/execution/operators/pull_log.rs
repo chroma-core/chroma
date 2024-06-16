@@ -4,7 +4,7 @@ use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::types::LogRecord;
 use async_trait::async_trait;
-use tracing::trace;
+
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.

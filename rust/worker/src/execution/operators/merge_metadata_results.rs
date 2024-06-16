@@ -7,14 +7,14 @@ use crate::{
         LogMaterializer, LogMaterializerError,
     },
     types::{
-        update_metdata_to_metdata, LogRecord, Metadata, MetadataValueConversionError, Operation,
+        LogRecord, Metadata, MetadataValueConversionError, Operation,
         Segment,
     },
-    utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
+    utils::{merge_sorted_vecs_conjunction},
 };
 use async_trait::async_trait;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashSet},
     sync::{atomic::AtomicU32, Arc},
 };
 use thiserror::Error;

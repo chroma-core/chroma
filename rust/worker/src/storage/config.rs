@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::path::Path;
+
 
 #[derive(Deserialize, Debug)]
 /// The configuration for the chosen storage.

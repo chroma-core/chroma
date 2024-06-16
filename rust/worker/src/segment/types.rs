@@ -2,19 +2,17 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
-use crate::blockstore::key::KeyWrapper;
+
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::index::metadata::types::MetadataIndexError;
+
 use crate::types::{
-    merge_update_metadata, update_metdata_to_metdata, BooleanOperator, LogRecord, Metadata,
-    MetadataType, MetadataValue, MetadataValueConversionError, Operation, OperationRecord, Where,
-    WhereClauseComparator, WhereComparison,
+    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata, MetadataValue, MetadataValueConversionError, Operation, OperationRecord,
 };
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
+
 use async_trait::async_trait;
-use futures::future::BoxFuture;
-use roaring::RoaringBitmap;
+
+
 use thiserror::Error;
 
 use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};

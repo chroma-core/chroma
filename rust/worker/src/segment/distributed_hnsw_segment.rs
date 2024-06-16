@@ -2,14 +2,13 @@ use super::record_segment::ApplyMaterializedLogError;
 use super::{SegmentFlusher, SegmentWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::hnsw_provider::{
-    HnswIndexProvider, HnswIndexProviderCommitError, HnswIndexProviderCreateError,
-    HnswIndexProviderFlushError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
+    HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
 };
 use crate::index::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use crate::types::{LogRecord, Operation, Segment};
+use crate::types::{Operation, Segment};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -87,7 +86,7 @@ impl DistributedHNSWSegmentWriter {
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let index_config = match IndexConfig::from_segment(&segment, dimensionality as i32) {
+        let _index_config = match IndexConfig::from_segment(&segment, dimensionality as i32) {
             Ok(ic) => ic,
             Err(e) => {
                 return Err(Box::new(
@@ -97,7 +96,7 @@ impl DistributedHNSWSegmentWriter {
         };
         let persist_path = &hnsw_index_provider.temporary_storage_path;
 
-        let hnsw_config = match HnswIndexConfig::from_segment(segment, persist_path) {
+        let _hnsw_config = match HnswIndexConfig::from_segment(segment, persist_path) {
             Ok(hc) => hc,
             Err(e) => {
                 return Err(Box::new(
@@ -303,7 +302,7 @@ impl DistributedHNSWSegmentReader {
     ) -> Result<Box<DistributedHNSWSegmentReader>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
         let index_config = IndexConfig::from_segment(&segment, dimensionality as i32);
-        let index_config = match index_config {
+        let _index_config = match index_config {
             Ok(ic) => ic,
             Err(e) => {
                 return Err(Box::new(
@@ -311,7 +310,7 @@ impl DistributedHNSWSegmentReader {
                 ));
             }
         };
-        let persist_path = &hnsw_index_provider.temporary_storage_path;
+        let _persist_path = &hnsw_index_provider.temporary_storage_path;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,

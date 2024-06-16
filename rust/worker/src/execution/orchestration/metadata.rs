@@ -13,9 +13,9 @@ use crate::execution::operators::metadata_filtering::{
     MetadataFilteringOutput,
 };
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
-use crate::index::metadata::types::MetadataIndexError;
+
 use crate::log::log::PullLogsError;
-use crate::segment::metadata_segment::MetadataSegmentReader;
+
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, Handler};
 use crate::types::{Collection, LogRecord, Metadata, SegmentType};
@@ -29,7 +29,7 @@ use crate::{
     types::Segment,
 };
 use async_trait::async_trait;
-use std::collections::HashSet;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -312,7 +312,7 @@ impl CountQueryOrchestrator {
         &self,
         mut sysdb: Box<dyn SysDb>,
         collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -342,7 +342,7 @@ impl CountQueryOrchestrator {
             .expect("Invariant violation. Result channel is not set.");
         match result_channel.send(Err(error)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // Log an error - this implied the listener was dropped
                 println!("[CountQueryOrchestrator] Result channel dropped before sending error");
             }
@@ -437,7 +437,7 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOr
             .expect("Expect channel to be present");
         match channel.send(Ok(msg.count)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // Log an error - this implied the listener was dropped
                 println!("[CountQueryOrchestrator] Result channel dropped before sending result");
             }
@@ -571,7 +571,7 @@ impl MetadataQueryOrchestrator {
         }
     }
 
-    async fn filter(&mut self, mut logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
+    async fn filter(&mut self, logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
         tracing::debug!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
@@ -670,7 +670,7 @@ impl MetadataQueryOrchestrator {
         &self,
         mut sysdb: Box<dyn SysDb>,
         collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -700,7 +700,7 @@ impl MetadataQueryOrchestrator {
             .expect("Invariant violation. Result channel is not set.");
         match result_channel.send(Err(error)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // Log an error - this implied the listener was dropped
                 println!("[MetadataQueryOrchestrator] Result channel dropped before sending error");
             }
@@ -832,7 +832,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
 
         match result_channel.send(Ok(output)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_e) => {
                 // Log an error - this implied the listener was dropped
                 println!(
                     "[MetadataQueryOrchestrator] Result channel dropped before sending result"

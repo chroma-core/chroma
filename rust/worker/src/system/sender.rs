@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use super::{Component, ComponentContext, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
-use tracing::Span;
+
 
 // Message Wrapper
 #[derive(Debug)]

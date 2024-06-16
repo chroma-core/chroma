@@ -58,7 +58,7 @@ impl ChromaTokenizer for TantivyChromaTokenizer {
 }
 
 mod test {
-    use super::*;
+
 
     #[test]
     fn test_chroma_tokenizer() {

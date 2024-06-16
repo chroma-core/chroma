@@ -1,6 +1,6 @@
 use super::delta_storage::BlockKeyArrowBuilder;
 use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
-use arrow::array::{Array, Float32Builder, StringBuilder, UInt32Array, UInt32Builder};
+use arrow::array::{Array, StringBuilder, UInt32Array, UInt32Builder};
 use std::sync::Arc;
 
 impl ArrowWriteableKey for u32 {

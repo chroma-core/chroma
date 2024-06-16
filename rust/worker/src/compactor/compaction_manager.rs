@@ -13,7 +13,7 @@ use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::segment::record_segment::RecordSegmentReader;
+
 use crate::storage::Storage;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
