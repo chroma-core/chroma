@@ -27,7 +27,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tracing::Span;
+use tracing::{trace, Span};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -305,5 +305,31 @@ impl Handler<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();
+        match message {
+            Ok(output) => {
+                let result = GetVectorsResult {
+                    ids: output.ids,
+                    vectors: output.vectors,
+                };
+                let result_channel = self
+                    .result_channel
+                    .take()
+                    .expect("Invariant violation. Result channel is not set.");
+                match result_channel.send(Ok(result)) {
+                    Ok(_) => (),
+                    Err(_e) => {
+                        // Log an error - this implied the listener was dropped
+                        trace!(
+                            "[GetVectorsOrchestrators] Result channel dropped before sending result"
+                        );
+                    }
+                }
+                // Cancel the orchestrator so it stops processing
+                ctx.cancellation_token.cancel();
+            }
+            Err(e) => {
+                self.terminate_with_error(Box::new(e), ctx);
+            }
+        }
     }
 }
