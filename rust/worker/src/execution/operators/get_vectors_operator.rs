@@ -108,6 +108,7 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
             },
         };
 
+        // Search the log records for the user ids
         let logs = input.log_records.clone();
         let mut remaining_search_user_ids: HashSet<String> =
             HashSet::from_iter(input.search_user_ids.iter().cloned());
@@ -115,15 +116,37 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
             if remaining_search_user_ids.contains(&log_record.record.id) {
                 match log_record.record.operation {
                     crate::types::Operation::Add => {
-                        // If the user id is already present in the log set, skip it
-                        // We use the first add log entry for a user id if a
-                        // user has multiple log entries
-                        if output_vectors.contains_key(&log_record.record.id) {
-                            continue;
+                        // If there is a record segment, validate the add
+                        if let Some(ref reader) = record_segment_reader {
+                            match reader.data_exists_for_user_id(&log_record.record.id).await {
+                                Ok(true) => {
+                                    // The record exists in the record segment, so this add is faulty
+                                    // and we should skip it
+                                    continue;
+                                }
+                                Ok(false) => {
+                                    // The record does not exist in the record segment,
+                                    // the add is valid
+
+                                    // If the user id is already present in the log set, skip it
+                                    // We use the first add log entry for a user id if a
+                                    // user has multiple log entries
+                                    if output_vectors.contains_key(&log_record.record.id) {
+                                        continue;
+                                    }
+                                    let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an add does not have an embedding.");
+                                    output_vectors
+                                        .insert(log_record.record.id.clone(), vector.clone());
+                                    remaining_search_user_ids.remove(&log_record.record.id);
+                                }
+                                Err(e) => {
+                                    // If there is an error, we skip the add
+                                    return Err(GetVectorsOperatorError::RecordSegmentReaderError(
+                                        e.into(),
+                                    ));
+                                }
+                            }
                         }
-                        let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an add does not have an embedding.");
-                        output_vectors.insert(log_record.record.id.clone(), vector.clone());
-                        remaining_search_user_ids.remove(&log_record.record.id);
                     }
                     crate::types::Operation::Update => {
                         // If there is a record segment, validate the update
