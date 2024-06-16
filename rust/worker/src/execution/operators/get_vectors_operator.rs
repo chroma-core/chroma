@@ -66,6 +66,8 @@ pub enum GetVectorsOperatorError {
     RecordSegmentReaderCreationError(
         #[from] crate::segment::record_segment::RecordSegmentReaderCreationError,
     ),
+    #[error(transparent)]
+    RecordSegmentReaderError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for GetVectorsOperatorError {
@@ -124,16 +126,41 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                         remaining_search_user_ids.remove(&log_record.record.id);
                     }
                     crate::types::Operation::Update => {
-                        // If the update mutates the vector, we need to update the output
-                        match &log_record.record.embedding {
-                            Some(vector) => {
-                                // This will overwrite the vector if it already exists
-                                // (perhaps via an add operation)
-                                output_vectors.insert(log_record.record.id.clone(), vector.clone());
-                                remaining_search_user_ids.remove(&log_record.record.id);
-                            }
-                            None => {
-                                // Nothing to do with this as the vector was not updated
+                        // If there is a record segment, validate the update
+                        if let Some(ref reader) = record_segment_reader {
+                            match reader.data_exists_for_user_id(&log_record.record.id).await {
+                                Ok(true) => {
+                                    // The record exists in the record segment, so this update is valid
+                                    // and we should include it in the output
+
+                                    // If the update mutates the vector, we need to update the output
+                                    match &log_record.record.embedding {
+                                        Some(vector) => {
+                                            // This will overwrite the vector if it already exists
+                                            // (e.g if it was added previously in the log)
+                                            output_vectors.insert(
+                                                log_record.record.id.clone(),
+                                                vector.clone(),
+                                            );
+                                            remaining_search_user_ids.remove(&log_record.record.id);
+                                        }
+                                        None => {
+                                            // Nothing to do with this as the vector was not updated
+                                        }
+                                    }
+                                }
+                                Ok(false) => {
+                                    // The record does not exist in the record segment,
+                                    // the update is faulty.
+                                    // We skip the update
+                                    continue;
+                                }
+                                Err(e) => {
+                                    // If there is an error, we skip the update
+                                    return Err(GetVectorsOperatorError::RecordSegmentReaderError(
+                                        e.into(),
+                                    ));
+                                }
                             }
                         }
                     }
@@ -142,10 +169,12 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                         // So the final value is always present in the log
                         let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an upsert does not have an embedding.");
                         output_vectors.insert(log_record.record.id.clone(), vector.clone());
+                        remaining_search_user_ids.remove(&log_record.record.id);
                     }
                     crate::types::Operation::Delete => {
                         // If the user id is present in the output, remove it
                         output_vectors.remove(&log_record.record.id);
+                        remaining_search_user_ids.remove(&log_record.record.id);
                     }
                 }
             }
