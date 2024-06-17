@@ -22,16 +22,16 @@ import (
 
 type ModelState struct {
 	// The current max offset for each collection
-	CollectionEnumerationOffset map[types.UniqueID]int64
+	CollectionEnumerationOffset map[types.UniqueID]uint64
 	// The current non-purged log for each collection and its offset
 	CollectionData map[types.UniqueID][]ModelLogRecord
 	// The current compaction offset for each collection (the last offset that was compacted)
-	CollectionCompactionOffset map[types.UniqueID]int64
+	CollectionCompactionOffset map[types.UniqueID]uint64
 }
 
 // A log entry in the model (for testing only)
 type ModelLogRecord struct {
-	offset int64
+	offset uint64
 	record *coordinatorpb.OperationRecord
 }
 
@@ -57,9 +57,9 @@ func (suite *LogServerTestSuite) SetupSuite() {
 	suite.lr = repository.NewLogRepository(conn)
 	suite.logServer = NewLogServer(suite.lr)
 	suite.model = ModelState{
-		CollectionEnumerationOffset: map[types.UniqueID]int64{},
+		CollectionEnumerationOffset: map[types.UniqueID]uint64{},
 		CollectionData:              map[types.UniqueID][]ModelLogRecord{},
-		CollectionCompactionOffset:  map[types.UniqueID]int64{},
+		CollectionCompactionOffset:  map[types.UniqueID]uint64{},
 	}
 }
 
@@ -115,7 +115,7 @@ func compareModelLogRecordToRecordLog(t *rapid.T, modelLogRecord ModelLogRecord,
 	if err := proto.Unmarshal(recordLog.Record, record); err != nil {
 		t.Fatal(err)
 	}
-	if modelLogRecord.offset != recordLog.Offset {
+	if int64(modelLogRecord.offset) != recordLog.Offset {
 		t.Fatalf("expected offset %d, got %d", modelLogRecord.offset, recordLog.Offset)
 	}
 	if modelLogRecord.record.Id != record.Id {
@@ -139,7 +139,7 @@ func compareModelLogRecordToRecordLog(t *rapid.T, modelLogRecord ModelLogRecord,
 }
 
 func compareModelLogRecordToLogRecord(t *rapid.T, modelLogRecord ModelLogRecord, recordLog *logservicepb.LogRecord) {
-	if modelLogRecord.offset != recordLog.LogOffset {
+	if int64(modelLogRecord.offset) != recordLog.LogOffset {
 		t.Fatalf("expected offset %d, got %d", modelLogRecord.offset, recordLog.LogOffset)
 	}
 	if modelLogRecord.record.Id != recordLog.Record.Id {
@@ -225,11 +225,11 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 
 				for i, record := range records {
 					modelRecord := ModelLogRecord{
-						offset: startEnumerationOffset + int64(i),
+						offset: startEnumerationOffset + uint64(i),
 						record: record,
 					}
 					suite.model.CollectionData[c] = append(suite.model.CollectionData[c], modelRecord)
-					suite.model.CollectionEnumerationOffset[c] = startEnumerationOffset + int64(i)
+					suite.model.CollectionEnumerationOffset[c] = startEnumerationOffset + uint64(i)
 				}
 
 				// Update the SUT
@@ -254,10 +254,10 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 						t.Fatal(err)
 					}
 					enumerationOffset := suite.model.CollectionEnumerationOffset[id]
-					compactionOffset := rapid.Int64Range(suite.model.CollectionCompactionOffset[id], enumerationOffset).Draw(t, "new_position")
+					compactionOffset := rapid.Uint64Range(suite.model.CollectionCompactionOffset[id], enumerationOffset).Draw(t, "new_position")
 					_, err = suite.logServer.UpdateCollectionLogOffset(ctx, &logservicepb.UpdateCollectionLogOffsetRequest{
 						CollectionId: id.String(),
-						LogOffset:    compactionOffset,
+						LogOffset:    int64(compactionOffset),
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -273,9 +273,9 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 
 				// Determine the minimum compaction size by scanning over
 				// all the log data
-				minCompactionSize := int64(math.MaxInt64)
-				maxCompactionSize := int64(0)
-				actualCompactionSizes := make(map[types.UniqueID]int64)
+				minCompactionSize := uint64(math.MaxUint64)
+				maxCompactionSize := uint64(0)
+				actualCompactionSizes := make(map[types.UniqueID]uint64)
 				all_empty := true
 				for id, log := range suite.model.CollectionData {
 					if len(log) > 0 {
@@ -305,7 +305,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 					return
 				}
 
-				requestMinCompactionSize := rapid.Int64Range(minCompactionSize, maxCompactionSize).Draw(t, "min_compaction_size")
+				requestMinCompactionSize := rapid.Uint64Range(minCompactionSize, maxCompactionSize).Draw(t, "min_compaction_size")
 				result, err := suite.logServer.GetAllCollectionInfoToCompact(ctx, &logservicepb.GetAllCollectionInfoToCompactRequest{
 					MinCompactionSize: requestMinCompactionSize,
 				})
@@ -332,7 +332,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 					return
 				}
 
-				startOffset := rapid.Int64Range(suite.model.CollectionCompactionOffset[c], suite.model.CollectionEnumerationOffset[c]).Draw(t, "start_offset")
+				startOffset := rapid.Uint64Range(suite.model.CollectionCompactionOffset[c], suite.model.CollectionEnumerationOffset[c]).Draw(t, "start_offset")
 				// If start offset is 0, we need to set it to 1 as the offset is 1 based
 				if startOffset == 0 {
 					startOffset = 1
@@ -361,7 +361,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 				// Pull logs from the SUT
 				response, err := suite.logServer.PullLogs(ctx, &logservicepb.PullLogsRequest{
 					CollectionId:    c.String(),
-					StartFromOffset: startOffset,
+					StartFromOffset: int64(startOffset),
 					BatchSize:       batchSize,
 					EndTimestamp:    time.Now().UnixNano(),
 				})

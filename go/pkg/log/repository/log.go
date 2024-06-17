@@ -77,8 +77,8 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	return
 }
 
-func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize int64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
-	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, minCompactionSize)
+func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize uint64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
+	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
 		collectionToCompact = []log.GetAllCollectionsToCompactRow{}
 	}
