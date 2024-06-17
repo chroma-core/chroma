@@ -8,7 +8,6 @@ import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
-from chromadb.test.conftest import override_hypothesis_profile
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
@@ -23,7 +22,6 @@ from hypothesis.stateful import (
     precondition,
     initialize,
 )
-import hypothesis
 import os
 import shutil
 import tempfile
@@ -172,11 +170,14 @@ class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
     persist = "persist"
 
 
+MIN_STATE_CHANGES_BEFORE_PERSIST = 5
+
+
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def __init__(self, api: ClientAPI, settings: Settings):
         self.api = api
         self.settings = settings
-        self.last_persist_delay = 10
+        self.min_state_changes_left_before_persisting = MIN_STATE_CHANGES_BEFORE_PERSIST
         self.api.reset()
         super().__init__(self.api)
 
@@ -200,7 +201,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
 
     @precondition(
         lambda self: len(self.record_set_state["ids"]) >= 1
-        and self.last_persist_delay <= 0
+        and self.min_state_changes_left_before_persisting <= 0
     )
     @rule()
     def persist(self) -> None:
@@ -223,9 +224,11 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
-            self.last_persist_delay = 10
+            self.min_state_changes_left_before_persisting = (
+                MIN_STATE_CHANGES_BEFORE_PERSIST
+            )
         else:
-            self.last_persist_delay -= 1
+            self.min_state_changes_left_before_persisting -= 1
 
     def teardown(self) -> None:
         self.api.reset()
@@ -238,8 +241,4 @@ def test_persist_embeddings_state(
     api = chromadb.Client(settings)
     run_state_machine_as_test(
         lambda: PersistEmbeddingsStateMachine(settings=settings, api=api),
-        # For small max_example values, the test may not generate any examples that pass the precondition for persist().
-        # This value makes it much more likely that the precondition will be satisfied and thus the rule will be exercised.
-        _min_steps=10,
-        settings=override_hypothesis_profile(fast=hypothesis.settings(max_examples=10)),
     )  # type: ignore

@@ -9,8 +9,6 @@ import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
-from hypothesis.errors import InvalidDefinition
-from hypothesis.stateful import RuleBasedStateMachine
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
 
 from dataclasses import dataclass
@@ -444,58 +442,6 @@ def recordsets(
         "metadatas": metadatas,
         "documents": documents,
     }
-
-
-# This class is mostly cloned from from hypothesis.stateful.RuleStrategy,
-# but always runs all the rules, instead of using a FeatureStrategy to
-# enable/disable rules. Disabled rules cause the entire test to be marked invalida and,
-# combined with the complexity of our other strategies, leads to an
-# unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
-class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
-    def __init__(self, machine: RuleBasedStateMachine) -> None:
-        super().__init__()  # type: ignore
-        self.machine = machine
-        self.rules = list(machine.rules())  # type: ignore
-
-        # The order is a bit arbitrary. Primarily we're trying to group rules
-        # that write to the same location together, and to put rules with no
-        # target first as they have less effect on the structure. We order from
-        # fewer to more arguments on grounds that it will plausibly need less
-        # data. This probably won't work especially well and we could be
-        # smarter about it, but it's better than just doing it in definition
-        # order.
-        self.rules.sort(
-            key=lambda rule: (
-                sorted(rule.targets),
-                len(rule.arguments),
-                rule.function.__name__,
-            )
-        )
-
-    def __repr__(self) -> str:
-        return "{}(machine={}({{...}}))".format(
-            self.__class__.__name__,
-            self.machine.__class__.__name__,
-        )
-
-    def do_draw(self, data):  # type: ignore
-        if not any(self.is_valid(rule) for rule in self.rules):
-            msg = f"No progress can be made from state {self.machine!r}"
-            raise InvalidDefinition(msg) from None
-
-        rule = data.draw(st.sampled_from([r for r in self.rules if self.is_valid(r)]))
-        argdata = data.draw(rule.arguments_strategy)
-        return (rule, argdata)
-
-    def is_valid(self, rule) -> bool:  # type: ignore
-        if not all(precond(self.machine) for precond in rule.preconditions):
-            return False
-
-        for b in rule.bundles:
-            bundle = self.machine.bundle(b.name)  # type: ignore
-            if not bundle:
-                return False
-        return True
 
 
 def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
