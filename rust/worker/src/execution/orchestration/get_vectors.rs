@@ -16,16 +16,12 @@ use crate::{
         },
     },
     log::log::{Log, PullLogsError},
-    sysdb::{self, sysdb::SysDb},
+    sysdb::sysdb::SysDb,
     system::{ChannelError, Component, ComponentContext, Handler, Receiver, System},
     types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
 use async_trait::async_trait;
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};
 use uuid::Uuid;
@@ -65,21 +61,9 @@ pub struct GetVectorsOrchestrator {
     // State fetched or created for query execution
     record_segment: Option<Segment>,
     collection: Option<Collection>,
-    // // query_vectors index to the result
-    // hnsw_result_offset_ids: HashMap<usize, Vec<usize>>,
-    // hnsw_result_distances: HashMap<usize, Vec<f32>>,
-    // brute_force_result_user_ids: HashMap<usize, Vec<String>>,
-    // brute_force_result_distances: HashMap<usize, Vec<f32>>,
-    // brute_force_result_embeddings: HashMap<usize, Vec<Vec<f32>>>,
-    // // Task id to query_vectors index
-    // hnsw_task_id_to_query_index: HashMap<Uuid, usize>,
-    // brute_force_task_id_to_query_index: HashMap<Uuid, usize>,
-    // merge_task_id_to_query_index: HashMap<Uuid, usize>,
-    // // Result state
-    // results: Option<Vec<Vec<VectorQueryResult>>>,
-    // // Services
+    // Services
     log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
     // Result channel
@@ -93,7 +77,7 @@ impl GetVectorsOrchestrator {
         get_ids: Vec<String>,
         hnsw_segment_id: Uuid,
         log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        sysdb: Box<SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
     ) -> Self {

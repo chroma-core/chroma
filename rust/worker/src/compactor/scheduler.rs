@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub(crate) struct Scheduler {
     my_ip: String,
     log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    sysdb: Box<SysDb>,
     policy: Box<dyn SchedulerPolicy>,
     job_queue: Vec<CompactionJob>,
     max_concurrent_jobs: usize,
@@ -23,7 +23,7 @@ impl Scheduler {
     pub(crate) fn new(
         my_ip: String,
         log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        sysdb: Box<SysDb>,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
@@ -246,7 +246,7 @@ mod tests {
             }),
         );
 
-        let mut sysdb = Box::new(TestSysDb::new());
+        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -271,11 +271,15 @@ mod tests {
             log_position: 0,
             version: 0,
         };
-        sysdb.add_collection(collection_1);
-        sysdb.add_collection(collection_2);
-
-        let last_compaction_time_1 = 2;
-        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection_1);
+                sysdb.add_collection(collection_2);
+                let last_compaction_time_1 = 2;
+                sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let my_member_id = "1".to_string();
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
@@ -314,8 +318,14 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
 
-        let last_compaction_time_2 = 1;
-        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+        // Add last compaction time for tenant_2
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                let last_compaction_time_2 = 1;
+                sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
@@ -420,7 +430,7 @@ mod tests {
         );
         let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
 
-        let mut sysdb = Box::new(TestSysDb::new());
+        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -434,11 +444,14 @@ mod tests {
             version: 0,
         };
 
-        sysdb.add_collection(collection_1);
-
-        let last_compaction_time_1 = 2;
-        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
-
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection_1);
+                let last_compaction_time_1 = 2;
+                sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
         let my_ip = "0.0.0.1".to_string();
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;

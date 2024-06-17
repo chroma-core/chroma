@@ -25,7 +25,7 @@ impl ChromaError for GetHnswSegmentByIdError {
 }
 
 pub(super) async fn get_hnsw_segment_by_id(
-    mut sysdb: Box<dyn SysDb>,
+    mut sysdb: Box<SysDb>,
     hnsw_segment_id: &Uuid,
 ) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
@@ -71,7 +71,7 @@ impl ChromaError for GetCollectionByIdError {
 }
 
 pub(super) async fn get_collection_by_id(
-    mut sysdb: Box<dyn SysDb>,
+    mut sysdb: Box<SysDb>,
     collection_id: &Uuid,
 ) -> Result<Collection, Box<GetCollectionByIdError>> {
     let child_span: tracing::Span =
@@ -113,7 +113,7 @@ impl ChromaError for GetRecordSegmentByCollectionIdError {
 }
 
 pub(super) async fn get_record_segment_by_collection_id(
-    mut sysdb: Box<dyn SysDb>,
+    mut sysdb: Box<SysDb>,
     collection_id: &Uuid,
 ) -> Result<Segment, Box<GetRecordSegmentByCollectionIdError>> {
     let segments = sysdb

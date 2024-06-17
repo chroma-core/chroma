@@ -133,7 +133,7 @@ pub(crate) struct HnswQueryOrchestrator {
     finish_dependency_count: u32,
     // Services
     log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
@@ -152,7 +152,7 @@ impl HnswQueryOrchestrator {
         include_embeddings: bool,
         segment_id: Uuid,
         log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        sysdb: Box<SysDb>,
         hnsw_index_provider: HnswIndexProvider,
         blockfile_provider: BlockfileProvider,
         dispatcher: Box<dyn Receiver<TaskMessage>>,

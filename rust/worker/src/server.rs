@@ -36,7 +36,7 @@ pub struct WorkerServer {
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Service dependencies
     log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    sysdb: Box<SysDb>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
