@@ -2,7 +2,6 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
-use rayon::iter::Update;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -221,7 +220,7 @@ UpdateMetadata
 */
 pub(crate) type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
 
-impl TryFrom<chroma_proto::UpdateMetadata> for HashMap<String, UpdateMetadataValue> {
+impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
     type Error = UpdateMetadataValueConversionError;
 
     fn try_from(proto_metadata: chroma_proto::UpdateMetadata) -> Result<Self, Self::Error> {
