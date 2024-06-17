@@ -39,43 +39,56 @@ pub(crate) struct CollectionRecord {
     pub(crate) collection_version: i32,
 }
 
-#[async_trait]
-pub(crate) trait Log: Send + Sync + LogClone + Debug {
-    async fn read(
+#[derive(Clone, Debug)]
+pub(crate) enum Log {
+    Grpc(GrpcLog),
+    InMemory(InMemoryLog),
+}
+
+impl Log {
+    pub(crate) async fn read(
         &mut self,
         collection_id: Uuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError>;
+    ) -> Result<Vec<LogRecord>, PullLogsError> {
+        match self {
+            Log::Grpc(log) => {
+                log.read(collection_id, offset, batch_size, end_timestamp)
+                    .await
+            }
+            Log::InMemory(log) => {
+                log.read(collection_id, offset, batch_size, end_timestamp)
+                    .await
+            }
+        }
+    }
 
-    async fn get_collections_with_new_data(
+    pub(crate) async fn get_collections_with_new_data(
         &mut self,
-    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError>;
+    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+        match self {
+            Log::Grpc(log) => log.get_collections_with_new_data().await,
+            Log::InMemory(log) => log.get_collections_with_new_data().await,
+        }
+    }
 
-    async fn update_collection_log_offset(
+    pub(crate) async fn update_collection_log_offset(
         &mut self,
         collection_id: Uuid,
         new_offset: i64,
-    ) -> Result<(), UpdateCollectionLogOffsetError>;
-}
-
-pub(crate) trait LogClone {
-    fn clone_box(&self) -> Box<dyn Log>;
-}
-
-impl<T> LogClone for T
-where
-    T: 'static + Log + Clone,
-{
-    fn clone_box(&self) -> Box<dyn Log> {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for Box<dyn Log> {
-    fn clone(&self) -> Box<dyn Log> {
-        self.clone_box()
+    ) -> Result<(), UpdateCollectionLogOffsetError> {
+        match self {
+            Log::Grpc(log) => {
+                log.update_collection_log_offset(collection_id, new_offset)
+                    .await
+            }
+            Log::InMemory(log) => {
+                log.update_collection_log_offset(collection_id, new_offset)
+                    .await
+            }
+        }
     }
 }
 
@@ -152,8 +165,7 @@ impl Configurable<LogConfig> for GrpcLog {
     }
 }
 
-#[async_trait]
-impl Log for GrpcLog {
+impl GrpcLog {
     async fn read(
         &mut self,
         collection_id: Uuid,
@@ -351,8 +363,7 @@ impl InMemoryLog {
     }
 }
 
-#[async_trait]
-impl Log for InMemoryLog {
+impl InMemoryLog {
     async fn read(
         &mut self,
         collection_id: Uuid,

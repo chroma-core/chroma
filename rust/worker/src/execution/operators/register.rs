@@ -45,8 +45,8 @@ pub struct RegisterInput {
     log_position: i64,
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
-    sysdb: Box<dyn SysDb>,
-    log: Box<dyn Log>,
+    sysdb: Box<SysDb>,
+    log: Box<Log>,
 }
 
 impl RegisterInput {
@@ -57,8 +57,8 @@ impl RegisterInput {
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-        sysdb: Box<dyn SysDb>,
-        log: Box<dyn Log>,
+        sysdb: Box<SysDb>,
+        log: Box<Log>,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -150,8 +150,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_operator() {
-        let mut sysdb = Box::new(TestSysDb::new());
-        let mut log = Box::new(InMemoryLog::new());
+        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_version = 0;
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
@@ -178,8 +178,14 @@ mod tests {
             log_position: 0,
             version: collection_version,
         };
-        sysdb.add_collection(collection_1);
-        sysdb.add_collection(collection_2);
+
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection_1);
+                sysdb.add_collection(collection_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let mut file_path_1 = HashMap::new();
         file_path_1.insert("hnsw".to_string(), vec!["path_1".to_string()]);
@@ -205,8 +211,13 @@ mod tests {
             metadata: None,
             file_path: file_path_2.clone(),
         };
-        sysdb.add_segment(segment_1);
-        sysdb.add_segment(segment_2);
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(segment_1);
+                sysdb.add_segment(segment_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let mut file_path_3 = HashMap::new();
         file_path_3.insert("hnsw".to_string(), vec!["path_3".to_string()]);

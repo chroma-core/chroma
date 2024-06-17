@@ -2,8 +2,8 @@ black==23.3.0 # match what's in pyproject.toml
 build
 grpcio-tools
 httpx
-hypothesis<=6.98.9 # > Than this version has API changes we don't currently support
-hypothesis[numpy]<=6.98.9
+hypothesis>=6.103.1
+hypothesis[numpy]>=6.103.1
 mypy-protobuf
 pre-commit
 pytest
