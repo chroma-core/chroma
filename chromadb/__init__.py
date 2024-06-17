@@ -2,10 +2,11 @@ from typing import Dict, Optional
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
+from chromadb.api.async_client import AsyncClient as AsyncClientCreator
 from chromadb.auth.token_authn import TokenTransportHeader
 import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
-from chromadb.api import AdminAPI, ClientAPI
+from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
@@ -179,7 +180,7 @@ def HttpClient(
     if settings is None:
         settings = Settings()
 
-    # Make sure paramaters are the correct types -- users can pass anything.
+    # Make sure parameters are the correct types -- users can pass anything.
     host = str(host)
     port = int(port)
     ssl = bool(ssl)
@@ -201,6 +202,59 @@ def HttpClient(
     settings.chroma_server_headers = headers
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
+async def AsyncHttpClient(
+    host: str = "localhost",
+    port: int = 8000,
+    ssl: bool = False,
+    headers: Optional[Dict[str, str]] = None,
+    settings: Optional[Settings] = None,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> AsyncClientAPI:
+    """
+    Creates an async client that connects to a remote Chroma server. This supports
+    many clients connecting to the same server, and is the recommended way to
+    use Chroma in production.
+
+    Args:
+        host: The hostname of the Chroma server. Defaults to "localhost".
+        port: The port of the Chroma server. Defaults to "8000".
+        ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
+        headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
+        settings: A dictionary of settings to communicate with the chroma server.
+        tenant: The tenant to use for this client. Defaults to the default tenant.
+        database: The database to use for this client. Defaults to the default database.
+    """
+
+    if settings is None:
+        settings = Settings()
+
+    # Make sure parameters are the correct types -- users can pass anything.
+    host = str(host)
+    port = int(port)
+    ssl = bool(ssl)
+    tenant = str(tenant)
+    database = str(database)
+
+    settings.chroma_api_impl = "chromadb.api.async_fastapi.AsyncFastAPI"
+    if settings.chroma_server_host and settings.chroma_server_host != host:
+        raise ValueError(
+            f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
+        )
+    settings.chroma_server_host = host
+    if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
+        raise ValueError(
+            f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
+        )
+    settings.chroma_server_http_port = port
+    settings.chroma_server_ssl_enabled = ssl
+    settings.chroma_server_headers = headers
+
+    return await AsyncClientCreator.create(
+        tenant=tenant, database=database, settings=settings
+    )
 
 
 def CloudClient(
