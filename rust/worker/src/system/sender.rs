@@ -1,9 +1,10 @@
 use std::fmt::Debug;
 
+use crate::errors::{ChromaError, ErrorCodes};
+
 use super::{Component, ComponentContext, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
-use tracing::Span;
 
 // Message Wrapper
 #[derive(Debug)]
@@ -192,4 +193,10 @@ where
 pub enum ChannelError {
     #[error("Failed to send message")]
     SendError,
+}
+
+impl ChromaError for ChannelError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
 }
