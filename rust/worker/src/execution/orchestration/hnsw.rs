@@ -435,7 +435,7 @@ impl HnswQueryOrchestrator {
             .take()
             .expect("Invariant violation. Result channel is not set.");
         let mut empty_resp = vec![];
-        for _ in 1..=self.query_vectors.len() {
+        for _ in 0..self.query_vectors.len() {
             empty_resp.push(vec![]);
         }
         match result_channel.send(Ok(empty_resp)) {

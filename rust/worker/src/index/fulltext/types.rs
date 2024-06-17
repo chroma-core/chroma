@@ -19,10 +19,6 @@ use super::tokenizer::ChromaTokenStream;
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
-    #[error("Multiple tokens found in frequencies blockfile")]
-    MultipleTokenFrequencies,
-    #[error("Zero frequency token found")]
-    ZeroFrequencyToken,
     #[error("Empty value in positional posting list")]
     EmptyValueInPositionalPostingList,
     #[error("Invariant violation")]
@@ -443,11 +439,11 @@ impl<'me> FullTextIndexReader<'me> {
                 return Ok(vec![]);
             }
             if res.len() > 1 {
-                return Err(FullTextIndexError::MultipleTokenFrequencies);
+                panic!("Invariant violation. Multiple frequency values found for a token.");
             }
             let res = res[0];
             if res.1 <= 0 {
-                return Err(FullTextIndexError::ZeroFrequencyToken);
+                panic!("Invariant violation. Zero frequency token found.");
             }
             // Throw away the "value" since we store frequencies in the keys.
             token_frequencies.push((token.text.to_string(), res.1));
@@ -570,7 +566,7 @@ impl<'me> FullTextIndexReader<'me> {
             return Ok(0);
         }
         if res.len() > 1 {
-            return Err(FullTextIndexError::MultipleTokenFrequencies);
+            panic!("Invariant violation. Multiple frequency values found for a token.");
         }
         Ok(res[0].1)
     }
