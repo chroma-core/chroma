@@ -15,6 +15,7 @@ use crate::{
     storage::Storage,
 };
 use core::panic;
+use foyer::{Cache, CacheBuilder};
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
@@ -98,14 +99,14 @@ impl ArrowBlockfileProvider {
 /// is a placeholder for that.
 #[derive(Clone)]
 pub(super) struct BlockManager {
-    read_cache: Arc<RwLock<HashMap<Uuid, Block>>>,
+    read_cache: Cache<Uuid, Block>,
     storage: Storage,
 }
 
 impl BlockManager {
     pub(super) fn new(storage: Storage) -> Self {
         Self {
-            read_cache: Arc::new(RwLock::new(HashMap::new())),
+            read_cache: CacheBuilder::new(16).build(),
             storage,
         }
     }
@@ -120,15 +121,20 @@ impl BlockManager {
         &self,
         id: &Uuid,
     ) -> BlockDelta {
-        let cache_guard = self.read_cache.read();
-        let block = cache_guard.get(id);
-        let block = match block {
-            Some(block) => block,
-            None => {
-                // TODO: Err - tried to fork a block not owned by this manager
-                panic!("Tried to fork a block not owned by this manager")
-            }
-        };
+        // let cache_guard = self.read_cache.read();
+        let entry = self.read_cache.get(id);
+        if entry.is_none() {
+            panic!("Tried to fork a block not owned by this manager");
+        }
+        let entry = entry.unwrap();
+        let block = entry.value();
+        // let block = match entry {
+        //     Some(entry) => entry.value(),
+        //     None => {
+        //         // TODO: Err - tried to fork a block not owned by this manager
+        //         panic!("Tried to fork a block not owned by this manager")
+        //     }
+        // };
         let new_id = Uuid::new_v4();
         let delta = BlockDelta::new::<KeyWrite, ValueWrite>(new_id);
         let populated_delta = self.fork_lifetime_scope::<KeyWrite, ValueWrite>(block, delta);
@@ -150,16 +156,13 @@ impl BlockManager {
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, delta: &BlockDelta) {
         let record_batch = delta.finish::<K, V>();
         let block = Block::from_record_batch(delta.id, record_batch);
-        self.read_cache.write().insert(block.id, block);
+        self.read_cache.insert(block.id, block);
     }
 
     pub(super) async fn get(&self, id: &Uuid) -> Option<Block> {
-        let block = {
-            let cache = self.read_cache.read();
-            cache.get(id).cloned()
-        };
-        match block {
-            Some(block) => Some(block),
+        let entry = self.read_cache.get(id);
+        match entry {
+            Some(entry) => Some(entry.value().to_owned()),
             None => {
                 let key = format!("block/{}", id);
                 let bytes = self.storage.get(&key).await;
@@ -177,7 +180,8 @@ impl BlockManager {
                         let block = Block::from_bytes(&buf, *id);
                         match block {
                             Ok(block) => {
-                                self.read_cache.write().insert(*id, block.clone());
+                                // self.read_cache.write().insert(*id, block.clone());
+                                self.read_cache.insert(*id, block.clone());
                                 Some(block)
                             }
                             Err(_) => {
