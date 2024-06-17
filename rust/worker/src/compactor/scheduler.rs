@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 pub(crate) struct Scheduler {
     my_ip: String,
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     policy: Box<dyn SchedulerPolicy>,
     job_queue: Vec<CompactionJob>,
@@ -22,7 +22,7 @@ pub(crate) struct Scheduler {
 impl Scheduler {
     pub(crate) fn new(
         my_ip: String,
-        log: Box<dyn Log>,
+        log: Box<Log>,
         sysdb: Box<SysDb>,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
@@ -202,10 +202,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler() {
-        let mut log = Box::new(InMemoryLog::new());
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
+        let mut in_memory_log = match *log {
+            Log::InMemory(ref mut in_memory_log) => in_memory_log,
+            _ => panic!("Invalid log type"),
+        };
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
@@ -226,7 +230,7 @@ mod tests {
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_2.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_2.clone(),
@@ -349,10 +353,14 @@ mod tests {
         expected = "offset in sysdb is less than offset in log, this should not happen!"
     )]
     async fn test_scheduler_panic() {
-        let mut log = Box::new(InMemoryLog::new());
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
+        let mut in_memory_log = match *log {
+            Log::InMemory(ref mut in_memory_log) => in_memory_log,
+            _ => panic!("Invalid log type"),
+        };
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
@@ -371,7 +379,7 @@ mod tests {
                 },
             }),
         );
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
@@ -390,7 +398,7 @@ mod tests {
                 },
             }),
         );
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
@@ -409,7 +417,7 @@ mod tests {
                 },
             }),
         );
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),

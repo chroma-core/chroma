@@ -84,7 +84,7 @@ pub struct CompactOrchestrator {
     system: System,
     collection_id: Uuid,
     // Dependencies
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
@@ -145,7 +145,7 @@ impl CompactOrchestrator {
         compaction_job: CompactionJob,
         system: System,
         collection_id: Uuid,
-        log: Box<dyn Log>,
+        log: Box<Log>,
         sysdb: Box<SysDb>,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,

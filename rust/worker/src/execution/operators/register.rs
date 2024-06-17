@@ -46,7 +46,7 @@ pub struct RegisterInput {
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
     sysdb: Box<SysDb>,
-    log: Box<dyn Log>,
+    log: Box<Log>,
 }
 
 impl RegisterInput {
@@ -58,7 +58,7 @@ impl RegisterInput {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         sysdb: Box<SysDb>,
-        log: Box<dyn Log>,
+        log: Box<Log>,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_operator() {
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
-        let mut log = Box::new(InMemoryLog::new());
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_version = 0;
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
