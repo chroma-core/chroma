@@ -26,7 +26,6 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import override_hypothesis_profile
 import numpy as np
 
 
@@ -135,8 +134,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
-    @precondition(lambda self: len(self.record_set_state["ids"]) > 20)
-    @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
+    @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
@@ -303,7 +301,6 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(api),
-        settings=override_hypothesis_profile(fast=hypothesis.settings(max_examples=10)),
     )  # type: ignore
     print_traces()
 
