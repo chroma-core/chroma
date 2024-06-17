@@ -3,8 +3,8 @@ from typing import Dict, Optional, Tuple
 import pytest
 from chromadb.api import AdminAPI
 import chromadb.api.types as types
-from chromadb.api.client import AdminClient, Client
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
+from chromadb.test.conftest import ClientFactories
 from chromadb.test.property.test_collections import CollectionStateMachine
 from hypothesis.stateful import (
     Bundle,
@@ -33,10 +33,11 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     tenants = Bundle("tenants")
     databases = Bundle("databases")
 
-    def __init__(self, client: Client):
+    def __init__(self, client_factories: ClientFactories):
+        client = client_factories.create_client()
         super().__init__(client)
         self.api = client
-        self.admin_client = AdminClient.from_system(client._system)
+        self.admin_client = client_factories.create_admin_client_from_system()
 
     @initialize()
     def initialize(self) -> None:
@@ -144,6 +145,8 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
-def test_collections(caplog: pytest.LogCaptureFixture, client: Client) -> None:
+def test_collections(
+    caplog: pytest.LogCaptureFixture, client_factories: ClientFactories
+) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: TenantDatabaseCollectionStateMachine(client))  # type: ignore
+    run_state_machine_as_test(lambda: TenantDatabaseCollectionStateMachine(client_factories))  # type: ignore

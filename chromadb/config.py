@@ -71,6 +71,7 @@ _abstract_type_keys: Dict[str, str] = {
     # NOTE: this is to support legacy api construction. Use ServerAPI instead
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
+    "chromadb.api.async_api.AsyncServerAPI": "chroma_api_impl",
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
@@ -318,9 +319,12 @@ class System(Component):
     def __init__(self, settings: Settings):
         if is_thin_client:
             # The thin client is a system with only the API component
-            if settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
+            if settings["chroma_api_impl"] not in [
+                "chromadb.api.fastapi.FastAPI",
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ]:
                 raise RuntimeError(
-                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
+                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'chromadb.api.async_fastapi.AsyncFastAPI' as the chroma_api_impl. \
             see https://docs.trychroma.com/guides#using-the-python-http-only-client for more information."
                 )
         # Validate settings don't contain any legacy config values

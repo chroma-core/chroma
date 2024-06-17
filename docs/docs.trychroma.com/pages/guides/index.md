@@ -114,9 +114,9 @@ Use following command to manage Dockerized Chroma:
 - __Command to Stop Chroma and delete volumes__
 This is distructive command. With this command volumes created earlier will be deleted along with data stored.: `docker-compose down -v` -->
 
-#### Using the python http-only client
+#### Using the Python HTTP-only client
 
-If you are running chroma in client-server mode, you may not need the full Chroma library. Instead, you can use the lightweight client-only library.
+If you are running Chroma in client-server mode, you may not need the full Chroma library. Instead, you can use the lightweight client-only library.
 In this case, you can install the `chromadb-client` package. This package is a lightweight HTTP client for the server with a minimal dependency footprint.
 
 ```python
@@ -131,6 +131,26 @@ client = chromadb.HttpClient(host='localhost', port=8000)
 
 Note that the `chromadb-client` package is a subset of the full Chroma library and does not include all the dependencies. If you want to use the full Chroma library, you can install the `chromadb` package instead.
 Most importantly, there is no default embedding function. If you add() documents without embeddings, you must have manually specified an embedding function and installed the dependencies for it.
+
+#### Using the Python HTTP-only **async** client
+
+If your application is async, we provide a separate lightweight async client. The behaviors and method signatures are identical to the synchronous client, but all methods that would block are now async.
+
+```python
+import asyncio
+import chromadb
+
+async def main():
+    client = await chromadb.AsyncHttpClient()
+    collection = await client.create_collection(name="my_collection")
+
+    await collection.add(
+        documents=["hello world"],
+        ids=["id1"]
+    )
+
+asyncio.run(main())
+```
 
 {% /tab %}
 {% tab label="Javascript" %}

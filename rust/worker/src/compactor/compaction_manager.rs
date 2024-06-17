@@ -13,7 +13,6 @@ use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::segment::record_segment::RecordSegmentReader;
 use crate::storage::Storage;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
@@ -38,7 +37,7 @@ pub(crate) struct CompactionManager {
     scheduler: Scheduler,
     // Dependencies
     log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    sysdb: Box<SysDb>,
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
@@ -67,7 +66,7 @@ impl CompactionManager {
     pub(crate) fn new(
         scheduler: Scheduler,
         log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        sysdb: Box<SysDb>,
         storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
@@ -358,7 +357,7 @@ mod tests {
             }),
         );
 
-        let mut sysdb = Box::new(TestSysDb::new());
+        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -383,8 +382,13 @@ mod tests {
             log_position: -1,
             version: 0,
         };
-        sysdb.add_collection(collection_1);
-        sysdb.add_collection(collection_2);
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection_1);
+                sysdb.add_collection(collection_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let collection_1_record_segment = Segment {
             id: Uuid::new_v4(),
@@ -440,17 +444,21 @@ mod tests {
             file_path: HashMap::new(),
         };
 
-        sysdb.add_segment(collection_1_record_segment);
-        sysdb.add_segment(collection_2_record_segment);
-        sysdb.add_segment(collection_1_hnsw_segment);
-        sysdb.add_segment(collection_2_hnsw_segment);
-        sysdb.add_segment(collection_1_metadata_segment);
-        sysdb.add_segment(collection_2_metadata_segment);
-
-        let last_compaction_time_1 = 2;
-        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
-        let last_compaction_time_2 = 1;
-        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(collection_1_record_segment);
+                sysdb.add_segment(collection_2_record_segment);
+                sysdb.add_segment(collection_1_hnsw_segment);
+                sysdb.add_segment(collection_2_hnsw_segment);
+                sysdb.add_segment(collection_1_metadata_segment);
+                sysdb.add_segment(collection_2_metadata_segment);
+                let last_compaction_time_1 = 2;
+                sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+                let last_compaction_time_2 = 1;
+                sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let my_member_id = "1".to_string();
         let compaction_manager_queue_size = 1000;
