@@ -17,6 +17,8 @@ func convertCollectionMetadataToModel(collectionMetadata *coordinatorpb.UpdateMe
 	metadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	for key, value := range collectionMetadata.Metadata {
 		switch v := (value.Value).(type) {
+		case *coordinatorpb.UpdateMetadataValue_BoolValue:
+			metadata.Add(key, &model.CollectionMetadataValueBoolType{Value: v.BoolValue})
 		case *coordinatorpb.UpdateMetadataValue_StringValue:
 			metadata.Add(key, &model.CollectionMetadataValueStringType{Value: v.StringValue})
 		case *coordinatorpb.UpdateMetadataValue_IntValue:
@@ -64,6 +66,12 @@ func convertCollectionMetadataToProto(collectionMetadata *model.CollectionMetada
 	}
 	for key, value := range collectionMetadata.Metadata {
 		switch v := (value).(type) {
+		case *model.CollectionMetadataValueBoolType:
+			metadatapb.Metadata[key] = &coordinatorpb.UpdateMetadataValue{
+				Value: &coordinatorpb.UpdateMetadataValue_BoolValue{
+					BoolValue: v.Value,
+				},
+			}
 		case *model.CollectionMetadataValueStringType:
 			metadatapb.Metadata[key] = &coordinatorpb.UpdateMetadataValue{
 				Value: &coordinatorpb.UpdateMetadataValue_StringValue{
@@ -126,6 +134,8 @@ func convertSegmentMetadataToModel(segmentMetadata *coordinatorpb.UpdateMetadata
 			continue
 		}
 		switch v := (value.Value).(type) {
+		case *coordinatorpb.UpdateMetadataValue_BoolValue:
+			metadata.Set(key, &model.SegmentMetadataValueBoolType{Value: v.BoolValue})
 		case *coordinatorpb.UpdateMetadataValue_StringValue:
 			metadata.Set(key, &model.SegmentMetadataValueStringType{Value: v.StringValue})
 		case *coordinatorpb.UpdateMetadataValue_IntValue:
@@ -184,6 +194,10 @@ func convertSegmentMetadataToProto(segmentMetadata *model.SegmentMetadata[model.
 
 	for key, value := range segmentMetadata.Metadata {
 		switch v := value.(type) {
+		case *model.SegmentMetadataValueBoolType:
+			metadatapb.Metadata[key] = &coordinatorpb.UpdateMetadataValue{
+				Value: &coordinatorpb.UpdateMetadataValue_BoolValue{BoolValue: v.Value},
+			}
 		case *model.SegmentMetadataValueStringType:
 			metadatapb.Metadata[key] = &coordinatorpb.UpdateMetadataValue{
 				Value: &coordinatorpb.UpdateMetadataValue_StringValue{StringValue: v.Value},

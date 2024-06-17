@@ -15,6 +15,7 @@ type CollectionMetadata struct {
 	Ts           types.Timestamp `gorm:"ts;type:bigint;default:0"`
 	CreatedAt    time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt    time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	BoolValue    *bool           `gorm:"bool_value"`
 }
 
 func (v CollectionMetadata) TableName() string {

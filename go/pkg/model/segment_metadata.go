@@ -16,6 +16,12 @@ type SegmentMetadataValueInt64Type struct {
 
 func (s *SegmentMetadataValueInt64Type) IsSegmentMetadataValueType() {}
 
+type SegmentMetadataValueBoolType struct {
+	Value bool
+}
+
+func (s *SegmentMetadataValueBoolType) IsSegmentMetadataValueType() {}
+
 type SegmentMetadataValueFloat64Type struct {
 	Value float64
 }

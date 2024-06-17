@@ -129,8 +129,8 @@ pub(crate) struct HnswQueryOrchestrator {
     merge_dependency_count: u32,
     finish_dependency_count: u32,
     // Services
-    log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    log: Box<Log>,
+    sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
@@ -148,8 +148,8 @@ impl HnswQueryOrchestrator {
         allowed_ids: Vec<String>,
         include_embeddings: bool,
         segment_id: Uuid,
-        log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        log: Box<Log>,
+        sysdb: Box<SysDb>,
         hnsw_index_provider: HnswIndexProvider,
         blockfile_provider: BlockfileProvider,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
@@ -419,7 +419,7 @@ impl HnswQueryOrchestrator {
 
     async fn get_hnsw_segment_from_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         hnsw_segment_id: &Uuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
@@ -449,7 +449,7 @@ impl HnswQueryOrchestrator {
 
     async fn get_collection(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let child_span: tracing::Span =
@@ -475,7 +475,7 @@ impl HnswQueryOrchestrator {
 
     async fn get_record_segment_for_collection(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb

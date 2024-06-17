@@ -303,6 +303,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata_t.str_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .left_join(metadata_t)
             .on(segments_t.id == metadata_t.segment_id)
@@ -384,6 +385,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata_t.str_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
@@ -636,15 +638,17 @@ class SqlSysDB(SqlDB, SysDB):
                 "num_rows": len(rows),
             }
         )
-        metadata: Dict[str, Union[str, int, float]] = {}
+        metadata: Dict[str, Union[str, int, float, bool]] = {}
         for row in rows:
-            key = str(row[-4])
-            if row[-3] is not None:
-                metadata[key] = str(row[-3])
+            key = str(row[-5])
+            if row[-4] is not None:
+                metadata[key] = str(row[-4])
+            elif row[-3] is not None:
+                metadata[key] = int(row[-3])
             elif row[-2] is not None:
-                metadata[key] = int(row[-2])
+                metadata[key] = float(row[-2])
             elif row[-1] is not None:
-                metadata[key] = float(row[-1])
+                metadata[key] = bool(row[-1])
         return metadata or None
 
     @trace_method("SqlSysDB._insert_metadata", OpenTelemetryGranularity.ALL)
@@ -685,15 +689,28 @@ class SqlSysDB(SqlDB, SysDB):
                 table.str_value,
                 table.int_value,
                 table.float_value,
+                table.bool_value,
             )
         )
         sql_id = self.uuid_to_db(id)
         for k, v in metadata.items():
-            if isinstance(v, str):
+            # Note: The order is important here because isinstance(v, bool)
+            # and isinstance(v, int) both are true for v of bool type.
+            if isinstance(v, bool):
+                q = q.insert(
+                    ParameterValue(sql_id),
+                    ParameterValue(k),
+                    None,
+                    None,
+                    None,
+                    ParameterValue(int(v)),
+                )
+            elif isinstance(v, str):
                 q = q.insert(
                     ParameterValue(sql_id),
                     ParameterValue(k),
                     ParameterValue(v),
+                    None,
                     None,
                     None,
                 )
@@ -704,6 +721,7 @@ class SqlSysDB(SqlDB, SysDB):
                     None,
                     ParameterValue(v),
                     None,
+                    None,
                 )
             elif isinstance(v, float):
                 q = q.insert(
@@ -712,6 +730,7 @@ class SqlSysDB(SqlDB, SysDB):
                     None,
                     None,
                     ParameterValue(v),
+                    None,
                 )
             elif v is None:
                 continue

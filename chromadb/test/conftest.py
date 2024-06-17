@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import time
 from typing import (
+    Any,
     Generator,
     Iterator,
     List,
@@ -12,6 +13,7 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
+    cast,
 )
 from uuid import UUID
 
@@ -29,7 +31,11 @@ from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
-from chromadb.api.client import Client as ClientCreator
+from chromadb.api.client import Client as ClientCreator, AdminClient
+from chromadb.api.async_client import (
+    AsyncAdminClient,
+    AsyncClient as AsyncClientCreator,
+)
 from chromadb.utils.async_to_sync import async_class_to_sync
 
 VALID_PRESETS = ["fast", "normal", "slow"]
@@ -62,6 +68,12 @@ hypothesis.settings.register_profile(
 )
 
 hypothesis.settings.load_profile(CURRENT_PRESET)
+
+
+def reset(api: ServerAPI) -> None:
+    api.reset()
+    if not NOT_CLUSTER_ONLY:
+        time.sleep(MEMBERLIST_SLEEP)
 
 
 def override_hypothesis_profile(
@@ -322,12 +334,14 @@ def _fastapi_fixture(
         try:
             persist_directory.cleanup()
 
-        except PermissionError as e:
+        # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+        # (when we drop support for Python < 3.10, we should use ignore_cleanup_errors=True with the context manager instead)
+        except (PermissionError, NotADirectoryError) as e:
             # todo: what's holding onto directory contents on Windows?
-            if os.name == "nt" and e.winerror:
+            if os.name == "nt":
                 pass
-
-            raise e
+            else:
+                raise e
 
     else:
         yield from run(args)
@@ -547,21 +561,33 @@ def sqlite() -> Generator[System, None, None]:
 
 def sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
-    with tempfile.TemporaryDirectory() as save_path:
-        settings = Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-            persist_directory=save_path,
-        )
-        system = System(settings)
-        system.start()
-        yield system
-        system.stop()
+    save_path = tempfile.TemporaryDirectory()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=save_path.name,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+    try:
+        save_path.cleanup()
+
+    # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+    # (when we drop support for Python < 3.10, we should use ignore_cleanup_errors=True with the context manager instead)
+    except (PermissionError, NotADirectoryError) as e:
+        # todo: what's holding onto directory contents on Windows?
+        if os.name == "nt":
+            pass
+        else:
+            raise e
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
@@ -636,6 +662,16 @@ def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, No
     yield from request.param()
 
 
+@async_class_to_sync
+class AsyncClientCreatorSync(AsyncClientCreator):
+    pass
+
+
+@async_class_to_sync
+class AsyncAdminClientSync(AsyncAdminClient):
+    pass
+
+
 @pytest.fixture(scope="function")
 def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
@@ -648,13 +684,74 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
         yield api
 
 
+class ClientFactories:
+    """This allows consuming tests to be parameterized by async/sync versions of the client and papers over the async implementation.
+    If you don't need to manually construct clients, use the `client` fixture instead.
+    """
+
+    _system: System
+    # Need to track created clients so we can call .clear_system_cache() during teardown
+    _created_clients: List[ClientAPI] = []
+
+    def __init__(self, system: System):
+        self._system = system
+
+    def create_client(self, *args: Any, **kwargs: Any) -> ClientCreator:
+        if kwargs.get("settings") is None:
+            kwargs["settings"] = self._system.settings
+
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            client = cast(ClientCreator, AsyncClientCreatorSync.create(*args, **kwargs))
+            self._created_clients.append(client)
+            return client
+
+        client = ClientCreator(*args, **kwargs)
+        self._created_clients.append(client)
+        return client
+
+    def create_admin_client(self, *args: Any, **kwargs: Any) -> AdminClient:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            return cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+
+        return AdminClient(*args, **kwargs)
+
+    def create_admin_client_from_system(self) -> AdminClient:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            return cast(AdminClient, AsyncAdminClientSync.from_system(self._system))
+
+        return AdminClient.from_system(self._system)
+
+
+@pytest.fixture(scope="function")
+def client_factories(system: System) -> Generator[ClientFactories, None, None]:
+    system.reset_state()
+
+    factories = ClientFactories(system)
+    yield factories
+
+    while len(factories._created_clients) > 0:
+        client = factories._created_clients.pop()
+        client.clear_system_cache()
+        del client
+
+
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-        # todo: remove this when async client is added
-        pytest.skip("Client with async backing not yet implemented.")
+        client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
+        yield client
+        client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
         yield client

@@ -28,6 +28,6 @@ func (s *collectionMetadataDb) DeleteByCollectionID(collectionID string) (int, e
 func (s *collectionMetadataDb) Insert(in []*dbmodel.CollectionMetadata) error {
 	return s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "collection_id"}, {Name: "key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"str_value", "int_value", "float_value"}),
+		DoUpdates: clause.AssignmentColumns([]string{"str_value", "int_value", "float_value", "bool_value"}),
 	}).Create(in).Error
 }

@@ -92,6 +92,7 @@ jobs:
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
