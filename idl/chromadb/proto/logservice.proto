@@ -42,7 +42,7 @@ message CollectionInfo {
 message GetAllCollectionInfoToCompactRequest {
   // The minimum number of log entries that a collection should have before it should
   // be returned for compaction
-  int64 min_compaction_size = 1;
+  uint64 min_compaction_size = 1;
 }
 
 message GetAllCollectionInfoToCompactResponse {

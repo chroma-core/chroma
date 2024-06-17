@@ -218,6 +218,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             sysdb.clone(),
             policy,
             max_concurrent_jobs,
+            min_compaction_size,
             assignment_policy,
         );
 
@@ -485,6 +486,7 @@ mod tests {
             sysdb.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
+            min_compaction_size,
             assignment_policy,
         );
         // Set memberlist
