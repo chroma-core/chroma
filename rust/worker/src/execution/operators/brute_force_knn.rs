@@ -164,7 +164,6 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         let data_chunk = logs;
         for data in data_chunk.iter() {
             let log_record = data.0;
-            let index = data.1;
 
             if log_record.final_operation == Operation::Delete {
                 // Explicitly skip deleted records.
@@ -230,222 +229,325 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::types::LogRecord;
-//     use crate::types::Operation;
-//     use crate::types::OperationRecord;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::LogRecord;
+    use crate::types::Operation;
+    use crate::types::OperationRecord;
+    use std::collections::HashMap;
+    use uuid::uuid;
 
-//     use super::*;
+    // Helper for tests
+    fn get_blockfile_provider_and_record_segment_definition() -> (BlockfileProvider, Segment) {
+        // Create a blockfile provider for the log materializer
+        let blockfile_provider = BlockfileProvider::new_memory();
 
-//     #[tokio::test]
-//     async fn test_brute_force_knn_l2sqr() {
-//         let operator = BruteForceKnnOperator {};
-//         let data = vec![
-//             LogRecord {
-//                 log_offset: 1,
-//                 record: OperationRecord {
-//                     id: "embedding_id_1".to_string(),
-//                     embedding: Some(vec![0.0, 0.0, 0.0]),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//             LogRecord {
-//                 log_offset: 2,
-//                 record: OperationRecord {
-//                     id: "embedding_id_2".to_string(),
-//                     embedding: Some(vec![0.0, 1.0, 1.0]),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//             LogRecord {
-//                 log_offset: 3,
-//                 record: OperationRecord {
-//                     id: "embedding_id_3".to_string(),
-//                     embedding: Some(vec![7.0, 8.0, 9.0]),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//         ];
-//         let data_chunk = Chunk::new(data.into());
+        // Create an empty record segment definition
+        let record_segment_definition = Segment {
+            id: uuid!("00000000-0000-0000-0000-000000000000"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(uuid!("00000000-0000-0000-0000-000000000000")),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        return (blockfile_provider, record_segment_definition);
+    }
 
-//         let input = BruteForceKnnOperatorInput {
-//             data: data_chunk,
-//             query: vec![0.0, 0.0, 0.0],
-//             k: 2,
-//             distance_metric: DistanceFunction::Euclidean,
-//             allowed_ids: Arc::new([]),
-//             allowed_ids_brute_force: Arc::new([]),
-//         };
-//         let output = operator.run(&input).await.unwrap();
-//         assert_eq!(output.indices, vec![0, 1]);
-//         let distance_1 = 0.0_f32.powi(2) + 1.0_f32.powi(2) + 1.0_f32.powi(2);
-//         assert_eq!(output.distances, vec![0.0, distance_1]);
-//         assert_eq!(output.data.get_visibility(0), Some(true));
-//         assert_eq!(output.data.get_visibility(1), Some(true));
-//         assert_eq!(output.data.get_visibility(2), Some(false));
-//     }
+    #[tokio::test]
+    async fn test_brute_force_knn_l2sqr() {
+        let operator = BruteForceKnnOperator {};
+        let (blockfile_provider, record_segment_definition) =
+            get_blockfile_provider_and_record_segment_definition();
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![0.0, 0.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(vec![0.0, 1.0, 1.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let data_chunk = Chunk::new(data.into());
 
-//     #[tokio::test]
-//     async fn test_brute_force_knn_cosine() {
-//         let operator = BruteForceKnnOperator {};
+        let input = BruteForceKnnOperatorInput {
+            log: data_chunk,
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
+            blockfile_provider,
+            record_segment_definition,
+        };
 
-//         let norm_1 = (1.0_f32.powi(2) + 2.0_f32.powi(2) + 3.0_f32.powi(2)).sqrt();
-//         let data_1 = vec![1.0 / norm_1, 2.0 / norm_1, 3.0 / norm_1];
+        let output = operator.run(&input).await.unwrap();
+        assert_eq!(output.user_ids, vec!["embedding_id_1", "embedding_id_2"]);
+        let distance_1 = 0.0_f32.powi(2) + 1.0_f32.powi(2) + 1.0_f32.powi(2);
+        assert_eq!(output.distances, vec![0.0, distance_1]);
+        assert_eq!(
+            output.embeddings,
+            vec![vec![0.0, 0.0, 0.0], vec![0.0, 1.0, 1.0]]
+        );
+    }
 
-//         let norm_2 = (0.0_f32.powi(2) + -1.0_f32.powi(2) + 6.0_f32.powi(2)).sqrt();
-//         let data_2 = vec![0.0 / norm_2, -1.0 / norm_2, 6.0 / norm_2];
-//         let data = vec![
-//             LogRecord {
-//                 log_offset: 1,
-//                 record: OperationRecord {
-//                     id: "embedding_id_1".to_string(),
-//                     embedding: Some(vec![0.0, 1.0, 0.0]),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//             LogRecord {
-//                 log_offset: 2,
-//                 record: OperationRecord {
-//                     id: "embedding_id_2".to_string(),
-//                     embedding: Some(data_1.clone()),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//             LogRecord {
-//                 log_offset: 3,
-//                 record: OperationRecord {
-//                     id: "embedding_id_3".to_string(),
-//                     embedding: Some(data_2.clone()),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//         ];
-//         let data_chunk = Chunk::new(data.into());
+    #[tokio::test]
+    async fn test_brute_force_knn_cosine() {
+        let operator = BruteForceKnnOperator {};
+        let (blockfile_provider, record_segment_definition) =
+            get_blockfile_provider_and_record_segment_definition();
 
-//         let input = BruteForceKnnOperatorInput {
-//             data: data_chunk,
-//             query: vec![0.0, 1.0, 0.0],
-//             k: 2,
-//             distance_metric: DistanceFunction::InnerProduct,
-//             allowed_ids: Arc::new([]),
-//             allowed_ids_brute_force: Arc::new([]),
-//         };
-//         let output = operator.run(&input).await.unwrap();
+        let norm_1 = (1.0_f32.powi(2) + 2.0_f32.powi(2) + 3.0_f32.powi(2)).sqrt();
+        let data_1 = vec![1.0 / norm_1, 2.0 / norm_1, 3.0 / norm_1];
 
-//         assert_eq!(output.indices, vec![0, 1]);
-//         let expected_distance_1 =
-//             1.0f32 - ((data_1[0] * 0.0) + (data_1[1] * 1.0) + (data_1[2] * 0.0));
-//         assert_eq!(output.distances, vec![0.0, expected_distance_1]);
-//         assert_eq!(output.data.get_visibility(0), Some(true));
-//         assert_eq!(output.data.get_visibility(1), Some(true));
-//         assert_eq!(output.data.get_visibility(2), Some(false));
-//     }
+        let norm_2 = (0.0_f32.powi(2) + -1.0_f32.powi(2) + 6.0_f32.powi(2)).sqrt();
+        let data_2 = vec![0.0 / norm_2, -1.0 / norm_2, 6.0 / norm_2];
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![0.0, 1.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(data_1.clone()),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(data_2.clone()),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let data_chunk = Chunk::new(data.into());
 
-//     #[tokio::test]
-//     async fn test_data_less_than_k() {
-//         // If we have less data than k, we should return all the data, sorted by distance.
-//         let operator = BruteForceKnnOperator {};
-//         let data = vec![LogRecord {
-//             log_offset: 1,
-//             record: OperationRecord {
-//                 id: "embedding_id_1".to_string(),
-//                 embedding: Some(vec![0.0, 0.0, 0.0]),
-//                 encoding: None,
-//                 metadata: None,
-//                 document: None,
-//                 operation: Operation::Add,
-//             },
-//         }];
+        let input = BruteForceKnnOperatorInput {
+            log: data_chunk,
+            query: vec![0.0, 1.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::InnerProduct,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
+            blockfile_provider,
+            record_segment_definition,
+        };
+        let output = operator.run(&input).await.unwrap();
 
-//         let data_chunk = Chunk::new(data.into());
+        assert_eq!(output.user_ids, vec!["embedding_id_1", "embedding_id_2"]);
+        let expected_distance_1 = 1.0 - ((data_1[0] * 0.0) + (data_1[1] * 1.0) + (data_1[2] * 0.0));
+        assert_eq!(output.distances, vec![0.0, expected_distance_1]);
+        assert_eq!(
+            output.embeddings,
+            vec![
+                vec![0.0, 1.0, 0.0],
+                vec![1.0 / norm_1, 2.0 / norm_1, 3.0 / norm_1]
+            ]
+        );
+    }
 
-//         let input = BruteForceKnnOperatorInput {
-//             data: data_chunk,
-//             query: vec![0.0, 0.0, 0.0],
-//             k: 2,
-//             distance_metric: DistanceFunction::Euclidean,
-//             allowed_ids: Arc::new([]),
-//             allowed_ids_brute_force: Arc::new([]),
-//         };
-//         let output = operator.run(&input).await.unwrap();
-//         assert_eq!(output.indices, vec![0]);
-//         assert_eq!(output.distances, vec![0.0]);
-//         assert_eq!(output.data.get_visibility(0), Some(true));
-//     }
+    #[tokio::test]
+    async fn test_data_less_than_k() {
+        let (blockfile_provider, record_segment_definition) =
+            get_blockfile_provider_and_record_segment_definition();
 
-//     #[tokio::test]
-//     async fn test_skip_deleted_records() {
-//         let operator = BruteForceKnnOperator {};
-//         let data = vec![
-//             LogRecord {
-//                 log_offset: 1,
-//                 record: OperationRecord {
-//                     id: "embedding_id_1".to_string(),
-//                     embedding: Some(vec![0.0, 0.0, 0.0]),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//             LogRecord {
-//                 log_offset: 2,
-//                 record: OperationRecord {
-//                     id: "embedding_id_2".to_string(),
-//                     embedding: None,
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//             LogRecord {
-//                 log_offset: 3,
-//                 record: OperationRecord {
-//                     id: "embedding_id_3".to_string(),
-//                     embedding: Some(vec![7.0, 8.0, 9.0]),
-//                     encoding: None,
-//                     metadata: None,
-//                     document: None,
-//                     operation: Operation::Add,
-//                 },
-//             },
-//         ];
-//         let data_chunk = Chunk::new(data.into());
+        // If we have less data than k, we should return all the data, sorted by distance.
+        let operator = BruteForceKnnOperator {};
+        let data = vec![LogRecord {
+            log_offset: 1,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: Some(vec![0.0, 0.0, 0.0]),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Add,
+            },
+        }];
 
-//         let input = BruteForceKnnOperatorInput {
-//             data: data_chunk,
-//             query: vec![0.0, 0.0, 0.0],
-//             k: 2,
-//             distance_metric: DistanceFunction::Euclidean,
-//             allowed_ids: Arc::new([]),
-//             allowed_ids_brute_force: Arc::new([]),
-//         };
-//         let output = operator.run(&input).await.unwrap();
-//         assert_eq!(output.indices, vec![0, 2]);
-//         let distance_1 = 7.0_f32.powi(2) + 8.0_f32.powi(2) + 9.0_f32.powi(2);
-//         assert_eq!(output.distances, vec![0.0, distance_1]);
-//         assert_eq!(output.data.get_visibility(0), Some(true));
-//         assert_eq!(output.data.get_visibility(1), Some(false));
-//         assert_eq!(output.data.get_visibility(2), Some(true));
-//     }
-// }
+        let data_chunk = Chunk::new(data.into());
+
+        let input = BruteForceKnnOperatorInput {
+            log: data_chunk,
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
+            blockfile_provider,
+            record_segment_definition,
+        };
+        let output = operator.run(&input).await.unwrap();
+
+        assert_eq!(output.user_ids, vec!["embedding_id_1"]);
+        assert_eq!(output.distances, vec![0.0]);
+        assert_eq!(output.embeddings, vec![vec![0.0, 0.0, 0.0]]);
+    }
+
+    #[tokio::test]
+    async fn test_malformed_record_errors() {
+        let operator = BruteForceKnnOperator {};
+        let (blockfile_provider, record_segment_definition) =
+            get_blockfile_provider_and_record_segment_definition();
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let data_chunk = Chunk::new(data.into());
+
+        let input = BruteForceKnnOperatorInput {
+            log: data_chunk,
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
+            blockfile_provider,
+            record_segment_definition,
+        };
+        let res = operator.run(&input).await;
+        match res {
+            Ok(_) => panic!("Expected error"),
+            Err(e) => match e {
+                BruteForceKnnOperatorError::LogMaterializationError(e) => {
+                    // We expect an error here because the second record is malformed.
+                }
+                _ => panic!("Unexpected error"),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_skip_deleted_record() {
+        let operator = BruteForceKnnOperator {};
+        let (blockfile_provider, record_segment_definition) =
+            get_blockfile_provider_and_record_segment_definition();
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![0.0, 0.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![0.0, 0.0, 0.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let data_chunk = Chunk::new(data.into());
+
+        let input = BruteForceKnnOperatorInput {
+            log: data_chunk,
+            query: vec![0.0, 0.0, 0.0],
+            k: 2,
+            distance_metric: DistanceFunction::Euclidean,
+            allowed_ids: Arc::new([]),
+            allowed_ids_brute_force: Arc::new([]),
+            blockfile_provider,
+            record_segment_definition,
+        };
+        let output = operator.run(&input).await.unwrap();
+
+        assert_eq!(output.user_ids, vec!["embedding_id_3"]);
+        assert_eq!(output.distances, vec![0.0]);
+        assert_eq!(output.embeddings, vec![vec![0.0, 0.0, 0.0]]);
+    }
+}
