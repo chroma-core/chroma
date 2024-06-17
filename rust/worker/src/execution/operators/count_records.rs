@@ -282,8 +282,7 @@ mod tests {
                     };
                 }
             };
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, None);
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
                 .await
