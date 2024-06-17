@@ -412,7 +412,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 						records, err = suite.lr.PullRecords(ctx, id.String(), 0, 1, time.Now().UnixNano())
 						suite.NoError(err)
 						if len(records) > 0 {
-							suite.Equal(offset, records[0].Offset)
+							suite.Equal(int64(offset), records[0].Offset)
 						}
 					}
 				}
