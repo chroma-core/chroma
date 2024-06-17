@@ -182,13 +182,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             {
                 continue;
             }
-            let embedding = match &log_record.final_embedding {
-                Some(embedding) => embedding,
-                None => {
-                    // implies that the record is a delete or update of irrelevant field
-                    continue;
-                }
-            };
+            let embedding = &log_record.merged_embeddings();
             if should_normalize {
                 let normalized_query = normalized_query.as_ref().expect("Invariant violation. Should have set normalized query if should_normalize is true.");
                 let normalized_embedding = normalize(&embedding[..]);
