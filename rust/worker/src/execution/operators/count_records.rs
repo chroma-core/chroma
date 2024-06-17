@@ -282,9 +282,8 @@ mod tests {
                     };
                 }
             };
-            let curr_max_offset_id = Arc::new(AtomicU32::new(1));
             let materializer =
-                LogMaterializer::new(record_segment_reader, data, curr_max_offset_id);
+                LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
                 .await
