@@ -39,6 +39,8 @@ enum GetVectorsError {
     HnswSegmentHasNoCollection,
     #[error("Error sending task to dispatcher")]
     TaskSendError(#[from] ChannelError),
+    #[error("System time error")]
+    SystemTimeError(#[from] std::time::SystemTimeError),
 }
 
 impl ChromaError for GetVectorsError {
@@ -46,6 +48,7 @@ impl ChromaError for GetVectorsError {
         match self {
             GetVectorsError::HnswSegmentHasNoCollection => ErrorCodes::Internal,
             GetVectorsError::TaskSendError(e) => e.code(),
+            GetVectorsError::SystemTimeError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -108,7 +111,7 @@ impl GetVectorsOrchestrator {
             // TODO: change protobuf definition to use u64 instead of i64
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
-                // Log an error and reply + return
+                self.terminate_with_error(Box::new(GetVectorsError::SystemTimeError(e)), ctx);
                 return;
             }
         };
