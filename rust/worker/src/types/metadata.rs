@@ -290,6 +290,25 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     }
 }
 
+pub(crate) struct MetadataDelta<'referred_data> {
+    pub(crate) metadata_to_update: HashMap<
+        &'referred_data str,
+        (&'referred_data MetadataValue, &'referred_data MetadataValue),
+    >,
+    pub(crate) metadata_to_delete: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+    pub(crate) metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+}
+
+impl<'referred_data> MetadataDelta<'referred_data> {
+    pub(crate) fn new() -> Self {
+        Self {
+            metadata_to_update: HashMap::new(),
+            metadata_to_delete: HashMap::new(),
+            metadata_to_insert: HashMap::new(),
+        }
+    }
+}
+
 /*
 ===========================================
 Metadata queries

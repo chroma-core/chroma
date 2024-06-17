@@ -1,8 +1,8 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
-    DeletedMetadata, LogRecord, Metadata, MetadataValue, MetadataValueConversionError, Operation,
-    OperationRecord, UpdateMetadata, UpdateMetadataValue,
+    DeletedMetadata, LogRecord, Metadata, MetadataDelta, MetadataValue,
+    MetadataValueConversionError, Operation, OperationRecord, UpdateMetadata, UpdateMetadataValue,
 };
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -166,25 +166,6 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
     pub(crate) final_embedding: Option<&'referred_data [f32]>,
-}
-
-pub(crate) struct MetadataDelta<'referred_data> {
-    pub(crate) metadata_to_update: HashMap<
-        &'referred_data str,
-        (&'referred_data MetadataValue, &'referred_data MetadataValue),
-    >,
-    pub(crate) metadata_to_delete: HashMap<&'referred_data str, &'referred_data MetadataValue>,
-    pub(crate) metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
-}
-
-impl<'referred_data> MetadataDelta<'referred_data> {
-    pub(crate) fn new() -> Self {
-        Self {
-            metadata_to_update: HashMap::new(),
-            metadata_to_delete: HashMap::new(),
-            metadata_to_insert: HashMap::new(),
-        }
-    }
 }
 
 impl<'referred_data> MaterializedLogRecord<'referred_data> {
