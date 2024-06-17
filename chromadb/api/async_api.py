@@ -439,6 +439,40 @@ class AsyncBaseAPI(ABC):
         pass
 
 
+class AsyncClientAPI(AsyncBaseAPI, ABC):
+    tenant: str
+    database: str
+
+    @abstractmethod
+    async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
+        """Set the tenant and database for the client. Raises an error if the tenant or
+        database does not exist.
+
+        Args:
+            tenant: The tenant to set.
+            database: The database to set.
+
+        """
+        pass
+
+    @abstractmethod
+    async def set_database(self, database: str) -> None:
+        """Set the database for the client. Raises an error if the database does not exist.
+
+        Args:
+            database: The database to set.
+
+        """
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def clear_system_cache() -> None:
+        """Clear the system cache so that new systems can be created for an existing path.
+        This should only be used for testing purposes."""
+        pass
+
+
 class AsyncAdminAPI(ABC):
     @abstractmethod
     async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:

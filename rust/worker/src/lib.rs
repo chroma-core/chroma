@@ -80,11 +80,6 @@ pub async fn query_service_entrypoint() {
         // Kubernetes will send SIGTERM to stop the pod gracefully
         // TODO: add more signal handling
         _ = sigterm.recv() => {
-            server_join_handle.abort();
-            match server_join_handle.await {
-                Ok(_) => println!("Server stopped"),
-                Err(e) => println!("Server stopped with error {}", e),
-            }
             dispatcher_handle.stop();
             dispatcher_handle.join().await;
             system.stop().await;

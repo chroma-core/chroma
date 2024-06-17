@@ -468,6 +468,16 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             None => {}
                                         }
                                     }
+                                    MetadataValue::Bool(value) => {
+                                        match &self.bool_metadata_index_writer {
+                                            Some(writer) => {
+                                                let _ = writer
+                                                    .set(key, *value, segment_offset_id)
+                                                    .await;
+                                            }
+                                            None => {}
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -532,6 +542,18 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                             *value as u32,
                                                             segment_offset_id,
                                                         )
+                                                        .await;
+                                                }
+                                                None => {
+                                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                                                }
+                                            }
+                                        }
+                                        MetadataValue::Bool(value) => {
+                                            match &self.bool_metadata_index_writer {
+                                                Some(writer) => {
+                                                    let _ = writer
+                                                        .delete(key, *value, segment_offset_id)
                                                         .await;
                                                 }
                                                 None => {
@@ -701,6 +723,69 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             None => {
                                                 tracing::error!(
                                                     "No writer found for f32 metadata index"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    MetadataValue::Bool(value) => {
+                                        match &self.bool_metadata_index_writer {
+                                            Some(writer) => {
+                                                match old_metadata {
+                                                    // TODO this doesn't handle deletes
+                                                    Some(old_metadata) => {
+                                                        match old_metadata.get(key) {
+                                                            Some(old_value) => match old_value {
+                                                                MetadataValue::Bool(old_value) => {
+                                                                    match writer
+                                                                        .update(
+                                                                            key,
+                                                                            (*old_value).into(),
+                                                                            (*value).into(),
+                                                                            segment_offset_id,
+                                                                        )
+                                                                        .await
+                                                                    {
+                                                                        Ok(_) => {}
+                                                                        Err(e) => {
+                                                                            tracing::error!(
+                                                                            "Error updating bool metadata index: {}",
+                                                                            e
+                                                                        )
+                                                                        }
+                                                                    }
+                                                                }
+                                                                _ => {
+                                                                    tracing::error!(
+                                                                    "Invariant violation: previous value is not a bool"
+                                                                );
+                                                                }
+                                                            },
+                                                            None => {
+                                                                match writer
+                                                                    .set(
+                                                                        key,
+                                                                        *value,
+                                                                        segment_offset_id,
+                                                                    )
+                                                                    .await
+                                                                {
+                                                                    Ok(_) => {}
+                                                                    Err(e) => {
+                                                                        tracing::error!(
+                                                                        "Error setting bool metadata index: {}",
+                                                                        e
+                                                                    )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    None => {}
+                                                };
+                                            }
+                                            None => {
+                                                tracing::error!(
+                                                    "No writer found for bool metadata index"
                                                 );
                                             }
                                         }
@@ -1282,6 +1367,61 @@ impl MetadataSegmentReader<'_> {
                                 }
                             }
                         }
+                        WhereComparison::SingleBoolComparison(operand, comparator) => {
+                            match comparator {
+                                WhereClauseComparator::Equal => {
+                                    let metadata_value_keywrapper = (*operand).try_into();
+                                    match metadata_value_keywrapper {
+                                        Ok(keywrapper) => {
+                                            match &self.bool_metadata_index_reader {
+                                                Some(reader) => {
+                                                    let result = reader
+                                                        .get(
+                                                            &direct_where_comparison.key,
+                                                            &keywrapper,
+                                                        )
+                                                        .await;
+                                                    match result {
+                                                        Ok(r) => {
+                                                            results = r
+                                                                .iter()
+                                                                .map(|x| x as usize)
+                                                                .collect();
+                                                        }
+                                                        Err(e) => {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                }
+                                                // This is expected. Before the first ever compaction
+                                                // the reader will be uninitialized, hence an empty vector
+                                                // here since nothing has been written to storage yet.
+                                                None => results = vec![],
+                                            }
+                                        }
+                                        Err(_) => {
+                                            panic!("Error converting bool to keywrapper")
+                                        }
+                                    }
+                                }
+                                WhereClauseComparator::NotEqual => {
+                                    todo!();
+                                }
+                                // We don't allow these comparators for bools.
+                                WhereClauseComparator::LessThan => {
+                                    unimplemented!();
+                                }
+                                WhereClauseComparator::LessThanOrEqual => {
+                                    unimplemented!();
+                                }
+                                WhereClauseComparator::GreaterThan => {
+                                    unimplemented!();
+                                }
+                                WhereClauseComparator::GreaterThanOrEqual => {
+                                    unimplemented!();
+                                }
+                            }
+                        }
                         WhereComparison::SingleIntComparison(operand, comparator) => {
                             match comparator {
                                 WhereClauseComparator::Equal => {
@@ -1653,6 +1793,9 @@ impl MetadataSegmentReader<'_> {
                             todo!();
                         }
                         WhereComparison::DoubleListComparison(..) => {
+                            todo!();
+                        }
+                        WhereComparison::BoolListComparison(..) => {
                             todo!();
                         }
                     }

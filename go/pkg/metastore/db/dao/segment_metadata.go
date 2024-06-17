@@ -29,7 +29,7 @@ func (s *segmentMetadataDb) Insert(in []*dbmodel.SegmentMetadata) error {
 	return s.db.Clauses(
 		clause.OnConflict{
 			Columns:   []clause.Column{{Name: "segment_id"}, {Name: "key"}},
-			DoUpdates: clause.AssignmentColumns([]string{"str_value", "int_value", "float_value", "ts"}),
+			DoUpdates: clause.AssignmentColumns([]string{"str_value", "int_value", "float_value", "ts", "bool_value"}),
 		},
 	).Create(in).Error
 }

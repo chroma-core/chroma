@@ -3,8 +3,7 @@ use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto::{
-    self, where_document, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest,
-    QueryMetadataResponse,
+    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
 use crate::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
@@ -23,6 +22,7 @@ use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace, trace_span, Instrument};
 use uuid::Uuid;
@@ -87,15 +87,26 @@ impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
-        let _server = Server::builder()
+        let server = Server::builder()
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
                 worker.clone(),
             ))
-            .add_service(chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker))
-            .serve(addr)
-            .await?;
-        println!("Worker shutting down");
+            .add_service(
+                chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker.clone()),
+            )
+            .serve_with_shutdown(addr, async {
+                let mut sigterm = match signal(SignalKind::terminate()) {
+                    Ok(sigterm) => sigterm,
+                    Err(e) => {
+                        tracing::error!("Failed to create signal handler: {:?}", e);
+                        return;
+                    }
+                };
+                sigterm.recv().await;
+                tracing::info!("Received SIGTERM, shutting down");
+            });
 
+        server.await?;
         Ok(())
     }
 

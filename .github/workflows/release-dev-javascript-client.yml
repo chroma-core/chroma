@@ -55,8 +55,14 @@ jobs:
           NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
           echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
         working-directory: ./clients/js/
+      - name: Update package.json with organization scope
+        run: |
+          ORG_NAME="@chroma-core"
+          PACKAGE_NAME=$(jq -r '.name' package.json)
+          jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' package.json > tmp.$$.json && mv tmp.$$.json package.json
+        working-directory: ./clients/js/
       - name: Test & publish
-        run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT --registry=${{ matrix.registry }}
+        run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
         working-directory: ./clients/js/
         env:
           NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
