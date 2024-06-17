@@ -35,7 +35,7 @@ pub struct WorkerServer {
     // Component dependencies
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Service dependencies
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,

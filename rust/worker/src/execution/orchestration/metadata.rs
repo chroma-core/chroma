@@ -62,7 +62,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     // State machine management
     merge_dependency_count: u32,
     // Services
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
@@ -83,7 +83,7 @@ pub(crate) struct CountQueryOrchestrator {
     record_segment: Option<Segment>,
     collection: Option<Collection>,
     // Services
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
@@ -129,7 +129,7 @@ impl CountQueryOrchestrator {
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
-        log: Box<dyn Log>,
+        log: Box<Log>,
         sysdb: Box<SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
@@ -450,7 +450,7 @@ impl MetadataQueryOrchestrator {
         system: System,
         metadata_segment_id: &Uuid,
         query_ids: Option<Vec<String>>,
-        log: Box<dyn Log>,
+        log: Box<Log>,
         sysdb: Box<SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
