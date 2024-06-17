@@ -6,7 +6,8 @@ use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
-    BruteForceKnnOperator, BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput,
+    BruteForceKnnOperator, BruteForceKnnOperatorError, BruteForceKnnOperatorInput,
+    BruteForceKnnOperatorOutput,
 };
 use crate::execution::operators::hnsw_knn::{
     HnswKnnOperator, HnswKnnOperatorInput, HnswKnnOperatorOutput,
@@ -240,7 +241,9 @@ impl HnswQueryOrchestrator {
     async fn brute_force_query(
         &mut self,
         logs: Chunk<LogRecord>,
-        self_address: Box<dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, ()>>>,
+        self_address: Box<
+            dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>>,
+        >,
     ) {
         self.state = ExecutionState::QueryKnn;
         let distance_function = &self
@@ -252,12 +255,18 @@ impl HnswQueryOrchestrator {
         // TODO: We shouldn't have to clone query vectors here. We should be able to pass a Arc<[f32]>-like to the input
         for (i, query_vector) in self.query_vectors.iter().enumerate() {
             let bf_input = BruteForceKnnOperatorInput {
-                data: logs.clone(),
+                log: logs.clone(),
                 query: query_vector.clone(),
                 k: self.k as usize,
                 distance_metric: distance_function.clone(),
                 allowed_ids: self.allowed_ids.clone(),
                 allowed_ids_brute_force: self.allowed_ids_brute_force.clone(),
+                record_segment_definition: self
+                    .record_segment
+                    .as_ref()
+                    .expect("Invariant violation. Record segment is not set")
+                    .clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
             };
             let operator = Box::new(BruteForceKnnOperator {});
             let task = wrap(operator, bf_input, self_address.clone());
@@ -676,10 +685,12 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestrator {
+impl Handler<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>>
+    for HnswQueryOrchestrator
+{
     async fn handle(
         &mut self,
-        message: TaskResult<BruteForceKnnOperatorOutput, ()>,
+        message: TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>,
         ctx: &crate::system::ComponentContext<HnswQueryOrchestrator>,
     ) {
         let task_id = message.id();
@@ -691,30 +702,10 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, ()>> for HnswQueryOrchestra
 
         match message {
             Ok(output) => {
-                let mut user_ids = Vec::new();
+                let mut user_ids = output.user_ids;
                 let mut embeddings = None;
                 if self.include_embeddings {
-                    embeddings = Some(Vec::new());
-                }
-                for index in output.indices {
-                    let record = match output.data.get(index) {
-                        Some(record) => record,
-                        None => {
-                            // return an error
-                            return;
-                        }
-                    };
-                    user_ids.push(record.record.id.clone());
-                    if let Some(embeddings) = embeddings.as_mut() {
-                        embeddings.push(
-                            record
-                                .record
-                                .embedding
-                                .as_ref()
-                                .expect("Brute force result log record should have embedding set")
-                                .clone(),
-                        );
-                    }
+                    embeddings = Some(output.embeddings);
                 }
                 self.brute_force_result_user_ids
                     .insert(query_index, user_ids);
