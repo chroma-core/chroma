@@ -99,6 +99,26 @@ chroma_client = chromadb.HttpClient(host='localhost', port=8000)
 
 That's it! Chroma's API will run in `client-server` mode with just this change.
 
+---
+
+Chroma also provides an async HTTP client. The behaviors and method signatures are identical to the synchronous client, but all methods that would block are now async. To use it, call `AsyncHttpClient` instead:
+
+```python
+import asyncio
+import chromadb
+
+async def main():
+    client = await chromadb.AsyncHttpClient()
+    collection = await client.create_collection(name="my_collection")
+
+    await collection.add(
+        documents=["hello world"],
+        ids=["id1"]
+    )
+
+asyncio.run(main())
+```
+
 <!-- #### Run Chroma inside your application
 
 To run the Chroma docker from inside your application code, create a docker-compose file or add to the existing one you have.
@@ -127,30 +147,14 @@ pip install chromadb-client
 import chromadb
 # Example setup of the client to connect to your chroma server
 client = chromadb.HttpClient(host='localhost', port=8000)
+
+# Or for async usage:
+async def main():
+    client = await chromadb.AsyncHttpClient(host='localhost', port=8000)
 ```
 
 Note that the `chromadb-client` package is a subset of the full Chroma library and does not include all the dependencies. If you want to use the full Chroma library, you can install the `chromadb` package instead.
 Most importantly, there is no default embedding function. If you add() documents without embeddings, you must have manually specified an embedding function and installed the dependencies for it.
-
-#### Using the Python HTTP-only **async** client
-
-If your application is async, we provide a separate lightweight async client. The behaviors and method signatures are identical to the synchronous client, but all methods that would block are now async.
-
-```python
-import asyncio
-import chromadb
-
-async def main():
-    client = await chromadb.AsyncHttpClient()
-    collection = await client.create_collection(name="my_collection")
-
-    await collection.add(
-        documents=["hello world"],
-        ids=["id1"]
-    )
-
-asyncio.run(main())
-```
 
 {% /tab %}
 {% tab label="Javascript" %}
