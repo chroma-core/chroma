@@ -62,7 +62,7 @@ pub struct GetVectorsOrchestrator {
     record_segment: Option<Segment>,
     collection: Option<Collection>,
     // Services
-    log: Box<dyn Log>,
+    log: Box<Log>,
     sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
@@ -76,7 +76,7 @@ impl GetVectorsOrchestrator {
         system: System,
         get_ids: Vec<String>,
         hnsw_segment_id: Uuid,
-        log: Box<dyn Log>,
+        log: Box<Log>,
         sysdb: Box<SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
