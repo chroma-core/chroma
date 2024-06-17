@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: logservice-migration
+  namespace: {{ .Values.namespace }}
+  annotations:
+  {{ range .Values.sysdbMigration.annotations }}
+    {{ .name }}: {{ .value }}
+  {{ end }}
+spec:
+  template:
+    metadata:
+      labels:
+        app: logservice-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - args: ['migrate', 'apply', '--env','prod']
+          image: "{{ .Values.logServiceMigration.image.repository }}:{{ .Values.logServiceMigration.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          name: migration
+          env:
+            {{ range .Values.logServiceMigration.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+
+---

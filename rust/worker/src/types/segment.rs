@@ -3,22 +3,39 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SegmentType {
     HnswDistributed,
+    BlockfileMetadata,
+    BlockfileRecord,
+    Sqlite,
 }
 
-#[derive(Debug, PartialEq)]
+impl From<SegmentType> for String {
+    fn from(segment_type: SegmentType) -> String {
+        match segment_type {
+            SegmentType::HnswDistributed => {
+                "urn:chroma:segment/vector/hnsw-distributed".to_string()
+            }
+            SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
+            SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
+            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Segment {
     pub(crate) id: Uuid,
     pub(crate) r#type: SegmentType,
     pub(crate) scope: SegmentScope,
-    pub(crate) topic: Option<String>,
     pub(crate) collection: Option<Uuid>,
     pub(crate) metadata: Option<Metadata>,
+    pub(crate) file_path: HashMap<String, Vec<String>>,
 }
 
 #[derive(Error, Debug)]
@@ -48,6 +65,8 @@ impl TryFrom<chroma_proto::Segment> for Segment {
     type Error = SegmentConversionError;
 
     fn try_from(proto_segment: chroma_proto::Segment) -> Result<Self, Self::Error> {
+        let mut proto_segment = proto_segment;
+
         let segment_uuid = match Uuid::try_parse(&proto_segment.id) {
             Ok(uuid) => uuid,
             Err(_) => return Err(SegmentConversionError::InvalidUuid),
@@ -74,25 +93,34 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
         let segment_type = match proto_segment.r#type.as_str() {
             "urn:chroma:segment/vector/hnsw-distributed" => SegmentType::HnswDistributed,
+            "urn:chroma:segment/record/blockfile" => SegmentType::BlockfileRecord,
+            "urn:chroma:segment/metadata/sqlite" => SegmentType::Sqlite,
+            "urn:chroma:segment/metadata/blockfile" => SegmentType::BlockfileMetadata,
             _ => {
-                return Err(SegmentConversionError::InvalidUuid);
+                println!("Invalid segment type: {}", proto_segment.r#type);
+                return Err(SegmentConversionError::InvalidSegmentType);
             }
         };
+
+        let mut file_paths = HashMap::new();
+        let drain = proto_segment.file_paths.drain();
+        for (key, value) in drain {
+            file_paths.insert(key, value.paths);
+        }
 
         Ok(Segment {
             id: segment_uuid,
             r#type: segment_type,
             scope: scope,
-            topic: proto_segment.topic,
             collection: collection_uuid,
             metadata: segment_metadata,
+            file_path: file_paths,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
     use crate::types::MetadataValue;
@@ -112,15 +140,14 @@ mod tests {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
             scope: chroma_proto::SegmentScope::Vector as i32,
-            topic: Some("test".to_string()),
             collection: Some("00000000-0000-0000-0000-000000000000".to_string()),
             metadata: Some(metadata),
+            file_paths: HashMap::new(),
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
         assert_eq!(converted_segment.id, Uuid::nil());
         assert_eq!(converted_segment.r#type, SegmentType::HnswDistributed);
         assert_eq!(converted_segment.scope, SegmentScope::VECTOR);
-        assert_eq!(converted_segment.topic, Some("test".to_string()));
         assert_eq!(converted_segment.collection, Some(Uuid::nil()));
         let metadata = converted_segment.metadata.unwrap();
         assert_eq!(metadata.len(), 1);

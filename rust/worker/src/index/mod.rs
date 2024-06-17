@@ -1,11 +1,11 @@
-mod fulltext;
+pub(crate) mod fulltext;
 mod hnsw;
-mod metadata;
+pub(crate) mod hnsw_provider;
+pub(crate) mod metadata;
 mod types;
 mod utils;
 
 // Re-export types
-pub use fulltext::*;
+
 pub(crate) use hnsw::*;
-pub(crate) use metadata::*;
 pub(crate) use types::*;

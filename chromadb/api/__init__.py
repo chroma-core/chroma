@@ -26,6 +26,13 @@ from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 
+# Re-export the async version
+from chromadb.api.async_api import (  # noqa: F401
+    AsyncBaseAPI,
+    AsyncAdminAPI,
+    AsyncServerAPI,
+)
+
 
 class BaseAPI(ABC):
     @abstractmethod
@@ -432,11 +439,9 @@ class BaseAPI(ABC):
         """
         pass
 
-    @property
     @abstractmethod
-    def max_batch_size(self) -> int:
-        """Return the maximum number of records that can be submitted in a single call
-        to submit_embeddings."""
+    def get_max_batch_size(self) -> int:
+        """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
 

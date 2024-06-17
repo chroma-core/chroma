@@ -1,6 +1,28 @@
 // Assumes that chroma-hnswlib is checked out at the same level as chroma
 #include "../../../hnswlib/hnswlib/hnswlib.h"
 
+class AllowAndDisallowListFilterFunctor : public hnswlib::BaseFilterFunctor
+{
+public:
+    std::unordered_set<hnswlib::labeltype> allow_list;
+    std::unordered_set<hnswlib::labeltype> disallow_list;
+
+    AllowAndDisallowListFilterFunctor(std::unordered_set<hnswlib::labeltype> allow_list, std::unordered_set<hnswlib::labeltype> disallow_list) : allow_list(allow_list), disallow_list(disallow_list) {}
+
+    bool operator()(hnswlib::labeltype id)
+    {
+        if (allow_list.size() > 0 && allow_list.find(id) == allow_list.end())
+        {
+            return false;
+        }
+        if (disallow_list.size() > 0 && disallow_list.find(id) != disallow_list.end())
+        {
+            return false;
+        }
+        return true;
+    }
+};
+
 template <typename dist_t, typename data_t = float>
 class Index
 {
@@ -108,13 +130,31 @@ public:
         return 0;
     }
 
-    void knn_query(const data_t *query_vector, const size_t k, hnswlib::labeltype *ids, data_t *distance)
+    size_t knn_query(const data_t *query_vector, const size_t k, hnswlib::labeltype *ids, data_t *distance, const hnswlib::labeltype *allowed_ids, const size_t allowed_id_length, const hnswlib::labeltype *disallowed_ids, const size_t disallowed_id_length)
     {
         if (!index_inited)
         {
             std::runtime_error("Index not inited");
         }
-        std::priority_queue<std::pair<dist_t, hnswlib::labeltype>> res = appr_alg->searchKnn(query_vector, k);
+
+        std::unordered_set<hnswlib::labeltype> allow_list;
+        std::unordered_set<hnswlib::labeltype> disallow_list;
+        if (allowed_ids != NULL)
+        {
+            for (int i = 0; i < allowed_id_length; i++)
+            {
+                allow_list.insert(allowed_ids[i]);
+            }
+        }
+        if (disallowed_ids != NULL)
+        {
+            for (int i = 0; i < disallowed_id_length; i++)
+            {
+                disallow_list.insert(disallowed_ids[i]);
+            }
+        }
+        AllowAndDisallowListFilterFunctor filter = AllowAndDisallowListFilterFunctor(allow_list, disallow_list);
+        std::priority_queue<std::pair<dist_t, hnswlib::labeltype>> res = appr_alg->searchKnn(query_vector, k, &filter);
         if (res.size() < k)
         {
             // TODO: This is ok and we should return < K results, but for maintining compatibility with the old API we throw an error for now
@@ -128,6 +168,7 @@ public:
             distance[i] = res_i.first;
             res.pop();
         }
+        return total_results;
     }
 
     int get_ef()
@@ -146,6 +187,15 @@ public:
             std::runtime_error("Index not inited");
         }
         appr_alg->ef_ = ef;
+    }
+
+    void resize_index(size_t new_size)
+    {
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
+        appr_alg->resizeIndex(new_size);
     }
 };
 
@@ -186,9 +236,9 @@ extern "C"
         return index->mark_deleted(id);
     }
 
-    void knn_query(Index<float> *index, const float *query_vector, const size_t k, hnswlib::labeltype *ids, float *distance)
+    size_t knn_query(Index<float> *index, const float *query_vector, const size_t k, hnswlib::labeltype *ids, float *distance, const hnswlib::labeltype *allowed_ids, const size_t allowed_id_length, const hnswlib::labeltype *disallowed_ids, const size_t disallowed_id_length)
     {
-        index->knn_query(query_vector, k, ids, distance);
+        return index->knn_query(query_vector, k, ids, distance, allowed_ids, allowed_id_length, disallowed_ids, disallowed_id_length);
     }
 
     int get_ef(Index<float> *index)
@@ -199,5 +249,20 @@ extern "C"
     void set_ef(Index<float> *index, const size_t ef)
     {
         index->set_ef(ef);
+    }
+
+    int len(Index<float> *index)
+    {
+        return index->appr_alg->getCurrentElementCount() - index->appr_alg->getDeletedCount();
+    }
+
+    size_t capacity(Index<float> *index)
+    {
+        return index->appr_alg->max_elements_;
+    }
+
+    void resize_index(Index<float> *index, size_t new_size)
+    {
+        index->resize_index(new_size);
     }
 }

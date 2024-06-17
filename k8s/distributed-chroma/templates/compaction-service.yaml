@@ -1,0 +1,99 @@
+{{if .Values.compactionService.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compaction-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.compactionService.configuration | indent 4 }}
+---
+{{ end }}
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: compaction-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compaction-service
+  template:
+    metadata:
+      labels:
+        app: compaction-service
+        member-type: compaction-service
+    spec:
+      serviceAccountName: compaction-service-serviceaccount
+      {{if .Values.compactionService.configuration}}
+      volumes:
+        - name: compaction-service-config
+          configMap:
+            name: compaction-service-config
+      {{ end }}
+      containers:
+        - name: compaction-service
+          image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          {{if .Values.compactionService.configuration}}
+          volumeMounts:
+            - name: compaction-service-config
+              mountPath: /config/
+          {{ end }}
+          ports:
+            - containerPort: 50051
+          env:
+            {{if .Values.compactionService.configuration}}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{ end }}
+            {{ range .Values.compactionService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+            - name: CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      updateStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          partition: 0
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: compaction-service
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: compaction-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: compaction-service-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: compaction-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

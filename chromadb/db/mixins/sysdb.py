@@ -20,7 +20,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.ingest import CollectionAssignmentPolicy, Producer
+from chromadb.ingest import Producer
 from chromadb.types import (
     Database,
     OptionalArgument,
@@ -35,13 +35,11 @@ from chromadb.types import (
 
 
 class SqlSysDB(SqlDB, SysDB):
-    _assignment_policy: CollectionAssignmentPolicy
-    # Used only to delete topics on collection deletion.
+    # Used only to delete log streams on collection deletion.
     # TODO: refactor to remove this dependency into a separate interface
     _producer: Producer
 
     def __init__(self, system: System):
-        self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         super().__init__(system)
         self._opentelemetry_client = system.require(OpenTelemetryClient)
 
@@ -143,7 +141,6 @@ class SqlSysDB(SqlDB, SysDB):
                 "segment_id": str(segment["id"]),
                 "segment_type": segment["type"],
                 "segment_scope": segment["scope"].value,
-                "segment_topic": str(segment["topic"]),
                 "collection": str(segment["collection"]),
             }
         )
@@ -156,14 +153,12 @@ class SqlSysDB(SqlDB, SysDB):
                     segments.id,
                     segments.type,
                     segments.scope,
-                    segments.topic,
                     segments.collection,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(segment["id"])),
                     ParameterValue(segment["type"]),
                     ParameterValue(segment["scope"].value),
-                    ParameterValue(segment["topic"]),
                     ParameterValue(self.uuid_to_db(segment["collection"])),
                 )
             )
@@ -224,15 +219,14 @@ class SqlSysDB(SqlDB, SysDB):
             else:
                 raise UniqueConstraintError(f"Collection {name} already exists")
 
-        topic = self._assignment_policy.assign_collection(id)
         collection = Collection(
             id=id,
-            topic=topic,
             name=name,
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
             database=database,
+            version=0,
         )
 
         with self.tx() as cur:
@@ -244,14 +238,12 @@ class SqlSysDB(SqlDB, SysDB):
                 .into(collections)
                 .columns(
                     collections.id,
-                    collections.topic,
                     collections.name,
                     collections.dimension,
                     collections.database_id,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
-                    ParameterValue(collection["topic"]),
                     ParameterValue(collection["name"]),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
@@ -287,7 +279,6 @@ class SqlSysDB(SqlDB, SysDB):
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        topic: Optional[str] = None,
         collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         add_attributes_to_current_span(
@@ -295,7 +286,6 @@ class SqlSysDB(SqlDB, SysDB):
                 "segment_id": str(id),
                 "segment_type": type if type else "",
                 "segment_scope": scope.value if scope else "",
-                "segment_topic": topic if topic else "",
                 "collection": str(collection),
             }
         )
@@ -308,12 +298,12 @@ class SqlSysDB(SqlDB, SysDB):
                 segments_t.id,
                 segments_t.type,
                 segments_t.scope,
-                segments_t.topic,
                 segments_t.collection,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .left_join(metadata_t)
             .on(segments_t.id == metadata_t.segment_id)
@@ -325,8 +315,6 @@ class SqlSysDB(SqlDB, SysDB):
             q = q.where(segments_t.type == ParameterValue(type))
         if scope:
             q = q.where(segments_t.scope == ParameterValue(scope.value))
-        if topic:
-            q = q.where(segments_t.topic == ParameterValue(topic))
         if collection:
             q = q.where(
                 segments_t.collection == ParameterValue(self.uuid_to_db(collection))
@@ -342,15 +330,13 @@ class SqlSysDB(SqlDB, SysDB):
                 rows = list(segment_rows)
                 type = str(rows[0][1])
                 scope = SegmentScope(str(rows[0][2]))
-                topic = str(rows[0][3]) if rows[0][3] else None
-                collection = self.uuid_from_db(rows[0][4]) if rows[0][4] else None
+                collection = self.uuid_from_db(rows[0][3]) if rows[0][3] else None
                 metadata = self._metadata_from_rows(rows)
                 segments.append(
                     Segment(
                         id=cast(UUID, id),
                         type=type,
                         scope=scope,
-                        topic=topic,
                         collection=collection,
                         metadata=metadata,
                     )
@@ -363,7 +349,6 @@ class SqlSysDB(SqlDB, SysDB):
     def get_collections(
         self,
         id: Optional[UUID] = None,
-        topic: Optional[str] = None,
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -380,7 +365,6 @@ class SqlSysDB(SqlDB, SysDB):
         add_attributes_to_current_span(
             {
                 "collection_id": str(id),
-                "collection_topic": topic if topic else "",
                 "collection_name": name if name else "",
             }
         )
@@ -394,7 +378,6 @@ class SqlSysDB(SqlDB, SysDB):
             .select(
                 collections_t.id,
                 collections_t.name,
-                collections_t.topic,
                 collections_t.dimension,
                 databases_t.name,
                 databases_t.tenant_id,
@@ -402,6 +385,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata_t.str_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
@@ -411,8 +395,6 @@ class SqlSysDB(SqlDB, SysDB):
         )
         if id:
             q = q.where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
-        if topic:
-            q = q.where(collections_t.topic == ParameterValue(topic))
         if name:
             q = q.where(collections_t.name == ParameterValue(name))
 
@@ -439,24 +421,25 @@ class SqlSysDB(SqlDB, SysDB):
                 id = self.uuid_from_db(str(collection_id))
                 rows = list(collection_rows)
                 name = str(rows[0][1])
-                topic = str(rows[0][2])
-                dimension = int(rows[0][3]) if rows[0][3] else None
+                dimension = int(rows[0][2]) if rows[0][2] else None
                 metadata = self._metadata_from_rows(rows)
                 collections.append(
                     Collection(
                         id=cast(UUID, id),
-                        topic=topic,
                         name=name,
                         metadata=metadata,
                         dimension=dimension,
-                        tenant=str(rows[0][5]),
-                        database=str(rows[0][4]),
+                        tenant=str(rows[0][4]),
+                        database=str(rows[0][3]),
+                        version=0,
                     )
                 )
 
             # apply limit and offset
             if limit is not None:
-                collections = collections[offset:offset+limit]
+                if offset is None:
+                    offset = 0
+                collections = collections[offset : offset + limit]
             else:
                 collections = collections[offset:]
 
@@ -494,7 +477,8 @@ class SqlSysDB(SqlDB, SysDB):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        """Delete a topic and all associated segments from the SysDB"""
+        """Delete a collection and all associated segments from the SysDB. Deletes
+        the log stream for this collection as well."""
         add_attributes_to_current_span(
             {
                 "collection_id": str(id),
@@ -519,18 +503,17 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             # no need for explicit del from metadata table because of ON DELETE CASCADE
             sql, params = get_sql(q, self.parameter_format())
-            sql = sql + " RETURNING id, topic"
+            sql = sql + " RETURNING id"
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
-        self._producer.delete_topic(result[1])
+        self._producer.delete_log(result[0])
 
     @trace_method("SqlSysDB.update_segment", OpenTelemetryGranularity.ALL)
     @override
     def update_segment(
         self,
         id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
         collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
@@ -548,9 +531,6 @@ class SqlSysDB(SqlDB, SysDB):
             .update(segments_t)
             .where(segments_t.id == ParameterValue(self.uuid_to_db(id)))
         )
-
-        if not topic == Unspecified():
-            q = q.set(segments_t.topic, ParameterValue(topic))
 
         if not collection == Unspecified():
             collection = cast(Optional[UUID], collection)
@@ -589,7 +569,6 @@ class SqlSysDB(SqlDB, SysDB):
     def update_collection(
         self,
         id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
@@ -607,9 +586,6 @@ class SqlSysDB(SqlDB, SysDB):
             .update(collections_t)
             .where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
         )
-
-        if not topic == Unspecified():
-            q = q.set(collections_t.topic, ParameterValue(topic))
 
         if not name == Unspecified():
             q = q.set(collections_t.name, ParameterValue(name))
@@ -662,15 +638,17 @@ class SqlSysDB(SqlDB, SysDB):
                 "num_rows": len(rows),
             }
         )
-        metadata: Dict[str, Union[str, int, float]] = {}
+        metadata: Dict[str, Union[str, int, float, bool]] = {}
         for row in rows:
-            key = str(row[-4])
-            if row[-3] is not None:
-                metadata[key] = str(row[-3])
+            key = str(row[-5])
+            if row[-4] is not None:
+                metadata[key] = str(row[-4])
+            elif row[-3] is not None:
+                metadata[key] = int(row[-3])
             elif row[-2] is not None:
-                metadata[key] = int(row[-2])
+                metadata[key] = float(row[-2])
             elif row[-1] is not None:
-                metadata[key] = float(row[-1])
+                metadata[key] = bool(row[-1])
         return metadata or None
 
     @trace_method("SqlSysDB._insert_metadata", OpenTelemetryGranularity.ALL)
@@ -711,15 +689,28 @@ class SqlSysDB(SqlDB, SysDB):
                 table.str_value,
                 table.int_value,
                 table.float_value,
+                table.bool_value,
             )
         )
         sql_id = self.uuid_to_db(id)
         for k, v in metadata.items():
-            if isinstance(v, str):
+            # Note: The order is important here because isinstance(v, bool)
+            # and isinstance(v, int) both are true for v of bool type.
+            if isinstance(v, bool):
+                q = q.insert(
+                    ParameterValue(sql_id),
+                    ParameterValue(k),
+                    None,
+                    None,
+                    None,
+                    ParameterValue(int(v)),
+                )
+            elif isinstance(v, str):
                 q = q.insert(
                     ParameterValue(sql_id),
                     ParameterValue(k),
                     ParameterValue(v),
+                    None,
                     None,
                     None,
                 )
@@ -730,6 +721,7 @@ class SqlSysDB(SqlDB, SysDB):
                     None,
                     ParameterValue(v),
                     None,
+                    None,
                 )
             elif isinstance(v, float):
                 q = q.insert(
@@ -738,6 +730,7 @@ class SqlSysDB(SqlDB, SysDB):
                     None,
                     None,
                     ParameterValue(v),
+                    None,
                 )
             elif v is None:
                 continue

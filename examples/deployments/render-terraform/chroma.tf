@@ -38,16 +38,13 @@ resource "render_service" "chroma" {
       value = var.chroma_data_volume_mount_path
     },
     ],
-    var.enable_auth ? [{
-      key   = "CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER"
-      value = "chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
-      },
+    var.enable_auth ? [
       {
-        key   = "CHROMA_SERVER_AUTH_CREDENTIALS"
+        key   = "CHROMA_SERVER_AUTHN_CREDENTIALS"
         value = "${local.token_auth_credentials.token}"
       },
       {
-        key   = "CHROMA_SERVER_AUTH_PROVIDER"
+        key   = "CHROMA_SERVER_AUTHN_PROVIDER"
         value = var.auth_type
     }] : []
   )

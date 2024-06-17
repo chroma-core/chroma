@@ -5,7 +5,7 @@ use crate::{
 };
 use thiserror::Error;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ScalarEncoding {
     FLOAT32,
     INT32,

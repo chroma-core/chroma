@@ -1,3 +1,3 @@
 export interface IEmbeddingFunction {
-    generate(texts: string[]): Promise<number[][]>;
+  generate(texts: string[]): Promise<number[][]>;
 }

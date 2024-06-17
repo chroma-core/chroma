@@ -2,7 +2,7 @@ from typing import Dict, Optional
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
-from chromadb.auth.token import TokenTransportHeader
+from chromadb.auth.token_authn import TokenTransportHeader
 import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
 from chromadb.api import AdminAPI, ClientAPI
@@ -37,21 +37,27 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "TokenTransportHeader",
 ]
 
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.24"
+__version__ = "0.5.0"
+
 
 # Workaround to deal with Colab's old sqlite3 version
-try:
-    import google.colab  # noqa: F401
+def is_in_colab() -> bool:
+    try:
+        import google.colab  # noqa: F401
 
-    IN_COLAB = True
-except ImportError:
-    IN_COLAB = False
+        return True
+    except ImportError:
+        return False
+
+
+IN_COLAB = is_in_colab()
 
 is_client = False
 try:
@@ -246,11 +252,11 @@ def CloudClient(
     # Always use SSL for cloud
     settings.chroma_server_ssl_enabled = enable_ssl
 
-    settings.chroma_client_auth_provider = "chromadb.auth.token.TokenAuthClientProvider"
-    settings.chroma_client_auth_credentials = api_key
-    settings.chroma_client_auth_token_transport_header = (
-        TokenTransportHeader.X_CHROMA_TOKEN.name
+    settings.chroma_client_auth_provider = (
+        "chromadb.auth.token_authn.TokenAuthClientProvider"
     )
+    settings.chroma_client_auth_credentials = api_key
+    settings.chroma_auth_token_transport_header = TokenTransportHeader.X_CHROMA_TOKEN
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 

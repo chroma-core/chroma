@@ -21,16 +21,19 @@ class ScalarEncoding(Enum):
 class SegmentScope(Enum):
     VECTOR = "VECTOR"
     METADATA = "METADATA"
+    RECORD = "RECORD"
 
 
 class Collection(TypedDict):
     id: UUID
     name: str
-    topic: str
     metadata: Optional[Metadata]
     dimension: Optional[int]
     tenant: str
     database: str
+    # The version is only used in the distributed version of chroma
+    # in single-node chroma, this field is always 0
+    version: int
 
 
 class Database(TypedDict):
@@ -47,9 +50,6 @@ class Segment(TypedDict):
     id: UUID
     type: NamespacedName
     scope: SegmentScope
-    # If a segment has a topic, it implies that this segment is a consumer of the topic
-    # and indexes the contents of the topic.
-    topic: Optional[str]
     # If a segment has a collection, it implies that this segment implements the full
     # collection and can be used to service queries (for it's given scope.)
     collection: Optional[UUID]
@@ -57,9 +57,9 @@ class Segment(TypedDict):
 
 
 # SeqID can be one of three types of value in our current and future plans:
-# 1. A Pulsar MessageID encoded as a 192-bit integer
-# 2. A Pulsar MessageIndex (a 64-bit integer)
-# 3. A SQL RowID (a 64-bit integer)
+# 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
+# 2. A Pulsar MessageIndex (a 64-bit integer) -  This is no longer used as we removed pulsar
+# 3. A SQL RowID (a 64-bit integer) - This is used by both sqlite and the new log-service
 
 # All three of these types can be expressed as a Python int, so that is the type we
 # use in the internal Python API. However, care should be taken that the larger 192-bit
@@ -79,42 +79,25 @@ Vector = Union[Sequence[float], Sequence[int]]
 
 class VectorEmbeddingRecord(TypedDict):
     id: str
-    seq_id: SeqId
     embedding: Vector
 
 
 class MetadataEmbeddingRecord(TypedDict):
     id: str
-    seq_id: SeqId
     metadata: Optional[Metadata]
 
 
-class EmbeddingRecord(TypedDict):
-    id: str
-    seq_id: SeqId
-    embedding: Optional[Vector]
-    encoding: Optional[ScalarEncoding]
-    metadata: Optional[UpdateMetadata]
-    operation: Operation
-    # The collection the operation is being performed on
-    # This is optional because in the single node version,
-    # topics are 1:1 with collections. So consumers of the ingest queue
-    # implicitly know this mapping. However, in the multi-node version,
-    # topics are shared between collections, so we need to explicitly
-    # specify the collection.
-    # For backwards compatability reasons, we can't make this a required field on
-    # single node, since data written with older versions of the code won't be able to
-    # populate it.
-    collection_id: Optional[UUID]
-
-
-class SubmitEmbeddingRecord(TypedDict):
+class OperationRecord(TypedDict):
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
-    collection_id: UUID  # The collection the operation is being performed on
+
+
+class LogRecord(TypedDict):
+    log_offset: int
+    record: OperationRecord
 
 
 class VectorQuery(TypedDict):
@@ -131,7 +114,6 @@ class VectorQueryResult(TypedDict):
     """A KNN/ANN query result"""
 
     id: str
-    seq_id: SeqId
     distance: float
     embedding: Optional[Vector]
 

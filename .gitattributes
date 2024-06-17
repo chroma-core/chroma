@@ -1,2 +1,4 @@
 *_pb2.py* linguist-generated
 *_pb2_grpc.py* linguist-generated
+go/database/**/db/** linguist-generated=true
+go/pkg/proto/** linguist-generated=true
