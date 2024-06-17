@@ -571,6 +571,7 @@ class SqliteMetadataSegment(MetadataReader):
             elif k == "$contains":
                 v = cast(str, v)
                 search_term = f"%{v}%"
+
                 sq = (
                     self._db.querybuilder()
                     .from_(fulltext_t)

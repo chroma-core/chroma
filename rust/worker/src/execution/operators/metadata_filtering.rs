@@ -19,7 +19,6 @@ use crate::{
 };
 use core::panic;
 use futures::stream::Count;
-use regex::Regex;
 use roaring::RoaringBitmap;
 use std::{
     collections::{HashMap, HashSet},
@@ -523,10 +522,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         }
                         match record.merged_document_ref() {
                             Some(doc) => {
-                                // Replace all occurences of _ and % with . in query.
-                                let normalized_query = query.replace("_", ".").replace("%", ".");
-                                let re = Regex::new(normalized_query.as_str()).unwrap();
-                                if re.is_match(doc) {
+                                if doc.contains(query) {
                                     matching_contains.push(record.offset_id as i32);
                                 }
                             }
