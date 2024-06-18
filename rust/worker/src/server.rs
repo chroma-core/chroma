@@ -540,6 +540,7 @@ mod tests {
     use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
+    use crate::types::{Collection, Segment};
 
     use super::*;
     use chroma_proto::vector_reader_client::VectorReaderClient;
@@ -547,7 +548,42 @@ mod tests {
 
     #[tokio::test]
     async fn foo() {
-        let sysdb = TestSysDb::new();
+        let mut sysdb = TestSysDb::new();
+
+        // Add some data for testing
+        let collection_uuid = Uuid::new_v4();
+        let collection = Collection {
+            id: collection_uuid,
+            name: "foo".to_string(),
+            metadata: None,
+            dimension: Some(1),
+            tenant: "foo".to_string(),
+            database: "foo".to_string(),
+            log_position: -1,
+            version: 0,
+        };
+        sysdb.add_collection(collection);
+
+        let record_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(collection_uuid),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        sysdb.add_segment(record_segment.clone());
+
+        let hnsw_segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::HnswDistributed,
+            scope: crate::types::SegmentScope::VECTOR,
+            collection: Some(collection_uuid),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        sysdb.add_segment(hnsw_segment.clone());
+
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
@@ -577,6 +613,7 @@ mod tests {
             let _ = crate::server::WorkerServer::run(server).await;
         });
 
+        // Test response when handler panics
         let err_response = VectorReaderClient::connect(format!("http://localhost:{}", port))
             .await
             .unwrap()
@@ -595,5 +632,17 @@ mod tests {
         assert!(err_response
             .message()
             .contains("throwing panic for testing"));
+
+        // A well-formatted request should still work, even after a panic was thrown
+        let response = VectorReaderClient::connect(format!("http://localhost:{}", port))
+            .await
+            .unwrap()
+            .get_vectors(Request::new(GetVectorsRequest {
+                segment_id: hnsw_segment.id.to_string(),
+                ids: vec![],
+            }))
+            .await;
+
+        assert!(response.is_ok());
     }
 }

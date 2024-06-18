@@ -61,7 +61,7 @@ where
                     } else if let Some(s) = err.downcast_ref::<&str>() {
                         format!("Service panicked: {}", s)
                     } else {
-                        "Service panicked but `CatchPanic` was unable to downcast the panic info"
+                        "Service panicked but `CatchPanicMiddleware` was unable to downcast the panic info"
                             .to_string()
                     };
                     tracing::error!("{}", message);
