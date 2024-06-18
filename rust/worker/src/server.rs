@@ -606,7 +606,7 @@ mod tests {
             "Service panicked: Intentional panic triggered"
         );
 
-        // A well-formatted request should still work, even after a panic was thrown
+        // The server should still work, even after a panic was thrown
         let response = client.get_info(Request::new(())).await;
         assert!(response.is_ok());
     }
