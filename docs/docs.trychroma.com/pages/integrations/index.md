@@ -24,6 +24,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Jina AI](/integrations/jinaai) | ✅  | ✅ |
 | [Roboflow](/integrations/roboflow) | ✅  | ➖ |
 | [Ollama Embeddings](/integrations/ollama) | ✅  | ✅ |
+| [MlX Embedding](/integrations/mlx) | ✅  |  ➖ |
 
 
 ***
