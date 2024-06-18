@@ -613,10 +613,12 @@ mod tests {
             let _ = crate::server::WorkerServer::run(server).await;
         });
 
-        // Test response when handler panics
-        let err_response = VectorReaderClient::connect(format!("http://localhost:{}", port))
+        let mut client = VectorReaderClient::connect(format!("http://localhost:{}", port))
             .await
-            .unwrap()
+            .unwrap();
+
+        // Test response when handler panics
+        let err_response = client
             .query_vectors(Request::new(QueryVectorsRequest {
                 segment_id: "00000000-0000-0000-0000-000000000000".to_string(),
                 vectors: vec![],
@@ -634,9 +636,7 @@ mod tests {
             .contains("throwing panic for testing"));
 
         // A well-formatted request should still work, even after a panic was thrown
-        let response = VectorReaderClient::connect(format!("http://localhost:{}", port))
-            .await
-            .unwrap()
+        let response = client
             .get_vectors(Request::new(GetVectorsRequest {
                 segment_id: hnsw_segment.id.to_string(),
                 ids: vec![],
