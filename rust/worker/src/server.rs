@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
-use crate::catch_panic::CatchPanicLayer;
 use crate::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -23,6 +22,7 @@ use crate::system::{Receiver, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
+use crate::utils::catch_panic_middleware::CatchPanicLayer;
 use async_trait::async_trait;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
@@ -547,7 +547,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn foo() {
+    async fn gracefully_handles_panics() {
         let mut sysdb = TestSysDb::new();
 
         // Add some data for testing

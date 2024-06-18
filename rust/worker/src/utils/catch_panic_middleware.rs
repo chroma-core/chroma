@@ -9,6 +9,7 @@ use hyper::body::Body;
 use tonic::body::BoxBody;
 use tower::{Layer, Service};
 
+/// Middleware layer for Tonic services that catches panics and returns an internal server error.
 #[derive(Debug, Clone, Default)]
 pub struct CatchPanicLayer;
 
