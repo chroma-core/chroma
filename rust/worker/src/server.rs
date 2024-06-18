@@ -96,18 +96,23 @@ impl WorkerServer {
             ))
             .add_service(
                 chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker.clone()),
-            )
-            .serve_with_shutdown(addr, async {
-                let mut sigterm = match signal(SignalKind::terminate()) {
-                    Ok(sigterm) => sigterm,
-                    Err(e) => {
-                        tracing::error!("Failed to create signal handler: {:?}", e);
-                        return;
-                    }
-                };
-                sigterm.recv().await;
-                tracing::info!("Received SIGTERM, shutting down");
-            });
+            );
+
+        #[cfg(debug_assertions)]
+        let server =
+            server.add_service(chroma_proto::debug_server::DebugServer::new(worker.clone()));
+
+        let server = server.serve_with_shutdown(addr, async {
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(sigterm) => sigterm,
+                Err(e) => {
+                    tracing::error!("Failed to create signal handler: {:?}", e);
+                    return;
+                }
+            };
+            sigterm.recv().await;
+            tracing::info!("Received SIGTERM, shutting down");
+        });
 
         server.await?;
         Ok(())
@@ -132,13 +137,6 @@ impl WorkerServer {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
-
-        #[cfg(debug_assertions)]
-        {
-            if segment_uuid == Uuid::nil() {
-                panic!("Invalid Segment UUID (throwing panic for testing)");
-            }
-        }
 
         let mut proto_results_for_all = Vec::new();
 
@@ -532,6 +530,25 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
     }
 }
 
+#[tonic::async_trait]
+impl chroma_proto::debug_server::Debug for WorkerServer {
+    async fn get_info(
+        &self,
+        _: Request<()>,
+    ) -> Result<Response<chroma_proto::GetInfoResponse>, Status> {
+        let response = chroma_proto::GetInfoResponse {
+            version: option_env!("CARGO_PKG_VERSION")
+                .unwrap_or("unknown")
+                .to_string(),
+        };
+        Ok(Response::new(response))
+    }
+
+    async fn trigger_panic(&self, _: Request<()>) -> Result<Response<()>, Status> {
+        panic!("Intentional panic triggered");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::execution::dispatcher;
@@ -540,50 +557,14 @@ mod tests {
     use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
-    use crate::types::{Collection, Segment};
 
     use super::*;
-    use chroma_proto::vector_reader_client::VectorReaderClient;
+    use chroma_proto::debug_client::DebugClient;
     use tempfile::tempdir;
 
     #[tokio::test]
     async fn gracefully_handles_panics() {
-        let mut sysdb = TestSysDb::new();
-
-        // Add some data for testing
-        let collection_uuid = Uuid::new_v4();
-        let collection = Collection {
-            id: collection_uuid,
-            name: "foo".to_string(),
-            metadata: None,
-            dimension: Some(1),
-            tenant: "foo".to_string(),
-            database: "foo".to_string(),
-            log_position: -1,
-            version: 0,
-        };
-        sysdb.add_collection(collection);
-
-        let record_segment = Segment {
-            id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(collection_uuid),
-            metadata: None,
-            file_path: HashMap::new(),
-        };
-        sysdb.add_segment(record_segment.clone());
-
-        let hnsw_segment = Segment {
-            id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::HnswDistributed,
-            scope: crate::types::SegmentScope::VECTOR,
-            collection: Some(collection_uuid),
-            metadata: None,
-            file_path: HashMap::new(),
-        };
-        sysdb.add_segment(hnsw_segment.clone());
-
+        let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
@@ -613,36 +594,20 @@ mod tests {
             let _ = crate::server::WorkerServer::run(server).await;
         });
 
-        let mut client = VectorReaderClient::connect(format!("http://localhost:{}", port))
+        let mut client = DebugClient::connect(format!("http://localhost:{}", port))
             .await
             .unwrap();
 
         // Test response when handler panics
-        let err_response = client
-            .query_vectors(Request::new(QueryVectorsRequest {
-                segment_id: "00000000-0000-0000-0000-000000000000".to_string(),
-                vectors: vec![],
-                k: 10,
-                allowed_ids: vec![],
-                include_embeddings: false,
-            }))
-            .await
-            .unwrap_err();
-
+        let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
         assert_eq!(err_response.code(), tonic::Code::Internal);
-        assert!(err_response.message().contains("Service panicked"));
-        assert!(err_response
-            .message()
-            .contains("throwing panic for testing"));
+        assert_eq!(
+            err_response.message(),
+            "Service panicked: Intentional panic triggered"
+        );
 
         // A well-formatted request should still work, even after a panic was thrown
-        let response = client
-            .get_vectors(Request::new(GetVectorsRequest {
-                segment_id: hnsw_segment.id.to_string(),
-                ids: vec![],
-            }))
-            .await;
-
+        let response = client.get_info(Request::new(())).await;
         assert!(response.is_ok());
     }
 }

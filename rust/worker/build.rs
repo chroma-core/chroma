@@ -1,15 +1,17 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the protobuf files in the chromadb proto directory.
+    let mut proto_paths = vec![
+        "../../idl/chromadb/proto/chroma.proto",
+        "../../idl/chromadb/proto/coordinator.proto",
+        "../../idl/chromadb/proto/logservice.proto",
+    ];
+
+    #[cfg(debug_assertions)]
+    proto_paths.push("../../idl/chromadb/proto/debug.proto");
+
     tonic_build::configure()
         .emit_rerun_if_changed(true)
-        .compile(
-            &[
-                "../../idl/chromadb/proto/chroma.proto",
-                "../../idl/chromadb/proto/coordinator.proto",
-                "../../idl/chromadb/proto/logservice.proto",
-            ],
-            &["../../idl/"],
-        )?;
+        .compile(&proto_paths, &["../../idl/"])?;
 
     // Compile the hnswlib bindings.
     cc::Build::new()
