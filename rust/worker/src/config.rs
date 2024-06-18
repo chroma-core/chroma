@@ -170,6 +170,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -204,6 +206,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -262,6 +266,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -296,6 +302,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -372,6 +380,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -406,6 +416,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -476,6 +488,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
@@ -508,6 +522,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
