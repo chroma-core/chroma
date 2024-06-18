@@ -178,6 +178,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -208,6 +210,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -262,6 +266,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -292,6 +298,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -364,6 +372,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -394,6 +404,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -452,6 +464,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -476,6 +490,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
