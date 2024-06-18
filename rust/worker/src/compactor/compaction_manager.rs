@@ -112,7 +112,7 @@ impl CompactionManager {
                     dispatcher.clone(),
                     None,
                     None,
-                    Arc::new(AtomicU32::new(1)),
+                    Arc::new(AtomicU32::new(0)),
                 );
 
                 match orchestrator.run().await {

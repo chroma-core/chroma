@@ -260,24 +260,48 @@ pub(crate) struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
     pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
     pub(crate) logs: Chunk<LogRecord>,
-    pub(crate) offset_id: Arc<AtomicU32>,
+    // Is None for readers. In that case, the materializer reads
+    // the current maximum from the record segment and uses that
+    // for materializing. Writers pass this value to the materializer
+    // because they need to share this across all log partitions.
+    pub(crate) curr_offset_id: Option<Arc<AtomicU32>>,
 }
 
 impl<'me> LogMaterializer<'me> {
     pub(crate) fn new(
         record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
-        offset_id: Arc<AtomicU32>,
+        curr_offset_id: Option<Arc<AtomicU32>>,
     ) -> Self {
         Self {
             record_segment_reader,
             logs,
-            offset_id,
+            curr_offset_id,
         }
     }
     pub(crate) async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
+        let next_offset_id;
+        match self.curr_offset_id.as_ref() {
+            Some(curr_offset_id) => {
+                next_offset_id = curr_offset_id.clone();
+                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            None => {
+                match self.record_segment_reader.as_ref() {
+                    Some(reader) => {
+                        next_offset_id = reader.get_current_max_offset_id();
+                        next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    // This means that the segment is uninitialized so counting starts
+                    // from 1.
+                    None => {
+                        next_offset_id = Arc::new(AtomicU32::new(1));
+                    }
+                };
+            }
+        }
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
@@ -332,9 +356,8 @@ impl<'me> LogMaterializer<'me> {
                     if !new_id_to_materialized.contains_key(log_record.record.id.as_str())
                         && !invalid_adds.contains(log_record.record.id.as_str())
                     {
-                        let next_offset_id = self
-                            .offset_id
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let next_offset_id =
+                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset_id,
@@ -468,9 +491,8 @@ impl<'me> LogMaterializer<'me> {
                         record_from_map.final_operation = Operation::Add;
                     } else {
                         // Insert.
-                        let next_offset_id = self
-                            .offset_id
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let next_offset_id =
+                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset_id,
@@ -624,8 +646,7 @@ mod tests {
                     };
                 }
             };
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -690,7 +711,7 @@ mod tests {
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
-            offset_id: Arc::new(AtomicU32::new(3)),
+            curr_offset_id: None,
         };
         let res = materializer
             .materialize()
