@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::blockstore::provider::BlockfileProvider;
+use crate::catch_panic::CatchPanicLayer;
 use crate::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -89,6 +90,7 @@ impl WorkerServer {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
         let server = Server::builder()
+            .layer(CatchPanicLayer::default())
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
                 worker.clone(),
             ))
@@ -130,6 +132,13 @@ impl WorkerServer {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
+
+        #[cfg(debug_assertions)]
+        {
+            if segment_uuid == Uuid::nil() {
+                panic!("Invalid Segment UUID (throwing panic for testing)");
+            }
+        }
 
         let mut proto_results_for_all = Vec::new();
 
@@ -520,5 +529,71 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         self.query_metadata_instrumented(request)
             .instrument(instrumented_span)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::execution::dispatcher;
+    use crate::log::log::InMemoryLog;
+    use crate::storage::local::LocalStorage;
+    use crate::storage::Storage;
+    use crate::sysdb::test_sysdb::TestSysDb;
+    use crate::system;
+
+    use super::*;
+    use chroma_proto::vector_reader_client::VectorReaderClient;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn foo() {
+        let sysdb = TestSysDb::new();
+        let log = InMemoryLog::new();
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+        let mut server = WorkerServer {
+            dispatcher: None,
+            system: None,
+            sysdb: Box::new(SysDb::Test(sysdb)),
+            log: Box::new(Log::InMemory(log)),
+            hnsw_index_provider: HnswIndexProvider::new(
+                storage.clone(),
+                tmp_dir.path().to_path_buf(),
+            ),
+            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            port,
+        };
+
+        let system: system::System = system::System::new();
+        let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        server.set_system(system.clone());
+        server.set_dispatcher(dispatcher_handle.receiver());
+
+        tokio::spawn(async move {
+            let _ = crate::server::WorkerServer::run(server).await;
+        });
+
+        let err_response = VectorReaderClient::connect(format!("http://localhost:{}", port))
+            .await
+            .unwrap()
+            .query_vectors(Request::new(QueryVectorsRequest {
+                segment_id: "00000000-0000-0000-0000-000000000000".to_string(),
+                vectors: vec![],
+                k: 10,
+                allowed_ids: vec![],
+                include_embeddings: false,
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err_response.code(), tonic::Code::Internal);
+        assert!(err_response.message().contains("Service panicked"));
+        assert!(err_response
+            .message()
+            .contains("throwing panic for testing"));
     }
 }

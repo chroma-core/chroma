@@ -1,5 +1,6 @@
 mod assignment;
 mod blockstore;
+mod catch_panic;
 mod compactor;
 mod config;
 pub mod distance;
