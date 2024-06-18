@@ -28,6 +28,20 @@ impl From<SegmentType> for String {
     }
 }
 
+impl TryFrom<&str> for SegmentType {
+    type Error = SegmentConversionError;
+
+    fn try_from(segment_type: &str) -> Result<Self, Self::Error> {
+        match segment_type {
+            "urn:chroma:segment/vector/hnsw-distributed" => Ok(SegmentType::HnswDistributed),
+            "urn:chroma:segment/record/blockfile" => Ok(SegmentType::BlockfileRecord),
+            "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
+            "urn:chroma:segment/metadata/blockfile" => Ok(SegmentType::BlockfileMetadata),
+            _ => Err(SegmentConversionError::InvalidSegmentType),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Segment {
     pub(crate) id: Uuid,
