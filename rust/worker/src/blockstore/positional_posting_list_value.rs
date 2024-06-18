@@ -113,6 +113,8 @@ impl PositionalPostingListBuilder {
             return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
         }
 
+        // Safe to unwrap here since this is called for >= 2nd time a token
+        // exists in the document.
         self.positions.get_mut(&doc_id).unwrap().extend(positions);
         Ok(())
     }

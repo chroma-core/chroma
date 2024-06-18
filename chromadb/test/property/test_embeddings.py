@@ -26,6 +26,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
+from chromadb.test.conftest import reset
 import numpy as np
 
 
@@ -75,7 +76,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
-        self.api.reset()
+        reset(self.api)
         self.collection = self.api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
@@ -306,7 +307,7 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
 
 
 def test_multi_add(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
@@ -325,7 +326,7 @@ def test_multi_add(api: ServerAPI) -> None:
 
 
 def test_dup_add(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
@@ -334,7 +335,7 @@ def test_dup_add(api: ServerAPI) -> None:
 
 
 def test_query_without_add(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
     N = np.random.randint(1, 2000)
@@ -349,7 +350,7 @@ def test_query_without_add(api: ServerAPI) -> None:
 
 
 def test_get_non_existent(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
     assert len(result["ids"]) == 0
@@ -361,7 +362,7 @@ def test_get_non_existent(api: ServerAPI) -> None:
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
 def test_escape_chars_in_ids(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     id = "\x1f"
     coll = api.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])
@@ -381,7 +382,7 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
     ],
 )
 def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     with pytest.raises(Exception) as e:
         coll.delete(**kwargs)
@@ -404,7 +405,7 @@ def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
     ],
 )
 def test_delete_success(api: ServerAPI, kwargs: dict):
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)

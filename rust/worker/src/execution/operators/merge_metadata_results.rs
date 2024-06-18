@@ -6,11 +6,8 @@ use crate::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    types::{
-        update_metdata_to_metdata, LogRecord, Metadata, MetadataValueConversionError, Operation,
-        Segment,
-    },
-    utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
+    types::{LogRecord, Metadata, MetadataValueConversionError, Operation, Segment},
+    utils::merge_sorted_vecs_conjunction,
 };
 use async_trait::async_trait;
 use std::{
