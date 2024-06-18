@@ -1,4 +1,4 @@
-import requests
+import httpx
 import zipfile
 import io
 import os
@@ -10,7 +10,7 @@ DLL_URL = "https://www.sqlite.org/2023/sqlite-dll-win64-x64-3420000.zip"
 
 if __name__ == "__main__":
     # Download and extract the DLL
-    r = requests.get(DLL_URL)
+    r = httpx.get(DLL_URL)
     z = zipfile.ZipFile(io.BytesIO(r.content))
     z.extractall(".")
     # Print current Python path

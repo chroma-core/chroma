@@ -1,7 +1,10 @@
-from typing import Optional
+from typing import Any, Dict, Optional, TypeVar
 from urllib.parse import quote, urlparse, urlunparse
 import logging
+import orjson as json
+import httpx
 
+import chromadb.errors as errors
 from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -57,3 +60,38 @@ class BaseHTTPClient:
         )
 
         return full_url
+
+    # requests removes None values from the built query string, but httpx includes it as an empty value
+    T = TypeVar("T", bound=Dict[Any, Any])
+
+    @staticmethod
+    def _clean_params(params: T) -> T:
+        """Remove None values from provided dict."""
+        return {k: v for k, v in params.items() if v is not None}  # type: ignore
+
+    @staticmethod
+    def _raise_chroma_error(resp: httpx.Response) -> None:
+        """Raises an error if the response is not ok, using a ChromaError if possible."""
+        try:
+            resp.raise_for_status()
+            return
+        except httpx.HTTPStatusError:
+            pass
+
+        chroma_error = None
+        try:
+            body = json.loads(resp.text)
+            if "error" in body:
+                if body["error"] in errors.error_types:
+                    chroma_error = errors.error_types[body["error"]](body["message"])
+
+        except BaseException:
+            pass
+
+        if chroma_error:
+            raise chroma_error
+
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            raise (Exception(resp.text))

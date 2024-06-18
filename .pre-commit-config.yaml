@@ -45,7 +45,6 @@ repos:
           ]
         additional_dependencies:
           [
-            "types-requests",
             "pydantic",
             "overrides",
             "hypothesis",
