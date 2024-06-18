@@ -12,12 +12,14 @@ use super::config::StorageConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
+use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_smithy_types::byte_stream::ByteStream;
 use std::clone::Clone;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncBufRead;
 
@@ -227,6 +229,10 @@ impl Configurable<StorageConfig> for S3Storage {
                             "loaded-from-env",
                         );
 
+                        let timeout_config_builder = TimeoutConfigBuilder::default()
+                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
+                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
+
                         // Set up s3 client
                         let config = aws_sdk_s3::config::Builder::new()
                             .endpoint_url("http://minio.chroma:9000".to_string())
@@ -234,6 +240,7 @@ impl Configurable<StorageConfig> for S3Storage {
                             .behavior_version_latest()
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))
                             .force_path_style(true)
+                            .timeout_config(timeout_config_builder.build())
                             .build();
                         aws_sdk_s3::Client::from_conf(config)
                     }

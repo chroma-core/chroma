@@ -24,6 +24,8 @@ query_service:
         S3:
             bucket: "chroma-storage"
             credentials: "Minio"
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     log:
         Grpc:
             host: "logservice.chroma"
@@ -56,6 +58,8 @@ compaction_service:
         S3:
             bucket: "chroma-storage"
             credentials: "Minio"
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     log:
         Grpc:
             host: "logservice.chroma"
