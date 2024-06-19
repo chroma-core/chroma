@@ -6,6 +6,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../idl/chromadb/proto/logservice.proto",
     ];
 
+    // Can't use #[cfg(test)] here because a build for tests is technically a regular debug build, meaning that #[cfg(test)] is useless in build.rs.
+    // See https://github.com/rust-lang/cargo/issues/1581
     #[cfg(debug_assertions)]
     proto_paths.push("../../idl/chromadb/proto/debug.proto");
 
