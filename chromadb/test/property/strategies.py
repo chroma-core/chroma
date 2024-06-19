@@ -61,11 +61,7 @@ class RecordSet(TypedDict):
 
     ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-<<<<<<< HEAD
     metadatas: Optional[Union[List[Optional[types.Metadata]], types.Metadata]]
-=======
-    metadatas: OneOrMany[Optional[Metadata]] | None
->>>>>>> d0a7570a ([TST] Make metadata strategy return valid metadata and remove invariant in favor of point test)
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
