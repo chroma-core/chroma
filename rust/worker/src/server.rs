@@ -22,7 +22,6 @@ use crate::system::{Receiver, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
-use crate::utils::CatchPanicLayer;
 use async_trait::async_trait;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
@@ -90,7 +89,6 @@ impl WorkerServer {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
         let server = Server::builder()
-            .layer(CatchPanicLayer::default())
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
                 worker.clone(),
             ))
@@ -600,11 +598,7 @@ mod tests {
 
         // Test response when handler panics
         let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
-        assert_eq!(err_response.code(), tonic::Code::Internal);
-        assert_eq!(
-            err_response.message(),
-            "Service panicked: Intentional panic triggered"
-        );
+        assert_eq!(err_response.code(), tonic::Code::Cancelled);
 
         // The server should still work, even after a panic was thrown
         let response = client.get_info(Request::new(())).await;
