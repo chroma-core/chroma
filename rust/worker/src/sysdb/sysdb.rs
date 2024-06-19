@@ -2,9 +2,11 @@ use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use crate::chroma_proto;
 use crate::chroma_proto::sys_db_client;
+use crate::chroma_proto::sys_db_client::SysDbClient;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
+use crate::tracing::util::client_interceptor;
 use crate::types::Collection;
 use crate::types::CollectionConversionError;
 use crate::types::FlushCompactionResponse;
@@ -18,7 +20,12 @@ use crate::types::Tenant;
 use async_trait::async_trait;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
+use tonic::service::interceptor;
+use tonic::transport::Endpoint;
+use tonic::Request;
+use tonic::Status;
 use uuid::Uuid;
 
 const DEFAULT_DATBASE: &str = "default_database";
@@ -122,7 +129,12 @@ impl SysDb {
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
 pub(crate) struct GrpcSysDb {
-    client: sys_db_client::SysDbClient<tonic::transport::Channel>,
+    client: SysDbClient<
+        interceptor::InterceptedService<
+            tonic::transport::Channel,
+            fn(Request<()>) -> Result<Request<()>, Status>,
+        >,
+    >,
 }
 
 #[derive(Error, Debug)]
@@ -148,15 +160,34 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                 let port = &my_config.port;
                 println!("Connecting to sysdb at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
-                let client = sys_db_client::SysDbClient::connect(connection_string).await;
-                match client {
-                    Ok(client) => {
+                let endpoint = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => {
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(
+                            tonic::transport::Error::from(e),
+                        )));
+                    }
+                };
+
+                let endpoint = endpoint
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                match endpoint.connect().await {
+                    Ok(channel) => {
+                        let client: SysDbClient<
+                            interceptor::InterceptedService<
+                                tonic::transport::Channel,
+                                fn(Request<()>) -> Result<Request<()>, Status>,
+                            >,
+                        > = SysDbClient::with_interceptor(channel, client_interceptor);
                         return Ok(GrpcSysDb { client });
                     }
                     Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(
+                            tonic::transport::Error::from(e),
+                        )));
                     }
-                }
+                };
             }
         }
     }

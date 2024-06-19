@@ -20,7 +20,7 @@ from io import BytesIO
 from pathlib import Path
 import os
 import tarfile
-import requests
+import httpx
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union, cast
 import numpy as np
 import numpy.typing as npt
@@ -265,7 +265,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "sentence-transformers/all-MiniLM-L6-v2".
         """
         self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-        self._session = requests.Session()
+        self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -309,7 +309,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         """
         self._model_name = model_name
         self._api_url = "https://api.jina.ai/v1/embeddings"
-        self._session = requests.Session()
+        self._session = httpx.Client()
         self._session.headers.update(
             {"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"}
         )
@@ -434,18 +434,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         retry=retry_if_exception(lambda e: "does not match expected SHA256" in str(e)),
     )
     def _download(self, url: str, fname: str, chunk_size: int = 1024) -> None:
-        resp = requests.get(url, stream=True)
-        total = int(resp.headers.get("content-length", 0))
-        with open(fname, "wb") as file, self.tqdm(
-            desc=str(fname),
-            total=total,
-            unit="iB",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar:
-            for data in resp.iter_content(chunk_size=chunk_size):
-                size = file.write(data)
-                bar.update(size)
+        with httpx.stream("GET", url) as resp:
+            total = int(resp.headers.get("content-length", 0))
+            with open(fname, "wb") as file, self.tqdm(
+                desc=str(fname),
+                total=total,
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as bar:
+                for data in resp.iter_bytes(chunk_size=chunk_size):
+                    size = file.write(data)
+                    bar.update(size)
         if not _verify_sha256(fname, self._MODEL_SHA256):
             # if the integrity of the file is not verified, remove it
             os.remove(fname)
@@ -666,7 +666,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         region: str = "us-central1",
     ):
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
-        self._session = requests.Session()
+        self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -782,7 +782,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     },
                 }
 
-                res = requests.post(
+                res = httpx.post(
                     f"{self._api_url}/clip/embed_image?api_key={self._api_key}",
                     json=infer_clip_payload,
                 )
@@ -796,7 +796,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     "text": input,
                 }
 
-                res = requests.post(
+                res = httpx.post(
                     f"{self._api_url}/clip/embed_text?api_key={self._api_key}",
                     json=infer_clip_payload,
                 )
@@ -869,13 +869,13 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             url (str): The URL of the HuggingFace Embedding Server.
         """
         try:
-            import requests
+            import httpx
         except ImportError:
             raise ValueError(
-                "The requests python package is not installed. Please install it with `pip install requests`"
+                "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
         self._api_url = f"{url}"
-        self._session = requests.Session()
+        self._session = httpx.Client()
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -975,14 +975,14 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str): The name of the model to use for text embeddings. E.g. "nomic-embed-text" (see https://ollama.com/library for available models).
         """
         try:
-            import requests
+            import httpx
         except ImportError:
             raise ValueError(
-                "The requests python package is not installed. Please install it with `pip install requests`"
+                "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
         self._api_url = f"{url}"
         self._model_name = model_name
-        self._session = requests.Session()
+        self._session = httpx.Client()
 
     def __call__(self, input: Documents) -> Embeddings:
         """

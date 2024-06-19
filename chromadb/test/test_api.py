@@ -1,7 +1,6 @@
 # type: ignore
 import traceback
-import requests
-from urllib3.connectionpool import InsecureRequestWarning
+import httpx
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
@@ -203,7 +202,7 @@ def test_pre_flight_checks(api):
     if not isinstance(api, FastAPI):
         pytest.skip("Not a FastAPI instance")
 
-    resp = requests.get(f"{api._api_url}/pre-flight-checks")
+    resp = httpx.get(f"{api._api_url}/pre-flight-checks")
     assert resp.status_code == 200
     assert resp.json() is not None
     assert "max_batch_size" in resp.json().keys()
@@ -1614,19 +1613,3 @@ def test_ssl_self_signed_without_ssl_verify(client_ssl):
     )
     client_ssl.clear_system_cache()
     assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
-
-
-def test_ssl_self_signed_with_verify_false(client_ssl):
-    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
-        pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
-    _port = client_ssl._server._settings.chroma_server_http_port
-    with pytest.warns(InsecureRequestWarning) as record:
-        client = chromadb.HttpClient(
-            ssl=True,
-            port=_port,
-            settings=chromadb.Settings(chroma_server_ssl_verify=False),
-        )
-        client.heartbeat()
-    client_ssl.clear_system_cache()
-    assert "Unverified HTTPS request" in str(record[0].message)

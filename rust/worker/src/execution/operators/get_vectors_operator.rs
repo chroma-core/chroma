@@ -112,8 +112,10 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         let logs = input.log_records.clone();
         let mut remaining_search_user_ids: HashSet<String> =
             HashSet::from_iter(input.search_user_ids.iter().cloned());
+        let mut original_search_user_ids: HashSet<String> =
+            HashSet::from_iter(input.search_user_ids.iter().cloned());
         for (log_record, _) in logs.iter() {
-            if remaining_search_user_ids.contains(&log_record.record.id) {
+            if original_search_user_ids.contains(&log_record.record.id) {
                 match log_record.record.operation {
                     crate::types::Operation::Add => {
                         // If there is a record segment, validate the add
@@ -146,6 +148,17 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                                     ));
                                 }
                             }
+                        } else {
+                            // Record segment is uninitialized.
+                            // If the user id is already present in the log set, skip it
+                            // We use the first add log entry for a user id if a
+                            // user has multiple log entries
+                            if output_vectors.contains_key(&log_record.record.id) {
+                                continue;
+                            }
+                            let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an add does not have an embedding.");
+                            output_vectors.insert(log_record.record.id.clone(), vector.clone());
+                            remaining_search_user_ids.remove(&log_record.record.id);
                         }
                     }
                     crate::types::Operation::Update => {
@@ -174,15 +187,52 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                                 }
                                 Ok(false) => {
                                     // The record does not exist in the record segment,
-                                    // the update is faulty.
-                                    // We skip the update
-                                    continue;
+                                    // If the user id is present in the output set then it means
+                                    // that it was inserted previously. Update the embedding
+                                    // if it exists.
+                                    if !output_vectors.contains_key(&log_record.record.id) {
+                                        continue;
+                                    }
+                                    match &log_record.record.embedding {
+                                        Some(vector) => {
+                                            // This will overwrite the vector if it already exists
+                                            // (e.g if it was added previously in the log)
+                                            output_vectors.insert(
+                                                log_record.record.id.clone(),
+                                                vector.clone(),
+                                            );
+                                            remaining_search_user_ids.remove(&log_record.record.id);
+                                        }
+                                        None => {
+                                            // Nothing to do with this as the vector was not updated
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     // If there is an error, we skip the update
                                     return Err(GetVectorsOperatorError::RecordSegmentReaderError(
                                         e.into(),
                                     ));
+                                }
+                            }
+                        } else {
+                            // Record segment is uninitialized.
+                            // If the user id is present in the output set then it means
+                            // that it was inserted previously. Update the embedding
+                            // if it exists.
+                            if !output_vectors.contains_key(&log_record.record.id) {
+                                continue;
+                            }
+                            match &log_record.record.embedding {
+                                Some(vector) => {
+                                    // This will overwrite the vector if it already exists
+                                    // (e.g if it was added previously in the log)
+                                    output_vectors
+                                        .insert(log_record.record.id.clone(), vector.clone());
+                                    remaining_search_user_ids.remove(&log_record.record.id);
+                                }
+                                None => {
+                                    // Nothing to do with this as the vector was not updated
                                 }
                             }
                         }
@@ -222,9 +272,11 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
 
         let mut ids = Vec::new();
         let mut vectors = Vec::new();
-        for (id, vector) in output_vectors.drain() {
-            ids.push(id);
-            vectors.push(vector);
+        for id in &input.search_user_ids {
+            if output_vectors.contains_key(id) {
+                ids.push(id.clone());
+                vectors.push(output_vectors.remove(id).unwrap());
+            }
         }
         return Ok(GetVectorsOperatorOutput { ids, vectors });
     }

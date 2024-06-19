@@ -2,7 +2,7 @@ from typing import Optional, Sequence
 from uuid import UUID
 
 from overrides import override
-import requests
+import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -349,7 +349,7 @@ class Client(SharedSystemClient, ClientAPI):
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
-        except requests.exceptions.ConnectionError:
+        except httpx.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
@@ -363,7 +363,7 @@ class Client(SharedSystemClient, ClientAPI):
 
         try:
             self._admin_client.get_database(name=database, tenant=tenant)
-        except requests.exceptions.ConnectionError:
+        except httpx.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
