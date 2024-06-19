@@ -91,15 +91,8 @@ impl TestSysDb {
         if id.is_some() && id.unwrap() != segment.id {
             return false;
         }
-        if r#type.is_some() {
-            match r#type.unwrap().as_str() {
-                "hnsw" => {
-                    if segment.r#type != SegmentType::HnswDistributed {
-                        return false;
-                    }
-                }
-                _ => return false,
-            }
+        if let Some(r#type) = r#type {
+            return segment.r#type == SegmentType::try_from(r#type.as_str()).unwrap();
         }
         if scope.is_some() && scope.unwrap() != segment.scope {
             return false;

@@ -94,18 +94,23 @@ impl WorkerServer {
             ))
             .add_service(
                 chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker.clone()),
-            )
-            .serve_with_shutdown(addr, async {
-                let mut sigterm = match signal(SignalKind::terminate()) {
-                    Ok(sigterm) => sigterm,
-                    Err(e) => {
-                        tracing::error!("Failed to create signal handler: {:?}", e);
-                        return;
-                    }
-                };
-                sigterm.recv().await;
-                tracing::info!("Received SIGTERM, shutting down");
-            });
+            );
+
+        #[cfg(debug_assertions)]
+        let server =
+            server.add_service(chroma_proto::debug_server::DebugServer::new(worker.clone()));
+
+        let server = server.serve_with_shutdown(addr, async {
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(sigterm) => sigterm,
+                Err(e) => {
+                    tracing::error!("Failed to create signal handler: {:?}", e);
+                    return;
+                }
+            };
+            sigterm.recv().await;
+            tracing::info!("Received SIGTERM, shutting down");
+        });
 
         server.await?;
         Ok(())
@@ -520,5 +525,83 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         self.query_metadata_instrumented(request)
             .instrument(instrumented_span)
             .await
+    }
+}
+
+#[tonic::async_trait]
+impl chroma_proto::debug_server::Debug for WorkerServer {
+    async fn get_info(
+        &self,
+        _: Request<()>,
+    ) -> Result<Response<chroma_proto::GetInfoResponse>, Status> {
+        let response = chroma_proto::GetInfoResponse {
+            version: option_env!("CARGO_PKG_VERSION")
+                .unwrap_or("unknown")
+                .to_string(),
+        };
+        Ok(Response::new(response))
+    }
+
+    async fn trigger_panic(&self, _: Request<()>) -> Result<Response<()>, Status> {
+        panic!("Intentional panic triggered");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::execution::dispatcher;
+    use crate::log::log::InMemoryLog;
+    use crate::storage::local::LocalStorage;
+    use crate::storage::Storage;
+    use crate::sysdb::test_sysdb::TestSysDb;
+    use crate::system;
+
+    use super::*;
+    use chroma_proto::debug_client::DebugClient;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn gracefully_handles_panics() {
+        let sysdb = TestSysDb::new();
+        let log = InMemoryLog::new();
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+        let mut server = WorkerServer {
+            dispatcher: None,
+            system: None,
+            sysdb: Box::new(SysDb::Test(sysdb)),
+            log: Box::new(Log::InMemory(log)),
+            hnsw_index_provider: HnswIndexProvider::new(
+                storage.clone(),
+                tmp_dir.path().to_path_buf(),
+            ),
+            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            port,
+        };
+
+        let system: system::System = system::System::new();
+        let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        server.set_system(system.clone());
+        server.set_dispatcher(dispatcher_handle.receiver());
+
+        tokio::spawn(async move {
+            let _ = crate::server::WorkerServer::run(server).await;
+        });
+
+        let mut client = DebugClient::connect(format!("http://localhost:{}", port))
+            .await
+            .unwrap();
+
+        // Test response when handler panics
+        let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
+        assert_eq!(err_response.code(), tonic::Code::Cancelled);
+
+        // The server should still work, even after a panic was thrown
+        let response = client.get_info(Request::new(())).await;
+        assert!(response.is_ok());
     }
 }
