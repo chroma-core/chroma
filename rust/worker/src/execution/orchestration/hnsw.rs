@@ -166,6 +166,12 @@ impl HnswQueryOrchestrator {
         let finish_dependency_count = query_vectors.len() as u32;
         // pre-allocate the result vectors
         let results = Some(Vec::with_capacity(query_vectors.len()));
+        tracing::info!(
+            "Performing KNN for k = {}, allowed_ids = {:?}, num query vectors = {:?}",
+            k,
+            allowed_ids,
+            query_vectors.len()
+        );
 
         HnswQueryOrchestrator {
             state: ExecutionState::Pending,
