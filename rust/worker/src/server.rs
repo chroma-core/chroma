@@ -22,7 +22,7 @@ use crate::system::{Receiver, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
-use crate::utils::catch_panic_middleware::CatchPanicLayer;
+use crate::utils::CatchPanicLayer;
 use async_trait::async_trait;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
