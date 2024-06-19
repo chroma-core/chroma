@@ -4134,6 +4134,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-panic"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bf1298a179837099f9309243af3b554e840f7f67f65e9f55294913299bd4cc5"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4665,6 +4675,7 @@ dependencies = [
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
+ "tracing-panic",
  "tracing-subscriber",
  "uuid",
 ]
