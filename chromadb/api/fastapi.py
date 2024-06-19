@@ -10,7 +10,7 @@ from overrides import override
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
-from chromadb.api import ServerAPI
+from chromadb.api import ServerAPI, json_to_collection_model
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     DataLoader,
@@ -40,7 +40,6 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.types import Collection as CollectionModel
 
 logger = logging.getLogger(__name__)
 
@@ -159,15 +158,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         collections = []
         for json_collection in json_collections:
-            model = CollectionModel(
-                id=json_collection["id"],
-                name=json_collection["name"],
-                metadata=json_collection["metadata"],
-                dimension=json_collection["dimension"],
-                tenant=json_collection["tenant"],
-                database=json_collection["database"],
-                version=json_collection["version"],
-            )
+            model = json_to_collection_model(json_collection)
             collections.append(Collection(self, model=model))
 
         return collections
@@ -211,15 +202,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             params={"tenant": tenant, "database": database},
         )
 
-        model = CollectionModel(
-            id=resp_json["id"],
-            name=resp_json["name"],
-            metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
-            tenant=resp_json["tenant"],
-            database=resp_json["database"],
-            version=resp_json["version"],
-        )
+        model = json_to_collection_model(resp_json)
         return Collection(
             client=self,
             model=model,
@@ -254,15 +237,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             params=_params,
         )
 
-        model = CollectionModel(
-            id=resp_json["id"],
-            name=resp_json["name"],
-            metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
-            tenant=resp_json["tenant"],
-            database=resp_json["database"],
-            version=resp_json["version"],
-        )
+        model = json_to_collection_model(resp_json)
         return Collection(
             client=self,
             model=model,

@@ -25,6 +25,7 @@ from chromadb.api.types import (
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
+from chromadb.types import Collection as CollectionModel
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -600,3 +601,17 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         pass
+
+
+def json_to_collection_model(json_collection: dict) -> CollectionModel:
+    return CollectionModel(
+        id=json_collection["id"],
+        name=json_collection["name"],
+        metadata=json_collection["metadata"],
+        dimension=json_collection["dimension"]
+        if "dimension" in json_collection
+        else None,
+        tenant=json_collection["tenant"],
+        database=json_collection["database"],
+        version=json_collection["version"] if "version" in json_collection else None,
+    )
