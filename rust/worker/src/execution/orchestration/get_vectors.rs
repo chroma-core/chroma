@@ -156,6 +156,7 @@ impl GetVectorsOrchestrator {
             .expect("Invariant violation. Record segment is not set.");
         let blockfile_provider = self.blockfile_provider.clone();
         let operator = GetVectorsOperator::new();
+        tracing::info!("get_vectors with search ids {:?}", self.search_user_ids);
         let input = GetVectorsOperatorInput::new(
             record_segment.clone(),
             blockfile_provider,
