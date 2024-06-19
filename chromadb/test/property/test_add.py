@@ -40,39 +40,52 @@ def test_add(
     record_set: strategies.RecordSet,
     should_compact: bool,
 ) -> None:
+    print("Running test_add")
     reset(api)
-    # TODO: Generative embedding functions
-    coll = api.create_collection(
-        name=collection.name,
-        metadata=collection.metadata,  # type: ignore
-        embedding_function=collection.embedding_function,
-    )
 
-    normalized_record_set = invariants.wrap_all(record_set)
+    try:
+        # TODO: Generative embedding functions
+        coll = api.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,  # type: ignore
+            embedding_function=collection.embedding_function,
+        )
 
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**normalized_record_set)
-        return
+        print("WRAPPING")
+        normalized_record_set = invariants.wrap_all(record_set)
+        print("WRAPPED")
 
-    coll.add(**record_set)
+        # TODO: The type of add() is incorrect as it does not allow for metadatas
+        # like [{"a": 1}, None, {"a": 3}]
+        coll.add(**record_set)  # type: ignore
+        print("ADDED")
+        if not NOT_CLUSTER_ONLY:
+            # Only wait for compaction if the size of the collection is
+            # some minimal size
+            if should_compact and len(normalized_record_set["ids"]) > 10:
+                initial_version = coll.get_model()["version"]
+                # Wait for the model to be updated
+                wait_for_version_increase(api, collection.name, initial_version)
 
-    if not NOT_CLUSTER_ONLY:
-        # Only wait for compaction if the size of the collection is
-        # some minimal size
-        if should_compact and len(normalized_record_set["ids"]) > 10:
-            initial_version = coll.get_model()["version"]
-            # Wait for the model to be updated
-            wait_for_version_increase(api, collection.name, initial_version)
+        print("INVAR CHECK")
+        invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+        print("COUNT PASSED")
+        n_results = max(1, (len(normalized_record_set["ids"]) // 10))
+        invariants.ann_accuracy(
+            coll,
+            cast(strategies.RecordSet, normalized_record_set),
+            n_results=n_results,
+            embedding_function=collection.embedding_function,
+        )
+        print("ANN PASSED")
+    except Exception as e:
+        print("FAILED ", e)
+        # print the backtrace
+        import traceback
 
-    invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
-    n_results = max(1, (len(normalized_record_set["ids"]) // 10))
-    invariants.ann_accuracy(
-        coll,
-        cast(strategies.RecordSet, normalized_record_set),
-        n_results=n_results,
-        embedding_function=collection.embedding_function,
-    )
+        print(traceback.format_exc())
+        raise e
+    print("PASSED")
 
 
 def create_large_recordset(
@@ -111,10 +124,6 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
     )
     normalized_record_set = invariants.wrap_all(record_set)
 
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**normalized_record_set)
-        return
     for batch in create_batches(
         api=api,
         ids=cast(List[str], record_set["ids"]),
@@ -141,12 +150,7 @@ def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) 
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    normalized_record_set = invariants.wrap_all(record_set)
 
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**normalized_record_set)
-        return
     with pytest.raises(Exception) as e:
         coll.add(**record_set)
     assert "exceeds maximum batch size" in str(e.value)

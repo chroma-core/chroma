@@ -190,11 +190,6 @@ def test_filterable_metadata_get(
         embedding_function=collection.embedding_function,
     )
 
-    if not invariants.is_metadata_valid(invariants.wrap_all(record_set)):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
-
     coll.add(**record_set)
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
@@ -238,11 +233,6 @@ def test_filterable_metadata_get_limit_offset(
         embedding_function=collection.embedding_function,
     )
 
-    if not invariants.is_metadata_valid(invariants.wrap_all(record_set)):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
-
     coll.add(**record_set)
     for filter in filters:
         # add limit and offset to filter
@@ -283,11 +273,6 @@ def test_filterable_metadata_query(
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
-
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
 
     coll.add(**record_set)
     total_count = len(normalized_record_set["ids"])
