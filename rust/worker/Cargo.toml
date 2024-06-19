@@ -48,11 +48,14 @@ tracing = "0.1"
 tracing-bunyan-formatter = "0.3.3"
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.19.0", default-features = false, features = ["trace", "rt-tokio"] }
+opentelemetry = { version = "0.19.0", default-features = false, features = [
+  "trace",
+  "rt-tokio",
+] }
 opentelemetry-otlp = "0.12.0"
 shuttle = "0.7.1"
 tracing-panic = "0.1.2"
-
+regex = "1.10.5"
 
 [dev-dependencies]
 proptest = "1.4.0"
@@ -60,6 +63,7 @@ proptest-state-machine = "0.1.0"
 "rand" = "0.8.5"
 rayon = "1.8.0"
 criterion = "0.3"
+random-port = "0.1.1"
 
 [build-dependencies]
 tonic-build = "0.10"

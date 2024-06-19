@@ -214,7 +214,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             i += 1;
         }
 
-        trace!("Brute force Knn result. distances: {:?}", sorted_distances);
+        tracing::info!("Brute force Knn result. distances: {:?}", sorted_distances);
         Ok(BruteForceKnnOperatorOutput {
             user_ids: sorted_user_ids,
             embeddings: sorted_embeddings,
