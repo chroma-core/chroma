@@ -20,14 +20,20 @@ query_service:
         Grpc:
             host: "sysdb.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     storage:
         S3:
             bucket: "chroma-storage"
             credentials: "Minio"
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -50,14 +56,20 @@ compaction_service:
         Grpc:
             host: "sysdb.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     storage:
         S3:
             bucket: "chroma-storage"
             credentials: "Minio"
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100

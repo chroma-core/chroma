@@ -390,10 +390,10 @@ impl CompactOrchestrator {
         match RecordSegmentReader::from_segment(record_segment, &self.blockfile_provider).await {
             Ok(reader) => {
                 self.curr_max_offset_id = reader.get_current_max_offset_id();
-                self.curr_max_offset_id
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
-            Err(_) => {}
+            Err(_) => {
+                self.curr_max_offset_id = Arc::new(AtomicU32::new(0));
+            }
         };
         self.record_segment = Some(record_segment.clone()); // auto deref.
 

@@ -136,13 +136,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                 }
             }
         };
-        // We use this really confusing pattern found in the rest of the code
-        // Where we create an effectively unused offset id for the read path
-        // This is very odd and confusing, and should be refactored, for now
-        // we just replicate the pattern here.
-        let offset_id = Arc::new(AtomicU32::new(1));
-        let log_materializer =
-            LogMaterializer::new(record_segment_reader, input.log.clone(), offset_id);
+        let log_materializer = LogMaterializer::new(record_segment_reader, input.log.clone(), None);
         let logs = match log_materializer.materialize().await {
             Ok(logs) => logs,
             Err(e) => {

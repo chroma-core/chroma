@@ -10,6 +10,7 @@ use crate::types::RecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
 use tonic::transport::Endpoint;
@@ -139,13 +140,18 @@ impl Configurable<LogConfig> for GrpcLog {
                 // TODO: switch to logging when logging is implemented
                 println!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
-                let endpoint_res = Endpoint::from_shared(connection_string);
-                if endpoint_res.is_err() {
-                    return Err(Box::new(GrpcLogError::FailedToConnect(
-                        endpoint_res.err().unwrap(),
-                    )));
-                }
-                let client = endpoint_res.ok().unwrap().connect().await;
+                let endpoint_res = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => {
+                        return Err(Box::new(GrpcLogError::FailedToConnect(
+                            tonic::transport::Error::from(e),
+                        )))
+                    }
+                };
+                let endpoint_res = endpoint_res
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                let client = endpoint_res.connect().await;
                 match client {
                     Ok(client) => {
                         let channel: LogServiceClient<
