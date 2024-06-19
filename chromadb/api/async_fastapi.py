@@ -6,7 +6,7 @@ from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
-from chromadb.api import AsyncServerAPI
+from chromadb.api import AsyncServerAPI, json_to_collection_model
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
@@ -19,7 +19,6 @@ from chromadb.utils.async_to_sync import async_to_sync
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.types import Database, Tenant
-from chromadb.types import Collection as CollectionModel
 
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.types import (
@@ -204,15 +203,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         collections = []
         for json_collection in resp_json:
-            model = CollectionModel(
-                id=json_collection["id"],
-                name=json_collection["name"],
-                metadata=json_collection["metadata"],
-                dimension=json_collection["dimension"],
-                tenant=json_collection["tenant"],
-                database=json_collection["database"],
-                version=json_collection["version"],
-            )
+            model = json_to_collection_model(resp_json)
 
             collections.append(AsyncCollection(client=self, model=model))
 
@@ -257,15 +248,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             params={"tenant": tenant, "database": database},
         )
 
-        model = CollectionModel(
-            id=resp_json["id"],
-            name=resp_json["name"],
-            metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
-            tenant=resp_json["tenant"],
-            database=resp_json["database"],
-            version=resp_json["version"],
-        )
+        model = json_to_collection_model(resp_json)
 
         return AsyncCollection(
             client=self,
@@ -300,15 +283,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             params=params,
         )
 
-        model = CollectionModel(
-            id=resp_json["id"],
-            name=resp_json["name"],
-            metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
-            tenant=resp_json["tenant"],
-            database=resp_json["database"],
-            version=resp_json["version"],
-        )
+        model = json_to_collection_model(resp_json)
 
         return AsyncCollection(
             client=self,
