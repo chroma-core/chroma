@@ -19,7 +19,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Metadata,
-    OneOrMany,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
@@ -61,7 +60,7 @@ class RecordSet(TypedDict):
 
     ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-    metadatas: OneOrMany[Optional[Metadata]] | None
+    metadatas: Optional[Union[List[Optional[types.Metadata]], Optional[types.Metadata]]]
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
