@@ -372,6 +372,48 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 
+class SpacyEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(self, model_name: str = "en_core_web_lg"):
+        try:
+            import spacy
+        except ImportError:
+            raise ValueError(
+                "The spacy python package is not installed. Please install it with `pip install spacy`"
+            )
+        self._model_name = model_name
+
+        try:
+            self._nlp = spacy.load("{model}".format(model=self._model_name))
+        except OSError:
+            raise ValueError(
+                """spacy models are not downloaded yet, please download them using `spacy download model_name`, Please checkout
+                for the list of models from: https://spacy.io/usage/models. By default the module will load en_core_web_lg
+                model as it optimizes accuracy and has embeddings in-built, please download and load with `en_core_web_md`
+                if you want to priortize efficiency over accuracy, the same logic applies for models from other languages also.
+                language_web_core_sm and language_web_core_trf doesn't have pre-trained embeddings."""
+            )
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            texts (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> spacy_fn = SpacyEmbeddingFunction(model_name="md")
+            >>> input = ["Hello, world!", "How are you?"]
+            >>> embeddings = spacy_fn(input)
+        """
+
+        return cast(
+            Embeddings, [list(self._nlp(doc).vector.astype("float")) for doc in input]
+        )
+
+
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
 # implements the same functionality as "all-MiniLM-L6-v2" from sentence-transformers.
