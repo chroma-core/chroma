@@ -129,6 +129,15 @@ jobs:
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build & cache Docker images
+        uses: docker/bake-action@v5
+        with:
+          files: docker-compose.test.yml
+          load: true
+          set: |
+            *.cache-to=type=gha,mode=max                                                                            *.cache-from=type=gha
       - name: Test
         run: clients/python/integration-test.sh
         shell: bash
