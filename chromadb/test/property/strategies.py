@@ -19,6 +19,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Metadata,
+    OneOrMany,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
@@ -60,7 +61,7 @@ class RecordSet(TypedDict):
 
     ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-    metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
+    metadatas: OneOrMany[Optional[Metadata]] | None
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
@@ -71,7 +72,7 @@ class NormalizedRecordSet(TypedDict):
 
     ids: List[types.ID]
     embeddings: Optional[types.Embeddings]
-    metadatas: Optional[List[types.Metadata]]
+    metadatas: Optional[List[Optional[types.Metadata]]]
     documents: Optional[List[types.Document]]
 
 
@@ -347,7 +348,7 @@ def collections(
 
 
 @st.composite
-def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
+def metadata(draw: st.DrawFn, collection: Collection) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
     metadata: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
@@ -362,6 +363,9 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
             k: st.just(v) for k, v in collection.known_metadata_keys.items()
         }
         metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))  # type: ignore
+    # We don't allow submitting empty metadata
+    if metadata == {}:
+        return None
     return metadata
 
 
@@ -423,7 +427,7 @@ def recordsets(
             if embeddings is not None and draw(st.booleans())
             else embeddings
         )
-        single_metadata: Union[Metadata, List[Metadata]] = (
+        single_metadata: Union[Optional[Metadata], List[Optional[Metadata]]] = (
             metadatas[0] if draw(st.booleans()) else metadatas
         )
         single_document = (

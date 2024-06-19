@@ -102,11 +102,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(normalized_record_set["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                self.collection.add(**normalized_record_set)
-            return multiple()
-
         intersection = set(normalized_record_set["ids"]).intersection(
             self.record_set_state["ids"]
         )
@@ -159,14 +154,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
-        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
-            record_set
-        )
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                self.collection.update(**normalized_record_set)
-            return
-
         self.collection.update(**record_set)
         self._upsert_embeddings(record_set)
 
@@ -183,14 +170,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
-
-        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
-            record_set
-        )
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                self.collection.upsert(**normalized_record_set)
-            return
 
         self.collection.upsert(**record_set)
         self._upsert_embeddings(record_set)
