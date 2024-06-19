@@ -258,10 +258,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             id=resp_json["id"],
             name=resp_json["name"],
             metadata=resp_json["metadata"],
-            dimension=resp_json["dimension"],
+            dimension=resp_json["dimension"] if "dimension" in resp_json else None,
             tenant=resp_json["tenant"],
             database=resp_json["database"],
-            version=resp_json["version"],
+            version=resp_json["version"] if "version" in resp_json else None,
         )
         return Collection(
             client=self,
