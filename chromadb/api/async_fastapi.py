@@ -203,7 +203,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         collections = []
         for json_collection in resp_json:
-            model = json_to_collection_model(resp_json)
+            model = json_to_collection_model(json_collection)
 
             collections.append(AsyncCollection(client=self, model=model))
 
