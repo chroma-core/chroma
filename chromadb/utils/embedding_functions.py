@@ -116,7 +116,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: Optional[str] = os.getenv("OPENAI_API_KEY"),
         model_name: str = "text-embedding-ada-002",
         organization_id: Optional[str] = None,
         api_base: Optional[str] = None,
@@ -152,7 +152,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
-
+            
         if api_key is not None:
             openai.api_key = api_key
         # If the api key is still not set, raise an error
