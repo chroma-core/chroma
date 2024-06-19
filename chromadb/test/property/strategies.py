@@ -60,7 +60,7 @@ class RecordSet(TypedDict):
 
     ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-    metadatas: Optional[Union[List[Optional[types.Metadata]], Optional[types.Metadata]]]
+    metadatas: Optional[Union[List[Optional[types.Metadata]], types.Metadata]]
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
