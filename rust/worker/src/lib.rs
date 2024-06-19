@@ -42,7 +42,6 @@ pub async fn query_service_entrypoint() {
         &config.service_name,
         &config.otel_endpoint,
     );
-    std::panic::set_hook(Box::new(tracing_panic::panic_hook));
 
     let system: system::System = system::System::new();
     let dispatcher =
@@ -103,7 +102,6 @@ pub async fn compaction_service_entrypoint() {
         &config.service_name,
         &config.otel_endpoint,
     );
-    std::panic::set_hook(Box::new(tracing_panic::panic_hook));
 
     let system: system::System = system::System::new();
 
