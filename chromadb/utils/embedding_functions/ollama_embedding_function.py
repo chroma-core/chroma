@@ -1,6 +1,8 @@
 import logging
 from typing import Union, cast
 
+import httpx
+
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
@@ -19,15 +21,9 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             url (str): The URL of the Ollama Server.
             model_name (str): The name of the model to use for text embeddings. E.g. "nomic-embed-text" (see https://ollama.com/library for available models).
         """
-        try:
-            import requests
-        except ImportError:
-            raise ValueError(
-                "The requests python package is not installed. Please install it with `pip install requests`"
-            )
         self._api_url = f"{url}"
         self._model_name = model_name
-        self._session = requests.Session()
+        self._session = httpx.Client()
 
     def __call__(self, input: Union[Documents, str]) -> Embeddings:
         """

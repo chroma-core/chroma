@@ -1,7 +1,7 @@
 import logging
 from typing import cast
 
-import requests
+import httpx
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -25,7 +25,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "sentence-transformers/all-MiniLM-L6-v2".
         """
         self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-        self._session = requests.Session()
+        self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -66,14 +66,8 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         Args:
             url (str): The URL of the HuggingFace Embedding Server.
         """
-        try:
-            import requests
-        except ImportError:
-            raise ValueError(
-                "The requests python package is not installed. Please install it with `pip install requests`"
-            )
         self._api_url = f"{url}"
-        self._session = requests.Session()
+        self._session = httpx.Client()
 
     def __call__(self, input: Documents) -> Embeddings:
         """

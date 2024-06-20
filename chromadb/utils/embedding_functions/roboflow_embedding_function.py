@@ -5,7 +5,7 @@ import os
 from io import BytesIO
 from typing import Union
 
-import requests
+import httpx
 
 from chromadb.api.types import (
     Documents,
@@ -61,7 +61,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     },
                 }
 
-                res = requests.post(
+                res = httpx.post(
                     f"{self._api_url}/clip/embed_image?api_key={self._api_key}",
                     json=infer_clip_payload_image,
                 )
@@ -75,7 +75,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     "text": input,
                 }
 
-                res = requests.post(
+                res = httpx.post(
                     f"{self._api_url}/clip/embed_text?api_key={self._api_key}",
                     json=infer_clip_payload_text,
                 )

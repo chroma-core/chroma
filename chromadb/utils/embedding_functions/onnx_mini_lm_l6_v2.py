@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 import logging
 import os
 import tarfile
@@ -8,11 +9,10 @@ from typing import List, Optional, cast
 
 import numpy as np
 import numpy.typing as npt
-import requests
+import httpx
 from onnxruntime import InferenceSession, get_available_providers, SessionOptions
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 from tokenizers import Tokenizer
-from tqdm import tqdm
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -60,6 +60,27 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         ):
             raise ValueError("Preferred providers must be unique")
         self._preferred_providers = preferred_providers
+        try:
+            # Equivalent to import onnxruntime
+            self.ort = importlib.import_module("onnxruntime")
+        except ImportError:
+            raise ValueError(
+                "The onnxruntime python package is not installed. Please install it with `pip install onnxruntime`"
+            )
+        try:
+            # Equivalent to from tokenizers import Tokenizer
+            self.Tokenizer = importlib.import_module("tokenizers").Tokenizer
+        except ImportError:
+            raise ValueError(
+                "The tokenizers python package is not installed. Please install it with `pip install tokenizers`"
+            )
+        try:
+            # Equivalent to from tqdm import tqdm
+            self.tqdm = importlib.import_module("tqdm").tqdm
+        except ImportError:
+            raise ValueError(
+                "The tqdm python package is not installed. Please install it with `pip install tqdm`"
+            )
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
@@ -78,18 +99,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         which makes mypy unhappy. If some smart folk knows how to fix this in an
         elegant way, please do so.
         """
-        resp = requests.get(url, stream=True)
-        total = int(resp.headers.get("content-length", 0))
-        with open(fname, "wb") as file, tqdm(
-            desc=str(fname),
-            total=total,
-            unit="iB",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar:
-            for data in resp.iter_content(chunk_size=chunk_size):
-                size = file.write(data)
-                bar.update(size)
+        with httpx.stream("GET", url) as resp:
+            total = int(resp.headers.get("content-length", 0))
+            with open(fname, "wb") as file, self.tqdm(
+                desc=str(fname),
+                total=total,
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as bar:
+                for data in resp.iter_bytes(chunk_size=chunk_size):
+                    size = file.write(data)
+                    bar.update(size)
         if not _verify_sha256(fname, self._MODEL_SHA256):
             # if the integrity of the file is not verified, remove it
             os.remove(fname)

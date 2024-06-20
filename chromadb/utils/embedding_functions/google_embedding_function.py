@@ -1,6 +1,6 @@
 import logging
 
-import requests
+import httpx
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -94,7 +94,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         region: str = "us-central1",
     ):
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
-        self._session = requests.Session()
+        self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, input: Documents) -> Embeddings:

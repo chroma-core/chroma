@@ -1,7 +1,7 @@
 import logging
 from typing import List, cast, Union
 
-import requests
+import httpx
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -24,7 +24,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         """
         self._model_name = model_name
         self._api_url = "https://api.jina.ai/v1/embeddings"
-        self._session = requests.Session()
+        self._session = httpx.Client()
         self._session.headers.update(
             {"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"}
         )
