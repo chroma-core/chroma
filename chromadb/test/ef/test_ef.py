@@ -29,6 +29,7 @@ def test_get_builtins_holds() -> None:
         "RoboflowEmbeddingFunction",
         "SentenceTransformerEmbeddingFunction",
         "Text2VecEmbeddingFunction",
+        "ChromaLangchainEmbeddingFunction",
     }
 
-    assert expected_builtins == set(embedding_functions.get_builtins())
+    assert expected_builtins == embedding_functions.get_builtins()
