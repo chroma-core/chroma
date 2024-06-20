@@ -22,7 +22,7 @@ jobs:
           filters: |
             outside-docs:
               - '!docs/**'
-              - '!.github/**'
+              - '!.github/release*'
 
   python-tests:
     name: Python tests
