@@ -49,7 +49,12 @@ def test_add_small(
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(
-        collection_st, min_size=250, max_size=500, num_unique_metadata=5
+        collection_st,
+        min_size=250,
+        max_size=500,
+        num_unique_metadata=5,
+        min_metadata_size=1,
+        max_metadata_size=5,
     ),
     should_compact=st.booleans(),
 )
@@ -59,11 +64,6 @@ def test_add_small(
         normal=hypothesis.settings(max_examples=5),
         fast=hypothesis.settings(max_examples=5),
     ),
-    suppress_health_check=[
-        hypothesis.HealthCheck.data_too_large,
-        hypothesis.HealthCheck.too_slow,
-        hypothesis.HealthCheck.function_scoped_fixture,
-    ],
 )
 def test_add_medium(
     api: ServerAPI,
@@ -80,56 +80,38 @@ def _test_add(
     record_set: strategies.RecordSet,
     should_compact: bool,
 ) -> None:
-    print("Running test_add")
     reset(api)
 
-    try:
-        # TODO: Generative embedding functions
-        coll = api.create_collection(
-            name=collection.name,
-            metadata=collection.metadata,  # type: ignore
-            embedding_function=collection.embedding_function,
-        )
+    # TODO: Generative embedding functions
+    coll = api.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,  # type: ignore
+        embedding_function=collection.embedding_function,
+    )
+    normalized_record_set = invariants.wrap_all(record_set)
 
-        print("WRAPPING")
-        normalized_record_set = invariants.wrap_all(record_set)
-        print("WRAPPED")
-        print("LEN OF RECORD SET", len(normalized_record_set["ids"]))
+    # TODO: The type of add() is incorrect as it does not allow for metadatas
+    # like [{"a": 1}, None, {"a": 3}]
+    coll.add(**record_set)  # type: ignore
+    if (
+        not NOT_CLUSTER_ONLY
+        and should_compact
+        and len(normalized_record_set["ids"]) > 10
+    ):
+        # Only wait for compaction if the size of the collection is
+        # some minimal size
+        initial_version = coll.get_model()["version"]
+        # Wait for the model to be updated
+        wait_for_version_increase(api, collection.name, initial_version)
 
-        # TODO: The type of add() is incorrect as it does not allow for metadatas
-        # like [{"a": 1}, None, {"a": 3}]
-        coll.add(**record_set)  # type: ignore
-        print("ADDED")
-        if (
-            not NOT_CLUSTER_ONLY
-            and should_compact
-            and len(normalized_record_set["ids"]) > 10
-        ):
-            # Only wait for compaction if the size of the collection is
-            # some minimal size
-            initial_version = coll.get_model()["version"]
-            # Wait for the model to be updated
-            wait_for_version_increase(api, collection.name, initial_version)
-
-        print("INVAR CHECK")
-        invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
-        print("COUNT PASSED")
-        n_results = max(1, (len(normalized_record_set["ids"]) // 10))
-        invariants.ann_accuracy(
-            coll,
-            cast(strategies.RecordSet, normalized_record_set),
-            n_results=n_results,
-            embedding_function=collection.embedding_function,
-        )
-        print("ANN PASSED")
-    except Exception as e:
-        print("FAILED ", e)
-        # print the backtrace
-        import traceback
-
-        print(traceback.format_exc())
-        raise e
-    print("PASSED")
+    invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+    n_results = max(1, (len(normalized_record_set["ids"]) // 10))
+    invariants.ann_accuracy(
+        coll,
+        cast(strategies.RecordSet, normalized_record_set),
+        n_results=n_results,
+        embedding_function=collection.embedding_function,
+    )
 
 
 # Hypothesis struggles to generate large record sets so we explicitly create
@@ -158,7 +140,6 @@ def create_large_recordset(
 def test_add_large(
     api: ServerAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:
-    print("LARGE SHOULD COMPACT", should_compact)
     reset(api)
 
     record_set = create_large_recordset(

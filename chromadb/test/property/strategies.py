@@ -1,7 +1,7 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Any, Optional, List, Dict, Tuple, Union, cast
+from typing import Any, Optional, List, Dict, Union, cast
 from typing_extensions import TypedDict
 import uuid
 import numpy as np
@@ -348,18 +348,15 @@ def collections(
 
 
 @st.composite
-def metadata_for_record(draw: st.DrawFn) -> Tuple[str, int]:
-    key = draw(st.text(min_size=1, max_size=3))
-    value = draw(st.integers(min_value=0, max_value=100))
-    return (key, value)
-
-
-@st.composite
-def metadata(draw: st.DrawFn, collection: Collection) -> Optional[types.Metadata]:
+def metadata(
+    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
     metadata: types.Metadata = draw(
-        st.dictionaries(safe_text, st.one_of(*safe_values), min_size=1, max_size=5)
+        st.dictionaries(
+            safe_text, st.one_of(*safe_values), min_size=min_size, max_size=max_size
+        )
     )
     # Then, remove keys that overlap with the known keys for the coll
     # to avoid type errors when comparing.
@@ -407,7 +404,12 @@ def recordsets(
     id_strategy: SearchStrategy[str] = safe_text,
     min_size: int = 1,
     max_size: int = 50,
+    # If num_unique_metadata is not None, then the number of metadata generations
+    # will be the size of the record set. If set, the number of metadata
+    # generations will be the value of num_unique_metadata.
     num_unique_metadata: Optional[int] = None,
+    min_metadata_size: int = 0,
+    max_metadata_size: Optional[int] = None,
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
@@ -420,7 +422,11 @@ def recordsets(
         embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
     num_metadata = num_unique_metadata if num_unique_metadata is not None else len(ids)
     generated_metadatas = draw(
-        st.lists(metadata(collection), min_size=num_metadata, max_size=num_metadata)
+        st.lists(
+            metadata(collection, min_size=min_size, max_size=max_size),
+            min_size=num_metadata,
+            max_size=num_metadata,
+        )
     )
     metadatas = []
     for i in range(len(ids)):
