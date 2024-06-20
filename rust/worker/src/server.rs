@@ -532,18 +532,30 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
 impl chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
-        _: Request<()>,
+        request: Request<()>,
     ) -> Result<Response<chroma_proto::GetInfoResponse>, Status> {
-        let response = chroma_proto::GetInfoResponse {
-            version: option_env!("CARGO_PKG_VERSION")
-                .unwrap_or("unknown")
-                .to_string(),
-        };
-        Ok(Response::new(response))
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let request_span = trace_span!("Get info");
+
+        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
+            let response = chroma_proto::GetInfoResponse {
+                version: option_env!("CARGO_PKG_VERSION")
+                    .unwrap_or("unknown")
+                    .to_string(),
+            };
+            Ok(Response::new(response))
+        })
     }
 
-    async fn trigger_panic(&self, _: Request<()>) -> Result<Response<()>, Status> {
-        panic!("Intentional panic triggered");
+    async fn trigger_panic(&self, request: Request<()>) -> Result<Response<()>, Status> {
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let request_span = trace_span!("Trigger panic");
+
+        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
+            panic!("Intentional panic triggered");
+        })
     }
 }
 
