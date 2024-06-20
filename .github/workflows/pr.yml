@@ -22,7 +22,6 @@ jobs:
           filters: |
             outside-docs:
               - '!docs/**'
-              - '!.github/**'
             docs:
               - 'docs/**'
 
