@@ -285,7 +285,7 @@ console.log(results)
 <!-- - Check out [💡 Examples](/examples) of what you can build with Chroma -->
 - Read the [🧪 Usage Guide](/guides) to learn more about the API
 - Learn how to [☁️ Deploy Chroma](/deployment) to a server
-- Join Chroma's [Discord Community](https://discord.gg/Fk2pH7k6) to ask questions and get help
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
 - Follow Chroma on [Twitter (@trychroma)](https://twitter.com/trychroma) for updates
 
 {% hint style="info" %}
