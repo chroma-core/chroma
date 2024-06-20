@@ -19,6 +19,8 @@ Set `anonymized_telemetry` to `False` in your client's settings:
 ```python
 from chromadb.config import Settings
 client = chromadb.Client(Settings(anonymized_telemetry=False))
+# or if using PersistentClient
+client = chromadb.PersistentClient(path="/path/to/save/to", settings=Settings(anonymized_telemetry=False))
 ```
 
 ###### In Chroma's Backend Using Environment Variables
@@ -35,7 +37,7 @@ ANONYMIZED_TELEMETRY=False
 
 We will only track usage details that help us make product decisions, specifically:
 
-- Chroma version and environment
+- Chroma version and environment details (e.g. OS, Python version, is it running in a container, or in a jupyter notebook)
 - Usage of embedding functions that ship with Chroma and aggregated usage of custom embeddings (we collect no information about the custom embeddings themselves)
 - Collection commands. We track the anonymized uuid of a collection as well as the number of items
   - `add`

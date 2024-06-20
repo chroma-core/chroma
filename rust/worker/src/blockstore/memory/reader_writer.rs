@@ -11,6 +11,16 @@ pub(crate) struct MemoryBlockfileWriter {
     id: uuid::Uuid,
 }
 
+pub(crate) struct MemoryBlockfileFlusher {
+    id: uuid::Uuid,
+}
+
+impl MemoryBlockfileFlusher {
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        self.id
+    }
+}
+
 impl MemoryBlockfileWriter {
     pub(super) fn new(storage_manager: StorageManager) -> Self {
         let builder = storage_manager.create();
@@ -22,9 +32,9 @@ impl MemoryBlockfileWriter {
         }
     }
 
-    pub(crate) fn commit(&self) -> Result<(), Box<dyn ChromaError>> {
+    pub(crate) fn commit(&self) -> Result<MemoryBlockfileFlusher, Box<dyn ChromaError>> {
         self.storage_manager.commit(self.builder.id);
-        Ok(())
+        Ok(MemoryBlockfileFlusher { id: self.id })
     }
 
     pub(crate) fn set<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
@@ -53,6 +63,7 @@ impl MemoryBlockfileWriter {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct MemoryBlockfileReader<K: Key, V: Value> {
     storage_manager: StorageManager,
     storage: Storage,
@@ -167,8 +178,24 @@ impl<
         Ok(values)
     }
 
+    pub(crate) fn get_at_index(
+        &'storage self,
+        index: usize,
+    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+        let res = V::get_at_index(&self.storage, index);
+        let (key, value) = match res {
+            Some((key, value)) => (key, value),
+            None => return Err(Box::new(BlockfileError::NotFoundError)),
+        };
+        Ok((key.prefix.as_str(), K::from(&key.key), value))
+    }
+
     pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         V::count(&self.storage)
+    }
+
+    pub(crate) fn contains(&'storage self, prefix: &str, key: K) -> bool {
+        V::contains(prefix, key.into(), &self.storage)
     }
 
     pub(crate) fn id(&self) -> uuid::Uuid {
@@ -850,5 +877,31 @@ mod tests {
 
         let key_1 = reader.get("prefix", "key1");
         assert!(key_1.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_by_index() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("key{:04}", i);
+            let value = format!("value{:04}", i);
+            let _ = writer.set("prefix", key.as_str(), value.as_str());
+        }
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        for i in 0..n {
+            let expected_key = format!("key{:04}", i);
+            let expected_value = format!("value{:04}", i);
+            let (prefix, key, value) = reader.get_at_index(i).unwrap();
+            assert_eq!(prefix, "prefix");
+            assert_eq!(key, expected_key.as_str());
+            assert_eq!(value, expected_value.as_str());
+        }
     }
 }

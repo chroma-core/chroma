@@ -60,6 +60,7 @@ def run(
     os.environ["IS_PERSISTENT"] = "True"
     os.environ["PERSIST_DIRECTORY"] = path
     os.environ["CHROMA_SERVER_NOFILE"] = "65535"
+    os.environ["CHROMA_CLI"] = "True"
 
     # get the path where chromadb is installed
     chromadb_path = os.path.dirname(os.path.realpath(__file__))

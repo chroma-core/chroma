@@ -1,5 +1,8 @@
+import hypothesis.stateful
+import hypothesis.strategies
 import pytest
 import logging
+import hypothesis
 import hypothesis.strategies as st
 from hypothesis import given
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
@@ -23,6 +26,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
+from chromadb.test.conftest import reset
 import numpy as np
 
 
@@ -68,11 +72,11 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def __init__(self, api: ServerAPI):
         super().__init__()
         self.api = api
-        self._rules_strategy = strategies.DeterministicRuleStrategy(self)  # type: ignore
+        self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
-        self.api.reset()
+        reset(self.api)
         self.collection = self.api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
@@ -131,8 +135,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
-    @precondition(lambda self: len(self.record_set_state["ids"]) > 20)
-    @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
+    @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
@@ -297,12 +300,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: EmbeddingStateMachine(api))  # type: ignore
+    run_state_machine_as_test(
+        lambda: EmbeddingStateMachine(api),
+    )  # type: ignore
     print_traces()
 
 
 def test_multi_add(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
@@ -321,7 +326,7 @@ def test_multi_add(api: ServerAPI) -> None:
 
 
 def test_dup_add(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
@@ -330,7 +335,7 @@ def test_dup_add(api: ServerAPI) -> None:
 
 
 def test_query_without_add(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
     N = np.random.randint(1, 2000)
@@ -345,7 +350,7 @@ def test_query_without_add(api: ServerAPI) -> None:
 
 
 def test_get_non_existent(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
     assert len(result["ids"]) == 0
@@ -357,7 +362,7 @@ def test_get_non_existent(api: ServerAPI) -> None:
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
 def test_escape_chars_in_ids(api: ServerAPI) -> None:
-    api.reset()
+    reset(api)
     id = "\x1f"
     coll = api.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])
@@ -377,7 +382,7 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
     ],
 )
 def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     with pytest.raises(Exception) as e:
         coll.delete(**kwargs)
@@ -400,7 +405,7 @@ def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
     ],
 )
 def test_delete_success(api: ServerAPI, kwargs: dict):
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)

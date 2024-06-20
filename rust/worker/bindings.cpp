@@ -188,6 +188,15 @@ public:
         }
         appr_alg->ef_ = ef;
     }
+
+    void resize_index(size_t new_size)
+    {
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
+        appr_alg->resizeIndex(new_size);
+    }
 };
 
 extern "C"
@@ -245,5 +254,15 @@ extern "C"
     int len(Index<float> *index)
     {
         return index->appr_alg->getCurrentElementCount() - index->appr_alg->getDeletedCount();
+    }
+
+    size_t capacity(Index<float> *index)
+    {
+        return index->appr_alg->max_elements_;
+    }
+
+    void resize_index(Index<float> *index, size_t new_size)
+    {
+        index->resize_index(new_size);
     }
 }

@@ -1,7 +1,7 @@
 import asyncio
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union, TypeVar
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -99,6 +99,9 @@ def otel_init(
     granularity = otel_granularity
 
 
+T = TypeVar("T", bound=Callable)
+
+
 def trace_method(
     trace_name: str,
     trace_granularity: OpenTelemetryGranularity,
@@ -117,14 +120,14 @@ def trace_method(
             ],
         ]
     ] = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[T], T]:
     """A decorator that traces a method."""
 
-    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(f: T) -> T:
         if asyncio.iscoroutinefunction(f):
 
             @wraps(f)
-            async def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+            async def async_wrapper(*args, **kwargs):
                 global tracer, granularity
                 if trace_granularity < granularity:
                     return await f(*args, **kwargs)
@@ -133,11 +136,11 @@ def trace_method(
                 with tracer.start_as_current_span(trace_name, attributes=attributes):
                     return await f(*args, **kwargs)
 
-            return wrapper
+            return async_wrapper  # type: ignore
         else:
 
             @wraps(f)
-            def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+            def wrapper(*args, **kwargs):
                 global tracer, granularity
                 if trace_granularity < granularity:
                     return f(*args, **kwargs)
@@ -146,9 +149,9 @@ def trace_method(
                 with tracer.start_as_current_span(trace_name, attributes=attributes):
                     return f(*args, **kwargs)
 
-            return wrapper
+            return wrapper  # type: ignore
 
-    return decorator
+    return decorator  # type: ignore
 
 
 def add_attributes_to_current_span(

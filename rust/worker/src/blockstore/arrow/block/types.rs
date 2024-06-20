@@ -1,31 +1,11 @@
-// use crate::blockstore::types::{BlockfileKey, Key, KeyType, Value, ValueType};
 use super::delta::BlockDelta;
-use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
-use crate::blockstore::key::{CompositeKey, KeyWrapper};
-use crate::blockstore::Key;
-use crate::errors::{ChromaError, ErrorCodes};
-use arrow::array::{
-    ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array,
-    Float32Builder, StructArray, UInt32Array, UInt32Builder,
-};
+use crate::blockstore::arrow::types::{ArrowReadableKey, ArrowReadableValue};
+use crate::errors::ChromaError;
 use arrow::{
-    array::{Array, Int32Array, Int32Builder, ListArray, ListBuilder, StringArray, StringBuilder},
-    datatypes::{DataType, Field},
+    array::{Array, StringArray},
     record_batch::RecordBatch,
 };
-use bytes::Bytes;
-use tokio::io::AsyncBufRead;
-// use proptest::bits::usize;
 use uuid::Uuid;
-// use parking_lot::RwLock;
-use std::io::Error;
-use std::sync::Arc;
-// use std::sync::Arc;
-use thiserror::Error;
-// use uuid::Uuid;
-
-// use super::delta::BlockDelta;
-// use super::iterator::BlockIterator;
 
 /// A block in a blockfile. A block is a sorted collection of data that is immutable once it has been committed.
 /// Blocks are the fundamental unit of storage in the blockstore and are used to store data in the form of (key, value) pairs.
@@ -38,7 +18,7 @@ use thiserror::Error;
 /// A Block holds BlockData via its Inner. Conceptually, the BlockData being loaded into memory is an optimization. The Block interface
 /// could also support out of core operations where the BlockData is loaded from disk on demand. Currently we force operations to be in-core
 /// but could expand to out-of-core in the future.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Block {
     // The data is stored in an Arrow record batch with the column schema (prefix, key, value).
     // These are stored in sorted order by prefix and key for efficient lookups.
@@ -90,6 +70,118 @@ impl Block {
             }
         }
         None
+    }
+
+    pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            if curr_prefix == prefix {
+                res.push((
+                    curr_prefix,
+                    K::get(self.data.column(1), i),
+                    V::get(self.data.column(2), i),
+                ));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_gt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            if curr_prefix == prefix && curr_key > key {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_lt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            if curr_prefix == prefix && curr_key < key {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_lte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            if curr_prefix == prefix && curr_key <= key {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
+    }
+
+    pub fn get_gte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut res: Vec<(&str, K, V)> = vec![];
+        for i in 0..self.data.num_rows() {
+            let curr_prefix = prefix_array.value(i);
+            let curr_key = K::get(self.data.column(1), i);
+            if curr_prefix == prefix && curr_key >= key {
+                res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
+            }
+        }
+        return Some(res);
     }
 
     pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(

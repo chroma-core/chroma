@@ -23,18 +23,20 @@ spec:
     - name: query-service-server-port
       port: 50051
       targetPort: 50051
+  clusterIP: None
   selector:
-    app: query-service-server
+    app: query-service
   type: ClusterIP
 
 ---
 
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: query-service
   namespace: {{ .Values.namespace }}
 spec:
+  serviceName: query-service
   replicas: 2
   selector:
     matchLabels:
@@ -73,10 +75,14 @@ spec:
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
             {{ end }}
-            - name: CHROMA_QUERY_SERVICE__MY_IP
+            - name: CHROMA_QUERY_SERVICE__MY_MEMBER_ID
               valueFrom:
                 fieldRef:
-                  fieldPath: status.podIP
+                  fieldPath: metadata.name
+      updateStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"

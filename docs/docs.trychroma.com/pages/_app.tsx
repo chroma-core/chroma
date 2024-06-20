@@ -1,7 +1,21 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { GlobalStateContext, GlobalStateProvider } from '../components/layout/state';
+
+import posthog from 'posthog-js'
+import { PostHogProvider } from 'posthog-js/react'
+
+// Check that PostHog is client-side (used to handle Next.js SSR)
+if (typeof window !== 'undefined') {
+  posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
+    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
+    // Enable debug mode in development
+    loaded: (posthog) => {
+      if (process.env.NODE_ENV === 'development') posthog.debug()
+    }
+  })
+}
 
 import {TopNav} from '../components/layout/TopNav';
 import {SideNav} from '../components/layout/SideNav';
@@ -69,6 +83,18 @@ export type ChromaDocsProps = MarkdocNextJsPageProps
 export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocsProps>) {
   const { markdoc } = pageProps;
 
+  const router = useRouter()
+
+  useEffect(() => {
+    // Track page views
+    const handleRouteChange = () => posthog?.capture('$pageview')
+    router.events.on('routeChangeComplete', handleRouteChange)
+
+    return () => {
+      router.events.off('routeChangeComplete', handleRouteChange)
+    }
+  }, [])
+
   let title = TITLE;
   let description = DESCRIPTION;
   if (markdoc && (markdoc.frontmatter !== undefined)) {
@@ -83,8 +109,6 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
   const toc = pageProps.markdoc?.content
     ? collectHeadings(pageProps.markdoc.content)
     : [];
-
-  const router = useRouter()
 
   // get the pathname and figure out if we are in a group or not
   // this requires iterating through ROOT_ITEMS
@@ -132,6 +156,7 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
   let githubEditLink = `https://github.com/chroma-core/chroma/blob/main/docs/docs.trychroma.com/pages/` + filePath + '.md'
 
   return (
+    <PostHogProvider client={posthog}>
     <ThemeProvider>
     <main className={`${inter.variable} font-sans ${ibmPlexMono.variable}`} style={{paddingBottom: '200px'}}>
       <GlobalStateProvider>
@@ -151,7 +176,7 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
         </Head>
         <TopNav>
           <Link href="https://discord.gg/MMeYNTmh3x" className='hidden sm:block'>
-            <img src="https://img.shields.io/discord/1073293645303795742"/>
+            <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600"/>
           </Link>
           <Link href="https://github.com/chroma-core/chroma">
             <img src="https://img.shields.io/github/stars/chroma-core/chroma.svg?style=social&label=Star&maxAge=2400"/>
@@ -227,5 +252,6 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
 
     </main>
     </ThemeProvider>
+    </PostHogProvider>
   );
 }

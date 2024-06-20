@@ -152,15 +152,32 @@ def load_and_check(
         raise e
 
 
+def get_multiprocessing_context():
+    try:
+        # Run the invariants in a new process to bypass any shared state/caching (which would defeat the purpose of the test)
+        # (forkserver is used because it's much faster than spawn—it will spawn a new, minimal singleton process and then fork that singleton)
+        ctx = multiprocessing.get_context("forkserver")
+        # This is like running `import chromadb` in the single process that is forked rather than importing it in each forked process.
+        # Gives a ~3x speedup since importing chromadb is fairly expensive.
+        ctx.set_forkserver_preload(["chromadb"])
+        return ctx
+    except Exception:
+        # forkserver/fork is not available on Windows
+        return multiprocessing.get_context("spawn")
+
+
 class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
     persist = "persist"
+
+
+MIN_STATE_CHANGES_BEFORE_PERSIST = 5
 
 
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def __init__(self, api: ClientAPI, settings: Settings):
         self.api = api
         self.settings = settings
-        self.last_persist_delay = 10
+        self.min_state_changes_left_before_persisting = MIN_STATE_CHANGES_BEFORE_PERSIST
         self.api.reset()
         super().__init__(self.api)
 
@@ -184,16 +201,14 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
 
     @precondition(
         lambda self: len(self.record_set_state["ids"]) >= 1
-        and self.last_persist_delay <= 0
+        and self.min_state_changes_left_before_persisting <= 0
     )
     @rule()
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
-        # Create a new process and then inside the process run the invariants
-        # TODO: Once we switch off of duckdb and onto sqlite we can remove this
-        ctx = multiprocessing.get_context("spawn")
         conn1, conn2 = multiprocessing.Pipe()
+        ctx = get_multiprocessing_context()
         p = ctx.Process(
             target=load_and_check,
             args=(self.settings, collection_name, self.record_set_state, conn2),
@@ -209,9 +224,11 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
-            self.last_persist_delay = 10
+            self.min_state_changes_left_before_persisting = (
+                MIN_STATE_CHANGES_BEFORE_PERSIST
+            )
         else:
-            self.last_persist_delay -= 1
+            self.min_state_changes_left_before_persisting -= 1
 
     def teardown(self) -> None:
         self.api.reset()
@@ -223,5 +240,5 @@ def test_persist_embeddings_state(
     caplog.set_level(logging.ERROR)
     api = chromadb.Client(settings)
     run_state_machine_as_test(
-        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
+        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api),
     )  # type: ignore
