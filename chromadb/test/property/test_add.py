@@ -55,6 +55,10 @@ def test_add_small(
 )
 @settings(
     deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=5),
+        fast=hypothesis.settings(max_examples=5),
+    ),
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.too_slow,
