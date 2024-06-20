@@ -21,7 +21,7 @@ where
 
 #[derive(Debug, Error)]
 pub(super) enum TaskError<Error> {
-    #[error("Task error: {0}")]
+    #[error("Error in task: {0}")]
     Other(Error),
     #[error("Task panicked")]
     Panic(Option<String>),
