@@ -22,9 +22,12 @@ from chromadb.utils.batch_utils import create_batches
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
+# Hypothesis tends to generate smaller values so we explicitly segregate the
+# the tests into tiers, Small, Medium. Hypothesis struggles to generate large
+# record sets so we explicitly create a large record set without using Hypothesis
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st),
+    record_set=strategies.recordsets(collection_st, min_size=1, max_size=500),
     should_compact=st.booleans(),
 )
 @settings(
@@ -34,7 +37,37 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
         fast=hypothesis.settings(max_examples=200),
     ),
 )
-def test_add(
+def test_add_small(
+    api: ServerAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    should_compact: bool,
+) -> None:
+    _test_add(api, collection, record_set, should_compact)
+
+
+@given(
+    collection=collection_st,
+    record_set=strategies.recordsets(collection_st, min_size=250, max_size=500),
+    should_compact=st.booleans(),
+)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=500),
+        fast=hypothesis.settings(max_examples=200),
+    ),
+)
+def test_add_medium(
+    api: ServerAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    should_compact: bool,
+) -> None:
+    _test_add(api, collection, record_set, should_compact)
+
+
+def _test_add(
     api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
@@ -54,18 +87,22 @@ def test_add(
         print("WRAPPING")
         normalized_record_set = invariants.wrap_all(record_set)
         print("WRAPPED")
+        print("LEN OF RECORD SET", len(normalized_record_set["ids"]))
 
         # TODO: The type of add() is incorrect as it does not allow for metadatas
         # like [{"a": 1}, None, {"a": 3}]
         coll.add(**record_set)  # type: ignore
         print("ADDED")
-        if not NOT_CLUSTER_ONLY:
+        if (
+            not NOT_CLUSTER_ONLY
+            and should_compact
+            and len(normalized_record_set["ids"]) > 10
+        ):
             # Only wait for compaction if the size of the collection is
             # some minimal size
-            if should_compact and len(normalized_record_set["ids"]) > 10:
-                initial_version = coll.get_model()["version"]
-                # Wait for the model to be updated
-                wait_for_version_increase(api, collection.name, initial_version)
+            initial_version = coll.get_model()["version"]
+            # Wait for the model to be updated
+            wait_for_version_increase(api, collection.name, initial_version)
 
         print("INVAR CHECK")
         invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
@@ -88,6 +125,8 @@ def test_add(
     print("PASSED")
 
 
+# Hypothesis struggles to generate large record sets so we explicitly create
+# a large record set
 def create_large_recordset(
     min_size: int = 45000,
     max_size: int = 50000,
@@ -107,9 +146,12 @@ def create_large_recordset(
     return cast(strategies.RecordSet, record_set)
 
 
-@given(collection=collection_st)
-@settings(deadline=None, max_examples=1)
-def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
+@given(collection=collection_st, should_compact=st.booleans())
+@settings(deadline=None, max_examples=5)
+def test_add_large(
+    api: ServerAPI, collection: strategies.Collection, should_compact: bool
+) -> None:
+    print("LARGE SHOULD COMPACT", should_compact)
     reset(api)
 
     record_set = create_large_recordset(
@@ -132,6 +174,12 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
         documents=cast(List[str], record_set["documents"]),
     ):
         coll.add(*batch)
+
+    if not NOT_CLUSTER_ONLY and should_compact:
+        initial_version = coll.get_model()["version"]
+        # Wait for the model to be updated
+        wait_for_version_increase(api, collection.name, initial_version)
+
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
 
 
