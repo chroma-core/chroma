@@ -510,15 +510,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     // Upstream sorts materialized records by offset id so matching_contains
                     // will be sorted.
                     // Emulate sqlite behavior. _ and % match to any character in sqlite.
-                    let normalized_query = query.replace("_", ".").replace("%", ".");
-                    let re = Regex::new(normalized_query.as_str()).unwrap();
+                    // let normalized_query = query.replace("_", ".").replace("%", ".");
+                    // let re = Regex::new(normalized_query.as_str()).unwrap();
                     for (record, _) in mat_records.iter() {
                         if record.final_operation == Operation::Delete {
                             continue;
                         }
                         match record.merged_document_ref() {
                             Some(doc) => {
-                                if re.is_match(doc) {
+                                /* if re.is_match(doc) { */
+                                if doc.contains(query) {
                                     matching_contains.push(record.offset_id as i32);
                                 }
                             }

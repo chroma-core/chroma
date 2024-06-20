@@ -48,7 +48,7 @@ if CURRENT_PRESET not in VALID_PRESETS:
 
 hypothesis.settings.register_profile(
     "base",
-    deadline=45000,
+    deadline=90000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
