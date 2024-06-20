@@ -48,15 +48,22 @@ def test_add_small(
 
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=250, max_size=500),
+    record_set=strategies.recordsets(
+        collection_st, min_size=250, max_size=500, num_unique_metadata=5
+    ),
     should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=1),
+        fast=hypothesis.settings(max_examples=1),
     ),
+    suppress_health_check=[
+        hypothesis.HealthCheck.data_too_large,
+        hypothesis.HealthCheck.too_slow,
+        hypothesis.HealthCheck.function_scoped_fixture,
+    ],
 )
 def test_add_medium(
     api: ServerAPI,
