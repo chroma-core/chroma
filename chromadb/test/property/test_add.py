@@ -61,8 +61,12 @@ def test_add_small(
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=5),
-        fast=hypothesis.settings(max_examples=5),
+        normal=hypothesis.settings(
+            max_examples=10, suppress_health_check=[hypothesis.HealthCheck.too_slow]
+        ),
+        fast=hypothesis.settings(
+            max_examples=5, suppress_health_check=[hypothesis.HealthCheck.too_slow]
+        ),
     ),
 )
 def test_add_medium(
