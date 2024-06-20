@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 from hypothesis import given, settings, HealthCheck
 import pytest
 from chromadb.api import ServerAPI
@@ -22,8 +22,15 @@ import random
 import re
 
 
-def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
+def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
     """Return true if the where clause is true for the given metadata map"""
+    if metadata is None:
+        # None metadata does not match any clause
+        # Note: This includes cases where filtering for $ne or $nin
+        # as we require that the key is present in the metadata
+        # i.e for a record set of [{}, {}] and a filter of {"where": {"test": {"$ne": 1}}}
+        # the result should be [] as the key "test" is not present in the metadata
+        return False
 
     key, expr = list(clause.items())[0]
 
