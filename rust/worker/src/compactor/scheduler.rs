@@ -15,6 +15,7 @@ pub(crate) struct Scheduler {
     policy: Box<dyn SchedulerPolicy>,
     job_queue: Vec<CompactionJob>,
     max_concurrent_jobs: usize,
+    min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
 }
@@ -26,12 +27,14 @@ impl Scheduler {
         sysdb: Box<SysDb>,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
+        min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
     ) -> Scheduler {
         Scheduler {
             my_ip,
             log,
             sysdb,
+            min_compaction_size,
             policy,
             job_queue: Vec::with_capacity(max_concurrent_jobs),
             max_concurrent_jobs,
@@ -41,7 +44,10 @@ impl Scheduler {
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
-        let collections = self.log.get_collections_with_new_data().await;
+        let collections = self
+            .log
+            .get_collections_with_new_data(self.min_compaction_size as u64)
+            .await;
         // TODO: filter collecitons based on memberlist
         let collections = match collections {
             Ok(collections) => collections,
@@ -299,6 +305,7 @@ mod tests {
             sysdb.clone(),
             scheduler_policy,
             max_concurrent_jobs,
+            1,
             assignment_policy,
         );
         // Scheduler does nothing without memberlist
@@ -474,6 +481,7 @@ mod tests {
             sysdb.clone(),
             scheduler_policy,
             max_concurrent_jobs,
+            1,
             assignment_policy,
         );
 

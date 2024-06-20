@@ -228,6 +228,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load();
@@ -324,6 +325,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -438,6 +440,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load();
@@ -538,6 +541,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load();

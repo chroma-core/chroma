@@ -57,8 +57,10 @@ class CollectionInfo(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., first_log_offset: _Optional[int] = ..., first_log_ts: _Optional[int] = ...) -> None: ...
 
 class GetAllCollectionInfoToCompactRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("min_compaction_size",)
+    MIN_COMPACTION_SIZE_FIELD_NUMBER: _ClassVar[int]
+    min_compaction_size: int
+    def __init__(self, min_compaction_size: _Optional[int] = ...) -> None: ...
 
 class GetAllCollectionInfoToCompactResponse(_message.Message):
     __slots__ = ("all_collection_info",)

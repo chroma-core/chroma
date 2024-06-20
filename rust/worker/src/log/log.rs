@@ -68,10 +68,11 @@ impl Log {
 
     pub(crate) async fn get_collections_with_new_data(
         &mut self,
+        min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         match self {
-            Log::Grpc(log) => log.get_collections_with_new_data().await,
-            Log::InMemory(log) => log.get_collections_with_new_data().await,
+            Log::Grpc(log) => log.get_collections_with_new_data(min_compaction_size).await,
+            Log::InMemory(log) => log.get_collections_with_new_data(min_compaction_size).await,
         }
     }
 
@@ -217,11 +218,14 @@ impl GrpcLog {
 
     async fn get_collections_with_new_data(
         &mut self,
+        min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         let response = self
             .client
             .get_all_collection_info_to_compact(
-                chroma_proto::GetAllCollectionInfoToCompactRequest {},
+                chroma_proto::GetAllCollectionInfoToCompactRequest {
+                    min_compaction_size: min_compaction_size,
+                },
             )
             .await;
 
@@ -397,6 +401,7 @@ impl InMemoryLog {
 
     async fn get_collections_with_new_data(
         &mut self,
+        min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         let mut collections = Vec::new();
         for (collection_id, log_records) in self.collection_to_log.iter() {
@@ -414,6 +419,11 @@ impl InMemoryLog {
                 }
                 None => &log_records[..],
             };
+
+            if (filtered_records.len() as u64) < min_compaction_size {
+                continue;
+            }
+
             let mut logs = filtered_records.to_vec();
             logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {
