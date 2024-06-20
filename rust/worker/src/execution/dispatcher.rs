@@ -206,7 +206,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        execution::operator::{wrap, Operator, TaskResult},
+        execution::operator::{wrap, Operator, TaskError, TaskResult},
         system::System,
     };
     use std::{
@@ -323,5 +323,74 @@ mod tests {
         // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
         assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
         assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
+    }
+
+    #[derive(Debug)]
+    struct PanicOperator {}
+    #[async_trait]
+    impl Operator<(), ()> for PanicOperator {
+        type Error = ();
+        async fn run(&self, _: &()) -> Result<(), Self::Error> {
+            panic!("Intentional panic");
+        }
+    }
+
+    #[derive(Debug)]
+    struct PanicDispatcher {
+        pub dispatcher: Box<dyn Receiver<TaskMessage>>,
+        received_messages: Arc<Mutex<Vec<TaskResult<(), ()>>>>,
+    }
+    #[async_trait]
+    impl Component for PanicDispatcher {
+        fn get_name() -> &'static str {
+            "Panic dispatcher"
+        }
+
+        fn queue_size(&self) -> usize {
+            1000
+        }
+
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+            let task = wrap(Box::new(PanicOperator {}), (), ctx.sender.as_receiver());
+            self.dispatcher
+                .send(task, None)
+                .await
+                .expect("dispatcher failed");
+        }
+    }
+
+    #[async_trait]
+    impl Handler<TaskResult<(), ()>> for PanicDispatcher {
+        async fn handle(
+            &mut self,
+            message: TaskResult<(), ()>,
+            ctx: &ComponentContext<PanicDispatcher>,
+        ) {
+            self.received_messages.lock().push(message);
+
+            // Cancel self after first received message
+            ctx.cancellation_token.cancel();
+        }
+    }
+
+    #[tokio::test]
+    async fn panics_should_bubble() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher_handle = system.start_component(dispatcher);
+        let received_messages = Arc::new(Mutex::new(Vec::new()));
+        let panic_dispatcher = PanicDispatcher {
+            dispatcher: dispatcher_handle.receiver(),
+            received_messages: received_messages.clone(),
+        };
+        let mut panic_dispatcher_handle = system.start_component(panic_dispatcher);
+
+        // Component will kill itself after the first message it receives
+        panic_dispatcher_handle.join().await;
+
+        assert_eq!(received_messages.lock().len(), 1);
+        let task_result = received_messages.lock().pop().unwrap().into_inner();
+        assert!(task_result.is_err());
+        assert!(matches!(task_result.unwrap_err(), TaskError::Panic));
     }
 }

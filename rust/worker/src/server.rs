@@ -528,6 +528,7 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
     }
 }
 
+#[cfg(debug_assertions)]
 #[tonic::async_trait]
 impl chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
