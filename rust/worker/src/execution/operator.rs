@@ -1,10 +1,7 @@
 use crate::{errors, system::Receiver};
 use async_trait::async_trait;
 use futures::FutureExt;
-use std::{
-    fmt::Debug,
-    panic::{AssertUnwindSafe, PanicInfo},
-};
+use std::{fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -27,7 +24,7 @@ pub(super) enum TaskError<Error> {
     #[error("Task error: {0}")]
     Other(Error),
     #[error("Task panicked")]
-    Panic,
+    Panic(Option<String>),
 }
 
 impl<Error> errors::ChromaError for TaskError<Error>
@@ -37,7 +34,7 @@ where
     fn code(&self) -> errors::ErrorCodes {
         match self {
             TaskError::Other(error) => error.code(),
-            TaskError::Panic => errors::ErrorCodes::UNKNOWN,
+            TaskError::Panic(_) => errors::ErrorCodes::UNKNOWN,
         }
     }
 }
@@ -116,10 +113,21 @@ where
                 result: result.map_err(TaskError::Other),
                 task_id: self.task_id,
             },
-            Err(_) => TaskResult {
-                result: Err(TaskError::Panic),
-                task_id: self.task_id,
-            },
+            Err(panic_value) => {
+                #[allow(clippy::manual_map)]
+                let panic_value = if let Some(s) = panic_value.downcast_ref::<&str>() {
+                    Some(&**s)
+                } else if let Some(s) = panic_value.downcast_ref::<String>() {
+                    Some(s.as_str())
+                } else {
+                    None
+                };
+
+                TaskResult {
+                    result: Err(TaskError::Panic(panic_value.map(|s| s.to_string()))),
+                    task_id: self.task_id,
+                }
+            }
         };
         let res = self.reply_channel.send(task_result, None).await;
         // TODO: if this errors, it means the caller was dropped

@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn panics_should_bubble() {
+    async fn panic_in_operator_should_be_caught() {
         let system = System::new();
         let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);
@@ -391,6 +391,11 @@ mod tests {
         assert_eq!(received_messages.lock().len(), 1);
         let task_result = received_messages.lock().pop().unwrap().into_inner();
         assert!(task_result.is_err());
-        assert!(matches!(task_result.unwrap_err(), TaskError::Panic));
+
+        if let TaskError::Panic(panic_message) = task_result.unwrap_err() {
+            assert_eq!(panic_message, Some("Intentional panic".to_string()));
+        } else {
+            panic!("Expected panic error");
+        }
     }
 }
