@@ -61,13 +61,15 @@ def test_add_small(
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(
-            max_examples=10, suppress_health_check=[hypothesis.HealthCheck.too_slow]
-        ),
-        fast=hypothesis.settings(
-            max_examples=5, suppress_health_check=[hypothesis.HealthCheck.too_slow]
-        ),
+        normal=hypothesis.settings(max_examples=10),
+        fast=hypothesis.settings(max_examples=5),
     ),
+    suppress_health_check=[
+        hypothesis.HealthCheck.too_slow,
+        hypothesis.HealthCheck.data_too_large,
+        hypothesis.HealthCheck.large_base_example,
+        hypothesis.HealthCheck.function_scoped_fixture,
+    ],
 )
 def test_add_medium(
     api: ServerAPI,
