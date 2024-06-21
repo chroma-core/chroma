@@ -2,7 +2,9 @@ import os
 
 import pytest
 
-from chromadb.utils.embedding_functions import CloudflareWorkersAIEmbeddingFunction
+from chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function import (
+    CloudflareWorkersAIEmbeddingFunction,
+)
 
 
 @pytest.mark.skipif(
