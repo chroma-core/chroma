@@ -109,13 +109,6 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
-      - name: Bake Docker images
-        uses: depot/bake-action@v1
-        with:
-          files: docker-bake.hcl
-          load: true
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
