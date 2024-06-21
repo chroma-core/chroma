@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+from pathlib import Path
 import socket
 import subprocess
 import tempfile
@@ -131,13 +132,17 @@ def skip_if_not_cluster() -> pytest.MarkDecorator:
     )
 
 
-def generate_self_signed_certificate() -> None:
+def generate_self_signed_certificate(output_directory: Path) -> Tuple[Path, Path]:
     config_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "openssl.cnf"
     )
     print(f"Config path: {config_path}")  # Debug print to verify path
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found at {config_path}")
+
+    serverkey_path = output_directory / "serverkey.pem"
+    servercert_path = output_directory / "servercert.pem"
+
     subprocess.run(
         [
             "openssl",
@@ -146,9 +151,9 @@ def generate_self_signed_certificate() -> None:
             "-newkey",
             "rsa:4096",
             "-keyout",
-            "serverkey.pem",
+            str(serverkey_path),
             "-out",
-            "servercert.pem",
+            str(servercert_path),
             "-days",
             "365",
             "-nodes",
@@ -156,8 +161,11 @@ def generate_self_signed_certificate() -> None:
             "/CN=localhost",
             "-config",
             config_path,
-        ]
+        ],
+        check=True,
     )
+
+    return serverkey_path, servercert_path
 
 
 def find_free_port() -> int:
@@ -363,11 +371,12 @@ def fastapi_persistent() -> Generator[System, None, None]:
 
 
 def fastapi_ssl() -> Generator[System, None, None]:
-    generate_self_signed_certificate()
+    cert_dir = Path(tempfile.mkdtemp())
+    (serverkey_path, servercert_path) = generate_self_signed_certificate(cert_dir)
     return _fastapi_fixture(
         is_persistent=False,
-        chroma_server_ssl_certfile="./servercert.pem",
-        chroma_server_ssl_keyfile="./serverkey.pem",
+        chroma_server_ssl_certfile=str(servercert_path),
+        chroma_server_ssl_keyfile=str(serverkey_path),
     )
 
 
