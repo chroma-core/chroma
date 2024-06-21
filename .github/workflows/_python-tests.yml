@@ -40,7 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest, windows-latest]
+        platform: [depot-ubuntu-22.04] #[ubuntu-latest, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/test_cli.py",
@@ -52,21 +52,28 @@ jobs:
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
         include:
-          - platform: ubuntu-latest
+          - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
           - platform: windows-latest
             env-file: compose-env.windows
     runs-on: ${{ matrix.platform }}
+    permissions:
+      # allow issuing OIDC tokens for this workflow run
+      id-token: write
+      # allow at least reading the repo contents, add other permissions if necessary
+      contents: read
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
-    - name: Set up Depot
-      uses: ./.github/actions/depot
+    - name: Set up Depot CLI
+      uses: depot/setup-action@v1
+    - name: Bake Docker images
+      uses: depot/bake-action@v1
       with:
-        depot-token: ${{ secrets.DEPOT_TOKEN }}
-        depot-project-id: ${{ secrets.DEPOT_PROJECT_ID }}
+        files: docker-compose.test.yml
+        load: true
     - name: Integration Test
       run: bin/python-integration-test ${{ matrix.test-globs }}
       shell: bash
