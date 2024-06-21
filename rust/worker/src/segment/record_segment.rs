@@ -579,6 +579,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
