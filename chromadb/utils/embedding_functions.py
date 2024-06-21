@@ -153,26 +153,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
-        if api_key is not None:
-            openai.api_key = api_key
-        # If the api key is still not set, raise an error
-        elif openai.api_key is None:
-            raise ValueError(
-                "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
-            )
-
-        if api_base is not None:
-            openai.api_base = api_base
-
-        if api_version is not None:
-            openai.api_version = api_version
-
         self._api_type = api_type
-        if api_type is not None:
-            openai.api_type = api_type
-
-        if organization_id is not None:
-            openai.organization = organization_id
 
         self._v1 = openai.__version__.startswith("1.")
         if self._v1:
@@ -188,6 +169,26 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_key=api_key, base_url=api_base, default_headers=default_headers
                 ).embeddings
         else:
+            if api_key is not None:
+                openai.api_key = api_key
+            # If the api key is still not set, raise an error
+            elif openai.api_key is None:
+                raise ValueError(
+                    "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
+                )
+
+            if api_base is not None:
+                openai.api_base = api_base
+
+            if api_version is not None:
+                openai.api_version = api_version
+
+            if api_type is not None:
+                openai.api_type = api_type
+
+            if organization_id is not None:
+                openai.organization = organization_id
+
             self._client = openai.Embedding
         self._model_name = model_name
         self._deployment_id = deployment_id
