@@ -898,6 +898,22 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         )
 
 
+class UniversalSentenceEncoderEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(
+        self, model_name: str = "https://tfhub.dev/google/universal-sentence-encoder/4"
+    ):
+        try:
+            import tensorflow_hub as hub
+        except ImportError:
+            raise ValueError(
+                "The tensorflow_hub python package is not installed. Please install it with `pip install tensorflow_hub`"
+            )
+        self._model = hub.load(model_name)
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return cast(Embeddings, self._model(input).numpy().tolist())
+
+
 def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
     try:
         from langchain_core.embeddings import Embeddings as LangchainEmbeddings
