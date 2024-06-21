@@ -105,7 +105,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest -n auto --dist loadgroup "${{ matrix.test-globs }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
