@@ -67,6 +67,7 @@ export type GetResponse = {
   documents: (null | Document)[];
   metadatas: (null | Metadata)[];
   error: null | string;
+  included: IncludeEnum[];
 };
 
 export type QueryResponse = {
@@ -75,6 +76,7 @@ export type QueryResponse = {
   documents: (null | Document)[][];
   metadatas: (null | Metadata)[][];
   distances: null | number[][];
+  included: IncludeEnum[];
 };
 
 export type AddResponse = {

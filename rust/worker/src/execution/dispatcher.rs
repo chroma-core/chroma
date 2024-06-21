@@ -7,6 +7,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
+use tracing::Span;
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
@@ -97,7 +98,11 @@ impl Dispatcher {
         // If a worker is waiting for a task, send it to the worker in FIFO order
         // Otherwise, add it to the task queue
         match self.waiters.pop() {
-            Some(channel) => match channel.reply_to.send(task).await {
+            Some(channel) => match channel
+                .reply_to
+                .send(task, Some(Span::current().clone()))
+                .await
+            {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error sending task to worker: {:?}", e);
@@ -116,7 +121,11 @@ impl Dispatcher {
     /// when one is available
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
         match self.task_queue.pop() {
-            Some(task) => match request.reply_to.send(task).await {
+            Some(task) => match request
+                .reply_to
+                .send(task, Some(Span::current().clone()))
+                .await
+            {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error sending task to worker: {:?}", e);
@@ -162,6 +171,10 @@ impl TaskRequestMessage {
 
 #[async_trait]
 impl Component for Dispatcher {
+    fn get_name() -> &'static str {
+        "Dispatcher"
+    }
+
     fn queue_size(&self) -> usize {
         self.queue_size
     }
@@ -188,14 +201,20 @@ impl Handler<TaskRequestMessage> for Dispatcher {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::Mutex;
+    use uuid::Uuid;
+
     use super::*;
     use crate::{
-        execution::operator::{wrap, Operator},
+        execution::operator::{wrap, Operator, TaskResult},
         system::System,
     };
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+    use std::{
+        collections::HashSet,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
     };
 
     // Create a component that will schedule DISPATCH_COUNT invocations of the MockOperator
@@ -226,9 +245,15 @@ mod tests {
     struct MockDispatchUser {
         pub dispatcher: Box<dyn Receiver<TaskMessage>>,
         counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
+        received_tasks: Arc<Mutex<HashSet<Uuid>>>,
     }
     #[async_trait]
     impl Component for MockDispatchUser {
+        fn get_name() -> &'static str {
+            "Mock dispatcher"
+        }
+
         fn queue_size(&self) -> usize {
             1000
         }
@@ -246,10 +271,10 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<Result<String, ()>> for MockDispatchUser {
+    impl Handler<TaskResult<String, ()>> for MockDispatchUser {
         async fn handle(
             &mut self,
-            _message: Result<String, ()>,
+            _message: TaskResult<String, ()>,
             ctx: &ComponentContext<MockDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
@@ -258,6 +283,7 @@ mod tests {
             if curr_count == DISPATCH_COUNT {
                 ctx.cancellation_token.cancel();
             }
+            self.received_tasks.lock().insert(_message.id());
         }
     }
 
@@ -265,7 +291,9 @@ mod tests {
     impl Handler<()> for MockDispatchUser {
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
-            let res = self.dispatcher.send(task).await;
+            let task_id = task.id();
+            self.sent_tasks.lock().insert(task_id);
+            let res = self.dispatcher.send(task, None).await;
         }
     }
 
@@ -275,9 +303,13 @@ mod tests {
         let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
         let dispatch_user = MockDispatchUser {
             dispatcher: dispatcher_handle.receiver(),
             counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
         };
         let mut dispatch_user_handle = system.start_component(dispatch_user);
         // yield to allow the component to process the messages
@@ -286,5 +318,10 @@ mod tests {
         dispatch_user_handle.join().await;
         // We should have received DISPATCH_COUNT messages
         assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
+        // The sent tasks should be equal to the received tasks
+        assert_eq!(*sent_tasks.lock(), *received_tasks.lock());
+        // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
+        assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
+        assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
     }
 }

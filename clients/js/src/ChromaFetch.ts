@@ -7,14 +7,16 @@ import {
   ChromaServerError,
   ChromaValueError,
   ChromaError,
+  createErrorByType,
 } from "./Errors";
 import { FetchAPI } from "./generated";
 
 function isOfflineError(error: any): boolean {
   return Boolean(
-    error?.name === "TypeError" &&
+    (error?.name === "TypeError" || error?.name === "FetchError") &&
       (error.message?.includes("fetch failed") ||
-        error.message?.includes("Failed to fetch"))
+        error.message?.includes("Failed to fetch") ||
+        error.message?.includes("ENOTFOUND")),
   );
 }
 
@@ -31,7 +33,7 @@ function parseServerError(error: string | undefined): Error {
     }
   }
   return new ChromaServerError(
-    "The server encountered an error while handling the request."
+    "The server encountered an error while handling the request.",
   );
 }
 
@@ -42,7 +44,7 @@ function parseServerError(error: string | undefined): Error {
  */
 export const chromaFetch: FetchAPI = async (
   input: RequestInfo | URL,
-  init?: RequestInit
+  init?: RequestInit,
 ): Promise<Response> => {
   try {
     const resp = await fetch(input, init);
@@ -50,20 +52,24 @@ export const chromaFetch: FetchAPI = async (
     const clonedResp = resp.clone();
     const respBody = await clonedResp.json();
     if (!clonedResp.ok) {
+      const error = createErrorByType(respBody?.error, respBody?.message);
+      if (error) {
+        throw error;
+      }
       switch (resp.status) {
         case 400:
           throw new ChromaClientError(
-            `Bad request to ${input} with status: ${resp.statusText}`
+            `Bad request to ${input} with status: ${resp.statusText}`,
           );
         case 401:
           throw new ChromaUnauthorizedError(`Unauthorized`);
         case 403:
           throw new ChromaForbiddenError(
-            `You do not have permission to access the requested resource.`
+            `You do not have permission to access the requested resource.`,
           );
         case 404:
           throw new ChromaNotFoundError(
-            `The requested resource could not be found: ${input}`
+            `The requested resource could not be found: ${input}`,
           );
         case 500:
           throw parseServerError(respBody?.error);
@@ -71,11 +77,11 @@ export const chromaFetch: FetchAPI = async (
         case 503:
         case 504:
           throw new ChromaConnectionError(
-            `Unable to connect to the chromadb server. Please try again later.`
+            `Unable to connect to the chromadb server. Please try again later.`,
           );
       }
       throw new Error(
-        `Failed to fetch ${input} with status ${resp.status}: ${resp.statusText}`
+        `Failed to fetch ${input} with status ${resp.status}: ${resp.statusText}`,
       );
     }
 
@@ -88,7 +94,7 @@ export const chromaFetch: FetchAPI = async (
     if (isOfflineError(error)) {
       throw new ChromaConnectionError(
         "Failed to connect to chromadb. Make sure your server is running and try again. If you are running from a browser, make sure that your chromadb instance is configured to allow requests from the current origin using the CHROMA_SERVER_CORS_ALLOW_ORIGINS environment variable.",
-        error
+        error,
       );
     }
     throw error;

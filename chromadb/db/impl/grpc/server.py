@@ -318,6 +318,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             dimension=request.dimension,
             database=database,
             tenant=tenant,
+            version=0,
         )
         collections[request.id] = new_collection
         return CreateCollectionResponse(
@@ -359,20 +360,19 @@ class GrpcMockSysDB(SysDBServicer, Component):
         target_id = UUID(hex=request.id) if request.HasField("id") else None
         target_name = request.name if request.HasField("name") else None
 
-        tenant = request.tenant
-        database = request.database
-        if tenant not in self._tenants_to_databases_to_collections:
-            return GetCollectionsResponse(
-                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
-            )
-        if database not in self._tenants_to_databases_to_collections[tenant]:
-            return GetCollectionsResponse(
-                status=proto.Status(code=404, reason=f"Database {database} not found")
-            )
-        collections = self._tenants_to_databases_to_collections[tenant][database]
-
+        allCollections = {}
+        for tenant, databases in self._tenants_to_databases_to_collections.items():
+            for database, collections in databases.items():
+                if request.tenant != "" and tenant != request.tenant:
+                    continue
+                if request.database != "" and database != request.database:
+                    continue
+                allCollections.update(collections)
+                print(
+                    f"Tenant: {tenant}, Database: {database}, Collections: {collections}"
+                )
         found_collections = []
-        for collection in collections.values():
+        for collection in allCollections.values():
             if target_id and collection["id"] != target_id:
                 continue
             if target_name and collection["name"] != target_name:

@@ -14,6 +14,15 @@ pub struct NormalizeVectorOperatorOutput {
     pub normalized_vectors: Vec<Vec<f32>>,
 }
 
+pub fn normalize(vector: &[f32]) -> Vec<f32> {
+    let mut norm = 0.0;
+    for x in vector {
+        norm += x * x;
+    }
+    let norm = 1.0 / (norm.sqrt() + EPS);
+    vector.iter().map(|x| x * norm).collect()
+}
+
 #[async_trait]
 impl Operator<NormalizeVectorOperatorInput, NormalizeVectorOperatorOutput>
     for NormalizeVectorOperator
@@ -27,12 +36,7 @@ impl Operator<NormalizeVectorOperatorInput, NormalizeVectorOperatorOutput>
         // TODO: this should not have to reallocate the vectors. We can optimize this later.
         let mut normalized_vectors = Vec::with_capacity(input.vectors.len());
         for vector in &input.vectors {
-            let mut norm = 0.0;
-            for x in vector {
-                norm += x * x;
-            }
-            let norm = 1.0 / (norm.sqrt() + EPS);
-            let normalized_vector = vector.iter().map(|x| x * norm).collect();
+            let normalized_vector = normalize(vector);
             normalized_vectors.push(normalized_vector);
         }
         Ok(NormalizeVectorOperatorOutput { normalized_vectors })

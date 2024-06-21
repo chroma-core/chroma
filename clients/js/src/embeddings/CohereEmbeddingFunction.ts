@@ -104,7 +104,7 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       if (e.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`"
+          "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`",
         );
       }
       throw e;

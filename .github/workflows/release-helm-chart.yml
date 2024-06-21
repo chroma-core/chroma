@@ -2,7 +2,7 @@
 # OSS helm chart we'll host. For now, just kick off the job which updates
 # hosted-chroma's version.
 
-name: Release Helm Chart
+name: 📦 Release Helm Chart
 
 on:
   push:

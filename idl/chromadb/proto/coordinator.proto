@@ -120,6 +120,8 @@ message GetCollectionsRequest {
   optional string name = 2;
   string tenant = 4;
   string database = 5;
+  optional int32 limit = 6;
+  optional int32 offset = 7;
 }
 
 message GetCollectionsResponse {

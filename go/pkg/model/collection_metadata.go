@@ -44,6 +44,19 @@ func (s *CollectionMetadataValueFloat64Type) Equals(other CollectionMetadataValu
 	return false
 }
 
+type CollectionMetadataValueBoolType struct {
+	Value bool
+}
+
+func (s *CollectionMetadataValueBoolType) IsCollectionMetadataValueType() {}
+
+func (s *CollectionMetadataValueBoolType) Equals(other CollectionMetadataValueType) bool {
+	if o, ok := other.(*CollectionMetadataValueBoolType); ok {
+		return s.Value == o.Value
+	}
+	return false
+}
+
 type CollectionMetadata[T CollectionMetadataValueType] struct {
 	Metadata map[string]T
 }

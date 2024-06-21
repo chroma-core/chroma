@@ -1,7 +1,7 @@
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
-from typing_extensions import Literal, TypedDict, Protocol
+from typing_extensions import Literal, TypedDict, Protocol, runtime_checkable
 import chromadb.errors as errors
 from chromadb.types import (
     Metadata,
@@ -55,7 +55,9 @@ Embedding = Vector
 Embeddings = List[Embedding]
 
 
-def maybe_cast_one_to_many_embedding(target: OneOrMany[Embedding]) -> Embeddings:
+def maybe_cast_one_to_many_embedding(
+    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]  # type: ignore[type-arg]
+) -> Embeddings:
     if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
@@ -99,7 +101,7 @@ def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
 
 
 # Images
-ImageDType = Union[np.uint, np.int_, np.float_]
+ImageDType = Union[np.uint, np.int_, np.float_]  # type: ignore[name-defined]
 Image = NDArray[ImageDType]
 Images = List[Image]
 
@@ -157,6 +159,7 @@ class GetResult(TypedDict):
     uris: Optional[URIs]
     data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
+    included: Include
 
 
 class QueryResult(TypedDict):
@@ -167,6 +170,7 @@ class QueryResult(TypedDict):
     data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
+    included: Include
 
 
 class IndexMetadata(TypedDict):
@@ -180,6 +184,7 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+@runtime_checkable
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
@@ -195,8 +200,10 @@ class EmbeddingFunction(Protocol[D]):
 
         setattr(cls, "__call__", __call__)
 
-    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
-        return retry(**retry_kwargs)(self.__call__)(input)
+    def embed_with_retries(
+        self, input: D, **retry_kwargs: Dict[str, Any]
+    ) -> Embeddings:
+        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
 
 
 def validate_embedding_function(
@@ -210,8 +217,8 @@ def validate_embedding_function(
     if not function_signature == protocol_signature:
         raise ValueError(
             f"Expected EmbeddingFunction.__call__ to have the following signature: {protocol_signature}, got {function_signature}\n"
-            "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
-            "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
+            "Please see https://docs.trychroma.com/guides/embeddings for details of the EmbeddingFunction interface.\n"
+            "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/deployment/migration#migration-to-0.4.16---november-7,-2023 \n"
         )
 
 
@@ -394,7 +401,7 @@ def validate_where(where: Where) -> Where:
                     or not all(isinstance(x, type(operand[0])) for x in operand)
                 ):
                     raise ValueError(
-                        f"Expected where operand value to be a non-empty list, and all values to obe of the same type "
+                        f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                         f"got {operand}"
                     )
     return where

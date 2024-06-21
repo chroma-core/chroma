@@ -3,12 +3,14 @@ package dbcore
 import (
 	"context"
 	"fmt"
-	"os"
+	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/docker/go-connections/nat"
+	"github.com/testcontainers/testcontainers-go"
+	postgres2 "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"reflect"
 	"strconv"
 	"time"
-
-	"github.com/chroma-core/chroma/go/pkg/types"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -188,13 +190,34 @@ func CreateTestTables(db *gorm.DB) {
 }
 
 func GetDBConfigForTesting() DBConfig {
-	dbAddress := os.Getenv("POSTGRES_HOST")
-	dbPort, _ := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
+	var container *postgres2.PostgresContainer
+	dbName := "chroma"
+	dbUsername := "chroma"
+	dbPassword := "chroma"
+	container, _ = postgres2.RunContainer(context.Background(),
+		testcontainers.WithImage("docker.io/postgres:15.2-alpine"),
+		postgres2.WithDatabase(dbName),
+		postgres2.WithUsername(dbUsername),
+		postgres2.WithPassword(dbPassword),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(5*time.Second)),
+	)
+
+	var ports nat.PortMap
+	ports, _ = container.Ports(context.Background())
+
+	if _, ok := ports["5432/tcp"]; !ok {
+
+	}
+	port := ports["5432/tcp"][0].HostPort
+	p, _ := strconv.Atoi(port)
 	return DBConfig{
 		Username:     "chroma",
 		Password:     "chroma",
-		Address:      dbAddress,
-		Port:         dbPort,
+		Address:      "localhost",
+		Port:         p,
 		DBName:       "chroma",
 		MaxIdleConns: 10,
 		MaxOpenConns: 100,

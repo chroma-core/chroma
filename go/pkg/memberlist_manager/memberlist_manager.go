@@ -54,57 +54,92 @@ func (m *MemberlistManager) Start() error {
 	return nil
 }
 
+func (m *MemberlistManager) reconcileMemberlist(updates map[string]bool) {
+	memberlist, resourceVersion, err := m.getOldMemberlist()
+	if err != nil {
+		log.Error("Error while getting memberlist", zap.Error(err))
+		return
+	}
+	log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
+	newMemberlist, err := m.nodeWatcher.ListReadyMembers()
+	if err != nil {
+		log.Error("Error while getting ready members", zap.Error(err))
+		return
+	}
+	// do not update memberlist if there's no change
+	if !memberlistSame(memberlist, newMemberlist) {
+		err = m.updateMemberlist(newMemberlist, *resourceVersion)
+		if err != nil {
+			log.Error("Error while updating memberlist", zap.Error(err))
+			return
+		}
+	} else {
+		log.Info("Memberlist has not changed")
+	}
+	for key := range updates {
+		m.workqueue.Done(key)
+	}
+}
+
 func (m *MemberlistManager) run() {
 	count := uint(0)
-	updates := make(map[string]Status)
-	lastUpdate := time.Now()
-	for {
-		interface_key, shutdown := m.workqueue.Get()
-		if shutdown {
-			log.Info("Shutting down memberlist manager")
-			break
-		}
-
-		key, ok := interface_key.(string)
-		if !ok {
-			log.Error("Error while asserting workqueue key to string")
-			m.workqueue.Done(key)
-			continue
-		}
-
-		nodeUpdate, err := m.nodeWatcher.GetStatus(key)
-		updates[key] = nodeUpdate
-		count++
-		if err != nil {
-			log.Error("Error while getting status of node", zap.Error(err))
-			m.workqueue.Done(key)
-			continue
-		}
-		if count >= m.reconcileCount || time.Since(lastUpdate) > m.reconcileInterval {
-			memberlist, resourceVersion, err := m.getOldMemberlist()
-			if err != nil {
-				log.Error("Error while getting memberlist", zap.Error(err))
-				continue
+	updates := map[string]bool{}
+	shutdownChan := make(chan struct{})
+	eventChan := make(chan string)
+	ticker := time.NewTicker(m.reconcileInterval)
+	go func() {
+		for {
+			interface_key, shutdown := m.workqueue.Get()
+			if shutdown {
+				log.Info("Shutting down memberlist manager")
+				shutdownChan <- struct{}{}
+				break
 			}
-			newMemberlist, err := reconcileBatch(memberlist, updates)
-			if err != nil {
-				log.Error("Error while reconciling memberlist", zap.Error(err))
-				continue
-			}
-			err = m.updateMemberlist(newMemberlist, *resourceVersion)
-			if err != nil {
-				log.Error("Error while updating memberlist", zap.Error(err))
-				continue
-			}
-
-			for key := range updates {
+			key, ok := interface_key.(string)
+			log.Info("Reconciling memberlist", zap.String("key", key))
+			if !ok {
+				log.Error("Error while asserting workqueue key to string")
 				m.workqueue.Done(key)
 			}
-			updates = make(map[string]Status)
+			eventChan <- key
+		}
+	}()
+
+	for {
+		select {
+		case key := <-eventChan:
+			count++
+			updates[key] = true
+			if count >= m.reconcileCount {
+				m.reconcileMemberlist(updates)
+				count = uint(0)
+				updates = map[string]bool{}
+			}
+		case <-shutdownChan:
+			return
+		case <-ticker.C:
+			m.reconcileMemberlist(updates)
 			count = uint(0)
-			lastUpdate = time.Now()
+			updates = map[string]bool{}
 		}
 	}
+}
+
+func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
+	if len(oldMemberlist) != len(newMemberlist) {
+		return false
+	}
+	// use a map to check if the new memberlist contains all the old members
+	newMemberlistMap := make(map[string]bool)
+	for _, member := range newMemberlist {
+		newMemberlistMap[member.id] = true
+	}
+	for _, member := range oldMemberlist {
+		if _, ok := newMemberlistMap[member.id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
@@ -116,28 +151,6 @@ func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
 		return nil, nil, errors.New("Memberlist recieved is nil")
 	}
 	return *memberlist, &resourceVersion, nil
-}
-
-func reconcileBatch(memberlist Memberlist, updates map[string]Status) (Memberlist, error) {
-	newMemberlist := Memberlist{}
-	exists := map[string]bool{}
-	for _, node := range memberlist {
-		if status, ok := updates[node]; ok {
-			if status == Ready {
-				newMemberlist = append(newMemberlist, node)
-			}
-			exists[node] = true
-		} else {
-			newMemberlist = append(newMemberlist, node)
-		}
-	}
-	for node, status := range updates {
-		if _, ok := exists[node]; !ok && status == Ready {
-			newMemberlist = append(newMemberlist, node)
-		}
-	}
-	log.Info("Getting new memberlist", zap.Any("newMemberlist", newMemberlist))
-	return newMemberlist, nil
 }
 
 func (m *MemberlistManager) updateMemberlist(memberlist Memberlist, resourceVersion string) error {

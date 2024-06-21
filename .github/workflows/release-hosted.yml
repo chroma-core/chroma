@@ -1,0 +1,23 @@
+name: 📦 Release hosted
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+          - name: Trigger Hosted Chroma FE Release
+            uses: actions/github-script@v6
+            with:
+                github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
+                script: |
+                    const result = await github.rest.actions.createWorkflowDispatch({
+                        owner: 'chroma-core',
+                        repo: 'hosted-chroma',
+                        workflow_id: 'update_oss.yaml',
+                        ref: 'main'
+                    })

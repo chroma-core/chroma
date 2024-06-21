@@ -114,7 +114,7 @@ func testCollection(t *rapid.T) {
 			}
 			if err == nil {
 				// verify the correctness
-				collectionList, err := c.GetCollections(ctx, collection.ID, nil, common.DefaultTenant, common.DefaultDatabase)
+				collectionList, err := c.GetCollections(ctx, collection.ID, nil, common.DefaultTenant, common.DefaultDatabase, nil, nil)
 				if err != nil {
 					t.Fatalf("error getting collections: %v", err)
 				}
@@ -256,7 +256,7 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
-	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName)
+	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 
 	sort.Slice(results, func(i, j int) bool {
@@ -275,14 +275,14 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	// Find by name
 	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName)
+		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName, nil, nil)
 		suite.NoError(err)
 		suite.Equal([]*model.Collection{collection}, result)
 	}
 
 	// Find by id
 	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, suite.tenantName, suite.databaseName)
+		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 		suite.NoError(err)
 		suite.Equal([]*model.Collection{collection}, result)
 	}
@@ -297,13 +297,13 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
 	suite.NoError(err)
 
-	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName)
+	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 
 	suite.NotContains(results, c1)
 	suite.Len(results, len(suite.sampleCollections)-1)
 	suite.ElementsMatch(results, suite.sampleCollections[1:])
-	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, suite.tenantName, suite.databaseName)
+	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(byIDResult)
 
@@ -328,7 +328,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, suite.tenantName, suite.databaseName)
+	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 
@@ -338,7 +338,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName)
+	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 
@@ -349,7 +349,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName)
+	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 
@@ -358,7 +358,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
 	suite.NoError(err)
 	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName)
+	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Equal([]*model.Collection{coll}, resultList)
 }
@@ -391,7 +391,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 		Name: &newName1,
 	})
 	suite.NoError(err)
-	result, err := suite.coordinator.GetCollections(ctx, suite.sampleCollections[1].ID, nil, suite.tenantName, suite.databaseName)
+	result, err := suite.coordinator.GetCollections(ctx, suite.sampleCollections[1].ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newName1, result[0].Name)
@@ -403,7 +403,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	})
 	suite.NoError(err)
 	//suite.Equal(newName0, collection.Name)
-	result, err = suite.coordinator.GetCollections(ctx, suite.sampleCollections[0].ID, nil, suite.tenantName, newDatabaseName)
+	result, err = suite.coordinator.GetCollections(ctx, suite.sampleCollections[0].ID, nil, suite.tenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newName0, result[0].Name)
@@ -441,7 +441,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		suite.NoError(err)
 		suite.sampleCollections[index] = collection
 	}
-	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName)
+	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Equal(len(suite.sampleCollections), len(result))
 	sort.Slice(result, func(i, j int) bool {
@@ -449,7 +449,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 	})
 	suite.Equal(suite.sampleCollections, result)
 
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName)
+	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Equal(len(suite.sampleCollections), len(result))
 
@@ -526,7 +526,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected := []*model.Collection{suite.sampleCollections[0]}
 	expected[0].TenantID = newTenantName
 	expected[0].DatabaseName = newDatabaseName
-	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, newDatabaseName)
+	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(expected[0], result[0])
@@ -534,16 +534,16 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected = []*model.Collection{suite.sampleCollections[1]}
 	expected[0].TenantID = suite.tenantName
 	expected[0].DatabaseName = newDatabaseName
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName)
+	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(expected[0], result[0])
 
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, suite.databaseName)
+	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Nil(result)
+	suite.Equal(0, len(result))
 
 	// clean up
 	err = dao.CleanUpTestTenant(suite.db, newTenantName)

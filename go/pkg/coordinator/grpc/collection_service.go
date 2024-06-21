@@ -100,6 +100,8 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	collectionName := req.Name
 	tenantID := req.Tenant
 	databaseName := req.Database
+	limit := req.Limit
+	offset := req.Offset
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 
@@ -110,7 +112,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		return res, nil
 	}
 
-	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName)
+	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
 		res.Status = failResponseWithError(err, errorCode)
@@ -202,9 +204,14 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	_, err = s.coordinator.UpdateCollection(ctx, updateCollection)
+
 	if err != nil {
 		log.Error("error updating collection", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
+		if err == common.ErrCollectionUniqueConstraintViolation {
+			res.Status = failResponseWithError(err, 409)
+		} else {
+			res.Status = failResponseWithError(err, errorCode)
+		}
 		return res, nil
 	}
 

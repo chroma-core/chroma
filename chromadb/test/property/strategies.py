@@ -9,8 +9,7 @@ import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
-from hypothesis.errors import InvalidDefinition
-from hypothesis.stateful import RuleBasedStateMachine
+from chromadb.test.conftest import NOT_CLUSTER_ONLY
 
 from dataclasses import dataclass
 
@@ -112,10 +111,13 @@ tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_
 safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1
 )  # TODO: handle longs
+# In distributed chroma, floats are 32 bit hence we need to
+# restrict the generation to generate only 32 bit floats.
 safe_floats = st.floats(
     allow_infinity=False,
     allow_nan=False,
     allow_subnormal=False,
+    width=32,
     min_value=-1e6,
     max_value=1e6,
 )  # TODO: handle infinity and NAN
@@ -442,58 +444,6 @@ def recordsets(
     }
 
 
-# This class is mostly cloned from from hypothesis.stateful.RuleStrategy,
-# but always runs all the rules, instead of using a FeatureStrategy to
-# enable/disable rules. Disabled rules cause the entire test to be marked invalida and,
-# combined with the complexity of our other strategies, leads to an
-# unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
-class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
-    def __init__(self, machine: RuleBasedStateMachine) -> None:
-        super().__init__()  # type: ignore
-        self.machine = machine
-        self.rules = list(machine.rules())  # type: ignore
-
-        # The order is a bit arbitrary. Primarily we're trying to group rules
-        # that write to the same location together, and to put rules with no
-        # target first as they have less effect on the structure. We order from
-        # fewer to more arguments on grounds that it will plausibly need less
-        # data. This probably won't work especially well and we could be
-        # smarter about it, but it's better than just doing it in definition
-        # order.
-        self.rules.sort(
-            key=lambda rule: (
-                sorted(rule.targets),
-                len(rule.arguments),
-                rule.function.__name__,
-            )
-        )
-
-    def __repr__(self) -> str:
-        return "{}(machine={}({{...}}))".format(
-            self.__class__.__name__,
-            self.machine.__class__.__name__,
-        )
-
-    def do_draw(self, data):  # type: ignore
-        if not any(self.is_valid(rule) for rule in self.rules):
-            msg = f"No progress can be made from state {self.machine!r}"
-            raise InvalidDefinition(msg) from None
-
-        rule = data.draw(st.sampled_from([r for r in self.rules if self.is_valid(r)]))
-        argdata = data.draw(rule.arguments_strategy)
-        return (rule, argdata)
-
-    def is_valid(self, rule) -> bool:  # type: ignore
-        if not all(precond(self.machine) for precond in rule.preconditions):
-            return False
-
-        for b in rule.bundles:
-            bundle = self.machine.bundle(b.name)  # type: ignore
-            if not bundle:
-                return False
-        return True
-
-
 def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
     """
     Returns a strategy that will generate all valid values except the input value - testing of $nin
@@ -523,12 +473,21 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+    # This is hacky, but the distributed system does not support $in or $in so we
+    # need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $in and $nin
+    if not NOT_CLUSTER_ONLY:
+        legal_ops: List[Optional[str]] = [None, "$eq"]
+    else:
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))
+        # Truncate to 32 bit
+        value = float(np.float32(value))
 
     op: WhereOperator = draw(st.sampled_from(legal_ops))
 
@@ -554,7 +513,15 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         word = draw(safe_text)
 
-    op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
+    # This is hacky, but the distributed system does not support $not_contains
+    # so we need to avoid generating these operators for now in that case.
+    # TODO: Remove this once the distributed system supports $not_contains
+    op: WhereOperator
+    if not NOT_CLUSTER_ONLY:
+        op = draw(st.sampled_from(["$contains"]))
+    else:
+        op = draw(st.sampled_from(["$contains", "$not_contains"]))
+
     if op == "$contains":
         return {"$contains": word}
     else:

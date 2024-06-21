@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package chroma;
+
+import "google/protobuf/empty.proto";
+
+message GetInfoResponse {
+  string version = 1;
+}
+
+service Debug {
+  rpc GetInfo(google.protobuf.Empty) returns (GetInfoResponse) {}
+  rpc TriggerPanic(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+}

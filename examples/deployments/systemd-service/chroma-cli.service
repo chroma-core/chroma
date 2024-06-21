@@ -1,0 +1,13 @@
+[Unit]
+Description = Chroma Service
+After = network.target
+
+[Service]
+Type = simple
+User = root
+Group = root
+WorkingDirectory = /chroma
+ExecStart=/usr/local/bin/chroma run --host 127.0.0.1 --port 8000 --path /chroma/data --log-path /var/log/chroma.log
+
+[Install]
+WantedBy = multi-user.target

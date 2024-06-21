@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+
 	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -73,7 +74,7 @@ func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequ
 
 func (s *logServer) GetAllCollectionInfoToCompact(ctx context.Context, req *logservicepb.GetAllCollectionInfoToCompactRequest) (res *logservicepb.GetAllCollectionInfoToCompactResponse, err error) {
 	var collectionToCompact []log.GetAllCollectionsToCompactRow
-	collectionToCompact, err = s.lr.GetAllCollectionInfoToCompact(ctx)
+	collectionToCompact, err = s.lr.GetAllCollectionInfoToCompact(ctx, req.MinCompactionSize)
 	if err != nil {
 		return
 	}

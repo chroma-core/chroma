@@ -1,0 +1,37 @@
+name: Setup Docker
+description: "This action sets up Docker Buildx and authenticates to registries"
+inputs:
+  ghcr-username:
+    description: "Github Container Registry username"
+    required: true
+  ghcr-password:
+    description: "Github Container Registry password"
+    required: true
+  dockerhub-username:
+    description: "DockerHub username"
+    required: true
+  dockerhub-password:
+    description: "DockerHub password"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # https://github.com/docker/setup-qemu-action - for multiplatform builds
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v2
+    # https://github.com/docker/setup-buildx-action - for multiplatform builds
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@v2
+    - name: Log in to the Github Container registry
+      uses: docker/login-action@v2.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ inputs.ghcr-username }}
+        password: ${{ inputs.ghcr-password }}
+    - name: Login to DockerHub
+      uses: docker/login-action@v2.1.0
+      with:
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-password }}

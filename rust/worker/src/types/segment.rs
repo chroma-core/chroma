@@ -4,13 +4,42 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
 };
 use std::collections::HashMap;
-use std::vec::Vec;
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SegmentType {
     HnswDistributed,
+    BlockfileMetadata,
+    BlockfileRecord,
+    Sqlite,
+}
+
+impl From<SegmentType> for String {
+    fn from(segment_type: SegmentType) -> String {
+        match segment_type {
+            SegmentType::HnswDistributed => {
+                "urn:chroma:segment/vector/hnsw-distributed".to_string()
+            }
+            SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
+            SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
+            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
+        }
+    }
+}
+
+impl TryFrom<&str> for SegmentType {
+    type Error = SegmentConversionError;
+
+    fn try_from(segment_type: &str) -> Result<Self, Self::Error> {
+        match segment_type {
+            "urn:chroma:segment/vector/hnsw-distributed" => Ok(SegmentType::HnswDistributed),
+            "urn:chroma:segment/record/blockfile" => Ok(SegmentType::BlockfileRecord),
+            "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
+            "urn:chroma:segment/metadata/blockfile" => Ok(SegmentType::BlockfileMetadata),
+            _ => Err(SegmentConversionError::InvalidSegmentType),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,8 +107,12 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
         let segment_type = match proto_segment.r#type.as_str() {
             "urn:chroma:segment/vector/hnsw-distributed" => SegmentType::HnswDistributed,
+            "urn:chroma:segment/record/blockfile" => SegmentType::BlockfileRecord,
+            "urn:chroma:segment/metadata/sqlite" => SegmentType::Sqlite,
+            "urn:chroma:segment/metadata/blockfile" => SegmentType::BlockfileMetadata,
             _ => {
-                return Err(SegmentConversionError::InvalidUuid);
+                println!("Invalid segment type: {}", proto_segment.r#type);
+                return Err(SegmentConversionError::InvalidSegmentType);
             }
         };
 
@@ -102,7 +135,6 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
     use crate::types::MetadataValue;
