@@ -3,6 +3,7 @@ import importlib
 import logging
 import os
 import tarfile
+import portalocker
 from functools import cached_property
 from pathlib import Path
 from typing import List, Optional, cast
@@ -211,26 +212,29 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             "vocab.txt",
         ]
         extracted_folder = os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME)
-        onnx_files_exist = True
-        for f in onnx_files:
-            if not os.path.exists(os.path.join(extracted_folder, f)):
-                onnx_files_exist = False
-                break
-        # Model is not downloaded yet
-        if not onnx_files_exist:
-            os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
-            if not os.path.exists(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
-            ) or not _verify_sha256(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                self._MODEL_SHA256,
-            ):
-                self._download(
-                    url=self.MODEL_DOWNLOAD_URL,
-                    fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                )
-            with tarfile.open(
-                name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                mode="r:gz",
-            ) as tar:
-                tar.extractall(path=self.DOWNLOAD_PATH)
+        lock_file = os.path.join(self.DOWNLOAD_PATH, ".lock")
+
+        with portalocker.Lock(lock_file):
+            onnx_files_exist = True
+            for f in onnx_files:
+                if not os.path.exists(os.path.join(extracted_folder, f)):
+                    onnx_files_exist = False
+                    break
+            # Model is not downloaded yet
+            if not onnx_files_exist:
+                os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
+                if not os.path.exists(
+                    os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+                ) or not _verify_sha256(
+                    os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    self._MODEL_SHA256,
+                ):
+                    self._download(
+                        url=self.MODEL_DOWNLOAD_URL,
+                        fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    )
+                with tarfile.open(
+                    name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    mode="r:gz",
+                ) as tar:
+                    tar.extractall(path=self.DOWNLOAD_PATH)
