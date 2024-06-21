@@ -2,7 +2,11 @@ import os
 
 import pytest
 
-from chromadb.utils.embedding_functions import VoyageAIEmbeddingFunction
+from chromadb.utils.embedding_functions.voyage_ai_embedding_function import (
+    VoyageAIEmbeddingFunction,
+)
+
+voyageai = pytest.importorskip("voyageai", reason="voyageai not installed")
 
 
 @pytest.fixture(scope="function")
@@ -18,7 +22,10 @@ def remove_api_key():
         os.environ["VOYAGE_API_KEY"] = existing_api_key
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage() -> None:
     ef = VoyageAIEmbeddingFunction(api_key=os.environ.get("VOYAGE_API_KEY", ""))
     embeddings = ef(["test doc"])
@@ -27,7 +34,10 @@ def test_voyage() -> None:
     assert len(embeddings[0]) > 0
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_input_type_query() -> None:
     ef = VoyageAIEmbeddingFunction(
         api_key=os.environ.get("VOYAGE_API_KEY", ""),
@@ -39,7 +49,10 @@ def test_voyage_input_type_query() -> None:
     assert len(embeddings[0]) > 0
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_input_type_document() -> None:
     ef = VoyageAIEmbeddingFunction(
         api_key=os.environ.get("VOYAGE_API_KEY", ""),
@@ -51,7 +64,10 @@ def test_voyage_input_type_document() -> None:
     assert len(embeddings[0]) > 0
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_model() -> None:
     ef = VoyageAIEmbeddingFunction(
         api_key=os.environ.get("VOYAGE_API_KEY", ""), model_name="voyage-01"
@@ -62,7 +78,10 @@ def test_voyage_model() -> None:
     assert len(embeddings[0]) > 0
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_truncation_default() -> None:
     ef = VoyageAIEmbeddingFunction(api_key=os.environ.get("VOYAGE_API_KEY", ""))
     embeddings = ef(["this is a test-message" * 10000])
@@ -71,7 +90,10 @@ def test_voyage_truncation_default() -> None:
     assert len(embeddings[0]) > 0
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_truncation_enabled() -> None:
     ef = VoyageAIEmbeddingFunction(
         api_key=os.environ.get("VOYAGE_API_KEY", ""), truncation=True
@@ -82,7 +104,10 @@ def test_voyage_truncation_enabled() -> None:
     assert len(embeddings[0]) > 0
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_truncation_disabled() -> None:
     ef = VoyageAIEmbeddingFunction(
         api_key=os.environ.get("VOYAGE_API_KEY", ""), truncation=False
@@ -91,30 +116,45 @@ def test_voyage_truncation_disabled() -> None:
         ef(["this is a test-message" * 10000])
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_env_api_key() -> None:
     VoyageAIEmbeddingFunction()
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_no_api_key(remove_api_key) -> None:
     with pytest.raises(ValueError, match="Please provide a VoyageAI API key"):
         VoyageAIEmbeddingFunction(api_key=None)  # type: ignore
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_no_api_key_in_env(remove_api_key) -> None:
     with pytest.raises(ValueError, match="Please provide a VoyageAI API key"):
         VoyageAIEmbeddingFunction(api_key=None)  # type: ignore
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_max_batch_size_exceeded_in_init() -> None:
     with pytest.raises(ValueError, match="The maximum batch size supported is"):
         VoyageAIEmbeddingFunction(api_key="dummy", max_batch_size=99999999)
 
 
-@pytest.mark.skipif("VOYAGE_API_KEY" not in os.environ, reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.")
+@pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ,
+    reason="VOYAGE_API_KEY not set, not going to test VoyageAI EF.",
+)
 def test_voyage_max_batch_size_exceeded_in_call() -> None:
     ef = VoyageAIEmbeddingFunction(api_key="dummy", max_batch_size=1)
     with pytest.raises(ValueError, match="The maximum batch size supported is"):
