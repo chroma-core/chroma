@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04-64]
+        platform: [depot-ubuntu-22.04-32]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest -n auto --dist loadgroup --ignore-glob 'chromadb/test/distributed/*'
+        run: python -m pytest -n auto --dist loadgroup --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -125,6 +125,24 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Test
         run: clients/python/integration-test.sh
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+
+  test-stress:
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ['depot-ubuntu-22.04-8']
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: python -m pytest -n auto --dist loadgroup chromadb/test/stress/
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
