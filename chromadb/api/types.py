@@ -3,6 +3,7 @@ from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
+from chromadb.config import get_fqn
 from chromadb.types import (
     Metadata,
     UpdateMetadata,
@@ -199,8 +200,8 @@ class EmbeddingFunction(Protocol[D]):
 
         setattr(cls, "__call__", __call__)
 
-    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
-        return retry(**retry_kwargs)(self.__call__)(input)
+    def embed_with_retries(self, input: D, **retry_kwargs: Any) -> Embeddings:
+        return retry(**retry_kwargs)(self.__call__)(input)  # type: ignore[no-any-return]
 
 
 def validate_embedding_function(
@@ -315,7 +316,9 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, floats or bools"""
     if not isinstance(metadatas, list):
-        raise ValueError(f"Expected metadatas to be a list, got {metadatas}")
+        raise ValueError(
+            f"Expected metadatas to be a list, got {get_fqn(type(metadatas))}"
+        )
     for metadata in metadatas:
         validate_metadata(metadata)
     return metadatas
@@ -327,12 +330,14 @@ def validate_where(where: Where) -> Where:
     or in the case of $and and $or, a list of where expressions
     """
     if not isinstance(where, dict):
-        raise ValueError(f"Expected where to be a dict, got {where}")
+        raise ValueError(f"Expected where to be a dict, got {get_fqn(type(where))}")
     if len(where) != 1:
         raise ValueError(f"Expected where to have exactly one operator, got {where}")
     for key, value in where.items():
         if not isinstance(key, str):
-            raise ValueError(f"Expected where key to be a str, got {key}")
+            raise ValueError(
+                f"Expected where key to be a str, got {get_fqn(type(key))}"
+            )
         if (
             key != "$and"
             and key != "$or"
@@ -341,12 +346,12 @@ def validate_where(where: Where) -> Where:
             and not isinstance(value, (str, int, float, dict))
         ):
             raise ValueError(
-                f"Expected where value to be a str, int, float, or operator expression, got {value}"
+                f"Expected where value to be a str, int, float, or operator expression, got {get_fqn(type(value))}"
             )
         if key == "$and" or key == "$or":
             if not isinstance(value, list):
                 raise ValueError(
-                    f"Expected where value for $and or $or to be a list of where expressions, got {value}"
+                    f"Expected where value for $and or $or to be a list of where expressions, got {get_fqn(type(value))}"
                 )
             if len(value) <= 1:
                 raise ValueError(
@@ -367,12 +372,12 @@ def validate_where(where: Where) -> Where:
                 if operator in ["$gt", "$gte", "$lt", "$lte"]:
                     if not isinstance(operand, (int, float)):
                         raise ValueError(
-                            f"Expected operand value to be an int or a float for operator {operator}, got {operand}"
+                            f"Expected operand value to be an int or a float for operator {operator}, got {get_fqn(type(operand))}"
                         )
                 if operator in ["$in", "$nin"]:
                     if not isinstance(operand, list):
                         raise ValueError(
-                            f"Expected operand value to be an list for operator {operator}, got {operand}"
+                            f"Expected operand value to be an list for operator {operator}, got {get_fqn(type(operand))}"
                         )
                 if operator not in [
                     "$gt",
@@ -391,15 +396,16 @@ def validate_where(where: Where) -> Where:
 
                 if not isinstance(operand, (str, int, float, list)):
                     raise ValueError(
-                        f"Expected where operand value to be a str, int, float, or list of those type, got {operand}"
+                        f"Expected where operand value to be a str, int, float, or list of those type, got {get_fqn(type(operand))}"
                     )
+
                 if isinstance(operand, list) and (
                     len(operand) == 0
                     or not all(isinstance(x, type(operand[0])) for x in operand)
                 ):
                     raise ValueError(
                         f"Expected where operand value to be a non-empty list, and all values to be of the same type "
-                        f"got {operand}"
+                        f"got {get_fqn(type(operand))}"
                     )
     return where
 
@@ -411,7 +417,7 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     """
     if not isinstance(where_document, dict):
         raise ValueError(
-            f"Expected where document to be a dictionary, got {where_document}"
+            f"Expected where document to be a dictionary, got {get_fqn(type(where_document))}"
         )
     if len(where_document) != 1:
         raise ValueError(
@@ -425,7 +431,7 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
         if operator == "$and" or operator == "$or":
             if not isinstance(operand, list):
                 raise ValueError(
-                    f"Expected document value for $and or $or to be a list of where document expressions, got {operand}"
+                    f"Expected document value for $and or $or to be a list of where document expressions, got {get_fqn(type(operand))}"
                 )
             if len(operand) <= 1:
                 raise ValueError(
@@ -436,7 +442,7 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
         # Value is a $contains operator
         elif not isinstance(operand, str):
             raise ValueError(
-                f"Expected where document operand value for operator $contains to be a str, got {operand}"
+                f"Expected where document operand value for operator $contains to be a str, got {get_fqn(type(operand))}"
             )
         elif len(operand) == 0:
             raise ValueError(
@@ -450,10 +456,12 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     to control if distances is allowed"""
 
     if not isinstance(include, list):
-        raise ValueError(f"Expected include to be a list, got {include}")
+        raise ValueError(f"Expected include to be a list, got {get_fqn(type(include))}")
     for item in include:
         if not isinstance(item, str):
-            raise ValueError(f"Expected include item to be a str, got {item}")
+            raise ValueError(
+                f"Expected include item to be a str, got {get_fqn(type(item))}"
+            )
         allowed_values = ["embeddings", "documents", "metadatas", "uris", "data"]
         if allow_distances:
             allowed_values.append("distances")
@@ -469,7 +477,7 @@ def validate_n_results(n_results: int) -> int:
     # Check Number of requested results
     if not isinstance(n_results, int):
         raise ValueError(
-            f"Expected requested number of results to be a int, got {n_results}"
+            f"Expected requested number of results to be a int, got {get_fqn(type(n_results))}"
         )
     if n_results <= 0:
         raise TypeError(
