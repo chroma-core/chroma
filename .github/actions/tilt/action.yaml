@@ -21,6 +21,9 @@ runs:
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
+    - name: Get registry host
+      shell: bash
+      run: ctlptl get cluster kind -o template --template '{{.status.localRegistryHosting.host}}'
     - name: Set up Depot CLI
       uses: depot/setup-action@v1
     - name: Bake Docker images
@@ -31,26 +34,34 @@ runs:
     - name: Load images into kind
       shell: bash
       run: |
-        docker tag logservice localhost:5005/logservice
-        docker push localhost:5005/logservice
+        docker tag logservice localhost:5005/local:logservice
+        docker push localhost:5005/local:logservice
 
-        docker tag logservice-migration localhost:5005/logservice-migration
-        docker push localhost:5005/logservice-migration
+        docker tag logservice-migration localhost:5005/local:logservice-migration
+        docker push localhost:5005/local:logservice-migration
 
-        docker tag sysdb-migration localhost:5005/sysdb-migration
-        docker push localhost:5005/sysdb-migration
+        docker tag sysdb-migration localhost:5005/local:sysdb-migration
+        docker push localhost:5005/local:sysdb-migration
 
-        docker tag sysdb localhost:5005/sysdb
-        docker push localhost:5005/sysdb
+        docker tag sysdb localhost:5005/local:sysdb
+        docker push localhost:5005/local:sysdb
 
-        docker tag frontend-service localhost:5005/frontend-service
-        docker push localhost:5005/frontend-service
+        docker tag frontend-service localhost:5005/local:frontend-service
+        docker push localhost:5005/local:frontend-service
 
-        docker tag query-service localhost:5005/query-service
-        docker push localhost:5005/query-service
+        docker tag query-service localhost:5005/local:query-service
+        docker push localhost:5005/local:query-service
 
-        docker tag compaction-service localhost:5005/compaction-service
-        docker push localhost:5005/compaction-service
+        docker tag compaction-service localhost:5005/local:compaction-service
+        docker push localhost:5005/local:compaction-service
+
+        kind load docker-image localhost:5005/local:logservice
+        kind load docker-image localhost:5005/local:logservice-migration
+        kind load docker-image localhost:5005/local:sysdb-migration
+        kind load docker-image localhost:5005/local:sysdb
+        kind load docker-image localhost:5005/local:frontend-service
+        kind load docker-image localhost:5005/local:query-service
+        kind load docker-image localhost:5005/local:compaction-service
     - name: Start Tilt
       shell: bash
       run: tilt ci

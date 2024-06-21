@@ -106,10 +106,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v3
-      - uses: ./.github/actions/python
+      - name: Setup
+        uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - uses: ./.github/actions/tilt
+      - name: Start cluster
+        uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
         shell: bash
