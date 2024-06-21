@@ -5,26 +5,28 @@ import (
 )
 
 type Collection struct {
-	ID           types.UniqueID
-	Name         string
-	Dimension    *int32
-	Metadata     *CollectionMetadata[CollectionMetadataValueType]
-	TenantID     string
-	DatabaseName string
-	Ts           types.Timestamp
-	LogPosition  int64
-	Version      int32
+	ID                   types.UniqueID
+	Name                 string
+	ConfigurationJsonStr string
+	Dimension            *int32
+	Metadata             *CollectionMetadata[CollectionMetadataValueType]
+	TenantID             string
+	DatabaseName         string
+	Ts                   types.Timestamp
+	LogPosition          int64
+	Version              int32
 }
 
 type CreateCollection struct {
-	ID           types.UniqueID
-	Name         string
-	Dimension    *int32
-	Metadata     *CollectionMetadata[CollectionMetadataValueType]
-	GetOrCreate  bool
-	TenantID     string
-	DatabaseName string
-	Ts           types.Timestamp
+	ID                   types.UniqueID
+	Name                 string
+	ConfigurationJsonStr string
+	Dimension            *int32
+	Metadata             *CollectionMetadata[CollectionMetadataValueType]
+	GetOrCreate          bool
+	TenantID             string
+	DatabaseName         string
+	Ts                   types.Timestamp
 }
 
 type DeleteCollection struct {

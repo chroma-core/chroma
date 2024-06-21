@@ -72,6 +72,8 @@ mod test {
         let proto_collection = chroma_proto::Collection {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             name: "foo".to_string(),
+            configuration_json_str: "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+                .to_string(),
             metadata: None,
             dimension: None,
             tenant: "baz".to_string(),

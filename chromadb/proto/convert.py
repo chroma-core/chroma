@@ -1,6 +1,7 @@
 import array
 from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import (
@@ -203,6 +204,9 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
+        configuration=CollectionConfiguration.from_json_str(
+            collection.configuration_json_str
+        ),
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,
@@ -219,6 +223,7 @@ def to_proto_collection(collection: Collection) -> proto.Collection:
     return proto.Collection(
         id=collection["id"].hex,
         name=collection["name"],
+        configuration_json_str=collection.get_configuration().to_json_str(),
         metadata=None
         if collection["metadata"] is None
         else to_proto_update_metadata(collection["metadata"]),
