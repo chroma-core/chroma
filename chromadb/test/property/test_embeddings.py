@@ -26,9 +26,10 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import reset
+from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
@@ -91,8 +92,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
-    @rule(target=embedding_ids, record_set=strategies.recordsets(collection_st))
-    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
+    @rule(
+        target=embedding_ids,
+        record_set=strategies.recordsets(collection_st),
+        should_compact=st.booleans(),
+    )
+    def add_embeddings(
+        self, record_set: strategies.RecordSet, should_compact: bool
+    ) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
 
@@ -124,21 +131,52 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             }
             self.collection.add(**normalized_record_set)
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
+
+            if not NOT_CLUSTER_ONLY:
+                # Only wait for compaction if the size of the collection is
+                # some minimal size
+                if should_compact and len(normalized_record_set["ids"]) > 10:
+                    initial_version = self.collection.get_model()["version"]
+                    # Wait for the model to be updated
+                    wait_for_version_increase(
+                        self.api, self.collection.name, initial_version
+                    )
+
             return multiple(*filtered_record_set["ids"])
 
         else:
             self.collection.add(**normalized_record_set)
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
+            if not NOT_CLUSTER_ONLY:
+                # Only wait for compaction if the size of the collection is
+                # some minimal size
+                if should_compact and len(normalized_record_set["ids"]) > 10:
+                    initial_version = self.collection.get_model()["version"]
+                    # Wait for the model to be updated
+                    wait_for_version_increase(
+                        self.api, self.collection.name, initial_version
+                    )
             return multiple(*normalized_record_set["ids"])
 
-    @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
-    def delete_by_ids(self, ids: IDs) -> None:
+    @rule(
+        ids=st.lists(consumes(embedding_ids), min_size=1), should_compact=st.booleans()
+    )
+    def delete_by_ids(self, ids: IDs, should_compact: bool) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
 
         self.collection.delete(ids=ids)
         self._remove_embeddings(set(indices_to_remove))
+        if not NOT_CLUSTER_ONLY:
+            # Only wait for compaction if the size of the collection is
+            # some minimal size
+            if should_compact:
+                initial_version = self.collection.get_model()["version"]
+                # Wait for the model to be updated
+                wait_for_version_increase(
+                    self.api, self.collection.name, initial_version
+                )
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
@@ -149,14 +187,26 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             id_strategy=embedding_ids,
             min_size=1,
             max_size=5,
-        )
+        ),
+        should_compact=st.booleans(),
     )
-    def update_embeddings(self, record_set: strategies.RecordSet) -> None:
+    def update_embeddings(
+        self, record_set: strategies.RecordSet, should_compact: bool
+    ) -> None:
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
         self.collection.update(**record_set)
         self._upsert_embeddings(record_set)
+        if not NOT_CLUSTER_ONLY:
+            # Only wait for compaction if the size of the collection is
+            # some minimal size
+            if should_compact:
+                initial_version = self.collection.get_model()["version"]
+                # Wait for the model to be updated
+                wait_for_version_increase(
+                    self.api, self.collection.name, initial_version
+                )
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
     @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
@@ -166,14 +216,26 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             id_strategy=st.one_of(embedding_ids, strategies.safe_text),
             min_size=1,
             max_size=5,
-        )
+        ),
+        should_compact=st.booleans(),
     )
-    def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
+    def upsert_embeddings(
+        self, record_set: strategies.RecordSet, should_compact: bool
+    ) -> None:
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
         self.collection.upsert(**record_set)
         self._upsert_embeddings(record_set)
+        if not NOT_CLUSTER_ONLY:
+            # Only wait for compaction if the size of the collection is
+            # some minimal size
+            if should_compact:
+                initial_version = self.collection.get_model()["version"]
+                # Wait for the model to be updated
+                wait_for_version_increase(
+                    self.api, self.collection.name, initial_version
+                )
 
     @invariant()
     def count(self) -> None:

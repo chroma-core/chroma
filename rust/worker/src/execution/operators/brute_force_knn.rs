@@ -39,9 +39,6 @@ pub struct BruteForceKnnOperatorInput {
     pub k: usize,
     pub distance_metric: DistanceFunction,
     pub allowed_ids: Arc<[String]>,
-    // This is just a subset of allowed_ids containing
-    // only the ids that are allowed and present in the log.
-    pub allowed_ids_brute_force: Arc<[String]>,
     // Deps to create the log materializer
     pub record_segment_definition: Segment,
     pub blockfile_provider: BlockfileProvider,
@@ -169,9 +166,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             // Empty allowed list is passed when where filtering is absent.
             // TODO: This should not need to use merged_user_id, which clones the id.
             if !input.allowed_ids.is_empty()
-                && !input
-                    .allowed_ids_brute_force
-                    .contains(&log_record.merged_user_id())
+                && !input.allowed_ids.contains(&log_record.merged_user_id())
             {
                 continue;
             }
@@ -297,7 +292,6 @@ mod tests {
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
             allowed_ids: Arc::new([]),
-            allowed_ids_brute_force: Arc::new([]),
             blockfile_provider,
             record_segment_definition,
         };
@@ -366,7 +360,6 @@ mod tests {
             k: 2,
             distance_metric: DistanceFunction::InnerProduct,
             allowed_ids: Arc::new([]),
-            allowed_ids_brute_force: Arc::new([]),
             blockfile_provider,
             record_segment_definition,
         };
@@ -411,7 +404,6 @@ mod tests {
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
             allowed_ids: Arc::new([]),
-            allowed_ids_brute_force: Arc::new([]),
             blockfile_provider,
             record_segment_definition,
         };
@@ -470,7 +462,6 @@ mod tests {
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
             allowed_ids: Arc::new([]),
-            allowed_ids_brute_force: Arc::new([]),
             blockfile_provider,
             record_segment_definition,
         };
@@ -534,7 +525,6 @@ mod tests {
             k: 2,
             distance_metric: DistanceFunction::Euclidean,
             allowed_ids: Arc::new([]),
-            allowed_ids_brute_force: Arc::new([]),
             blockfile_provider,
             record_segment_definition,
         };
