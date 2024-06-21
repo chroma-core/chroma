@@ -23,7 +23,7 @@ const {VoyageAIEmbeddingFunction, InputType} = require('chromadb');
 // const {VoyageAIEmbeddingFunction, InputType}  from "chromadb"; // ESM import
 const embedder = new VoyageAIEmbeddingFunction("apiKey", "voyage-law-2", InputType.DOCUMENT)
 
-// use directly 
+// use directly
 const embeddings = embedder.generate(["document1","document2"])
 
 // pass documents to query for .add and .query
@@ -39,4 +39,3 @@ const collectionGet = await client.getCollection({name:"name", embeddingFunction
 {% /tabs %}
 
 You should pass in the `model_name` argument, which lets you choose which VoyageAI embeddings model to use. You can see the available models [here](https://docs.voyageai.com/docs/embeddings).
-
