@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest -n auto ${{ matrix.test-globs }}
+        run: python -m pytest -n auto --dist loadgroup ${{ matrix.test-globs }}
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
