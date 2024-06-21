@@ -17,7 +17,7 @@ runs:
           tar -xzv -C /usr/local/bin ctlptl
     - name: Set up kind
       shell: bash
-      run: ctlptl create cluster kind --registry=ctlptl-registry
+      run: ctlptl create cluster kind
     - name: Start Tilt
       shell: bash
       run: tilt ci
