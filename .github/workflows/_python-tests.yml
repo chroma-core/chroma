@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04-32]
+        platform: [depot-ubuntu-22.04-64]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -99,11 +99,23 @@ jobs:
                    "chromadb/test/test_logservice.py",
                    "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
+    permissions:
+      # allow issuing OIDC tokens for this workflow run
+      id-token: write
+      # allow at least reading the repo contents, add other permissions if necessary
+      contents: read
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+      - name: Bake Docker images
+        uses: depot/bake-action@v1
+        with:
+          files: docker-bake.hcl
+          load: true
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
