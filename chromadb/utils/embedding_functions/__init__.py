@@ -34,8 +34,9 @@ def _import_all_efs() -> Set[str]:
             attr = getattr(module, attr_name)
             if (
                 isinstance(attr, type)
-                and issubclass(attr, EmbeddingFunction)
-                and attr is not EmbeddingFunction  # Don't re-export the type
+                and isinstance(attr, EmbeddingFunction)
+                and attr  # type: ignore[comparison-overlap]
+                is not EmbeddingFunction  # Don't re-export the type
             ):
                 globals()[attr.__name__] = attr
                 imported_classes.add(attr.__name__)
