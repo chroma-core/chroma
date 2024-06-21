@@ -257,12 +257,13 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 
 		dbCollection := &dbmodel.Collection{
-			ID:          createCollection.ID.String(),
-			Name:        &createCollection.Name,
-			Dimension:   createCollection.Dimension,
-			DatabaseID:  databases[0].ID,
-			Ts:          ts,
-			LogPosition: 0,
+			ID:                   createCollection.ID.String(),
+			Name:                 &createCollection.Name,
+			ConfigurationJsonStr: &createCollection.ConfigurationJsonStr,
+			Dimension:            createCollection.Dimension,
+			DatabaseID:           databases[0].ID,
+			Ts:                   ts,
+			LogPosition:          0,
 		}
 
 		err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
