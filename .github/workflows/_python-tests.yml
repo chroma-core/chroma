@@ -20,17 +20,17 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [ubuntu-latest, windows-latest]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
+        platform: [depot-ubuntu-22.04-16] #[ubuntu-latest, windows-latest]
+        # test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+        #            "chromadb/test/auth/test_simple_rbac_authz.py",
+        #            "chromadb/test/property/test_add.py",
+        #            "chromadb/test/property/test_collections.py",
+        #            "chromadb/test/property/test_collections_with_database_tenant.py",
+        #            "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+        #            "chromadb/test/property/test_cross_version_persist.py",
+        #            "chromadb/test/property/test_embeddings.py",
+        #            "chromadb/test/property/test_filtering.py",
+        #            "chromadb/test/property/test_persist.py"]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest -n auto --dist loadgroup ${{ matrix.test-globs }}
+        run: python -m pytest -n auto --dist loadgroup --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -85,7 +85,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["16core-64gb-ubuntu-latest"]
+        platform: ["depot-ubuntu-22.04-16"]
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
@@ -133,7 +133,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
+        platform: ['depot-ubuntu-22.04-16']
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
