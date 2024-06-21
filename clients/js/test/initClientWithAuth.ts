@@ -16,7 +16,6 @@ export const chromaTokenBearer = new ChromaClient({
   auth: {
     provider: "token",
     credentials: "test-token",
-    providerOptions: { headerType: "AUTHORIZATION" },
   },
 });
 export const chromaTokenXToken = new ChromaClient({
@@ -24,7 +23,7 @@ export const chromaTokenXToken = new ChromaClient({
   auth: {
     provider: "token",
     credentials: "test-token",
-    providerOptions: { headerType: "X_CHROMA_TOKEN" },
+    tokenHeaderType: "X_CHROMA_TOKEN",
   },
 });
 export const cloudClient = new CloudClient({

@@ -1,5 +1,4 @@
 import { expect, test } from "@jest/globals";
-import { ChromaClient } from "../src/ChromaClient";
 import {
   chromaTokenDefault,
   chromaTokenBearer,
@@ -7,6 +6,7 @@ import {
   cloudClient,
 } from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
+import { ChromaForbiddenError } from "../src/Errors";
 
 test("it should get the version without auth needed", async () => {
   const version = await chromaNoAuth.version();
@@ -21,9 +21,9 @@ test("it should get the heartbeat without auth needed", async () => {
 });
 
 test("it should raise error when non authenticated", async () => {
-  await expect(chromaNoAuth.listCollections()).rejects.toMatchObject({
-    status: 401,
-  });
+  await expect(chromaNoAuth.listCollections()).rejects.toBeInstanceOf(
+    ChromaForbiddenError,
+  );
 });
 
 if (!process.env.XTOKEN_TEST) {

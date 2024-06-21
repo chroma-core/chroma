@@ -36,25 +36,6 @@ export function repack(value: unknown): any {
   }
 }
 
-export async function handleError(error: unknown) {
-  if (error instanceof Response) {
-    try {
-      const res = await (error as Response).json();
-      if ("error" in res) {
-        return { error: res.error };
-      }
-    } catch (e: unknown) {
-      return {
-        error:
-          e && typeof e === "object" && "message" in e
-            ? e.message
-            : "unknown error",
-      };
-    }
-  }
-  return { error };
-}
-
 export async function handleSuccess(
   response: Response | string | Count200Response,
 ) {
@@ -103,4 +84,10 @@ export async function validateTenantDatabase(
       `Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`,
     );
   }
+}
+
+export function isBrowser() {
+  return (
+    typeof window !== "undefined" && typeof window.document !== "undefined"
+  );
 }

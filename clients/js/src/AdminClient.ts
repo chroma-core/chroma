@@ -1,11 +1,12 @@
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError, validateTenantDatabase } from "./utils";
+import { handleSuccess, validateTenantDatabase } from "./utils";
 import { ConfigOptions } from "./types";
 import {
   AuthOptions,
-  ClientAuthProtocolAdapter,
-  IsomorphicFetchClientAuthProtocolAdapter,
+  authOptionsToAuthProvider,
+  ClientAuthProvider,
 } from "./auth";
+import { chromaFetch } from "./ChromaFetch";
 
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -25,7 +26,7 @@ export class AdminClient {
    * @ignore
    */
   private api: DefaultApi & ConfigOptions;
-  private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
+  private authProvider: ClientAuthProvider | undefined;
   public tenant: string = DEFAULT_TENANT;
   public database: string = DEFAULT_DATABASE;
 
@@ -58,21 +59,26 @@ export class AdminClient {
     if (path === undefined) path = "http://localhost:8000";
     this.tenant = tenant;
     this.database = database;
+    this.authProvider = undefined;
 
     const apiConfig: Configuration = new Configuration({
       basePath: path,
     });
-    if (auth !== undefined) {
-      this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(
-        new DefaultApi(apiConfig),
-        auth,
-      );
-      this.api = this.apiAdapter.getApi();
-    } else {
-      this.api = new DefaultApi(apiConfig);
-    }
 
+    this.api = new DefaultApi(apiConfig, undefined, chromaFetch);
     this.api.options = fetchOptions ?? {};
+
+    if (auth !== undefined) {
+      this.authProvider = authOptionsToAuthProvider(auth);
+      this.api.options.headers = {
+        ...this.api.options.headers,
+        ...this.authProvider.authenticate(),
+      };
+      this.api.options.headers = {
+        ...this.api.options.headers,
+        ...this.authProvider.authenticate(),
+      };
+    }
   }
 
   /**
@@ -149,8 +155,7 @@ export class AdminClient {
   public async createTenant({ name }: { name: string }): Promise<Tenant> {
     const newTenant = await this.api
       .createTenant({ name }, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     // newTenant is null if successful
     if (newTenant && newTenant.error) {
@@ -179,8 +184,7 @@ export class AdminClient {
   public async getTenant({ name }: { name: string }): Promise<Tenant> {
     const getTenant = await this.api
       .getTenant(name, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     if (getTenant.error) {
       throw new Error(getTenant.error);
@@ -216,8 +220,7 @@ export class AdminClient {
   }): Promise<Database> {
     const newDatabase = await this.api
       .createDatabase(tenantName, { name }, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     // newDatabase is null if successful
     if (newDatabase && newDatabase.error) {
@@ -254,8 +257,7 @@ export class AdminClient {
   }): Promise<Database> {
     const getDatabase = await this.api
       .getDatabase(name, tenantName, this.api.options)
-      .then(handleSuccess)
-      .catch(handleError);
+      .then(handleSuccess);
 
     if (getDatabase.error) {
       throw new Error(getDatabase.error);

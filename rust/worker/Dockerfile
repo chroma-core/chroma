@@ -1,4 +1,4 @@
-FROM rust:1.74.1 as builder
+FROM rust:1.77.2 as builder
 ARG CHROMA_KUBERNETES_INTEGRATION=0
 ENV CHROMA_KUBERNETES_INTEGRATION $CHROMA_KUBERNETES_INTEGRATION
 
@@ -34,9 +34,9 @@ RUN if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service .; else m
 
 FROM debian:bookworm-slim as query_service
 
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates
 COPY --from=query_service_builder /chroma/query_service .
 COPY --from=query_service_builder /chroma/rust/worker/chroma_config.yaml .
-RUN apt-get update && apt-get install -y libssl-dev
 
 ENTRYPOINT [ "./query_service" ]
 
@@ -54,8 +54,8 @@ RUN if [ "$RELEASE_MODE" = "1" ]; then mv target/release/compaction_service .; e
 
 FROM debian:bookworm-slim as compaction_service
 
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates
 COPY --from=compaction_service_builder /chroma/compaction_service .
 COPY --from=compaction_service_builder /chroma/rust/worker/chroma_config.yaml .
-RUN apt-get update && apt-get install -y libssl-dev
 
 ENTRYPOINT [ "./compaction_service" ]

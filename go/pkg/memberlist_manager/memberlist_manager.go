@@ -3,6 +3,7 @@ package memberlist_manager
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/pingcap/log"
@@ -23,9 +24,11 @@ type IMemberlistManager interface {
 }
 
 type MemberlistManager struct {
-	workqueue       workqueue.RateLimitingInterface // workqueue for the coordinator
-	nodeWatcher     IWatcher                        // node watcher for the coordinator
-	memberlistStore IMemberlistStore                // memberlist store for the coordinator
+	workqueue         workqueue.RateLimitingInterface // workqueue for the coordinator
+	nodeWatcher       IWatcher                        // node watcher for the coordinator
+	memberlistStore   IMemberlistStore                // memberlist store for the coordinator
+	reconcileInterval time.Duration                   // interval for reconciliation
+	reconcileCount    uint                            // number of updates to reconcile at once
 }
 
 func NewMemberlistManager(nodeWatcher IWatcher, memberlistStore IMemberlistStore) *MemberlistManager {
@@ -51,67 +54,115 @@ func (m *MemberlistManager) Start() error {
 	return nil
 }
 
-func (m *MemberlistManager) run() {
-	for {
-		interface_key, shutdown := m.workqueue.Get()
-		if shutdown {
-			log.Info("Shutting down memberlist manager")
-			break
-		}
-
-		key, ok := interface_key.(string)
-		if !ok {
-			log.Error("Error while asserting workqueue key to string")
-			m.workqueue.Done(key)
-			continue
-		}
-
-		nodeUpdate, err := m.nodeWatcher.GetStatus(key)
+func (m *MemberlistManager) reconcileMemberlist(updates map[string]bool) {
+	memberlist, resourceVersion, err := m.getOldMemberlist()
+	if err != nil {
+		log.Error("Error while getting memberlist", zap.Error(err))
+		return
+	}
+	log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
+	newMemberlist, err := m.nodeWatcher.ListReadyMembers()
+	if err != nil {
+		log.Error("Error while getting ready members", zap.Error(err))
+		return
+	}
+	// do not update memberlist if there's no change
+	if !memberlistSame(memberlist, newMemberlist) {
+		err = m.updateMemberlist(newMemberlist, *resourceVersion)
 		if err != nil {
-			log.Error("Error while getting status of node", zap.Error(err))
-			m.workqueue.Done(key)
-			continue
+			log.Error("Error while updating memberlist", zap.Error(err))
+			return
 		}
-
-		err = m.reconcile(key, nodeUpdate)
-		if err != nil {
-			log.Error("Error while reconciling memberlist", zap.Error(err))
-		}
-
+	} else {
+		log.Info("Memberlist has not changed")
+	}
+	for key := range updates {
 		m.workqueue.Done(key)
 	}
 }
 
-func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
-	memberlist, resourceVersion, err := m.memberlistStore.GetMemberlist(context.Background())
-	if err != nil {
-		return err
-	}
-	if memberlist == nil {
-		return errors.New("Memberlist recieved is nil")
-	}
-	exists := false
-	// Loop through the memberlist and generate a new one based on the update
-	// If we find the node in the existing list and the status is Ready, we add it to the new list
-	// If we find the node in the existing list and the status is NotReady, we don't add it to the new list
-	// If we don't find the node in the existing list and the status is Ready, we add it to the new list
-	newMemberlist := Memberlist{}
-	for _, node := range *memberlist {
-		if node == nodeIp {
-			if status == Ready {
-				newMemberlist = append(newMemberlist, node)
+func (m *MemberlistManager) run() {
+	count := uint(0)
+	updates := map[string]bool{}
+	shutdownChan := make(chan struct{})
+	eventChan := make(chan string)
+	ticker := time.NewTicker(m.reconcileInterval)
+	go func() {
+		for {
+			interface_key, shutdown := m.workqueue.Get()
+			if shutdown {
+				log.Info("Shutting down memberlist manager")
+				shutdownChan <- struct{}{}
+				break
 			}
-			// Else here implies the node is not ready, so we don't add it to the new memberlist
-			exists = true
-		} else {
-			// This update doesn't pertains to this node, so we just add it to the new memberlist
-			newMemberlist = append(newMemberlist, node)
+			key, ok := interface_key.(string)
+			log.Info("Reconciling memberlist", zap.String("key", key))
+			if !ok {
+				log.Error("Error while asserting workqueue key to string")
+				m.workqueue.Done(key)
+			}
+			eventChan <- key
+		}
+	}()
+
+	for {
+		select {
+		case key := <-eventChan:
+			count++
+			updates[key] = true
+			if count >= m.reconcileCount {
+				m.reconcileMemberlist(updates)
+				count = uint(0)
+				updates = map[string]bool{}
+			}
+		case <-shutdownChan:
+			return
+		case <-ticker.C:
+			m.reconcileMemberlist(updates)
+			count = uint(0)
+			updates = map[string]bool{}
 		}
 	}
-	if !exists && status == Ready {
-		newMemberlist = append(newMemberlist, nodeIp)
+}
+
+func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
+	if len(oldMemberlist) != len(newMemberlist) {
+		return false
 	}
-	return m.memberlistStore.UpdateMemberlist(context.Background(), &newMemberlist, resourceVersion)
+	// use a map to check if the new memberlist contains all the old members
+	newMemberlistMap := make(map[string]bool)
+	for _, member := range newMemberlist {
+		newMemberlistMap[member.id] = true
+	}
+	for _, member := range oldMemberlist {
+		if _, ok := newMemberlistMap[member.id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
+	memberlist, resourceVersion, err := m.memberlistStore.GetMemberlist(context.Background())
+	if err != nil {
+		return nil, nil, err
+	}
+	if memberlist == nil {
+		return nil, nil, errors.New("Memberlist recieved is nil")
+	}
+	return *memberlist, &resourceVersion, nil
+}
+
+func (m *MemberlistManager) updateMemberlist(memberlist Memberlist, resourceVersion string) error {
+	return m.memberlistStore.UpdateMemberlist(context.Background(), &memberlist, resourceVersion)
+}
+
+func (m *MemberlistManager) SetReconcileInterval(interval time.Duration) {
+	m.reconcileInterval = interval
+}
+
+func (m *MemberlistManager) SetReconcileCount(count uint) {
+	m.reconcileCount = count
 }
 
 func (m *MemberlistManager) Stop() error {

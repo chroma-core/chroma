@@ -4,7 +4,9 @@
 # for now we nest it in the worker directory
 
 query_service:
-    my_ip: "10.244.0.9"
+    service_name: "query-service"
+    otel_endpoint: "http://jaeger:4317"
+    my_member_id: "query-service-0"
     my_port: 50051
     assignment_policy:
         RendezvousHashing:
@@ -18,20 +20,29 @@ query_service:
         Grpc:
             host: "sysdb.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     storage:
         S3:
             bucket: "chroma-storage"
+            credentials: "Minio"
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
 
 compaction_service:
-    my_ip: "10.244.0.9"
+    service_name: "compaction-service"
+    otel_endpoint: "http://jaeger:4317"
+    my_member_id: "compaction-service-0"
     my_port: 50051
     assignment_policy:
         RendezvousHashing:
@@ -45,13 +56,20 @@ compaction_service:
         Grpc:
             host: "sysdb.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     storage:
         S3:
             bucket: "chroma-storage"
+            credentials: "Minio"
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
+            connect_timeout_ms: 5000
+            request_timeout_ms: 1000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -60,3 +78,4 @@ compaction_service:
         compaction_manager_queue_size: 1000
         max_concurrent_jobs: 100
         compaction_interval_sec: 60
+        min_compaction_size: 10

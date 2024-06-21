@@ -11,6 +11,11 @@ path = "src/bin/query_service.rs"
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
 
+[[bench]]
+name = "distance_metrics"
+path = "src/benches/distance_metrics.rs"
+harness = false
+
 [dependencies]
 tonic = "0.10"
 prost = "0.12"
@@ -18,7 +23,6 @@ prost-types = "0.12"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 tokio-util = "0.7.10"
 rand = "0.8.5"
-rayon = "1.8.0"
 async-trait = "0.1.74"
 uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
@@ -26,7 +30,6 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 futures = "0.3"
 num_cpus = "1.16.0"
-pulsar = "6.1.0"
 murmur3 = "0.5.2"
 thiserror = "1.0.50"
 tempfile = "3.8.1"
@@ -41,11 +44,25 @@ aws-config = { version = "1.1.2", features = ["behavior-version-latest"] }
 arrow = "50.0.0"
 roaring = "0.10.3"
 tantivy = "0.21.1"
+tracing = "0.1"
+tracing-bunyan-formatter = "0.3.3"
+tracing-opentelemetry = "0.19.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+opentelemetry = { version = "0.19.0", default-features = false, features = [
+  "trace",
+  "rt-tokio",
+] }
+opentelemetry-otlp = "0.12.0"
+shuttle = "0.7.1"
+regex = "1.10.5"
 
 [dev-dependencies]
 proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
 "rand" = "0.8.5"
+rayon = "1.8.0"
+criterion = "0.3"
+random-port = "0.1.1"
 
 [build-dependencies]
 tonic-build = "0.10"

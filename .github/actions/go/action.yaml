@@ -1,0 +1,9 @@
+name: Setup Go
+description: "This action sets up Go"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        cache-dependency-path: go/go.sum
+    - uses: ariga/setup-atlas@v0

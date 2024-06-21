@@ -1,21 +1,22 @@
-use crate::execution::data::data_chunk::DataChunk;
+use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
+use crate::types::LogRecord;
 use async_trait::async_trait;
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.
 #[derive(Debug)]
 pub struct PullLogsOperator {
-    client: Box<dyn Log>,
+    client: Box<Log>,
 }
 
 impl PullLogsOperator {
     /// Create a new pull logs operator.
     /// # Parameters
     /// * `client` - The log client to use for reading logs.
-    pub fn new(client: Box<dyn Log>) -> Box<Self> {
+    pub fn new(client: Box<Log>) -> Box<Self> {
         Box::new(PullLogsOperator { client })
     }
 }
@@ -64,32 +65,30 @@ impl PullLogsInput {
 /// The output of the pull logs operator.
 #[derive(Debug)]
 pub struct PullLogsOutput {
-    logs: DataChunk,
+    logs: Chunk<LogRecord>,
 }
 
 impl PullLogsOutput {
     /// Create a new pull logs output.
     /// # Parameters
     /// * `logs` - The logs that were read.
-    pub fn new(logs: DataChunk) -> Self {
+    pub fn new(logs: Chunk<LogRecord>) -> Self {
         PullLogsOutput { logs }
     }
 
     /// Get the log entries that were read by an invocation of the pull logs operator.
     /// # Returns
     /// The log entries that were read.
-    pub fn logs(&self) -> DataChunk {
+    pub fn logs(&self) -> Chunk<LogRecord> {
         self.logs.clone()
     }
 }
-
-pub type PullLogsResult = Result<PullLogsOutput, PullLogsError>;
 
 #[async_trait]
 impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
     type Error = PullLogsError;
 
-    async fn run(&self, input: &PullLogsInput) -> PullLogsResult {
+    async fn run(&self, input: &PullLogsInput) -> Result<PullLogsOutput, PullLogsError> {
         // We expect the log to be cheaply cloneable, we need to clone it since we need
         // a mutable reference to it. Not necessarily the best, but it works for our needs.
         let mut client_clone = self.client.clone();
@@ -114,7 +113,8 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
             }
 
             num_records_read += logs.len();
-            offset += batch_size as i64;
+            // unwrap here is safe because we just checked if empty
+            offset = logs.last().unwrap().log_offset + 1;
             result.append(&mut logs);
 
             // We used a a timestamp and we didn't get a full batch, so we have retrieved
@@ -134,7 +134,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
             result.truncate(input.num_records.unwrap() as usize);
         }
         // Convert to DataChunk
-        let data_chunk = DataChunk::new(result.into());
+        let data_chunk = Chunk::new(result.into());
         Ok(PullLogsOutput::new(data_chunk))
     }
 }
@@ -148,50 +148,55 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_pull_logs() {
-        let mut log = Box::new(InMemoryLog::new());
-
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_id_1 = collection_uuid_1.to_string();
-        log.add_log(
-            collection_id_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 1,
-                log_ts: 1,
-                record: LogRecord {
-                    log_offset: 1,
-                    record: OperationRecord {
-                        id: "embedding_id_1".to_string(),
-                        embedding: None,
-                        encoding: None,
-                        metadata: None,
-                        operation: Operation::Add,
-                    },
-                },
-            }),
-        );
-        log.add_log(
-            collection_id_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_id_1.clone(),
-                log_offset: 2,
-                log_ts: 2,
-                record: LogRecord {
-                    log_offset: 2,
-                    record: OperationRecord {
-                        id: "embedding_id_2".to_string(),
-                        embedding: None,
-                        encoding: None,
-                        metadata: None,
-                        operation: Operation::Add,
-                    },
-                },
-            }),
-        );
+
+        match *log {
+            Log::InMemory(ref mut log) => {
+                log.add_log(
+                    collection_uuid_1.clone(),
+                    Box::new(InternalLogRecord {
+                        collection_id: collection_uuid_1.clone(),
+                        log_offset: 0,
+                        log_ts: 1,
+                        record: LogRecord {
+                            log_offset: 0,
+                            record: OperationRecord {
+                                id: "embedding_id_1".to_string(),
+                                embedding: None,
+                                encoding: None,
+                                metadata: None,
+                                document: None,
+                                operation: Operation::Add,
+                            },
+                        },
+                    }),
+                );
+                log.add_log(
+                    collection_uuid_1.clone(),
+                    Box::new(InternalLogRecord {
+                        collection_id: collection_uuid_1.clone(),
+                        log_offset: 1,
+                        log_ts: 2,
+                        record: LogRecord {
+                            log_offset: 1,
+                            record: OperationRecord {
+                                id: "embedding_id_2".to_string(),
+                                embedding: None,
+                                encoding: None,
+                                metadata: None,
+                                document: None,
+                                operation: Operation::Add,
+                            },
+                        },
+                    }),
+                );
+            }
+            _ => panic!("Expected InMemoryLog"),
+        }
 
         let operator = PullLogsOperator::new(log);
 

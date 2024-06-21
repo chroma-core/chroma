@@ -453,6 +453,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if self._index is not None:
             self._index.open_file_handles()
 
+    @override
+    def stop(self) -> None:
+        super().stop()
+        self.close_persistent_index()
+
     def close_persistent_index(self) -> None:
         """Close the persistent index"""
         if self._index is not None:

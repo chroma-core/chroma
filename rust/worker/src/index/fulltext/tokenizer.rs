@@ -1,6 +1,8 @@
+use parking_lot::Mutex;
+use std::sync::Arc;
 use tantivy::tokenizer::{NgramTokenizer, Token, TokenStream, Tokenizer};
 
-pub(crate) trait ChromaTokenStream {
+pub(crate) trait ChromaTokenStream: Send {
     fn process(&mut self, sink: &mut dyn FnMut(&Token));
     fn get_tokens(&self) -> &Vec<Token>;
 }
@@ -27,23 +29,26 @@ impl ChromaTokenStream for TantivyChromaTokenStream {
     }
 }
 
-pub(crate) trait ChromaTokenizer {
-    fn encode(&mut self, text: &str) -> Box<dyn ChromaTokenStream>;
+pub(crate) trait ChromaTokenizer: Send {
+    fn encode(&self, text: &str) -> Box<dyn ChromaTokenStream>;
 }
 
 pub(crate) struct TantivyChromaTokenizer {
-    tokenizer: Box<NgramTokenizer>,
+    tokenizer: Arc<Mutex<Box<NgramTokenizer>>>,
 }
 
 impl TantivyChromaTokenizer {
     pub fn new(tokenizer: Box<NgramTokenizer>) -> Self {
-        TantivyChromaTokenizer { tokenizer }
+        TantivyChromaTokenizer {
+            tokenizer: Arc::new(Mutex::new(tokenizer)),
+        }
     }
 }
 
 impl ChromaTokenizer for TantivyChromaTokenizer {
-    fn encode(&mut self, text: &str) -> Box<dyn ChromaTokenStream> {
-        let mut token_stream = self.tokenizer.token_stream(text);
+    fn encode(&self, text: &str) -> Box<dyn ChromaTokenStream> {
+        let mut tokenizer = self.tokenizer.lock();
+        let mut token_stream = tokenizer.token_stream(text);
         let mut tokens = Vec::new();
         token_stream.process(&mut |token| {
             tokens.push(token.clone());
@@ -58,7 +63,7 @@ mod test {
     #[test]
     fn test_chroma_tokenizer() {
         let tokenizer: Box<NgramTokenizer> = Box::new(NgramTokenizer::new(1, 1, false).unwrap());
-        let mut chroma_tokenizer = TantivyChromaTokenizer::new(tokenizer);
+        let chroma_tokenizer = TantivyChromaTokenizer::new(tokenizer);
         let mut token_stream = chroma_tokenizer.encode("hello world");
         let mut tokens = Vec::new();
         token_stream.process(&mut |token| {
@@ -72,7 +77,7 @@ mod test {
     #[test]
     fn test_get_tokens() {
         let tokenizer: Box<NgramTokenizer> = Box::new(NgramTokenizer::new(1, 1, false).unwrap());
-        let mut chroma_tokenizer = TantivyChromaTokenizer::new(tokenizer);
+        let chroma_tokenizer = TantivyChromaTokenizer::new(tokenizer);
         let token_stream = chroma_tokenizer.encode("hello world");
         let tokens = token_stream.get_tokens();
         assert_eq!(tokens.len(), 11);

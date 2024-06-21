@@ -3,13 +3,15 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
+
 	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/jackc/pgx/v5"
-	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type LogRepository struct {
-	conn    *pgx.Conn
+	conn    *pgxpool.Pool
 	queries *log.Queries
 }
 
@@ -75,8 +77,8 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	return
 }
 
-func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
-	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx)
+func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize uint64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
+	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
 		collectionToCompact = []log.GetAllCollectionsToCompactRow{}
 	}
@@ -90,7 +92,12 @@ func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Con
 	return
 }
 
-func NewLogRepository(conn *pgx.Conn) *LogRepository {
+func (r *LogRepository) PurgeRecords(ctx context.Context) (err error) {
+	err = r.queries.PurgeRecords(ctx)
+	return
+}
+
+func NewLogRepository(conn *pgxpool.Pool) *LogRepository {
 	return &LogRepository{
 		conn:    conn,
 		queries: log.New(conn),

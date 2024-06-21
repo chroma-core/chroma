@@ -1,27 +1,42 @@
+{{if .Values.queryService.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: query-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.queryService.configuration | indent 4 }}
+---
+{{ end }}
+
 ---
 
 apiVersion: v1
 kind: Service
 metadata:
-  name: query-service 
+  name: query-service
   namespace: {{ .Values.namespace }}
 spec:
   ports:
     - name: query-service-server-port
       port: 50051
       targetPort: 50051
+  clusterIP: None
   selector:
-    app: query-service-server
+    app: query-service
   type: ClusterIP
 
 ---
 
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: query-service
   namespace: {{ .Values.namespace }}
 spec:
+  serviceName: query-service
   replicas: 2
   selector:
     matchLabels:
@@ -33,22 +48,41 @@ spec:
         member-type: query-service
     spec:
       serviceAccountName: query-service-serviceaccount
+      {{if .Values.queryService.configuration}}
+      volumes:
+        - name: query-service-config
+          configMap:
+            name: query-service-config
+      {{ end }}
       containers:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
+          {{if .Values.queryService.configuration}}
+          volumeMounts:
+            - name: query-service-config
+              mountPath: /config/
+          {{ end }}
           ports:
             - containerPort: 50051
-          volumeMounts:
-            - name: chroma
-              mountPath: /index_data
           env:
-            - name: CHROMA_query-service__PULSAR_URL
-              value: pulsar://pulsar.chroma:6650
-            - name: CHROMA_query-service__MY_IP
+            {{if .Values.queryService.configuration}}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{ end }}
+            {{ range .Values.queryService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+            - name: CHROMA_QUERY_SERVICE__MY_MEMBER_ID
               valueFrom:
                 fieldRef:
-                  fieldPath: status.podIP
+                  fieldPath: metadata.name
+      updateStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
@@ -56,9 +90,6 @@ spec:
           labelSelector:
             matchLabels:
               member-type: query-service
-      volumes:
-        - name: chroma
-          emptyDir: {}
 
 ---
 

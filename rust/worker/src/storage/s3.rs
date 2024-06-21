@@ -8,21 +8,51 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::{config::StorageConfig, Storage};
+use super::config::StorageConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
+use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_smithy_types::byte_stream::ByteStream;
 use std::clone::Clone;
-use std::io::Write;
+use std::time::Duration;
+use thiserror::Error;
+use tokio::io::AsyncBufRead;
 
 #[derive(Clone)]
-struct S3Storage {
+pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
+}
+
+#[derive(Error, Debug)]
+pub enum S3PutError {
+    #[error("S3 PUT error: {0}")]
+    S3PutError(String),
+}
+
+impl ChromaError for S3PutError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        crate::errors::ErrorCodes::Internal
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum S3GetError {
+    #[error("S3 GET error: {0}")]
+    S3GetError(String),
+    #[error("No such key: {0}")]
+    NoSuchKey(String),
+}
+
+impl ChromaError for S3GetError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        crate::errors::ErrorCodes::Internal
+    }
 }
 
 impl S3Storage {
@@ -59,15 +89,126 @@ impl S3Storage {
                         return Ok(());
                     }
                     e => {
-                        println!("error: {}", e.to_string());
+                        println!("Error creating bucket: {}", e.to_string());
                         return Err::<(), String>(e.to_string());
                     }
                 },
                 _ => {
-                    println!("error: {}", e);
+                    println!("Error creating bucket: {}", e);
                     return Err::<(), String>(e.to_string());
                 }
             },
+        }
+    }
+
+    pub(crate) async fn get(
+        &self,
+        key: &str,
+    ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, S3GetError> {
+        let res = self
+            .client
+            .get_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        match res {
+            Ok(res) => {
+                return Ok(Box::new(res.body.into_async_read()));
+            }
+            Err(e) => {
+                println!("error: {}", e);
+                match e {
+                    SdkError::ServiceError(err) => {
+                        let inner = err.into_err();
+                        match inner {
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
+                                println!("no such key: {}", msg);
+                                return Err(S3GetError::NoSuchKey(msg.to_string()));
+                            }
+                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
+                                print!("invalid object state: {}", msg);
+                                return Err(S3GetError::S3GetError(msg.to_string()));
+                            }
+                            aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) =>  {
+                                println!("unhandled error");
+                                return Err(S3GetError::S3GetError("unhandled error".to_string()));
+                            }
+                            _ => {
+                                println!("error: {}", inner.to_string());
+                                return Err(S3GetError::S3GetError(inner.to_string()));
+                            }
+                        };
+                    }
+                    _ => {}
+                }
+                return Err(S3GetError::S3GetError(e.to_string()));
+            }
+        }
+    }
+
+    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+        let bytestream = ByteStream::from(bytes);
+        self.put_bytestream(key, bytestream).await
+    }
+
+    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+        let bytestream = ByteStream::from_path(path).await;
+        match bytestream {
+            Ok(bytestream) => return self.put_bytestream(key, bytestream).await,
+            Err(e) => {
+                return Err(S3PutError::S3PutError(e.to_string()));
+            }
+        }
+    }
+
+    async fn put_bytestream(&self, key: &str, bytestream: ByteStream) -> Result<(), S3PutError> {
+        let res = self
+            .client
+            .put_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .body(bytestream)
+            .send()
+            .await;
+        match res {
+            Ok(_) => {
+                println!("put object {} to bucket {}", key, self.bucket);
+                return Ok(());
+            }
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner_err = err.into_err();
+                    let err_string = format!(
+                        "S3 service error with code: {:?} and message: {:?}",
+                        inner_err.code(),
+                        inner_err.message()
+                    );
+                    println!("{}", err_string);
+                    return Err(S3PutError::S3PutError(err_string));
+                }
+                _ => {
+                    println!("S3 Put Error: {}", e);
+                    return Err(S3PutError::S3PutError(e.to_string()));
+                }
+            },
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum StorageConfigError {
+    #[error("Invalid storage config")]
+    InvalidStorageConfig,
+    #[error("Failed to create bucket: {0}")]
+    FailedToCreateBucket(String),
+}
+
+impl ChromaError for StorageConfigError {
+    fn code(&self) -> crate::errors::ErrorCodes {
+        match self {
+            StorageConfigError::InvalidStorageConfig => crate::errors::ErrorCodes::InvalidArgument,
+            StorageConfigError::FailedToCreateBucket(_) => crate::errors::ErrorCodes::Internal,
         }
     }
 }
@@ -77,90 +218,56 @@ impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::S3(s3_config) => {
-                let config = aws_config::load_from_env().await;
-                let client = aws_sdk_s3::Client::new(&config);
+                let client = match &s3_config.credentials {
+                    super::config::S3CredentialsConfig::Minio => {
+                        // Set up credentials assuming minio is running locally
+                        let cred = aws_sdk_s3::config::Credentials::new(
+                            "minio",
+                            "minio123",
+                            None,
+                            None,
+                            "loaded-from-env",
+                        );
 
+                        let timeout_config_builder = TimeoutConfigBuilder::default()
+                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
+                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
+
+                        // Set up s3 client
+                        let config = aws_sdk_s3::config::Builder::new()
+                            .endpoint_url("http://minio.chroma:9000".to_string())
+                            .credentials_provider(cred)
+                            .behavior_version_latest()
+                            .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                            .force_path_style(true)
+                            .timeout_config(timeout_config_builder.build())
+                            .build();
+                        aws_sdk_s3::Client::from_conf(config)
+                    }
+                    super::config::S3CredentialsConfig::AWS => {
+                        let config = aws_config::load_from_env().await;
+                        aws_sdk_s3::Client::new(&config)
+                    }
+                };
                 let storage = S3Storage::new(&s3_config.bucket, client);
-                return Ok(storage);
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl Storage for S3Storage {
-    async fn get(&self, key: &str, path: &str) -> Result<(), String> {
-        let file = std::fs::File::create(path);
-        let res = self
-            .client
-            .get_object()
-            .bucket(self.bucket.clone())
-            .key(key)
-            .send()
-            .await;
-        match res {
-            Ok(mut res) => {
-                match file {
-                    Ok(mut file) => {
-                        while let bytes = res.body.next().await {
-                            match bytes {
-                                Some(bytes) => match bytes {
-                                    Ok(bytes) => {
-                                        file.write_all(&bytes).unwrap();
-                                    }
-                                    Err(e) => {
-                                        println!("error: {}", e);
-                                        return Err::<(), String>(e.to_string());
-                                    }
-                                },
-                                None => {
-                                    // Stream is done
-                                    return Ok(());
-                                }
+                // for minio we create the bucket since it is only used for testing
+                match &s3_config.credentials {
+                    super::config::S3CredentialsConfig::Minio => {
+                        let res = storage.create_bucket().await;
+                        match res {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(Box::new(StorageConfigError::FailedToCreateBucket(e)));
                             }
                         }
                     }
-                    Err(e) => {
-                        println!("error: {}", e);
-                        return Err::<(), String>(e.to_string());
-                    }
+                    _ => {}
                 }
-                return Ok(());
-            }
-            Err(e) => {
-                println!("error: {}", e);
-                return Err::<(), String>(e.to_string());
-            }
-        }
-    }
 
-    async fn put(&self, key: &str, path: &str) -> Result<(), String> {
-        // Puts from a file on disk to s3.
-        let bytestream = ByteStream::from_path(path).await;
-        match bytestream {
-            Ok(bytestream) => {
-                let res = self
-                    .client
-                    .put_object()
-                    .bucket(self.bucket.clone())
-                    .key(key)
-                    .body(bytestream)
-                    .send()
-                    .await;
-                match res {
-                    Ok(_) => {
-                        println!("put object {} to bucket {}", key, self.bucket);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        println!("error: {}", e);
-                        return Err::<(), String>(e.to_string());
-                    }
-                }
+                return Ok(storage);
             }
-            Err(e) => {
-                println!("error: {}", e);
-                return Err::<(), String>(e.to_string());
+            _ => {
+                return Err(Box::new(StorageConfigError::InvalidStorageConfig));
             }
         }
     }
@@ -170,6 +277,7 @@ impl Storage for S3Storage {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use tokio::io::AsyncReadExt;
 
     #[tokio::test]
     #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
@@ -195,7 +303,7 @@ mod tests {
 
         let storage = S3Storage {
             bucket: "test".to_string(),
-            client: client,
+            client,
         };
         storage.create_bucket().await.unwrap();
 
@@ -205,12 +313,12 @@ mod tests {
 
         let test_data = "test data";
         let test_file_in = format!("{}/test_file_in", persist_path);
-        let test_file_out = format!("{}/test_file_out", persist_path);
         std::fs::write(&test_file_in, test_data).unwrap();
-        storage.put("test", &test_file_in).await.unwrap();
-        storage.get("test", &test_file_out).await.unwrap();
+        storage.put_file("test", &test_file_in).await.unwrap();
+        let mut bytes = storage.get("test").await.unwrap();
 
-        let contents = std::fs::read_to_string(test_file_out).unwrap();
-        assert_eq!(contents, test_data);
+        let mut buf = String::new();
+        bytes.read_to_string(&mut buf).await.unwrap();
+        assert_eq!(buf, test_data);
     }
 }

@@ -42,7 +42,7 @@ impl Scheduler {
                     return;
                 }
                 _ = tokio::time::sleep(duration) => {
-                    match sender.send(message).await {
+                    match sender.send(message, None).await {
                         Ok(_) => {
                             return;
                         },
@@ -83,7 +83,7 @@ impl Scheduler {
                         return;
                     }
                     _ = tokio::time::sleep(duration) => {
-                        match sender.send(message.clone()).await {
+                        match sender.send(message.clone(), None).await {
                             Ok(_) => {
                             },
                             Err(e) => {
@@ -176,6 +176,10 @@ mod tests {
 
     #[async_trait]
     impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
         fn queue_size(&self) -> usize {
             self.queue_size
         }

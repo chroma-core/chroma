@@ -6,6 +6,7 @@ from typing import Generator, List, Callable, Dict, Union
 
 from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
+from chromadb.test.conftest import find_free_port
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.config import (
@@ -32,6 +33,7 @@ sample_collections = [
         dimension=128,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     ),
     Collection(
         id=uuid.UUID(int=2),
@@ -40,6 +42,7 @@ sample_collections = [
         dimension=None,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     ),
     Collection(
         id=uuid.UUID(int=3),
@@ -48,6 +51,7 @@ sample_collections = [
         dimension=None,
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     ),
 ]
 
@@ -88,10 +92,12 @@ def sqlite_persistent() -> Generator[SysDB, None, None]:
 def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     """Fixture generator for sqlite DB that creates a mock grpc sysdb server
     and a grpc client that connects to it."""
+    port = find_free_port()
+
     system = System(
         Settings(
             allow_reset=True,
-            chroma_server_grpc_port=50051,
+            chroma_server_grpc_port=port,
         )
     )
     system.instance(GrpcMockSysDB)
@@ -187,6 +193,7 @@ def test_update_collections(sysdb: SysDB) -> None:
         dimension=sample_collections[0]["dimension"],
         database=DEFAULT_DATABASE,
         tenant=DEFAULT_TENANT,
+        version=0,
     )
 
     sysdb.reset_state()

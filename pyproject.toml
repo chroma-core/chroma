@@ -3,25 +3,24 @@ name = "chromadb"
 dynamic = ["version"]
 
 authors = [
-  { name="Jeff Huber", email="jeff@trychroma.com" },
-  { name="Anton Troynikov", email="anton@trychroma.com" }
+  { name = "Jeff Huber", email = "jeff@trychroma.com" },
+  { name = "Anton Troynikov", email = "anton@trychroma.com" },
 ]
 description = "Chroma."
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
-    "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
 ]
 dependencies = [
   'build >= 1.0.3',
-  'requests >= 2.28',
   'pydantic >= 1.9',
   'chroma-hnswlib==0.7.3',
   'fastapi >= 0.95.2',
   'uvicorn[standard] >= 0.18.3',
-  'numpy >= 1.22.5',
+  'numpy >= 1.22.5, < 2.0.0',
   'posthog >= 2.4.0',
   'typing_extensions >= 4.5.0',
   'onnxruntime >= 1.14.1',
@@ -43,15 +42,17 @@ dependencies = [
   'PyYAML>=6.0.0',
   'mmh3>=4.0.1',
   'orjson>=3.9.12',
+  'httpx>=0.27.0',
 ]
 
 [tool.black]
 line-length = 88
-required-version = "23.3.0" # Black will refuse to run if it's not this version.
+required-version = "23.3.0"                         # Black will refuse to run if it's not this version.
 target-version = ['py38', 'py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+asyncio_mode = "auto"
 
 [tool.mypy]
 ignore_errors = false
@@ -72,7 +73,7 @@ requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
-local_scheme="no-local-version"
+local_scheme = "no-local-version"
 
 [tool.setuptools]
 packages = ["chromadb"]

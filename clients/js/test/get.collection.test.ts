@@ -1,6 +1,7 @@
 import { expect, test } from "@jest/globals";
 import chroma from "./initClient";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
+import { ChromaValueError, InvalidCollectionError } from "../src/Errors";
 
 test("it should get a collection", async () => {
   await chroma.reset();
@@ -16,6 +17,9 @@ test("it should get a collection", async () => {
   expect(results.ids.length).toBe(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
+  expect(results.included).toEqual(
+    expect.arrayContaining(["metadatas", "documents"]),
+  );
 
   const results2 = await collection.get({ where: { test: "test1" } });
   expect(results2).toBeDefined();
@@ -32,14 +36,20 @@ test("wrong code returns an error", async () => {
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
   });
-  const results = await collection.get({
-    where: {
-      //@ts-ignore supposed to fail
-      test: { $contains: "hello" },
-    },
-  });
-  expect(results.error).toBeDefined();
-  expect(results.error).toContain("ValueError");
+  try {
+    await collection.get({
+      where: {
+        //@ts-ignore supposed to fail
+        test: { $contains: "hello" },
+      },
+    });
+  } catch (error: any) {
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(ChromaValueError);
+    expect(error.message).toMatchInlineSnapshot(
+      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
+    );
+  }
 });
 
 test("it should get embedding with matching documents", async () => {
@@ -89,6 +99,15 @@ test("test gt, lt, in a simple small way", async () => {
   const items = await collection.get({ where: { float_value: { $gt: -1.4 } } });
   expect(items.ids.length).toBe(2);
   expect(["test2", "test3"]).toEqual(expect.arrayContaining(items.ids));
+});
+
+test("should error on non existing collection", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.deleteCollection({ name: "test" });
+  expect(async () => {
+    await collection.get({ ids: IDS });
+  }).rejects.toThrow(InvalidCollectionError);
 });
 
 test("it should throw an error if the collection does not exist", async () => {
