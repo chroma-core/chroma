@@ -44,3 +44,6 @@ target/
 
 # Rapid test data
 testdata
+
+# Depot project config
+depot.json

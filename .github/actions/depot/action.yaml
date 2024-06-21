@@ -1,0 +1,18 @@
+name: Setup Depot
+description: "This action authenticates Depot and configures Docker"
+inputs:
+  depot-token:
+    description: "Depot token"
+    required: true
+  depot-project-id:
+    description: "Depot project ID"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Depot CLI
+      uses: depot/setup-action@v1
+    - name: Configure Docker
+      run: depot configure-docker --token ${{ inputs.depot-token }} --project ${{ inputs.depot-project-id }}
+      shell: bash

@@ -20,18 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04-16] #[ubuntu-latest, windows-latest]
-        # test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-        #            "chromadb/test/auth/test_simple_rbac_authz.py",
-        #            "chromadb/test/property/test_add.py",
-        #            "chromadb/test/property/test_collections.py",
-        #            "chromadb/test/property/test_collections_with_database_tenant.py",
-        #            "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-        #            "chromadb/test/property/test_cross_version_persist.py",
-        #            "chromadb/test/property/test_embeddings.py",
-        #            "chromadb/test/property/test_filtering.py",
-        #            "chromadb/test/property/test_persist.py"]
-
+        platform: [depot-ubuntu-22.04-32]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -73,6 +62,11 @@ jobs:
       uses: actions/checkout@v3
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
+    - name: Set up Depot
+      uses: ./.github/actions/depot
+      with:
+        depot-token: ${{ secrets.DEPOT_TOKEN }}
+        depot-project-id: ${{ secrets.DEPOT_PROJECT_ID }}
     - name: Integration Test
       run: bin/python-integration-test ${{ matrix.test-globs }}
       shell: bash
@@ -133,7 +127,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ['depot-ubuntu-22.04-16']
+        platform: ['depot-ubuntu-22.04-8']
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -141,7 +135,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest chromadb/test/stress/
+        run: python -m pytest -n auto --dist loadgroup chromadb/test/stress/
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
