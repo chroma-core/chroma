@@ -10,3 +10,7 @@ runs:
         path: hnswlib
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
+    - name: Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: chroma/rust/worker
