@@ -20,6 +20,21 @@ We will aim to provide:
 
 ## Migration Log
 
+### Migrating Collections - July 1, 2024
+
+Recently we have made a change to how collections are stored and represented in Chroma, in order to pave the way for much more user-friendly use of collections. This change is not backwards compatible, so we have created a migration tool to help you migrate your collections to the new format.
+
+**There is no need to re-embed your data.**
+
+With Chroma installed, you can run the migration tool with the following command:
+
+```bash
+chroma migrate path=/path/to/chroma
+```
+
+If you are using Chroma on a remote server, you will need to run this command locally on that server - it cannot be run remotely. If you have any questions or need help with this migration, please reach out to us on [Discord](https://discord.gg/MMeYNTmh3x).
+
+
 ### v0.5.1
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.

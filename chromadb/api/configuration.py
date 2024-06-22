@@ -240,13 +240,37 @@ class HNSWConfiguration(Configuration):
             is_static=True,
             default_value=1000,
         ),
-        "sync_threashold": ConfigurationDefinition(
-            name="sync_threashold",
+        "sync_threshold": ConfigurationDefinition(
+            name="sync_threshold",
             validator=lambda value: isinstance(value, int) and value >= 1,
             is_static=True,
             default_value=100,
         ),
     }
+
+    @classmethod
+    def from_legacy_params(cls, params: Dict[str, Any]) -> Self:
+        """Returns an HNSWConfiguration from a metadata dict containing legacy HNSW parameters. Used for migration."""
+
+        # We maintain this map to avoid a circular import with HnswParams, and because then names won't change
+        old_to_new = {
+            "hnsw:space": "space",
+            "hnsw:construction_ef": "ef_construction",
+            "hnsw:search_ef": "ef_search",
+            "hnsw:M": "M",
+            "hnsw:num_threads": "num_threads",
+            "hnsw:resize_factor": "resize_factor",
+            "hnsw:batch_size": "batch_size",
+            "hnsw:sync_threshold": "sync_threshold",
+        }
+
+        parameters = []
+        for name, value in params.items():
+            if name not in old_to_new:
+                raise ValueError(f"Invalid legacy HNSW parameter name: {name}")
+            new_name = old_to_new[name]
+            parameters.append(ConfigurationParameter(name=new_name, value=value))
+        return cls(parameters=parameters)
 
 
 class CollectionConfiguration(Configuration):
