@@ -1,4 +1,6 @@
 import importlib
+import requests
+from io import BytesIO
 import multiprocessing
 from typing import Optional, Sequence, List, Tuple
 import numpy as np
@@ -16,8 +18,19 @@ class ImageLoader(DataLoader[List[Optional[Image]]]):
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
+    #    def _load_image(self, uri: Optional[URI]) -> Optional[Image]:
+    #        return np.array(self._PILImage.open(uri)) if uri is not None else None
+
     def _load_image(self, uri: Optional[URI]) -> Optional[Image]:
-        return np.array(self._PILImage.open(uri)) if uri is not None else None
+        if uri is not None:
+            if uri[0:4] == "http":
+                return np.asarray(
+                    self._PILImage.open(BytesIO(requests.get(uri).content))
+                )
+            else:
+                return np.array(self._PILImage.open(uri))
+        else:
+            return None
 
     def __call__(self, uris: Sequence[Optional[URI]]) -> List[Optional[Image]]:
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:

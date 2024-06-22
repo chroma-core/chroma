@@ -53,6 +53,7 @@ repos:
             "numpy",
             "types-protobuf",
             "kubernetes",
+            "types-requests"
           ]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
