@@ -1,9 +1,18 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from chromadb.api.types import (
     CollectionMetadata,
-    Include,
 )
+from enum import Enum
+
+
+class IncludeEnum(str, Enum):
+    documents = "documents"
+    embeddings = "embeddings"
+    metadatas = "metadatas"
+    distances = "distances"
+    uris = "uris"
+    data = "data"
 
 
 class AddEmbedding(BaseModel):
@@ -33,7 +42,7 @@ class QueryEmbedding(BaseModel):
     where_document: Optional[Dict[Any, Any]] = {}
     query_embeddings: List[Any]
     n_results: int = 10
-    include: Include = ["metadatas", "documents", "distances"]
+    include: List[IncludeEnum] = Field(default=["metadatas", "documents"])
 
 
 class GetEmbedding(BaseModel):
@@ -43,7 +52,7 @@ class GetEmbedding(BaseModel):
     sort: Optional[str] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
-    include: Include = ["metadatas", "documents"]
+    include: List[IncludeEnum] = Field(default=["metadatas", "documents"])
 
 
 class DeleteEmbedding(BaseModel):
