@@ -9,7 +9,7 @@ Chroma's commitment is whenever schema or data format change, we will provide a 
 Specifically we will announce schema changes on:
 
 - Discord ([#migrations channel](https://discord.com/channels/1073293645303795742/1129286514845691975))
-- Github (here)
+- Github ([here](https://github.com/chroma-core/chroma/issues))
 - Email listserv [Sign up](https://airtable.com/shrHaErIs1j9F97BE)
 
 We will aim to provide:
