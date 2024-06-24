@@ -6,7 +6,10 @@ from chromadb.api import ServerAPI
 from chromadb.auth.token_authn import TokenTransportHeader
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
-from chromadb.test.conftest import _await_server, _run_server, find_free_port
+from chromadb.test.conftest import (
+    _await_server,
+    spawn_server,
+)
 
 TOKEN_TRANSPORT_HEADER = TokenTransportHeader.X_CHROMA_TOKEN
 TEST_CLOUD_HOST = "localhost"
@@ -25,21 +28,7 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
     chroma_server_authn_credentials: str = valid_token
     chroma_auth_token_transport_header: str = TOKEN_TRANSPORT_HEADER
 
-    port = find_free_port()
-
-    args: Tuple[
-        int,
-        bool,
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[Dict[str, Any]],
-    ] = (
-        port,
+    (port, proc) = spawn_server(
         False,
         None,
         chroma_server_authn_provider,
@@ -50,9 +39,6 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
         None,
         None,
     )
-    ctx = multiprocessing.get_context("spawn")
-    proc = ctx.Process(target=_run_server, args=args, daemon=True)
-    proc.start()
 
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",

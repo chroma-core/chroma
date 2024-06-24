@@ -1,4 +1,6 @@
 import multiprocessing
+from multiprocessing.connection import Connection, wait
+from multiprocessing.context import SpawnProcess
 import os
 from pathlib import Path
 import socket
@@ -176,7 +178,39 @@ def find_free_port() -> int:
 
 
 def _run_server(
-    port: int,
+    conn: Connection,  # used to send the selected port back to the parent process
+    settings: Settings,
+    chroma_server_ssl_certfile: Optional[str] = None,
+    chroma_server_ssl_keyfile: Optional[str] = None,
+) -> None:
+    app_server = chromadb.server.fastapi.FastAPI(settings)
+
+    config = uvicorn.Config(
+        app_server.app(),
+        # Bind to first available port (we would prefer to pass a socket here so we know the port in advance, but uvicorn doesn't support that)
+        port=0,
+        host="0.0.0.0",
+        log_level="error",
+        timeout_keep_alive=30,
+        ssl_keyfile=chroma_server_ssl_keyfile,
+        ssl_certfile=chroma_server_ssl_certfile,
+    )
+    server = uvicorn.Server(config)
+
+    # Hacky, but seems to be the best way to obtain the port
+    orig_log_started_message = server._log_started_message
+
+    def patch_log_started_message(listeners) -> None:
+        orig_log_started_message(listeners)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        conn.send(port)
+
+    server._log_started_message = patch_log_started_message
+
+    server.run()
+
+
+def spawn_server(
     is_persistent: bool = False,
     persist_directory: Optional[str] = None,
     chroma_server_authn_provider: Optional[str] = None,
@@ -188,8 +222,9 @@ def _run_server(
     chroma_server_ssl_certfile: Optional[str] = None,
     chroma_server_ssl_keyfile: Optional[str] = None,
     chroma_overwrite_singleton_tenant_database_access_from_auth: Optional[bool] = False,
-) -> None:
-    """Run a Chroma server locally"""
+) -> Tuple[int, SpawnProcess]:
+    """Run a Chroma server locally. Returns a tuple of the port and spawned process. The server is ready to accept requests when this function returns."""
+
     if is_persistent and persist_directory:
         settings = Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -225,16 +260,19 @@ def _run_server(
             chroma_server_authz_config_file=chroma_server_authz_config_file,
             chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
-    server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(
-        server.app(),
-        host="0.0.0.0",
-        port=port,
-        log_level="error",
-        timeout_keep_alive=30,
-        ssl_keyfile=chroma_server_ssl_keyfile,
-        ssl_certfile=chroma_server_ssl_certfile,
+
+    r, w = multiprocessing.Pipe()
+    ctx = multiprocessing.get_context("spawn")
+    proc = ctx.Process(
+        target=_run_server,
+        args=(w, settings, chroma_server_ssl_keyfile, chroma_server_ssl_certfile),
+        daemon=True,
     )
+    proc.start()
+    w.close()
+    r = wait([r], timeout=5)  # type: ignore
+    port = r[0].recv()  # type: ignore
+    return (port, proc)
 
 
 def _await_server(api: ServerAPI, attempts: int = 0) -> None:
@@ -266,10 +304,7 @@ def _fastapi_fixture(
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
 
-    port = find_free_port()
-    ctx = multiprocessing.get_context("spawn")
     args: Tuple[
-        int,
         bool,
         Optional[str],
         Optional[str],
@@ -282,7 +317,6 @@ def _fastapi_fixture(
         Optional[str],
         Optional[bool],
     ] = (
-        port,
         False,
         None,
         chroma_server_authn_provider,
@@ -296,9 +330,8 @@ def _fastapi_fixture(
         chroma_overwrite_singleton_tenant_database_access_from_auth,
     )
 
-    def run(args):
-        proc = ctx.Process(target=_run_server, args=args, daemon=True)
-        proc.start()
+    def run(args: Any) -> Generator[System, None, None]:
+        (port, proc) = spawn_server(*args)
         settings = Settings(
             chroma_api_impl=chroma_api_impl,
             chroma_server_host="localhost",
@@ -312,9 +345,7 @@ def _fastapi_fixture(
             chroma_overwrite_singleton_tenant_database_access_from_auth=chroma_overwrite_singleton_tenant_database_access_from_auth,
         )
         system = System(settings)
-        api = system.instance(ServerAPI)
         system.start()
-        _await_server(api if isinstance(api, FastAPI) else async_class_to_sync(api))
         yield system
         system.stop()
         proc.kill()
@@ -323,7 +354,6 @@ def _fastapi_fixture(
     if is_persistent:
         persist_directory = tempfile.TemporaryDirectory()
         args = (
-            port,
             is_persistent,
             persist_directory.name,
             chroma_server_authn_provider,
