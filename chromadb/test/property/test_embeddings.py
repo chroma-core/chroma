@@ -4,7 +4,7 @@ import pytest
 import logging
 import hypothesis
 import hypothesis.strategies as st
-from hypothesis import given, settings
+from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
@@ -367,7 +367,9 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(api),
-        settings=settings(deadline=90000),
+        settings=settings(
+            deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
+        ),
     )  # type: ignore
     print_traces()
 
