@@ -40,7 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04] #[ubuntu-latest, windows-latest]
+        platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/test_cli.py",

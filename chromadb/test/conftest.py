@@ -268,9 +268,9 @@ def spawn_server(
         daemon=True,
     )
     proc.start()
-    w.close()
-    r = wait([r], timeout=5)  # type: ignore
+    r = wait([r])  # type: ignore
     port = r[0].recv()  # type: ignore
+    w.close()
     return (port, proc)
 
 
