@@ -27,7 +27,6 @@ from httpx import ConnectError
 from typing_extensions import Protocol
 
 from chromadb.api.async_fastapi import AsyncFastAPI
-from chromadb.api.fastapi import FastAPI
 import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
