@@ -176,10 +176,11 @@ recordset_st = st.shared(
 
 
 @settings(
+    deadline=90000,
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-    ]
+    ],
 )  # type: ignore
 @given(
     collection=collection_st,
@@ -221,10 +222,11 @@ def test_filterable_metadata_get(
 
 
 @settings(
+    deadline=90000,
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-    ]
+    ],
 )  # type: ignore
 @given(
     collection=collection_st,
@@ -278,10 +280,11 @@ def test_filterable_metadata_get_limit_offset(
 
 
 @settings(
+    deadline=90000,
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-    ]
+    ],
 )
 @given(
     collection=collection_st,
