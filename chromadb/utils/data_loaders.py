@@ -1,5 +1,5 @@
 import importlib
-import requests
+import httpx
 from io import BytesIO
 import multiprocessing
 from typing import Optional, Sequence, List, Tuple
@@ -24,9 +24,7 @@ class ImageLoader(DataLoader[List[Optional[Image]]]):
     def _load_image(self, uri: Optional[URI]) -> Optional[Image]:
         if uri is not None:
             if uri[0:4] == "http":
-                return np.asarray(
-                    self._PILImage.open(BytesIO(requests.get(uri).content))
-                )
+                return np.asarray(self._PILImage.open(BytesIO(httpx.get(uri).content)))
             else:
                 return np.array(self._PILImage.open(uri))
         else:
