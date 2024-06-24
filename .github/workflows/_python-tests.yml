@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest -n auto --dist loadgroup --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'
+        run: python -m pytest -n auto --dist loadgroup --durations 10 --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -110,7 +110,7 @@ jobs:
       - name: Start cluster
         uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest --durations 10 "${{ matrix.test-globs }}"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -146,7 +146,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest -n auto --dist loadgroup chromadb/test/stress/
+        run: python -m pytest -n auto --dist loadgroup --durations 10 chromadb/test/stress/
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
