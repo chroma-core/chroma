@@ -5,6 +5,11 @@ on:
 
 jobs:
   test:
+    permissions:
+      # allow issuing OIDC tokens for this workflow run
+      id-token: write
+      # allow at least reading the repo contents, add other permissions if necessary
+      contents: read
     runs-on: depot-ubuntu-22.04
     steps:
       - name: Checkout
