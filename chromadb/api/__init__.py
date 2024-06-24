@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import List, Sequence, Optional
 from uuid import UUID
 
 from overrides import override
+from pydantic import Field
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -13,7 +14,6 @@ from chromadb.api.types import (
     DataLoader,
     Embeddings,
     IDs,
-    Include,
     Loadable,
     Metadatas,
     URIs,
@@ -23,6 +23,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component, Settings
+from chromadb.server.fastapi.types import IncludeEnum
 from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 from chromadb.types import Collection as CollectionModel
@@ -344,7 +345,9 @@ class BaseAPI(ABC):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: List[IncludeEnum] = Field(
+            default=["embeddings", "metadatas", "documents"]
+        ),
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
@@ -394,7 +397,9 @@ class BaseAPI(ABC):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: List[IncludeEnum] = Field(
+            default=["embeddings", "metadatas", "documents"]
+        ),
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
@@ -603,7 +608,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
 
-def json_to_collection_model(json_collection: dict) -> CollectionModel:
+def json_to_collection_model(json_collection: dict) -> CollectionModel:  # type: ignore
     return CollectionModel(
         id=json_collection["id"],
         name=json_collection["name"],

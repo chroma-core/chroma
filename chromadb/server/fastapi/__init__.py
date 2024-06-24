@@ -1,11 +1,10 @@
 from typing import Any, Callable, cast, Dict, List, Sequence, Optional, Tuple
 import fastapi
-import orjson
 from anyio import (
     to_thread,
     CapacityLimiter,
 )
-from fastapi import FastAPI as _FastAPI, Response, Request
+from fastapi import FastAPI as _FastAPI, Response, Request, Body
 from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
@@ -367,13 +366,14 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     async def create_database(
-        self, request: Request, tenant: str = DEFAULT_TENANT
+        self,
+        request: Request,
+        tenant: str = DEFAULT_TENANT,
+        body: CreateDatabase = Body(...),
     ) -> None:
         def process_create_database(
-            tenant: str, headers: Headers, raw_body: bytes
+            tenant: str, headers: Headers, db: CreateDatabase
         ) -> None:
-            db = CreateDatabase.model_validate(orjson.loads(raw_body))
-
             (
                 maybe_tenant,
                 maybe_database,
@@ -395,7 +395,7 @@ class FastAPI(Server):
             process_create_database,
             tenant,
             request.headers,
-            await request.body(),
+            body,
             limiter=self._capacity_limiter,
         )
 
@@ -432,10 +432,12 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
-    async def create_tenant(self, request: Request) -> None:
-        def process_create_tenant(request: Request, raw_body: bytes) -> None:
-            tenant = CreateTenant.model_validate(orjson.loads(raw_body))
-
+    async def create_tenant(
+        self,
+        request: Request,
+        body: CreateTenant = Body(...),
+    ) -> None:
+        def process_create_tenant(request: Request, tenant: CreateTenant) -> None:
             maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_TENANT,
@@ -451,7 +453,7 @@ class FastAPI(Server):
         await to_thread.run_sync(
             process_create_tenant,
             request,
-            await request.body(),
+            body,
             limiter=self._capacity_limiter,
         )
 
@@ -554,13 +556,14 @@ class FastAPI(Server):
     async def create_collection(
         self,
         request: Request,
+        body: CreateCollection = Body(...),
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         def process_create_collection(
-            request: Request, tenant: str, database: str, raw_body: bytes
+            request: Request, body: CreateCollection, tenant: str, database: str
         ) -> Collection:
-            create = CreateCollection.model_validate(orjson.loads(raw_body))
+            create = CreateCollection.model_validate(body)
 
             (
                 maybe_tenant,
@@ -590,9 +593,9 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 process_create_collection,
                 request,
+                body,
                 tenant,
                 database,
-                await request.body(),
                 limiter=self._capacity_limiter,
             ),
         )
@@ -641,11 +644,11 @@ class FastAPI(Server):
         self,
         collection_id: str,
         request: Request,
+        body: UpdateCollection = Body(...),
     ) -> None:
         def process_update_collection(
-            request: Request, collection_id: str, raw_body: bytes
+            request: Request, collection_id: str, update: UpdateCollection
         ) -> None:
-            update = UpdateCollection.model_validate(orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
@@ -663,7 +666,7 @@ class FastAPI(Server):
             process_update_collection,
             request,
             collection_id,
-            await request.body(),
+            body,
             limiter=self._capacity_limiter,
         )
 
@@ -699,11 +702,12 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
-    async def add(self, request: Request, collection_id: str) -> bool:
+    async def add(
+        self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
+    ) -> bool:
         try:
 
-            def process_add(request: Request, raw_body: bytes) -> bool:
-                add = AddEmbedding.model_validate(orjson.loads(raw_body))
+            def process_add(request: Request, add: AddEmbedding) -> bool:
                 self.auth_and_get_tenant_and_database_for_request(
                     request.headers,
                     AuthzAction.ADD,
@@ -725,7 +729,7 @@ class FastAPI(Server):
                 await to_thread.run_sync(
                     process_add,
                     request,
-                    await request.body(),
+                    body,
                     limiter=self._capacity_limiter,
                 ),
             )
@@ -733,10 +737,10 @@ class FastAPI(Server):
             raise HTTPException(status_code=500, detail=str(e))
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
-    async def update(self, request: Request, collection_id: str) -> None:
-        def process_update(request: Request, raw_body: bytes) -> bool:
-            update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
-
+    async def update(
+        self, request: Request, collection_id: str, body: UpdateEmbedding = Body(...)
+    ) -> None:
+        def process_update(request: Request, update: UpdateEmbedding) -> bool:
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE,
@@ -757,15 +761,15 @@ class FastAPI(Server):
         await to_thread.run_sync(
             process_update,
             request,
-            await request.body(),
+            body,
             limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
-    async def upsert(self, request: Request, collection_id: str) -> None:
-        def process_upsert(request: Request, raw_body: bytes) -> bool:
-            upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
-
+    async def upsert(
+        self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
+    ) -> None:
+        def process_upsert(request: Request, upsert: AddEmbedding) -> bool:
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPSERT,
@@ -786,14 +790,15 @@ class FastAPI(Server):
         await to_thread.run_sync(
             process_upsert,
             request,
-            await request.body(),
+            body,
             limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
-    async def get(self, collection_id: str, request: Request) -> GetResult:
-        def process_get(request: Request, raw_body: bytes) -> GetResult:
-            get = GetEmbedding.model_validate(orjson.loads(raw_body))
+    async def get(
+        self, collection_id: str, request: Request, body: GetEmbedding = Body(...)
+    ) -> GetResult:
+        def process_get(request: Request, get: GetEmbedding) -> GetResult:
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
@@ -817,15 +822,16 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 process_get,
                 request,
-                await request.body(),
+                body,
                 limiter=self._capacity_limiter,
             ),
         )
 
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
-    async def delete(self, collection_id: str, request: Request) -> List[UUID]:
-        def process_delete(request: Request, raw_body: bytes) -> List[str]:
-            delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
+    async def delete(
+        self, collection_id: str, request: Request, body: DeleteEmbedding = Body(...)
+    ) -> List[UUID]:
+        def process_delete(request: Request, delete: DeleteEmbedding) -> List[str]:
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
@@ -845,7 +851,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 process_delete,
                 request,
-                await request.body(),
+                body,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -899,10 +905,9 @@ class FastAPI(Server):
         self,
         collection_id: str,
         request: Request,
+        body: QueryEmbedding = Body(...),
     ) -> QueryResult:
-        def process_query(request: Request, raw_body: bytes) -> QueryResult:
-            query = QueryEmbedding.model_validate(orjson.loads(raw_body))
-
+        def process_query(request: Request, query: QueryEmbedding) -> QueryResult:
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.QUERY,
@@ -925,7 +930,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 process_query,
                 request,
-                await request.body(),
+                body,
                 limiter=self._capacity_limiter,
             ),
         )

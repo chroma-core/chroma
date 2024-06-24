@@ -823,18 +823,18 @@ export const ApiApiFetchParamCreator = function (
     },
     /**
      * @summary List Collections
+     * @param {number | null} [limit]
+     * @param {number | null} [offset]
      * @param {string} [tenant]
      * @param {string} [database]
-     * @param {number} [limit]
-     * @param {number} [offset]
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
     listCollections(
+      limit: number | null | undefined,
+      offset: number | null | undefined,
       tenant: string | undefined,
       database: string | undefined,
-      limit: number | undefined,
-      offset: number | undefined,
       options: RequestInit = {},
     ): FetchArgs {
       let localVarPath = `/api/v1/collections`;
@@ -855,20 +855,20 @@ export const ApiApiFetchParamCreator = function (
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      if (tenant !== undefined) {
-        localVarQueryParameter.append("tenant", String(tenant));
-      }
-
-      if (database !== undefined) {
-        localVarQueryParameter.append("database", String(database));
-      }
-
       if (limit !== undefined) {
         localVarQueryParameter.append("limit", String(limit));
       }
 
       if (offset !== undefined) {
         localVarQueryParameter.append("offset", String(offset));
+      }
+
+      if (tenant !== undefined) {
+        localVarQueryParameter.append("tenant", String(tenant));
+      }
+
+      if (database !== undefined) {
+        localVarQueryParameter.append("database", String(database));
       }
 
       localVarRequestOptions.headers = localVarHeaderParameter;
@@ -1828,18 +1828,18 @@ export const ApiApiFp = function (configuration?: Configuration) {
     },
     /**
      * @summary List Collections
+     * @param {number | null} [limit]
+     * @param {number | null} [offset]
      * @param {string} [tenant]
      * @param {string} [database]
-     * @param {number} [limit]
-     * @param {number} [offset]
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
     listCollections(
+      limit: number | null | undefined,
+      offset: number | null | undefined,
       tenant: string | undefined,
       database: string | undefined,
-      limit: number | undefined,
-      offset: number | undefined,
       options?: RequestInit,
     ): (
       fetch?: FetchAPI,
@@ -1847,7 +1847,7 @@ export const ApiApiFp = function (configuration?: Configuration) {
     ) => Promise<Api.ListCollections200Response> {
       const localVarFetchArgs = ApiApiFetchParamCreator(
         configuration,
-      ).listCollections(tenant, database, limit, offset, options);
+      ).listCollections(limit, offset, tenant, database, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
         return fetch(
           basePath + localVarFetchArgs.url,
@@ -2404,25 +2404,25 @@ export class ApiApi extends BaseAPI {
 
   /**
    * @summary List Collections
+   * @param {number | null} [limit]
+   * @param {number | null} [offset]
    * @param {string} [tenant]
    * @param {string} [database]
-   * @param {number} [limit]
-   * @param {number} [offset]
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
   public listCollections(
+    limit: number | null | undefined,
+    offset: number | null | undefined,
     tenant: string | undefined,
     database: string | undefined,
-    limit: number | undefined,
-    offset: number | undefined,
     options?: RequestInit,
   ) {
     return ApiApiFp(this.configuration).listCollections(
-      tenant,
-      database,
       limit,
       offset,
+      tenant,
+      database,
       options,
     )(this.fetch, this.basePath);
   }
