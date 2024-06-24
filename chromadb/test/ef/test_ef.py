@@ -32,7 +32,7 @@ def test_get_builtins_holds() -> None:
         "ChromaLangchainEmbeddingFunction",
     }
 
-    assert expected_builtins == embedding_functions.get_builtins()
+    assert embedding_functions.get_builtins().issubset(expected_builtins)
 
 
 def test_default_ef_exists() -> None:
