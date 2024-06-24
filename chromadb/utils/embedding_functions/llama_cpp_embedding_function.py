@@ -3,7 +3,7 @@ from typing import Any, cast
 
 class LlamaCppEmbeddingFunction(EmbeddingFunction):
     
-    def __init__(self, model_path: str = "", huggingface_repo_id: str = "", huggingface_filename: str = "", **kwargs: Any):
+    def __init__(self, model_path: str = "", huggingface_repo_id: str = "", huggingface_filename: str = "", **kwargs: Any) -> None:
         """
         Initialize the LlamaCppEmbeddingFunction. This function will embed documents using the Llama-CPP-Python library.
 
