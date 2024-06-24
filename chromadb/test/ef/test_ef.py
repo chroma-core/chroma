@@ -24,6 +24,7 @@ def test_get_builtins_holds() -> None:
         "JinaEmbeddingFunction",
         "ONNXMiniLM_L6_V2",
         "OllamaEmbeddingFunction",
+        "LlamaCppEmbeddingFunction",
         "OpenAIEmbeddingFunction",
         "OpenCLIPEmbeddingFunction",
         "RoboflowEmbeddingFunction",
