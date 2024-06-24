@@ -3,19 +3,20 @@ from typing import Any, cast
 
 class LlamaCppEmbeddingFunction(EmbeddingFunction):
     
-    def __init__(self, model_path: str, **kwargs: Any):
+    def __init__(self, model_path: str = "", huggingface_repo_id: str = "", huggingface_filename: str = "", **kwargs: Any):
         """
         Initialize the LlamaCppEmbeddingFunction. This function will embed documents using the Llama-CPP-Python library.
 
         Args:
-            model_path (str): Path to the model file.
+            model_path (str): Path to the model file
+            huggingface_repo_id (str): The name of the HuggingFace id to use. i.e. "username/repo_name".
+            hugingface_filename (str): The name of the file to download from the HuggingFace model. i.e. "*q8_0.gguf".
             kwargs: Additional arguments to pass to the Llama constructor.
                 * n_ctx (int): The context size.
                 * n_threads (int): The number of cpu threads to use.
                 * n_gpu_layers (int): The number of layers to run on the GPU.
         """
         # import external libraries
-
         try:
             from llama_cpp import Llama
         except ImportError:
@@ -27,6 +28,12 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         except ImportError:
             raise ValueError(
                 "The torch python package is not installed. Please install it with `pip install torch`"
+            )
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError:
+            raise ValueError(
+                "The huggingface-hub python package is not installed. Please install it with `pip install huggingface_hub`"
             )
         self.model_path = model_path
 
@@ -43,7 +50,16 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             kwargs['n_gpu_layers'] = 0
 
         try:
-            self.llm_embedding = Llama(model_path, **kwargs)
+            if huggingface_repo_id and huggingface_filename:
+                self.llm_embedding = Llama.from_pretrained(repo_id=huggingface_repo_id, filename=huggingface_filename, **kwargs)
+            elif huggingface_repo_id and not huggingface_filename:
+                raise ValueError("Please provide a filename to download from the HuggingFace model.")
+            elif not huggingface_repo_id and huggingface_filename:
+                raise ValueError("Please provide a HuggingFace repo id to download the model from.")
+            elif model_path:
+                self.llm_embedding = Llama(model_path, **kwargs)
+            else:
+                raise ValueError("Please provide either a model path or a HuggingFace repo id and filename.")
         except Exception as e:
             raise Exception(f"Error initializing LlamaCppEmbeddingFunction: {e}")
 
