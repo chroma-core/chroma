@@ -4,7 +4,7 @@ import pytest
 import logging
 import hypothesis
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
@@ -103,6 +103,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
 
+        initial_version = self.collection.get_model()["version"]
+
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
@@ -136,7 +138,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 # Only wait for compaction if the size of the collection is
                 # some minimal size
                 if should_compact and len(normalized_record_set["ids"]) > 10:
-                    initial_version = self.collection.get_model()["version"]
                     # Wait for the model to be updated
                     wait_for_version_increase(
                         self.api, self.collection.name, initial_version
@@ -151,7 +152,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 # Only wait for compaction if the size of the collection is
                 # some minimal size
                 if should_compact and len(normalized_record_set["ids"]) > 10:
-                    initial_version = self.collection.get_model()["version"]
                     # Wait for the model to be updated
                     wait_for_version_increase(
                         self.api, self.collection.name, initial_version
@@ -166,13 +166,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
 
+        initial_version = self.collection.get_model()["version"]
+
         self.collection.delete(ids=ids)
         self._remove_embeddings(set(indices_to_remove))
         if not NOT_CLUSTER_ONLY:
-            # Only wait for compaction if the size of the collection is
-            # some minimal size
             if should_compact:
-                initial_version = self.collection.get_model()["version"]
                 # Wait for the model to be updated
                 wait_for_version_increase(
                     self.api, self.collection.name, initial_version
@@ -196,13 +195,20 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
+        initial_version = self.collection.get_model()["version"]
+
+        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
+            record_set
+        )
+        if not invariants.is_metadata_valid(normalized_record_set):
+            with pytest.raises(Exception):
+                self.collection.update(**normalized_record_set)
+            return
+
         self.collection.update(**record_set)
         self._upsert_embeddings(record_set)
         if not NOT_CLUSTER_ONLY:
-            # Only wait for compaction if the size of the collection is
-            # some minimal size
             if should_compact:
-                initial_version = self.collection.get_model()["version"]
                 # Wait for the model to be updated
                 wait_for_version_increase(
                     self.api, self.collection.name, initial_version
@@ -225,13 +231,20 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
+        initial_version = self.collection.get_model()["version"]
+
+        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
+            record_set
+        )
+        if not invariants.is_metadata_valid(normalized_record_set):
+            with pytest.raises(Exception):
+                self.collection.upsert(**normalized_record_set)
+            return
+
         self.collection.upsert(**record_set)
         self._upsert_embeddings(record_set)
         if not NOT_CLUSTER_ONLY:
-            # Only wait for compaction if the size of the collection is
-            # some minimal size
             if should_compact:
-                initial_version = self.collection.get_model()["version"]
                 # Wait for the model to be updated
                 wait_for_version_increase(
                     self.api, self.collection.name, initial_version
@@ -354,6 +367,7 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(api),
+        settings=settings(deadline=90000),
     )  # type: ignore
     print_traces()
 
