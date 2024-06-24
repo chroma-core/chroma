@@ -70,6 +70,8 @@ jobs:
     - name: Set up Depot CLI
       uses: depot/setup-action@v1
     - name: Bake Docker images
+      # does not work on Windows
+      if: matrix.platform != 'depot-ubuntu-22.04'
       uses: depot/bake-action@v1
       with:
         files: docker-compose.test.yml
