@@ -191,8 +191,8 @@ def _run_server(
         host="0.0.0.0",
         log_level="error",
         timeout_keep_alive=30,
-        ssl_keyfile=chroma_server_ssl_keyfile,
         ssl_certfile=chroma_server_ssl_certfile,
+        ssl_keyfile=chroma_server_ssl_keyfile,
     )
     server = uvicorn.Server(config)
 
@@ -264,7 +264,7 @@ def spawn_server(
     ctx = multiprocessing.get_context("spawn")
     proc = ctx.Process(
         target=_run_server,
-        args=(w, settings, chroma_server_ssl_keyfile, chroma_server_ssl_certfile),
+        args=(w, settings, chroma_server_ssl_certfile, chroma_server_ssl_keyfile),
         daemon=True,
     )
     proc.start()
