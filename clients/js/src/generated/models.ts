@@ -13,7 +13,7 @@
  */
 
 export namespace Api {
-  export interface Add201Response {}
+  export interface Add201Response { }
 
   export interface AddEmbedding {
     embeddings?: Api.AddEmbedding.Embedding[] | null;
@@ -28,21 +28,22 @@ export namespace Api {
    * @namespace AddEmbedding
    */
   export namespace AddEmbedding {
-    export interface Embedding {}
+    export interface Embedding { }
 
-    export interface Metadatum {}
+    export interface Metadatum { }
   }
 
-  export interface ADelete200Response {}
+  export interface ADelete200Response { }
 
-  export interface AGet200Response {}
+  export interface AGet200Response { }
 
-  export interface Count200Response {}
+  export interface Count200Response { }
 
-  export interface CountCollections200Response {}
+  export interface CountCollections200Response { }
 
   export interface CreateCollection {
     name: string;
+    configuration: Api.CreateCollection.Configuration | null;
     metadata?: Api.CreateCollection.Metadata | null;
     get_or_create?: boolean;
   }
@@ -52,24 +53,26 @@ export namespace Api {
    * @namespace CreateCollection
    */
   export namespace CreateCollection {
-    export interface Metadata {}
+    export interface Configuration { }
+
+    export interface Metadata { }
   }
 
-  export interface CreateCollection200Response {}
+  export interface CreateCollection200Response { }
 
   export interface CreateDatabase {
     name: string;
   }
 
-  export interface CreateDatabase200Response {}
+  export interface CreateDatabase200Response { }
 
   export interface CreateTenant {
     name: string;
   }
 
-  export interface CreateTenant200Response {}
+  export interface CreateTenant200Response { }
 
-  export interface DeleteCollection200Response {}
+  export interface DeleteCollection200Response { }
 
   export interface DeleteEmbedding {
     ids?: string[] | null;
@@ -82,14 +85,14 @@ export namespace Api {
    * @namespace DeleteEmbedding
    */
   export namespace DeleteEmbedding {
-    export interface Where {}
+    export interface Where { }
 
-    export interface WhereDocument {}
+    export interface WhereDocument { }
   }
 
-  export interface GetCollection200Response {}
+  export interface GetCollection200Response { }
 
-  export interface GetDatabase200Response {}
+  export interface GetDatabase200Response { }
 
   export interface GetEmbedding {
     ids?: string[] | null;
@@ -114,14 +117,14 @@ export namespace Api {
    * @namespace GetEmbedding
    */
   export namespace GetEmbedding {
-    export interface Where {}
+    export interface Where { }
 
-    export interface WhereDocument {}
+    export interface WhereDocument { }
   }
 
-  export interface GetNearestNeighbors200Response {}
+  export interface GetNearestNeighbors200Response { }
 
-  export interface GetTenant200Response {}
+  export interface GetTenant200Response { }
 
   export interface HTTPValidationError {
     detail?: Api.ValidationError[];
@@ -136,9 +139,9 @@ export namespace Api {
     Data = "data",
   }
 
-  export interface ListCollections200Response {}
+  export interface ListCollections200Response { }
 
-  export interface PreFlightChecks200Response {}
+  export interface PreFlightChecks200Response { }
 
   export interface QueryEmbedding {
     where?: Api.QueryEmbedding.Where | null;
@@ -157,14 +160,14 @@ export namespace Api {
    * @namespace QueryEmbedding
    */
   export namespace QueryEmbedding {
-    export interface Where {}
+    export interface Where { }
 
-    export interface WhereDocument {}
+    export interface WhereDocument { }
 
-    export interface QueryEmbedding2 {}
+    export interface QueryEmbedding2 { }
   }
 
-  export interface Update200Response {}
+  export interface Update200Response { }
 
   export interface UpdateCollection {
     new_name?: string | null;
@@ -176,10 +179,10 @@ export namespace Api {
    * @namespace UpdateCollection
    */
   export namespace UpdateCollection {
-    export interface NewMetadata {}
+    export interface NewMetadata { }
   }
 
-  export interface UpdateCollection200Response {}
+  export interface UpdateCollection200Response { }
 
   export interface UpdateEmbedding {
     embeddings?: Api.UpdateEmbedding.Embedding[] | null;
@@ -194,12 +197,12 @@ export namespace Api {
    * @namespace UpdateEmbedding
    */
   export namespace UpdateEmbedding {
-    export interface Embedding {}
+    export interface Embedding { }
 
-    export interface Metadatum {}
+    export interface Metadatum { }
   }
 
-  export interface Upsert200Response {}
+  export interface Upsert200Response { }
 
   export interface ValidationError {
     loc: (string | number)[];

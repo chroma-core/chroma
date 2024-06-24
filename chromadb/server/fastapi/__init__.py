@@ -377,7 +377,6 @@ class FastAPI(Server):
             tenant: str, headers: Headers, raw_body: bytes
         ) -> None:
             db = CreateDatabase.model_validate(orjson.loads(raw_body))
-
             (
                 maybe_tenant,
                 maybe_database,

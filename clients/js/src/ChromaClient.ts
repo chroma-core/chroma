@@ -168,6 +168,7 @@ export class ChromaClient {
         this.database,
         {
           name,
+          configuration: {},
           metadata,
         },
         this.api.options,
@@ -226,6 +227,7 @@ export class ChromaClient {
         {
           name,
           metadata,
+          configuration: {},
           get_or_create: true,
         },
         this.api.options,
