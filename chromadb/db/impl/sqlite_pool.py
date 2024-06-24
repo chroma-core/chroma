@@ -1,5 +1,6 @@
 import sqlite3
 from abc import ABC, abstractmethod
+from queue import Queue
 from typing import Any, Set
 import threading
 from overrides import override
@@ -21,6 +22,16 @@ class Connection:
             db_file, timeout=1000, check_same_thread=False, uri=is_uri, *args, **kwargs
         )  # type: ignore
         self._conn.isolation_level = None  # Handle commits explicitly
+        self._conn.execute("PRAGMA cache_size = 2000000;")
+        self._conn.execute("PRAGMA temp_store = MEMORY;")
+        self._conn.execute("PRAGMA journal_mode = OFF;")
+
+        mmap_size = 2048 * 1024 * 1024
+        self._conn.execute(f'PRAGMA mmap_size = {mmap_size};')
+        self._conn.execute('PRAGMA synchronous = OFF;')
+        self._conn.execute("PRAGMA optimize;")
+        self._conn.execute("ANALYZE embedding_metadata;")
+        self._conn.execute("ANALYZE embeddings;")
 
     def execute(self, sql: str, parameters=...) -> sqlite3.Cursor:  # type: ignore
         if parameters is ...:
@@ -157,3 +168,50 @@ class PerThreadPool(Pool):
     @override
     def return_to_pool(self, conn: Connection) -> None:
         pass  # Each thread gets its own connection, so we don't need to return it to the pool
+
+
+class ReusableConnectionPool(Pool):
+    """Maintains a reusable connection pool. Connections are shared across threads."""
+
+    def __init__(self, db_file: str, is_uri: bool = False, max_connections: int = 10,):
+        self._available_connections = Queue(maxsize=max_connections)
+        self._all_connections: Set[Connection] = set()
+        self._lock = threading.Lock()
+        self._db_file = db_file
+        self._is_uri = is_uri
+        self._max_connections = max_connections
+        self._initialized = threading.Event()
+
+        # Pre-initialize connections
+        for _ in range(max_connections):
+            self._available_connections.put(self._create_new_connection())
+
+        self._initialized.set()
+
+    def _create_new_connection(self,*args, **kwargs) -> Connection:
+        new_connection = Connection(self, self._db_file, self._is_uri, *args, **kwargs)
+        self._all_connections.add(new_connection)
+        return new_connection
+
+    @override
+    def connect(self, *args: Any, **kwargs: Any) -> Connection:
+        self._initialized.wait()  # Ensure pool is initialized
+        connection = self._available_connections.get()
+        if connection is None:
+            connection = self._create_new_connection(*args, **kwargs)
+        return connection
+
+    @override
+    def close(self) -> None:
+        with self._lock:
+            while not self._available_connections.empty():
+                conn = self._available_connections.get()
+                conn.close_actual()
+            for conn in self._all_connections:
+                conn.close_actual()
+            self._all_connections.clear()
+
+    @override
+    def return_to_pool(self, conn: Connection) -> None:
+        if conn in self._all_connections:
+            self._available_connections.put(conn)

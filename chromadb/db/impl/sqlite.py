@@ -1,4 +1,4 @@
-from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
+from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool, ReusableConnectionPool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
@@ -87,7 +87,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             )
             if not os.path.exists(self._db_file):
                 os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
-            self._conn_pool = PerThreadPool(self._db_file)
+            self._conn_pool = ReusableConnectionPool(self._db_file)
         self._tx_stack = local()
         super().__init__(system)
 
