@@ -1,5 +1,5 @@
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-from typing import Any, cast
+from typing import Any, cast, List
 
 class LlamaCppEmbeddingFunction(EmbeddingFunction):
     
@@ -96,7 +96,7 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         else:
             raise ValueError("The embedding is not 2d or 3d. Please check the embedding output.")
         
-    def mean_pooling(self, document_embedding: np.array) -> np.array:
+    def mean_pooling(self, document_embeddings:  List[np.ndarray]) -> np.array:
         """
         Perform mean pooling on the document embedding.
 
@@ -112,9 +112,9 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             raise ValueError(
                 "The numpy python package is not installed. Please install it with `pip install numpy`"
             )
-        return [np.sum(sentence, axis=0) / sentence.shape[0] for sentence in document_embedding]
+        return np.array([np.mean(document_embedding, axis=0) for document_embedding in document_embeddings])
     
-    def max_pooling(self, document_embedding: np.array) -> np.array:
+    def max_pooling(self, document_embeddings:  List[np.ndarray]) -> np.array:
         """
         Perform max pooling on the document embedding.
 
@@ -130,7 +130,7 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             raise ValueError(
                 "The numpy python package is not installed. Please install it with `pip install numpy`"
             )
-        return [np.max(sentence, axis=0) for sentence in document_embedding]
+        return np.array([np.max(document_embedding, axis=0) for document_embedding in document_embeddings])
     
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -164,15 +164,13 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             # Create embeddings
             if self.pooling_method == "mean":
                 # Convert to numpy array
-                llama_embeddings = [self.mean_pooling(np.array(embedding)) for embedding in llama_embeddings]
+                llama_embeddings = self.mean_pooling(llama_embeddings)
             elif self.pooling_method == "max":
                 # Convert to numpy array
-                llama_embeddings = [self.max_pooling(np.array(embedding)) for embedding in llama_embeddings]
+                llama_embeddings = self.max_pooling(llama_embeddings)
             else:
                 raise ValueError("Invalid pooling method. Please choose 'mean', 'max'")
             
-            llama_embeddings = np.array(llama_embeddings)
-
             return cast(
                 Embeddings,
                 llama_embeddings.tolist()
