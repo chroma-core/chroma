@@ -227,7 +227,7 @@ export class ChromaClient {
         {
           name,
           metadata,
-          configuration: {},
+          configuration: null,
           get_or_create: true,
         },
         this.api.options,
