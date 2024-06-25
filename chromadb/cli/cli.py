@@ -58,7 +58,6 @@ def run(
 
     # set ENV variable for PERSIST_DIRECTORY to path
     os.environ["IS_PERSISTENT"] = "True"
-    os.environ["ALLOW_RESET"] = "True"
     os.environ["PERSIST_DIRECTORY"] = path
     os.environ["CHROMA_SERVER_NOFILE"] = "65535"
     os.environ["CHROMA_CLI"] = "True"
