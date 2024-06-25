@@ -90,25 +90,6 @@ class Collection(
             version=version,
         )
 
-    def modify(
-        self,
-        name: Optional[str] = None,
-        metadata: Optional[Metadata] = None,
-        configuration: Optional[CollectionConfiguration] = None,
-    ) -> None:
-        """
-
-        Modifes the collection and returns a new instance of the collection. This does not partially update the
-        metadata or the configuration, but rather replaces them with the provided values.
-
-        """
-        if name is not None:
-            self.name = name
-        if configuration is not None:
-            self.configuration_json = configuration.to_json()
-        if metadata is not None:
-            self.metadata = metadata
-
     # TODO: This throws away type information.
     def __getitem__(self, key: str) -> Optional[Any]:
         """Allows the collection to be treated as a dictionary"""
@@ -151,13 +132,15 @@ class Collection(
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Deserializes a Collection object from JSON"""
+        # Copy the JSON map so we can modify it
+        params_map = json_map.copy()
 
         # Get the CollectionConfiguration from the JSON map, and remove it from the map
         configuration = CollectionConfiguration.from_json(
-            json_map.pop("configuration_json")
+            params_map.pop("configuration_json", None)
         )
 
-        return cls(configuration=configuration, **json_map)
+        return cls(configuration=configuration, **params_map)
 
 
 class Database(TypedDict):

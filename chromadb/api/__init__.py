@@ -553,7 +553,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration],
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -575,7 +575,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration],
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
