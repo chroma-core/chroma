@@ -6,8 +6,19 @@ on:
 jobs:
   test:
     runs-on: depot-ubuntu-22.04
+    permissions:
+      # allow issuing OIDC tokens for this workflow run (for Depot)
+      id-token: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+      - name: Bake Docker images
+        uses: depot/bake-action@v1
+        with:
+          files: docker-compose.test.yml
+          load: true
       - name: Test
         run: bin/ts-integration-test
