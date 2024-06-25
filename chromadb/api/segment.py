@@ -147,7 +147,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration],
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -213,12 +213,12 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration],
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.create_collection(  # type: ignore
+        return self.create_collection(
             name=name,
             metadata=metadata,
             configuration=configuration,
@@ -459,7 +459,7 @@ class SegmentAPI(ServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         add_attributes_to_current_span(
             {
@@ -638,7 +638,7 @@ class SegmentAPI(ServerAPI):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["documents", "metadatas", "distances"],
+        include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         add_attributes_to_current_span(
             {
