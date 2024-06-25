@@ -262,10 +262,10 @@ export class ChromaClient {
     offset,
   }: ListCollectionsParams = {}): Promise<CollectionType[]> {
     const response = await this.api.listCollections(
-      this.tenant,
-      this.database,
       limit,
       offset,
+      this.tenant,
+      this.database,
       this.api.options,
     );
     return handleSuccess(response);
