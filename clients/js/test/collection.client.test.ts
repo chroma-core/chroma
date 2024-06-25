@@ -22,6 +22,7 @@ test("it should create a collection", async () => {
   expect(collection).toHaveProperty("id");
   expect(collection.name).toBe("test");
   let collections = await chroma.listCollections();
+
   expect([
     {
       name: "test",
@@ -32,7 +33,12 @@ test("it should create a collection", async () => {
       version: 0,
       dimension: null,
     },
-  ]).toEqual(expect.arrayContaining(collections));
+  ]).toEqual(
+    expect.arrayContaining(
+      collections.map(({ configuration_json, ...rest }) => rest),
+    ),
+  );
+
   expect([{ name: "test2", metadata: null }]).not.toEqual(
     expect.arrayContaining(collections),
   );
@@ -60,7 +66,11 @@ test("it should create a collection", async () => {
       dimension: null,
       version: 0,
     },
-  ]).toEqual(expect.arrayContaining(collections2));
+  ]).toEqual(
+    expect.arrayContaining(
+      collections2.map(({ configuration_json, ...rest }) => rest),
+    ),
+  );
 });
 
 test("it should get a collection", async () => {

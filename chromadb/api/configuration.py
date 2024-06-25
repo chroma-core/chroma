@@ -25,16 +25,16 @@ class StaticParameterError(Exception):
     pass
 
 
+ParameterValue = Union[str, int, float, bool, "Configuration"]
+
+
 class ParameterValidator(Protocol):
     """Represents an abstract parameter validator."""
 
     @abstractmethod
-    def __call__(self, value: Union[str, int, float, bool]) -> bool:
+    def __call__(self, value: ParameterValue) -> bool:
         """Returns whether the given value is valid."""
         raise NotImplementedError()
-
-
-ParameterValue = Union[str, int, float, bool]
 
 
 class ConfigurationDefinition:
@@ -98,6 +98,14 @@ class Configuration(JSONSerializable["Configuration"]):
                     raise ValueError(f"Invalid parameter name: {parameter.name}")
 
                 definition = self.definitions[parameter.name]
+                # Handle the case where we have a recursive configuration definition
+                if isinstance(parameter.value, dict):
+                    child_type = globals().get(parameter.value.get("_type", None))
+                    if child_type is None:
+                        raise ValueError(
+                            f"Invalid configuration type: {parameter.value}"
+                        )
+                    parameter.value = child_type.from_json(parameter.value)
                 if not isinstance(parameter.value, type(definition.default_value)):
                     raise ValueError(f"Invalid parameter value: {parameter.value}")
 
@@ -160,21 +168,34 @@ class Configuration(JSONSerializable["Configuration"]):
     @override
     def to_json(self) -> Dict[str, Any]:
         """Returns the JSON compatible dictionary representation of the configuration."""
-        return {name: parameter.value for name, parameter in self.parameter_map.items()}
+        json_dict = {
+            name: parameter.value.to_json()
+            if isinstance(parameter.value, Configuration)
+            else parameter.value
+            for name, parameter in self.parameter_map.items()
+        }
+        # What kind of configuration is this?
+        json_dict["_type"] = self.__class__.__name__
+        return json_dict
 
     @classmethod
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Returns a configuration from the given JSON string."""
+        if cls.__name__ != json_map.get("_type", None):
+            raise ValueError(
+                f"Trying to instantiate configuration of type {cls.__name__} from JSON with type {json_map['_type']}"
+            )
         parameters = []
         for name, value in json_map.items():
+            # Type value is only for storage
+            if name == "_type":
+                continue
             parameters.append(ConfigurationParameter(name=name, value=value))
         return cls(parameters=parameters)
 
 
-class CollectionConfiguration(Configuration):
-    """The configuration for a collection."""
-
+class HNSWConfiguration(Configuration):
     definitions = {
         "space": ConfigurationDefinition(
             name="space",
@@ -224,5 +245,18 @@ class CollectionConfiguration(Configuration):
             validator=lambda value: isinstance(value, int) and value >= 1,
             is_static=True,
             default_value=100,
+        ),
+    }
+
+
+class CollectionConfiguration(Configuration):
+    """The configuration for a collection."""
+
+    definitions = {
+        "hnsw_configuration": ConfigurationDefinition(
+            name="hnsw_configuration",
+            validator=lambda value: isinstance(value, HNSWConfiguration),
+            is_static=False,
+            default_value=HNSWConfiguration(),
         ),
     }

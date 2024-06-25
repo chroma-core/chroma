@@ -59,6 +59,7 @@ export type CollectionType = {
   name: string;
   id: string;
   metadata: Metadata | null;
+  configuration_json: any;
 };
 
 export type GetResponse = {
