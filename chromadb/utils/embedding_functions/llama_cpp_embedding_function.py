@@ -166,9 +166,8 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
                 # Convert to numpy array
                 llama_embeddings = [self.mean_pooling(np.array(embedding)) for embedding in llama_embeddings]
             elif self.pooling_method == "max":
-                pass
-            elif "specific token" in self.pooling_method:
-                pass
+                # Convert to numpy array
+                llama_embeddings = [self.max_pooling(np.array(embedding)) for embedding in llama_embeddings]
             else:
                 raise ValueError("Invalid pooling method. Please choose 'mean', 'max'")
             
