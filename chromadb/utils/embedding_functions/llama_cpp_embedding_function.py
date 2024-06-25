@@ -87,7 +87,7 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
 
         # Check if pooling is required
         test_embeddings = self.llm_embedding.embed(["This is a test sentence."])
-        np_test_embeddings = np.array(test_embeddings[0]['embedding'])
+        np_test_embeddings = np.array(test_embeddings)
         # If the np array is 3d, then pooling is required
         if np_test_embeddings.ndim == 3:
             self.need_pooling = True
