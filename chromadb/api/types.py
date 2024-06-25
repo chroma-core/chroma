@@ -103,7 +103,7 @@ def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
 
 
 # Images
-ImageDType = Union[np.uint, np.int_, np.float_]  # type: ignore[name-defined]
+ImageDType = Union[np.uint, np.int_, np.float16]  # type: ignore[name-defined]
 Image = NDArray[ImageDType]
 Images = List[Image]
 
