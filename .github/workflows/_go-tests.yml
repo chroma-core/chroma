@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [ubuntu-latest]
+        platform: [depot-ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
     services:
       postgres:
@@ -36,7 +36,7 @@ jobs:
         working-directory: go
 
   cluster-test:
-    runs-on: "16core-64gb-ubuntu-latest"
+    runs-on: "depot-ubuntu-22.04-16"
     steps:
       - name: Checkout
         uses: actions/checkout@v3
