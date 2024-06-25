@@ -79,7 +79,7 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             raise Exception(f"Error initializing LlamaCppEmbeddingFunction: {e}")
             return
         
-        if pooling_method not in ["mean", "max"]:
+        if pooling_method in ["mean", "max"]:
             self.pooling_method = pooling_method
         else:
             raise ValueError("Invalid pooling method. Please choose 'mean', 'max'.")
