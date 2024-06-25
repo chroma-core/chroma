@@ -10,16 +10,13 @@ import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
-
 from dataclasses import dataclass
-
 from chromadb.api.types import (
     Documents,
     Embeddable,
     EmbeddingFunction,
     Embeddings,
     Metadata,
-    OneOrMany,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
@@ -423,7 +420,9 @@ def recordsets(
     num_metadata = num_unique_metadata if num_unique_metadata is not None else len(ids)
     generated_metadatas = draw(
         st.lists(
-            metadata(collection, min_size=min_size, max_size=max_size),
+            metadata(
+                collection, min_size=min_metadata_size, max_size=max_metadata_size
+            ),
             min_size=num_metadata,
             max_size=num_metadata,
         )
