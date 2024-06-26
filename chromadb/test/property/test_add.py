@@ -77,7 +77,11 @@ def test_add_medium(
     record_set: strategies.RecordSet,
     should_compact: bool,
 ) -> None:
-    _test_add(api, collection, record_set, should_compact)
+    # Cluster tests transmit their results over grpc, which has a payload limit
+    # This breaks the ann_accuracy invariant by default, since
+    # the vector reader returns a payload of dataset size. So we need to batch
+    # the queries in the ann_accuracy invariant
+    _test_add(api, collection, record_set, should_compact, batch_ann_accuracy=True)
 
 
 def _test_add(
@@ -85,6 +89,7 @@ def _test_add(
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
+    batch_ann_accuracy: bool = False,
 ) -> None:
     reset(api)
 
@@ -112,12 +117,26 @@ def _test_add(
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
-    invariants.ann_accuracy(
-        coll,
-        cast(strategies.RecordSet, normalized_record_set),
-        n_results=n_results,
-        embedding_function=collection.embedding_function,
-    )
+
+    if batch_ann_accuracy:
+        batch_size = 10
+        for i in range(0, len(normalized_record_set["ids"]), batch_size):
+            invariants.ann_accuracy(
+                coll,
+                cast(strategies.RecordSet, normalized_record_set),
+                n_results=n_results,
+                embedding_function=collection.embedding_function,
+                query_indices=list(
+                    range(i, min(i + batch_size, len(normalized_record_set["ids"])))
+                ),
+            )
+    else:
+        invariants.ann_accuracy(
+            coll,
+            cast(strategies.RecordSet, normalized_record_set),
+            n_results=n_results,
+            embedding_function=collection.embedding_function,
+        )
 
 
 # Hypothesis struggles to generate large record sets so we explicitly create
