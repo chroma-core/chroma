@@ -211,7 +211,7 @@ def _test_interleaved_add_query(
 
 def test_multithreaded_add(api: ServerAPI) -> None:
     for i in range(3):
-        num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
+        num_workers = random.randint(2, max(multiprocessing.cpu_count() * 2, 8))
         N, D = generate_data_shape()
         _test_multithreaded_add(api, N, D, num_workers)
 
