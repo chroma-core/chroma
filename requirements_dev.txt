@@ -6,6 +6,7 @@ hypothesis>=6.103.1
 hypothesis[numpy]>=6.103.1
 mypy-protobuf
 pre-commit
+psutil
 pytest
 pytest-asyncio
 pytest-xdist
