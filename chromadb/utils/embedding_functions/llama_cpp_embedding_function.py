@@ -140,7 +140,7 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         Returns:
             Embeddings: A list of embeddings for the input documents.
         """
-        llama_embeddings = self.llm_embedding.embed(list(input))
+        llama_embeddings = self.llm_embedding.embed(list(input), normalize=True)
         if not self.need_pooling:
             # Create embeddings
             # Convert to numpy array
