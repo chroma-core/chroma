@@ -171,8 +171,10 @@ def test_add_large(
 
     if not NOT_CLUSTER_ONLY and should_compact:
         initial_version = coll.get_model()["version"]
-        # Wait for the model to be updated
-        wait_for_version_increase(api, collection.name, initial_version)
+        # Wait for the model to be updated, since the record set is larger, add some additional time
+        wait_for_version_increase(
+            api, collection.name, initial_version, additional_time=240
+        )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
 
