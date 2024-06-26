@@ -4,14 +4,13 @@ import numpy as np
 
 
 class LlamaCppEmbeddingFunction(EmbeddingFunction):
-    
     def __init__(
-            self, 
-            model_path: str = "", 
-            model_file_name: str = "", 
-            pooling_method: str = "mean",
-            **kwargs: Any
-        ) -> None:
+        self,
+        model_path: str = "",
+        model_file_name: str = "",
+        pooling_method: str = "mean",
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the LlamaCppEmbeddingFunction. This function will embed documents using the Llama-CPP-Python library.
 
@@ -42,6 +41,9 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             )
         try:
             from huggingface_hub import hf_hub_download
+
+            if hf_hub_download is None:
+                raise ImportError
         except ImportError:
             raise ValueError(
                 "The huggingface-hub python package is not installed. Please install it with `pip install huggingface_hub`"
@@ -50,33 +52,36 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         self.model_path = model_path
 
         # Check if verbose is in kwargs, if not set to False
-        if 'verbose' not in kwargs:
-            kwargs['verbose'] = False
+        if "verbose" not in kwargs:
+            kwargs["verbose"] = False
         # Force embedding to be True
-        kwargs['embedding'] = True
+        kwargs["embedding"] = True
         # Check if the computer has a GPU, if not set n_gpu_layers to 0
         if cuda.is_available():
-            if 'n_gpu_layers' not in kwargs:
-                kwargs['n_gpu_layers'] = 1
+            if "n_gpu_layers" not in kwargs:
+                kwargs["n_gpu_layers"] = 1
         else:
-            kwargs['n_gpu_layers'] = 0
+            kwargs["n_gpu_layers"] = 0
 
         try:
             if model_path and model_file_name:
-                self.llm_embedding = Llama.from_pretrained(repo_id=model_path, filename=model_file_name, **kwargs)
+                self.llm_embedding = Llama.from_pretrained(
+                    repo_id=model_path, filename=model_file_name, **kwargs
+                )
             elif model_path:
                 self.llm_embedding = Llama(model_path, **kwargs)
             else:
-                raise ValueError("Please provide either a model path or a HuggingFace repo id and filename.")
+                raise ValueError(
+                    "Please provide either a model path or a HuggingFace repo id and filename."
+                )
         except Exception as e:
             raise Exception(f"Error initializing LlamaCppEmbeddingFunction: {e}")
             return
-        
+
         if pooling_method in ["mean", "max"]:
             self.pooling_method = pooling_method
         else:
             raise ValueError("Invalid pooling method. Please choose 'mean', 'max'.")
-
 
         # Check if pooling is required
         test_embeddings = self.llm_embedding.embed(["This is a test sentence."])
@@ -87,9 +92,11 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         elif np_test_embeddings.ndim == 2:
             self.need_pooling = False
         else:
-            raise ValueError("The embedding is not 2d or 3d. Please check the embedding output.")
-        
-    def mean_pooling(self, document_embeddings:  List[np.ndarray]) -> np.array:
+            raise ValueError(
+                "The embedding is not 2d or 3d. Please check the embedding output."
+            )
+
+    def mean_pooling(self, document_embeddings: List[np.ndarray]) -> np.array:
         """
         Perform mean pooling on the document embedding.
 
@@ -99,9 +106,14 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         Returns:
             np.array: The pooled document embedding.
         """
-        return np.array([np.mean(document_embedding, axis=0) for document_embedding in document_embeddings])
-    
-    def max_pooling(self, document_embeddings:  List[np.ndarray]) -> np.array:
+        return np.array(
+            [
+                np.mean(document_embedding, axis=0)
+                for document_embedding in document_embeddings
+            ]
+        )
+
+    def max_pooling(self, document_embeddings: List[np.ndarray]) -> np.array:
         """
         Perform max pooling on the document embedding.
 
@@ -111,8 +123,13 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         Returns:
             np.array: The pooled document embedding.
         """
-        return np.array([np.max(document_embedding, axis=0) for document_embedding in document_embeddings])
-    
+        return np.array(
+            [
+                np.max(document_embedding, axis=0)
+                for document_embedding in document_embeddings
+            ]
+        )
+
     def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given input documents.
@@ -130,10 +147,7 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             llama_embeddings = np.array(llama_embeddings)
 
             # embed the documents somehow
-            return cast(
-                Embeddings,
-            llama_embeddings.tolist()
-            )
+            return cast(Embeddings, llama_embeddings.tolist())
         if self.need_pooling:
             # Create embeddings
             if self.pooling_method == "mean":
@@ -144,8 +158,5 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
                 llama_embeddings = self.max_pooling(llama_embeddings)
             else:
                 raise ValueError("Invalid pooling method. Please choose 'mean', 'max'")
-            
-            return cast(
-                Embeddings,
-                llama_embeddings.tolist()
-            )
+
+            return cast(Embeddings, llama_embeddings.tolist())
