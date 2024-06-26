@@ -1,5 +1,5 @@
 import uuid
-
+from pathlib import PurePath
 import pytest
 import chromadb.test.property.strategies as strategies
 from unittest.mock import patch
@@ -116,7 +116,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
 
     @staticmethod
     def mock_directory_size(directory: str):
-        path_id = directory.split("/").pop()
+        path_id = PurePath(directory).name
         collection_id = SegmentManagerStateMachine.segment_collection[
             uuid.UUID(path_id)
         ]
