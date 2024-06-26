@@ -7,15 +7,15 @@ import { InvalidCollectionError } from "../src/Errors";
 test("it should get embedding with matching documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.get({
-    ids: ["test1"],
+  const results = await chroma.getDocuments(collection, {
+    ids: "test1",
     include: [
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
@@ -26,14 +26,14 @@ test("it should get embedding with matching documents", async () => {
   expect(results).toBeInstanceOf(Object);
   expect(results.embeddings![0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
-  await collection.update({
+  await chroma.setDocuments(collection, {
     ids: ["test1"],
     embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
     metadatas: [{ test: "test1new" }],
     documents: ["doc1new"],
   });
 
-  const results2 = await collection.get({
+  const results2 = await chroma.getDocuments(collection, {
     ids: ["test1"],
     include: [
       IncludeEnum.Embeddings,
@@ -53,7 +53,7 @@ test("should error on non existing collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
   expect(async () => {
-    await collection.update({
+    await chroma.setDocuments(collection, {
       ids: ["test1"],
       embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
       metadatas: [{ test: "meta1" }],

@@ -14,10 +14,10 @@ test("it should add single embeddings to a collection", async () => {
   const ids = "test1";
   const embeddings = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const metadatas = { test: "test" };
-  await collection.add({ ids, embeddings, metadatas });
-  const count = await collection.count();
+  await chroma.addDocuments(collection, { ids, embeddings, metadatas });
+  const count = await chroma.countCollections();
   expect(count).toBe(1);
-  var res = await collection.get({
+  var res = await chroma.getDocuments(collection, {
     ids: [ids],
     include: [IncludeEnum.Embeddings],
   });
@@ -27,10 +27,10 @@ test("it should add single embeddings to a collection", async () => {
 test("it should add batch embeddings to a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-  const count = await collection.count();
+  await chroma.addDocuments(collection, { ids: IDS, embeddings: EMBEDDINGS });
+  const count = await chroma.countCollections();
   expect(count).toBe(3);
-  var res = await collection.get({
+  var res = await chroma.getDocuments(collection, {
     ids: IDS,
     include: [IncludeEnum.Embeddings],
   });
@@ -50,10 +50,10 @@ if (!process.env.OPENAI_API_KEY) {
       embeddingFunction: embedder,
     });
     const embeddings = await embedder.generate(DOCUMENTS);
-    await collection.add({ ids: IDS, embeddings: embeddings });
-    const count = await collection.count();
+    await chroma.addDocuments(collection, { ids: IDS, embeddings: embeddings });
+    const count = await chroma.countDocuments(collection);
     expect(count).toBe(3);
-    var res = await collection.get({
+    var res = await chroma.getDocuments(collection, {
       ids: IDS,
       include: [IncludeEnum.Embeddings],
     });
@@ -74,10 +74,10 @@ if (!process.env.COHERE_API_KEY) {
       embeddingFunction: embedder,
     });
     const embeddings = await embedder.generate(DOCUMENTS);
-    await collection.add({ ids: IDS, embeddings: embeddings });
-    const count = await collection.count();
+    await chroma.addDocuments(collection, { ids: IDS, embeddings: embeddings });
+    const count = await chroma.countDocuments(collection);
     expect(count).toBe(3);
-    var res = await collection.get({
+    var res = await chroma.getDocuments(collection, {
       ids: IDS,
       include: [IncludeEnum.Embeddings],
     });
@@ -88,14 +88,14 @@ if (!process.env.COHERE_API_KEY) {
 test("add documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  let resp = await collection.add({
+  let resp = await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     documents: DOCUMENTS,
   });
   expect(resp).toBe(true);
-  const results = await collection.get({ ids: ["test1"] });
-  expect(results.documents[0]).toBe("This is a test");
+  const results = await chroma.getDocuments(collection, { ids: "test1" });
+  expect(results.documents).toBe(["This is a test"]);
 });
 
 test("should error on non existing collection", async () => {
@@ -103,7 +103,7 @@ test("should error on non existing collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
   expect(async () => {
-    await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
+    await chroma.addDocuments(collection, { ids: IDS, embeddings: EMBEDDINGS });
   }).rejects.toThrow(InvalidCollectionError);
 });
 
@@ -114,7 +114,7 @@ test("It should return an error when inserting duplicate IDs in the same batch",
   const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
   const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
   try {
-    await collection.add({ ids, embeddings, metadatas });
+    await chroma.addDocuments(collection, { ids, embeddings, metadatas });
   } catch (e: any) {
     expect(e.message).toMatch("duplicates");
   }
@@ -127,7 +127,7 @@ test("should error on empty embedding", async () => {
   const embeddings = [[]];
   const metadatas = [{ test: "test1", float_value: 0.1 }];
   try {
-    await collection.add({ ids, embeddings, metadatas });
+    await chroma.addDocuments(collection, { ids, embeddings, metadatas });
   } catch (e: any) {
     expect(e.message).toMatch("got empty embedding at pos");
   }
@@ -149,10 +149,10 @@ if (!process.env.OLLAMA_SERVER_URL) {
       embeddingFunction: embedder,
     });
     const embeddings = await embedder.generate(DOCUMENTS);
-    await collection.add({ ids: IDS, embeddings: embeddings });
-    const count = await collection.count();
+    await chroma.addDocuments(collection, { ids: IDS, embeddings: embeddings });
+    const count = await chroma.countDocuments(collection);
     expect(count).toBe(3);
-    var res = await collection.get({
+    var res = await chroma.getDocuments(collection, {
       ids: IDS,
       include: [IncludeEnum.Embeddings],
     });

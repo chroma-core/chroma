@@ -21,17 +21,17 @@ export class TestEmbeddingFunction implements IEmbeddingFunction {
 test("it should query a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-  const results = await collection.query({
-    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  await chroma.addDocuments(collection, { ids: IDS, embeddings: EMBEDDINGS });
+  const results = await chroma.queryDocuments(collection, {
+    query: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 2,
   });
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
-  expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["test3"]).not.toEqual(expect.arrayContaining(results.ids[0]));
+  expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
+  expect(["test3"]).not.toEqual(expect.arrayContaining(results.ids));
   expect(results.included).toEqual(
-    expect.arrayContaining(["metadatas", "documents"]),
+    expect.arrayContaining(["metadatas", "documents"])
   );
 });
 
@@ -39,15 +39,15 @@ test("it should query a collection", async () => {
 test("it should get embedding with matching documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.query({
-    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  const results = await chroma.queryDocuments(collection, {
+    query: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 3,
     whereDocument: { $contains: "This is a test" },
   });
@@ -56,37 +56,35 @@ test("it should get embedding with matching documents", async () => {
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
   expect(results.ids.length).toBe(1);
-  expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
-  );
+  expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
+  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
+  expect(["This is a test"]).toEqual(expect.arrayContaining(results.documents));
 
-  const results2 = await collection.query({
-    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  const results2 = await chroma.queryDocuments(collection, {
+    query: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 3,
     whereDocument: { $contains: "This is a test" },
     include: [IncludeEnum.Embeddings],
   });
 
   // expect(results2.embeddings[0][0]).toBeInstanceOf(Array);
-  expect(results2.embeddings![0].length).toBe(1);
-  expect(results2.embeddings![0][0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  expect(results2.embeddings?.length).toBe(1);
+  expect(results2.embeddings?.[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   expect(results2.included).toEqual(expect.arrayContaining(["embeddings"]));
 });
 
 test("it should exclude documents matching - not_contains", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.query({
-    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  const results = await chroma.queryDocuments(collection, {
+    query: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 3,
     whereDocument: { $not_contains: "This is a test" },
   });
@@ -94,8 +92,7 @@ test("it should exclude documents matching - not_contains", async () => {
   // it should only return doc1
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
-  expect(["test2", "test3"]).toEqual(expect.arrayContaining(results.ids[0]));
+  expect(results.ids).toEqual(expect.arrayContaining(["test2", "test3"]));
 });
 
 // test queryTexts
@@ -106,15 +103,15 @@ test("it should query a collection with text", async () => {
     name: "test",
     embeddingFunction: embeddingFunction,
   });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.query({
-    queryTexts: ["test"],
+  const results = await chroma.queryDocuments(collection, {
+    query: "test",
     nResults: 3,
     whereDocument: { $contains: "This is a test" },
   });
@@ -122,11 +119,9 @@ test("it should query a collection with text", async () => {
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
   expect(results.ids.length).toBe(1);
-  expect(["test1"]).toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["This is a test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
-  );
+  expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
+  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
+  expect(["This is a test"]).toEqual(expect.arrayContaining(results.documents));
 });
 
 test("it should query a collection with text and where", async () => {
@@ -136,15 +131,15 @@ test("it should query a collection with text and where", async () => {
     name: "test",
     embeddingFunction: embeddingFunction,
   });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.query({
-    queryTexts: ["test"],
+  const results = await chroma.queryDocuments(collection, {
+    query: "test",
     nResults: 3,
     where: { float_value: 2 },
   });
@@ -152,11 +147,9 @@ test("it should query a collection with text and where", async () => {
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
   expect(results.ids.length).toBe(1);
-  expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
-  );
+  expect(results.ids).toContain("test3");
+  expect(results.ids).not.toContain("test2");
+  expect(results.documents).toContain("This is a third test");
 });
 
 test("it should query a collection with text and where in", async () => {
@@ -166,56 +159,50 @@ test("it should query a collection with text and where in", async () => {
     name: "test",
     embeddingFunction: embeddingFunction,
   });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.query({
-    queryTexts: ["test"],
+  const results = await chroma.queryDocuments(collection, {
+    query: "test",
     nResults: 3,
     where: { float_value: { $in: [2, 5, 10] } },
   });
 
   expect(results).toBeDefined();
   expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
-  expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
-  );
+  expect(results.ids).toContain("test3");
+  expect(results.ids).not.toContain("test2");
+  expect(results.documents).toContain("This is a third test");
 });
 
 test("it should query a collection with text and where nin", async () => {
   await chroma.reset();
-  let embeddingFunction = new TestEmbeddingFunction();
   const collection = await chroma.createCollection({
     name: "test",
-    embeddingFunction: embeddingFunction,
+    embeddingFunction: new TestEmbeddingFunction(),
   });
-  await collection.add({
+  await chroma.addDocuments(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
     documents: DOCUMENTS,
   });
 
-  const results = await collection.query({
-    queryTexts: ["test"],
+  const results = await chroma.queryDocuments(collection, {
+    query: "test",
     nResults: 3,
     where: { float_value: { $nin: [-2, 0] } },
   });
 
   expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
-  expect(["test3"]).toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids[0]));
-  expect(["This is a third test"]).toEqual(
-    expect.arrayContaining(results.documents[0]),
+  expect(results.ids).toEqual(expect.arrayContaining(["test3"]));
+  expect(results.ids).not.toEqual(expect.arrayContaining(["test2"]));
+  expect(results.documents).toEqual(
+    expect.arrayContaining(["This is a third test"])
   );
 });
 
@@ -224,6 +211,6 @@ test("should error on non existing collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
   expect(async () => {
-    await collection.query({ queryEmbeddings: [1, 2, 3] });
+    await chroma.queryDocuments(collection, { query: [1, 2, 3] });
   }).rejects.toThrow(InvalidCollectionError);
 });

@@ -3,29 +3,36 @@ import {
   ApiApi as DefaultApi,
   Api as GeneratedApi,
 } from "./generated";
-import { handleSuccess, toArray, validateTenantDatabase } from "./utils";
+import {
+  handleSuccess,
+  prepareDocumentRequest,
+  toArray,
+  toQueryArray,
+  validateTenantDatabase,
+} from "./utils";
 import {
   ChromaClientParams,
-  ChromaDoc,
   ConfigOptions,
   CreateCollectionParams,
   DeleteCollectionParams,
   GetParams,
   GetResponse,
   ListCollectionsParams,
-  QueryDoc,
-  QueryParams,
-  QueryResponse,
+  QueryDocumentsParams,
   Collection,
   SingleQueryParams,
-  SingleQueryResult,
-  QueryResult,
   MultiQueryParams,
-  MultiQueryResult,
-  DocQuery,
   GetOrCreateCollectionParams,
   GetCollectionParams,
   AddDocumentsParams,
+  AddResponse,
+  UpsertDocumentsParams,
+  Embedding,
+  Embeddings,
+  SingleQueryResponse,
+  MultiQueryResponse,
+  DeleteParams,
+  PeekParams,
 } from "./types";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
@@ -188,7 +195,7 @@ export class ChromaClient {
           name,
           metadata,
         },
-        this.api.options,
+        this.api.options
       )
       .then(handleSuccess);
 
@@ -227,7 +234,7 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async getOrCreateCollection({
+  async getOrCreateCollection({
     name,
     metadata,
     embeddingFunction = new DefaultEmbeddingFunction(),
@@ -241,7 +248,7 @@ export class ChromaClient {
           metadata,
           get_or_create: true,
         },
-        this.api.options,
+        this.api.options
       )
       .then(handleSuccess);
 
@@ -269,17 +276,16 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async listCollections({
-    limit,
-    offset,
-  }: ListCollectionsParams = {}): Promise<Collection[]> {
+  async listCollections({ limit, offset }: ListCollectionsParams = {}): Promise<
+    Collection[]
+  > {
     await this.initPromise;
     const response = await this.api.listCollections(
       limit,
       offset,
       this.tenant,
       this.database,
-      this.api.options,
+      this.api.options
     );
     return handleSuccess(response);
   }
@@ -295,12 +301,12 @@ export class ChromaClient {
    * const collections = await client.countCollections();
    * ```
    */
-  public async countCollections(): Promise<number> {
+  async countCollections(): Promise<number> {
     await this.initPromise;
     const response = await this.api.countCollections(
       this.tenant,
       this.database,
-      this.api.options,
+      this.api.options
     );
     return handleSuccess(response);
   }
@@ -320,7 +326,7 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async getCollection({
+  async getCollection({
     name,
     embeddingFunction,
   }: GetCollectionParams): Promise<Collection> {
@@ -351,7 +357,7 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async updateCollection(collection: Collection): Promise<Collection> {
+  async updateCollection(collection: Collection): Promise<Collection> {
     await this.initPromise;
     const response = await this.api
       .updateCollection(
@@ -409,16 +415,19 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async addDocuments(
+  async addDocuments(
     collection: Collection,
     params: AddDocumentsParams
-  ) {
+  ): Promise<AddResponse> {
     await this.initPromise;
     return await this.api
       .add(
         collection.id,
         // TODO: For some reason the auto generated code requires metadata to be defined here.
-        await computeEmbeddings(params, collection.embeddingFunction),
+        (await prepareDocumentRequest(
+          params,
+          collection.embeddingFunction
+        )) as GeneratedApi.AddEmbedding,
         this.api.options
       )
       .then(handleSuccess);
@@ -443,13 +452,16 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async setDocuments(collection: Collection, documents: ChromaDoc[]) {
+  async setDocuments(collection: Collection, params: UpsertDocumentsParams) {
     await this.initPromise;
     return await this.api
       .upsert(
         collection.id,
         // TODO: For some reason the auto generated code requires metadata to be defined here.
-        await computeEmbeddings(documents, collection.embeddingFunction),
+        (await prepareDocumentRequest(
+          params,
+          collection.embeddingFunction
+        )) as GeneratedApi.AddEmbedding,
         this.api.options
       )
       .then(handleSuccess);
@@ -478,7 +490,7 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async getDocuments(
+  async getDocuments(
     collection: Collection,
     { ids, where, limit, offset, include, whereDocument }: GetParams = {}
   ): Promise<GetResponse> {
@@ -537,27 +549,38 @@ export class ChromaClient {
   queryDocuments(
     collection: Collection,
     params: SingleQueryParams
-  ): Promise<GetResponse>;
+  ): Promise<SingleQueryResponse>;
   queryDocuments(
     collection: Collection,
     params: MultiQueryParams
-  ): Promise<QueryResponse>;
+  ): Promise<MultiQueryResponse>;
   public async queryDocuments(
     collection: Collection,
-    { nResults = 10, where, whereDocument, include, query }: QueryParams
-  ): Promise<QueryResult> {
+    {
+      nResults = 10,
+      where,
+      whereDocument,
+      include,
+      query,
+    }: QueryDocumentsParams
+  ): Promise<SingleQueryResponse | MultiQueryResponse> {
     await this.initPromise;
-    const queryDocs = toArray<DocQuery>(query).map(docQueryToQueryDoc);
-    const docsWithEmbeddings = await computeEmbeddings(
-      queryDocs,
-      collection.embeddingFunction
-    );
+    const [arrayQuery, wasSingular] = toQueryArray(query);
+
+    if (arrayQuery.length === 0) {
+      throw new Error("Query must contain at least one document or embedding.");
+    }
+
+    const embeddings =
+      typeof arrayQuery[0] === "string"
+        ? await collection.embeddingFunction.generate(arrayQuery as string[])
+        : (arrayQuery as Embeddings);
 
     const response = (await this.api
       .getNearestNeighbors(
         collection.id,
         {
-          query_embeddings: docsWithEmbeddings.map((d) => d.embedding),
+          query_embeddings: embeddings,
           where,
           n_results: nResults,
           where_document: whereDocument,
@@ -565,34 +588,86 @@ export class ChromaClient {
         },
         this.api.options
       )
-      .then(handleSuccess)) as QueryResponse;
+      .then(handleSuccess)) as MultiQueryResponse;
 
-    const result: MultiQueryResult = response.ids.map((ids, index) => {
-      return {
-        queryDoc: queryDocs[index],
-        results: parallelArraysToDocs({
-          ids,
-          embeddings: response.embeddings?.[index],
-          // TODO: figure out if we need to refine the types here, can there
-          // really be a case where documents are interleaved with null?
-          documents: response.documents?.[index] as string[] | undefined,
-          metadatas: response.metadatas?.[index],
-        }).map((doc, i) => {
-          return {
-            doc,
-            distance: response.distances?.[index]?.[i] ?? 0,
-          };
-        }),
-      };
-    });
-
-    return Array.isArray(query) ? result : result[0];
+    return wasSingular
+      ? {
+          ids: response.ids[0],
+          embeddings: response.embeddings?.[0] ?? null,
+          documents: response.documents?.[0] ?? null,
+          metadatas: response.metadatas?.[0] ?? null,
+          distances: response.distances?.[0] ?? null,
+          included: response.included,
+        }
+      : response;
   }
 
-  public async countDocuments(collection: Collection): Promise<number> {
+  async countDocuments(collection: Collection): Promise<number> {
     await this.initPromise;
     return await this.api
       .count(collection.id, this.api.options)
       .then(handleSuccess);
+  }
+
+  /**
+   * Deletes items from the collection.
+   * @param {Object} params - The parameters for deleting items from the collection.
+   * @param {ID | IDs} [params.ids] - Optional ID or array of IDs of items to delete.
+   * @param {Where} [params.where] - Optional query condition to filter items to delete based on metadata values.
+   * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter items to delete based on document content.
+   * @returns {Promise<string[]>} A promise that resolves to the IDs of the deleted items.
+   * @throws {Error} If there is an issue deleting items from the collection.
+   *
+   * @example
+   * ```typescript
+   * const results = await collection.delete({
+   *   ids: "some_id",
+   *   where: {"name": {"$eq": "John Doe"}},
+   *   whereDocument: {"$contains":"search_string"}
+   * });
+   * ```
+   */
+  public async deleteDocuments(
+    collection: Collection,
+    { ids, where, whereDocument }: DeleteParams = {}
+  ): Promise<string[]> {
+    let idsArray = undefined;
+    if (ids !== undefined) idsArray = toArray(ids);
+    return await this.api
+      .aDelete(
+        collection.id,
+        { ids: idsArray, where: where, where_document: whereDocument },
+        this.api.options
+      )
+      .then(handleSuccess);
+  }
+
+  /**
+   * Peek inside the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {PositiveInteger} [params.limit] - Optional number of results to return (default is 10).
+   * @returns {Promise<GetResponse>} A promise that resolves to the query results.
+   * @throws {Error} If there is an issue executing the query.
+   *
+   * @example
+   * ```typescript
+   * const results = await collection.peek({
+   *   limit: 10
+   * });
+   * ```
+   */
+  async peekDocuments(
+    collection: Collection,
+    { limit }: PeekParams = {}
+  ): Promise<GetResponse> {
+    if (limit === undefined) limit = 10;
+    const response = await this.api.aGet(
+      collection.id,
+      {
+        limit,
+      },
+      this.api.options
+    );
+    return handleSuccess(response);
   }
 }

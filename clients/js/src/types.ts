@@ -63,21 +63,32 @@ export type CollectionType = {
 
 export type GetResponse = {
   ids: IDs;
-  embeddings: null | Embeddings;
-  documents: (null | Document)[];
-  metadatas: (null | Metadata)[];
-  error: null | string;
+  embeddings: Embeddings | null;
+  documents: (Document | null)[];
+  metadatas: (Metadata | null)[];
+  error: string | null;
   included: IncludeEnum[];
 };
 
-export type QueryResponse = {
-  ids: IDs[];
-  embeddings: null | Embeddings[];
-  documents: (null | Document)[][];
-  metadatas: (null | Metadata)[][];
-  distances: null | number[][];
+export type SingleQueryResponse = {
+  ids: IDs;
+  embeddings: Embeddings | null;
+  documents: (Document | null)[];
+  metadatas: (Metadata | null)[];
+  distances: number[] | null;
   included: IncludeEnum[];
 };
+
+export type MultiQueryResponse = {
+  ids: IDs[];
+  embeddings: Embeddings[] | null;
+  documents: (Document | null)[][];
+  metadatas: (Metadata | null)[][];
+  distances: number[][] | null;
+  included: IncludeEnum[];
+};
+
+export type QueryResponse = SingleQueryResponse | MultiQueryResponse;
 
 export type AddResponse = {
   error: string;
@@ -137,15 +148,52 @@ export type DeleteCollectionParams = {
   name: string;
 };
 
-export type AddDocumentsParams = {
-  ids: ID | IDs;
-  embeddings?: Embedding | Embeddings;
-  metadatas?: Metadata | Metadatas;
-  documents?: Document | Documents;
+type SingleDocumentOperationParams = {
+  ids: ID;
+  embeddings?: Embedding;
+  metadatas?: Metadata;
+  documents?: Document;
 };
 
-export type UpsertParams = AddDocumentsParams;
-export type UpdateParams = AddDocumentsParams;
+type SingleEmbeddingDocumentOperationParams = SingleDocumentOperationParams & {
+  embeddings: Embedding;
+};
+
+type SingleContentDocumentOperationParams = SingleDocumentOperationParams & {
+  documents: Document;
+};
+
+type SingleAddDocumentOperationParams =
+  | SingleEmbeddingDocumentOperationParams
+  | SingleContentDocumentOperationParams;
+
+export type MultiDocumentOperationParams = {
+  ids: IDs;
+  embeddings?: Embeddings;
+  metadatas?: Metadatas;
+  documents?: Documents;
+};
+
+type MultiEmbeddingDocumentOperationParams = MultiDocumentOperationParams & {
+  embeddings: Embeddings;
+};
+
+type MultiContentDocumentOperationParams = MultiDocumentOperationParams & {
+  documents: Documents;
+};
+
+type MultiAddDocumentOperationParams =
+  | MultiEmbeddingDocumentOperationParams
+  | MultiContentDocumentOperationParams;
+
+export type AddDocumentsParams =
+  | SingleAddDocumentOperationParams
+  | MultiAddDocumentOperationParams;
+
+export type UpsertDocumentsParams = AddDocumentsParams;
+export type UpdateDocumentsParams =
+  | MultiDocumentOperationParams
+  | SingleDocumentOperationParams;
 
 export type ModifyCollectionParams = {
   name?: string;
@@ -156,12 +204,11 @@ export type ModifyCollectionParams = {
  *  - string: a simple text query which will be converted to an Embedding
  *  - Embedding: a list of numbers representing the embedding of the query
  */
-export type DocQuery = string | Embedding;
 
 export type SingleQueryParams = {
   nResults?: PositiveInteger;
   where?: Where;
-  query: DocQuery;
+  query: string | Embedding;
   whereDocument?: WhereDocument; // {"$contains":"search_string"}
   include?: IncludeEnum[]; // ["metadata", "document"]
 };
@@ -169,21 +216,12 @@ export type SingleQueryParams = {
 export type MultiQueryParams = {
   nResults?: PositiveInteger;
   where?: Where;
-  query: DocQuery[];
+  query: string[] | Embeddings;
   whereDocument?: WhereDocument; // {"$contains":"search_string"}
   include?: IncludeEnum[]; // ["metadata", "document"]
 };
 
-export type QueryParams = SingleQueryParams | MultiQueryParams;
-
-export type SingleQueryResult = {
-  queryDoc: QueryDoc;
-  results: { doc: ChromaDoc; distance: number }[];
-};
-
-export type MultiQueryResult = SingleQueryResult[];
-
-export type QueryResult = SingleQueryResult | MultiQueryResult;
+export type QueryDocumentsParams = SingleQueryParams | MultiQueryParams;
 
 export type PeekParams = { limit?: PositiveInteger };
 
