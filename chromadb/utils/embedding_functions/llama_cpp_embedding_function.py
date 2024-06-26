@@ -1,22 +1,25 @@
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from typing import Any, cast, List
+import numpy as np
+
 
 class LlamaCppEmbeddingFunction(EmbeddingFunction):
     
     def __init__(
             self, 
             model_path: str = "", 
-            huggingface_repo_id: str = "", 
-            huggingface_filename: str = "", 
+            model_file_name: str = "", 
             pooling_method: str = "mean",
             **kwargs: Any
         ) -> None:
         """
         Initialize the LlamaCppEmbeddingFunction. This function will embed documents using the Llama-CPP-Python library.
 
+        Example:
+            To use a huggingface model: LlamaCppEmbeddingFunction(model_path="username/repo_name", huggingface_filename="*q8_0.gguf")
+            To use a local model: LlamaCppEmbeddingFunction(model_path="path/to/model")
         Args:
-            model_path (str): Path to the model file
-            huggingface_repo_id (str): The name of the HuggingFace id to use. i.e. "username/repo_name".
+            model_path (str): Path to the model file or the name of the huggingface id to use i.e. "username/repo_name".
             hugingface_filename (str): The name of the file to download from the HuggingFace model. i.e. "*q8_0.gguf".
             pooling_method (str): The pooling method to use. Options are "mean", "max".
             kwargs: Additional arguments to pass to the Llama constructor.
@@ -43,12 +46,6 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             raise ValueError(
                 "The huggingface-hub python package is not installed. Please install it with `pip install huggingface_hub`"
             )
-        try:
-            import numpy as np
-        except ImportError:
-            raise ValueError(
-                "The numpy python package is not installed. Please install it with `pip install numpy`"
-            )
 
         self.model_path = model_path
 
@@ -65,12 +62,8 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
             kwargs['n_gpu_layers'] = 0
 
         try:
-            if huggingface_repo_id and huggingface_filename:
-                self.llm_embedding = Llama.from_pretrained(repo_id=huggingface_repo_id, filename=huggingface_filename, **kwargs)
-            elif huggingface_repo_id and not huggingface_filename:
-                raise ValueError("Please provide a filename to download from the HuggingFace model.")
-            elif not huggingface_repo_id and huggingface_filename:
-                raise ValueError("Please provide a HuggingFace repo id to download the model from.")
+            if model_path and model_file_name:
+                self.llm_embedding = Llama.from_pretrained(repo_id=model_path, filename=model_file_name, **kwargs)
             elif model_path:
                 self.llm_embedding = Llama(model_path, **kwargs)
             else:
@@ -106,12 +99,6 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         Returns:
             np.array: The pooled document embedding.
         """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ValueError(
-                "The numpy python package is not installed. Please install it with `pip install numpy`"
-            )
         return np.array([np.mean(document_embedding, axis=0) for document_embedding in document_embeddings])
     
     def max_pooling(self, document_embeddings:  List[np.ndarray]) -> np.array:
@@ -124,12 +111,6 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         Returns:
             np.array: The pooled document embedding.
         """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ValueError(
-                "The numpy python package is not installed. Please install it with `pip install numpy`"
-            )
         return np.array([np.max(document_embedding, axis=0) for document_embedding in document_embeddings])
     
     def __call__(self, input: Documents) -> Embeddings:
@@ -142,13 +123,6 @@ class LlamaCppEmbeddingFunction(EmbeddingFunction):
         Returns:
             Embeddings: A list of embeddings for the input documents.
         """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ValueError(
-                "The numpy python package is not installed. Please install it with `pip install numpy`"
-            )
-        
         llama_embeddings = self.llm_embedding.embed(list(input))
         if not self.need_pooling:
             # Create embeddings
