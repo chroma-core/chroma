@@ -3,6 +3,10 @@ import os
 import pytest
 import httpx
 from httpx import HTTPError, ConnectError
+# Test for required packages of the LlamaCppEmbeddingFunction
+llama_cpp = pytest.importorskip("llama_cpp", reason="llama_cpp not installed")  
+torch = pytest.importorskip("torch", reason="torch not installed")  
+huggingface_hub = pytest.importorskip("huggingface_hub", reason="huggingface_hub not installed")  
 
 from chromadb.utils.embedding_functions import LlamaCppEmbeddingFunction
 
