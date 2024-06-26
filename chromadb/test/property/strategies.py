@@ -10,9 +10,7 @@ import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
-
 from dataclasses import dataclass
-
 from chromadb.api.types import (
     Documents,
     Embeddable,
@@ -60,7 +58,7 @@ class RecordSet(TypedDict):
 
     ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-    metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
+    metadatas: Optional[Union[List[Optional[types.Metadata]], types.Metadata]]
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
@@ -71,7 +69,7 @@ class NormalizedRecordSet(TypedDict):
 
     ids: List[types.ID]
     embeddings: Optional[types.Embeddings]
-    metadatas: Optional[List[types.Metadata]]
+    metadatas: Optional[List[Optional[types.Metadata]]]
     documents: Optional[List[types.Document]]
 
 
@@ -347,10 +345,16 @@ def collections(
 
 
 @st.composite
-def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
+def metadata(
+    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
-    metadata: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    metadata: types.Metadata = draw(
+        st.dictionaries(
+            safe_text, st.one_of(*safe_values), min_size=min_size, max_size=max_size
+        )
+    )
     # Then, remove keys that overlap with the known keys for the coll
     # to avoid type errors when comparing.
     if collection.known_metadata_keys:
@@ -362,6 +366,9 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
             k: st.just(v) for k, v in collection.known_metadata_keys.items()
         }
         metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))  # type: ignore
+    # We don't allow submitting empty metadata
+    if metadata == {}:
+        return None
     return metadata
 
 
@@ -394,6 +401,12 @@ def recordsets(
     id_strategy: SearchStrategy[str] = safe_text,
     min_size: int = 1,
     max_size: int = 50,
+    # If num_unique_metadata is not None, then the number of metadata generations
+    # will be the size of the record set. If set, the number of metadata
+    # generations will be the value of num_unique_metadata.
+    num_unique_metadata: Optional[int] = None,
+    min_metadata_size: int = 0,
+    max_metadata_size: Optional[int] = None,
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
@@ -404,9 +417,20 @@ def recordsets(
     embeddings: Optional[Embeddings] = None
     if collection.has_embeddings:
         embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
-    metadatas = draw(
-        st.lists(metadata(collection), min_size=len(ids), max_size=len(ids))
+    num_metadata = num_unique_metadata if num_unique_metadata is not None else len(ids)
+    generated_metadatas = draw(
+        st.lists(
+            metadata(
+                collection, min_size=min_metadata_size, max_size=max_metadata_size
+            ),
+            min_size=num_metadata,
+            max_size=num_metadata,
+        )
     )
+    metadatas = []
+    for i in range(len(ids)):
+        metadatas.append(generated_metadatas[i % len(generated_metadatas)])
+
     documents: Optional[Documents] = None
     if collection.has_documents:
         documents = draw(
@@ -423,7 +447,7 @@ def recordsets(
             if embeddings is not None and draw(st.booleans())
             else embeddings
         )
-        single_metadata: Union[Metadata, List[Metadata]] = (
+        single_metadata: Union[Optional[Metadata], List[Optional[Metadata]]] = (
             metadatas[0] if draw(st.booleans()) else metadatas
         )
         single_document = (
@@ -435,7 +459,6 @@ def recordsets(
             "metadatas": single_metadata,
             "documents": single_document,
         }
-
     return {
         "ids": ids,
         "embeddings": embeddings,

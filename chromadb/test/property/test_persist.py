@@ -81,11 +81,6 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    if not invariants.is_metadata_valid(invariants.wrap_all(embeddings_strategy)):
-        with pytest.raises(Exception):
-            coll.add(**embeddings_strategy)
-        return
-
     coll.add(**embeddings_strategy)
 
     invariants.count(coll, embeddings_strategy)
