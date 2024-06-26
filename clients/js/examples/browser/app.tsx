@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ChromaClient } from "../../src/ChromaClient";
-import { Collection } from "../../src/Collection";
+import { Collection } from "../../src/types";
 
 const SAMPLE_DOCUMENTS = [
   "apple",
@@ -26,7 +26,7 @@ const useCollection = () => {
 
   useEffect(() => {
     chroma
-      .getOrCreateCollection({ name: "demo-collection" })
+      .collection({ name: "demo-collection" })
       .then((collection) => setCollection(collection));
   }, []);
 
@@ -44,35 +44,39 @@ const useDocuments = (query?: string) => {
     async (abortSignal?: AbortSignal) => {
       setIsLoading(true);
       try {
+        if (!collection) {
+          return;
+        }
+
         if (query) {
-          collection?.query({ queryTexts: query }).then((results) => {
-            if (abortSignal?.aborted) {
-              return;
-            }
-
-            const maxDistance = Math.max(...(results.distances?.[0] ?? []));
-            setDocuments(
-              results.documents[0].map((document, i) => {
-                const distance = results.distances?.[0][i] ?? 0;
-                const relativeDistance = distance / maxDistance;
-
-                return {
-                  document: document!,
-                  relativeDistance,
-                };
-              }),
-            );
+          const { results } = await chroma.queryDocuments(collection, {
+            query,
           });
+          if (abortSignal?.aborted) {
+            return;
+          }
+
+          const maxDistance = Math.max(
+            ...(results.map((r) => r.distance) ?? [])
+          );
+          setDocuments(
+            results.map(({ distance, doc }) => {
+              return {
+                document: doc.contents!,
+                relativeDistance: distance / maxDistance,
+              };
+            })
+          );
         } else {
-          collection?.get({}).then((results) => {
+          chroma.getDocuments(collection).then((docs) => {
             if (abortSignal?.aborted) {
               return;
             }
 
             setDocuments(
-              results.documents.map((document) => ({
-                document: document!,
-              })),
+              docs.map((document) => ({
+                document: document.contents!,
+              }))
             );
           });
         }
@@ -80,7 +84,7 @@ const useDocuments = (query?: string) => {
         setIsLoading(false);
       }
     },
-    [collection, query],
+    [collection, query]
   );
 
   useEffect(() => {
@@ -100,7 +104,7 @@ export function App() {
   const trimmedQuery = query.trim();
 
   const { documents, revalidate, isLoading } = useDocuments(
-    trimmedQuery === "" ? undefined : trimmedQuery,
+    trimmedQuery === "" ? undefined : trimmedQuery
   );
 
   const handleDocumentAdd = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -116,10 +120,12 @@ export function App() {
 
     setIsMutating(true);
     try {
-      await collection.upsert({
-        ids: [await hashString(document)],
-        documents: [document],
-      });
+      await chroma.setDocuments(collection, [
+        {
+          id: await hashString(document),
+          contents: document,
+        },
+      ]);
 
       await revalidate();
       currentTarget.reset();
@@ -137,12 +143,15 @@ export function App() {
 
     setIsMutating(true);
     try {
-      await collection.upsert({
-        ids: await Promise.all(
-          SAMPLE_DOCUMENTS.map(async (d) => hashString(d)),
-        ),
-        documents: SAMPLE_DOCUMENTS,
-      });
+      await chroma.setDocuments(
+        collection,
+        await Promise.all(
+          SAMPLE_DOCUMENTS.map(async (d) => ({
+            id: await hashString(d),
+            contents: d,
+          }))
+        )
+      );
 
       await revalidate();
     } finally {

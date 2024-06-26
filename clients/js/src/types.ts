@@ -83,6 +83,13 @@ export type AddResponse = {
   error: string;
 };
 
+export interface Collection {
+  name: string;
+  id: string;
+  metadata: CollectionMetadata | undefined;
+  embeddingFunction: IEmbeddingFunction;
+}
+
 export type CollectionMetadata = Record<string, unknown>;
 
 // RequestInit can be used to set Authorization headers and more
@@ -123,36 +130,60 @@ export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction?: IEmbeddingFunction;
+  embeddingFunction: IEmbeddingFunction;
 };
 
 export type DeleteCollectionParams = {
   name: string;
 };
 
-export type AddParams = {
+export type AddDocumentsParams = {
   ids: ID | IDs;
   embeddings?: Embedding | Embeddings;
   metadatas?: Metadata | Metadatas;
   documents?: Document | Documents;
 };
 
-export type UpsertParams = AddParams;
-export type UpdateParams = AddParams;
+export type UpsertParams = AddDocumentsParams;
+export type UpdateParams = AddDocumentsParams;
 
 export type ModifyCollectionParams = {
   name?: string;
   metadata?: CollectionMetadata;
 };
 
-export type QueryParams = {
-  queryEmbeddings?: Embedding | Embeddings;
+/** This type represents the different ways the user can express a query for documents
+ *  - string: a simple text query which will be converted to an Embedding
+ *  - Embedding: a list of numbers representing the embedding of the query
+ */
+export type DocQuery = string | Embedding;
+
+export type SingleQueryParams = {
   nResults?: PositiveInteger;
   where?: Where;
-  queryTexts?: string | string[];
+  query: DocQuery;
   whereDocument?: WhereDocument; // {"$contains":"search_string"}
   include?: IncludeEnum[]; // ["metadata", "document"]
 };
+
+export type MultiQueryParams = {
+  nResults?: PositiveInteger;
+  where?: Where;
+  query: DocQuery[];
+  whereDocument?: WhereDocument; // {"$contains":"search_string"}
+  include?: IncludeEnum[]; // ["metadata", "document"]
+};
+
+export type QueryParams = SingleQueryParams | MultiQueryParams;
+
+export type SingleQueryResult = {
+  queryDoc: QueryDoc;
+  results: { doc: ChromaDoc; distance: number }[];
+};
+
+export type MultiQueryResult = SingleQueryResult[];
+
+export type QueryResult = SingleQueryResult | MultiQueryResult;
 
 export type PeekParams = { limit?: PositiveInteger };
 

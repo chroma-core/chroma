@@ -13,17 +13,17 @@ app.get("/", async (req, res) => {
     googleApiKey: "<APIKEY>",
   });
 
-  const collection = await cc.createCollection({
+  const collection = await cc.collection({
     name: "test-from-js",
     embeddingFunction: google,
   });
 
-  await collection.add({
-    ids: ["doc1", "doc2"],
-    documents: ["doc1", "doc2"],
-  });
+  await cc.addDocuments(collection, [
+    { id: "doc1", contents: "doc1" },
+    { id: "doc2", contents: "doc2" },
+  ]);
 
-  let count = await collection.count();
+  let count = await cc.countDocuments(collection);
   console.log("count", count);
 
   const googleQuery = new chroma.GoogleGenerativeAiEmbeddingFunction({
@@ -31,13 +31,13 @@ app.get("/", async (req, res) => {
     taskType: "RETRIEVAL_QUERY",
   });
 
-  const queryCollection = await cc.getCollection({
+  const queryCollection = await cc.collection({
     name: "test-from-js",
     embeddingFunction: googleQuery,
   });
 
-  const query = await collection.query({
-    queryTexts: ["doc1"],
+  const query = await cc.queryDocuments(queryCollection, {
+    query: "doc1",
     nResults: 1,
   });
   console.log("query", query);

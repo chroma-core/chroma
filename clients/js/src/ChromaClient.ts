@@ -1,15 +1,31 @@
-import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess } from "./utils";
-import { Collection } from "./Collection";
+import {
+  Configuration,
+  ApiApi as DefaultApi,
+  Api as GeneratedApi,
+} from "./generated";
+import { handleSuccess, toArray, validateTenantDatabase } from "./utils";
 import {
   ChromaClientParams,
-  CollectionType,
+  ChromaDoc,
   ConfigOptions,
   CreateCollectionParams,
   DeleteCollectionParams,
-  GetCollectionParams,
-  GetOrCreateCollectionParams,
+  GetParams,
+  GetResponse,
   ListCollectionsParams,
+  QueryDoc,
+  QueryParams,
+  QueryResponse,
+  Collection,
+  SingleQueryParams,
+  SingleQueryResult,
+  QueryResult,
+  MultiQueryParams,
+  MultiQueryResult,
+  DocQuery,
+  GetOrCreateCollectionParams,
+  GetCollectionParams,
+  AddDocumentsParams,
 } from "./types";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
@@ -25,10 +41,11 @@ export class ChromaClient {
    * @ignore
    */
   private api: DefaultApi & ConfigOptions;
-  private tenant: string = DEFAULT_TENANT;
-  private database: string = DEFAULT_DATABASE;
-  private _adminClient?: AdminClient;
+  private tenant: string;
+  private database: string;
+  private _adminClient: AdminClient;
   private authProvider: ClientAuthProvider | undefined;
+  private initPromise: Promise<void>;
 
   /**
    * Creates a new ChromaClient instance.
@@ -44,13 +61,12 @@ export class ChromaClient {
    * ```
    */
   constructor({
-    path,
+    path = "http://localhost:8000",
     fetchOptions,
     auth,
     tenant = DEFAULT_TENANT,
     database = DEFAULT_DATABASE,
   }: ChromaClientParams = {}) {
-    if (path === undefined) path = "http://localhost:8000";
     this.tenant = tenant;
     this.database = database;
     this.authProvider = undefined;
@@ -78,10 +94,12 @@ export class ChromaClient {
       database: database,
     });
 
-    // TODO: Validate tenant and database on client creation
-    // this got tricky because:
-    // - the constructor is sync but the generated api is async
-    // - we need to inject auth information so a simple rewrite/fetch does not work
+    this.initPromise = this.init();
+  }
+
+  /** @ignore */
+  private async init() {
+    await validateTenantDatabase(this._adminClient, this.tenant, this.database);
   }
 
   /**
@@ -96,7 +114,8 @@ export class ChromaClient {
    * await client.reset();
    * ```
    */
-  public async reset(): Promise<boolean> {
+  async reset(): Promise<boolean> {
+    await this.initPromise;
     return await this.api.reset(this.api.options);
   }
 
@@ -110,7 +129,8 @@ export class ChromaClient {
    * const version = await client.version();
    * ```
    */
-  public async version(): Promise<string> {
+  async version(): Promise<string> {
+    await this.initPromise;
     const response = await this.api.version(this.api.options);
     return await handleSuccess(response);
   }
@@ -125,7 +145,8 @@ export class ChromaClient {
    * const heartbeat = await client.heartbeat();
    * ```
    */
-  public async heartbeat(): Promise<number> {
+  async heartbeat(): Promise<number> {
+    await this.initPromise;
     const response = await this.api.heartbeat(this.api.options);
     let ret = await handleSuccess(response);
     return ret["nanosecond heartbeat"];
@@ -153,15 +174,12 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async createCollection({
+  async createCollection({
     name,
     metadata,
-    embeddingFunction,
+    embeddingFunction = new DefaultEmbeddingFunction(),
   }: CreateCollectionParams): Promise<Collection> {
-    if (embeddingFunction === undefined) {
-      embeddingFunction = new DefaultEmbeddingFunction();
-    }
-
+    await this.initPromise;
     const newCollection = await this.api
       .createCollection(
         this.tenant,
@@ -180,13 +198,12 @@ export class ChromaClient {
         : new Error(newCollection.error);
     }
 
-    return new Collection(
-      name,
-      newCollection.id,
-      this.api,
-      metadata,
+    return {
+      name: newCollection.name,
+      id: newCollection.id,
+      metadata: newCollection.metadata,
       embeddingFunction,
-    );
+    };
   }
 
   /**
@@ -213,12 +230,8 @@ export class ChromaClient {
   public async getOrCreateCollection({
     name,
     metadata,
-    embeddingFunction,
+    embeddingFunction = new DefaultEmbeddingFunction(),
   }: GetOrCreateCollectionParams): Promise<Collection> {
-    if (embeddingFunction === undefined) {
-      embeddingFunction = new DefaultEmbeddingFunction();
-    }
-
     const newCollection = await this.api
       .createCollection(
         this.tenant,
@@ -232,13 +245,12 @@ export class ChromaClient {
       )
       .then(handleSuccess);
 
-    return new Collection(
-      name,
-      newCollection.id,
-      this.api,
-      newCollection.metadata,
+    return {
+      name: newCollection.name,
+      id: newCollection.id,
+      metadata: newCollection.metadata,
       embeddingFunction,
-    );
+    };
   }
 
   /**
@@ -260,7 +272,8 @@ export class ChromaClient {
   public async listCollections({
     limit,
     offset,
-  }: ListCollectionsParams = {}): Promise<CollectionType[]> {
+  }: ListCollectionsParams = {}): Promise<Collection[]> {
+    await this.initPromise;
     const response = await this.api.listCollections(
       limit,
       offset,
@@ -283,6 +296,7 @@ export class ChromaClient {
    * ```
    */
   public async countCollections(): Promise<number> {
+    await this.initPromise;
     const response = await this.api.countCollections(
       this.tenant,
       this.database,
@@ -314,13 +328,43 @@ export class ChromaClient {
       .getCollection(name, this.tenant, this.database, this.api.options)
       .then(handleSuccess);
 
-    return new Collection(
-      response.name,
-      response.id,
-      this.api,
-      response.metadata,
+    return {
+      name: response.name,
+      id: response.id,
+      metadata: response.metadata,
       embeddingFunction,
-    );
+    };
+  }
+
+  /**
+   * Modify the collection name or metadata
+   * @param {Object} params - The parameters for the query.
+   * @param {string} [params.name] - Optional new name for the collection.
+   * @param {CollectionMetadata} [params.metadata] - Optional new metadata for the collection.
+   * @returns {Promise<void>} - The response from the API.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.modify({
+   *   name: "new name",
+   *   metadata: { "key": "value" },
+   * });
+   * ```
+   */
+  public async updateCollection(collection: Collection): Promise<Collection> {
+    await this.initPromise;
+    const response = await this.api
+      .updateCollection(
+        collection.id,
+        {
+          new_name: collection.name,
+          new_metadata: collection.metadata,
+        },
+        this.api.options
+      )
+      .then(handleSuccess);
+
+    return response;
   }
 
   /**
@@ -340,8 +384,215 @@ export class ChromaClient {
   public async deleteCollection({
     name,
   }: DeleteCollectionParams): Promise<void> {
+    await this.initPromise;
     return await this.api
       .deleteCollection(name, this.tenant, this.database, this.api.options)
+      .then(handleSuccess);
+  }
+
+  /**
+   * Add items to the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
+   * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
+   * @returns {Promise<AddResponse>} - The response from the API. True if successful.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.add({
+   *   ids: ["id1", "id2"],
+   *   embeddings: [[1, 2, 3], [4, 5, 6]],
+   *   metadatas: [{ "key": "value" }, { "key": "value" }],
+   *   documents: ["document1", "document2"]
+   * });
+   * ```
+   */
+  public async addDocuments(
+    collection: Collection,
+    params: AddDocumentsParams
+  ) {
+    await this.initPromise;
+    return await this.api
+      .add(
+        collection.id,
+        // TODO: For some reason the auto generated code requires metadata to be defined here.
+        await computeEmbeddings(params, collection.embeddingFunction),
+        this.api.options
+      )
+      .then(handleSuccess);
+  }
+
+  /**
+   * Upsert items to the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
+   * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
+   * @returns {Promise<boolean>} - The response from the API. True if successful.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.upsert({
+   *   ids: ["id1", "id2"],
+   *   embeddings: [[1, 2, 3], [4, 5, 6]],
+   *   metadatas: [{ "key": "value" }, { "key": "value" }],
+   *   documents: ["document1", "document2"],
+   * });
+   * ```
+   */
+  public async setDocuments(collection: Collection, documents: ChromaDoc[]) {
+    await this.initPromise;
+    return await this.api
+      .upsert(
+        collection.id,
+        // TODO: For some reason the auto generated code requires metadata to be defined here.
+        await computeEmbeddings(documents, collection.embeddingFunction),
+        this.api.options
+      )
+      .then(handleSuccess);
+  }
+
+  /**
+   * Get items from the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - Optional IDs of the items to get.
+   * @param {Where} [params.where] - Optional where clause to filter items by.
+   * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
+   * @param {PositiveInteger} [params.offset] - Optional offset on the items to get.
+   * @param {IncludeEnum[]} [params.include] - Optional list of items to include in the response.
+   * @param {WhereDocument} [params.whereDocument] - Optional where clause to filter items by.
+   * @returns {Promise<GetResponse>} - The response from the server.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.get({
+   *   ids: ["id1", "id2"],
+   *   where: { "key": "value" },
+   *   limit: 10,
+   *   offset: 0,
+   *   include: ["embeddings", "metadatas", "documents"],
+   *   whereDocument: { $contains: "value" },
+   * });
+   * ```
+   */
+  public async getDocuments(
+    collection: Collection,
+    { ids, where, limit, offset, include, whereDocument }: GetParams = {}
+  ): Promise<GetResponse> {
+    await this.initPromise;
+    const idsArray = ids ? toArray(ids) : undefined;
+
+    return (await this.api
+      .aGet(
+        collection.id,
+        {
+          ids: idsArray,
+          where,
+          limit,
+          offset,
+          include,
+          where_document: whereDocument,
+        },
+        this.api.options
+      )
+      .then(handleSuccess)) as GetResponse;
+  }
+
+  /**
+   * Performs a query on the collection using the specified parameters.
+   *
+   * @param {Object} params - The parameters for the query.
+   * @param {Embedding | Embeddings} [params.queryEmbeddings] - Optional query embeddings to use for the search.
+   * @param {PositiveInteger} [params.nResults] - Optional number of results to return (default is 10).
+   * @param {Where} [params.where] - Optional query condition to filter results based on metadata values.
+   * @param {string | string[]} [params.queryTexts] - Optional query text(s) to search for in the collection.
+   * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter results based on document content.
+   * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
+   *
+   * @returns {Promise<QueryResponse>} A promise that resolves to the query results.
+   * @throws {Error} If there is an issue executing the query.
+   * @example
+   * // Query the collection using embeddings
+   * const results = await collection.query({
+   *   queryEmbeddings: [[0.1, 0.2, ...], ...],
+   *   nResults: 10,
+   *   where: {"name": {"$eq": "John Doe"}},
+   *   include: ["metadata", "document"]
+   * });
+   * @example
+   * ```js
+   * // Query the collection using query text
+   * const results = await collection.query({
+   *   queryTexts: "some text",
+   *   nResults: 10,
+   *   where: {"name": {"$eq": "John Doe"}},
+   *   include: ["metadata", "document"]
+   * });
+   * ```
+   *
+   */
+  queryDocuments(
+    collection: Collection,
+    params: SingleQueryParams
+  ): Promise<GetResponse>;
+  queryDocuments(
+    collection: Collection,
+    params: MultiQueryParams
+  ): Promise<QueryResponse>;
+  public async queryDocuments(
+    collection: Collection,
+    { nResults = 10, where, whereDocument, include, query }: QueryParams
+  ): Promise<QueryResult> {
+    await this.initPromise;
+    const queryDocs = toArray<DocQuery>(query).map(docQueryToQueryDoc);
+    const docsWithEmbeddings = await computeEmbeddings(
+      queryDocs,
+      collection.embeddingFunction
+    );
+
+    const response = (await this.api
+      .getNearestNeighbors(
+        collection.id,
+        {
+          query_embeddings: docsWithEmbeddings.map((d) => d.embedding),
+          where,
+          n_results: nResults,
+          where_document: whereDocument,
+          include,
+        },
+        this.api.options
+      )
+      .then(handleSuccess)) as QueryResponse;
+
+    const result: MultiQueryResult = response.ids.map((ids, index) => {
+      return {
+        queryDoc: queryDocs[index],
+        results: parallelArraysToDocs({
+          ids,
+          embeddings: response.embeddings?.[index],
+          // TODO: figure out if we need to refine the types here, can there
+          // really be a case where documents are interleaved with null?
+          documents: response.documents?.[index] as string[] | undefined,
+          metadatas: response.metadatas?.[index],
+        }).map((doc, i) => {
+          return {
+            doc,
+            distance: response.distances?.[index]?.[i] ?? 0,
+          };
+        }),
+      };
+    });
+
+    return Array.isArray(query) ? result : result[0];
+  }
+
+  public async countDocuments(collection: Collection): Promise<number> {
+    await this.initPromise;
+    return await this.api
+      .count(collection.id, this.api.options)
       .then(handleSuccess);
   }
 }
