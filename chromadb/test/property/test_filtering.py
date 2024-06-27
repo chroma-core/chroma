@@ -21,7 +21,6 @@ import logging
 import random
 import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
-from hypothesis import reproduce_failure
 
 
 def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
