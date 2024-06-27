@@ -9,7 +9,7 @@ Chroma's commitment is whenever schema or data format change, we will provide a 
 Specifically we will announce schema changes on:
 
 - Discord ([#migrations channel](https://discord.com/channels/1073293645303795742/1129286514845691975))
-- Github (here)
+- Github ([here](https://github.com/chroma-core/chroma/issues))
 - Email listserv [Sign up](https://airtable.com/shrHaErIs1j9F97BE)
 
 We will aim to provide:
@@ -19,6 +19,12 @@ We will aim to provide:
 - a video walkthrough of using the tool
 
 ## Migration Log
+
+### v0.5.1
+
+On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
+
+The first time this is run, it makes a HTTP request. We made this a method to make it more clear that it's potentially a blocking operation.
 
 ### Auth overhaul - April 20, 2024
 

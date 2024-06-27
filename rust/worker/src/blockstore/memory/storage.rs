@@ -6,7 +6,10 @@ use crate::{
 use arrow::array::Int32Array;
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 pub(crate) trait Writeable {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder);
@@ -48,6 +51,11 @@ pub(crate) trait Readable<'referred_data>: Sized {
         key: KeyWrapper,
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)>;
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)>;
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 
@@ -160,6 +168,17 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
             .map(|(k, v)| (k, v.as_str()))
             .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage
+            .string_value_storage
+            .iter()
+            .nth(index)
+            .map(|(k, v)| (k, v.as_str()))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -282,6 +301,17 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage
+            .int32_array_storage
+            .iter()
+            .nth(index)
+            .map(|(k, v)| (k, v.clone()))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.int32_array_storage.iter().len())
     }
@@ -401,6 +431,17 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage
+            .roaring_bitmap_storage
+            .iter()
+            .nth(index)
+            .map(|(k, v)| (k, v.clone()))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
@@ -408,6 +449,127 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .roaring_bitmap_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
+    }
+}
+
+impl Writeable for f32 {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+        storage.f32_storage.write().as_mut().unwrap().insert(
+            CompositeKey {
+                prefix: prefix.to_string(),
+                key: key.clone(),
+            },
+            value,
+        );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .f32_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
+    }
+}
+
+impl<'referred_data> Readable<'referred_data> for f32 {
+    fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
+        storage
+            .f32_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .map(|a| *a)
+    }
+
+    fn get_by_prefix_from_storage(
+        prefix: &str,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .f32_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn read_gt_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .f32_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key > key)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn read_gte_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .f32_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
+            .map(|(k, v)| (k, v.clone()))
+            .collect()
+    }
+
+    fn read_lt_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .f32_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key < key)
+            .map(|(k, v)| (k, v.clone()))
+            .collect()
+    }
+
+    fn read_lte_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .f32_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .map(|(k, v)| (k, v.clone()))
+            .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage.f32_storage.iter().nth(index).map(|(k, v)| (k, *v))
+    }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.f32_storage.iter().len())
+    }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .f32_storage
             .get(&CompositeKey {
                 prefix: prefix.to_string(),
                 key,
@@ -515,6 +677,13 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage.u32_storage.iter().nth(index).map(|(k, v)| (k, *v))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.u32_storage.iter().len())
     }
@@ -522,6 +691,131 @@ impl<'referred_data> Readable<'referred_data> for u32 {
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
             .u32_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .is_some()
+    }
+}
+
+impl Writeable for bool {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+        storage.bool_storage.write().as_mut().unwrap().insert(
+            CompositeKey {
+                prefix: prefix.to_string(),
+                key: key.clone(),
+            },
+            value,
+        );
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        storage
+            .bool_storage
+            .write()
+            .as_mut()
+            .unwrap()
+            .remove(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            });
+    }
+}
+
+impl<'referred_data> Readable<'referred_data> for bool {
+    fn read_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Option<Self> {
+        storage
+            .bool_storage
+            .get(&CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            })
+            .map(|a| *a)
+    }
+
+    fn get_by_prefix_from_storage(
+        prefix: &str,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .bool_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn read_gt_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .bool_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key > key)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn read_gte_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .bool_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn read_lt_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .bool_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key < key)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn read_lte_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+        storage
+            .bool_storage
+            .iter()
+            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .map(|(k, v)| (k, *v))
+            .collect()
+    }
+
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        storage.bool_storage.iter().nth(index).map(|(k, v)| (k, *v))
+    }
+
+    fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(storage.bool_storage.iter().len())
+    }
+
+    fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
+        storage
+            .bool_storage
             .get(&CompositeKey {
                 prefix: prefix.to_string(),
                 key,
@@ -727,6 +1021,24 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             .collect()
     }
 
+    fn get_at_index(
+        storage: &'referred_data Storage,
+        index: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        let (k, v) = storage.data_record_id_storage.iter().nth(index).unwrap();
+        let embedding = storage.data_record_embedding_storage.get(k).unwrap();
+        let id = v;
+        Some((
+            k,
+            DataRecord {
+                id,
+                embedding,
+                metadata: None,
+                document: None,
+            },
+        ))
+    }
+
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.data_record_id_storage.iter().len())
     }
@@ -744,33 +1056,39 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
 
 #[derive(Clone)]
 pub(crate) struct StorageBuilder {
+    bool_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, bool>>>>,
     // String Value
-    string_value_storage: Arc<RwLock<Option<HashMap<CompositeKey, String>>>>,
+    string_value_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
     // u32 Value
-    u32_storage: Arc<RwLock<Option<HashMap<CompositeKey, u32>>>>,
+    u32_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, u32>>>>,
+    // f32 value
+    f32_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, f32>>>>,
     // Roaring Bitmap Value
-    roaring_bitmap_storage: Arc<RwLock<Option<HashMap<CompositeKey, RoaringBitmap>>>>,
+    roaring_bitmap_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, RoaringBitmap>>>>,
     // Int32 Array Value
-    int32_array_storage: Arc<RwLock<Option<HashMap<CompositeKey, Int32Array>>>>,
+    int32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Int32Array>>>>,
     // Data Record Fields
-    data_record_id_storage: Arc<RwLock<Option<HashMap<CompositeKey, String>>>>,
-    data_record_embedding_storage: Arc<RwLock<Option<HashMap<CompositeKey, Vec<f32>>>>>,
+    data_record_id_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
+    data_record_embedding_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<f32>>>>>,
     pub(super) id: uuid::Uuid,
 }
 
 #[derive(Clone)]
 pub(crate) struct Storage {
+    bool_storage: Arc<BTreeMap<CompositeKey, bool>>,
     // String Value
-    string_value_storage: Arc<HashMap<CompositeKey, String>>,
-    // // u32 Value
-    u32_storage: Arc<HashMap<CompositeKey, u32>>,
-    // // Roaring Bitmap Value
-    roaring_bitmap_storage: Arc<HashMap<CompositeKey, RoaringBitmap>>,
-    // // Int32 Array Value
-    int32_array_storage: Arc<HashMap<CompositeKey, Int32Array>>,
+    string_value_storage: Arc<BTreeMap<CompositeKey, String>>,
+    // u32 Value
+    u32_storage: Arc<BTreeMap<CompositeKey, u32>>,
+    // f32 value
+    f32_storage: Arc<BTreeMap<CompositeKey, f32>>,
+    // Roaring Bitmap Value
+    roaring_bitmap_storage: Arc<BTreeMap<CompositeKey, RoaringBitmap>>,
+    // Int32 Array Value
+    int32_array_storage: Arc<BTreeMap<CompositeKey, Int32Array>>,
     // Data Record Fields
-    data_record_id_storage: Arc<HashMap<CompositeKey, String>>,
-    data_record_embedding_storage: Arc<HashMap<CompositeKey, Vec<f32>>>,
+    data_record_id_storage: Arc<BTreeMap<CompositeKey, String>>,
+    data_record_embedding_storage: Arc<BTreeMap<CompositeKey, Vec<f32>>>,
     pub(super) id: uuid::Uuid,
 }
 
@@ -797,12 +1115,14 @@ impl StorageManager {
     pub(super) fn create(&self) -> StorageBuilder {
         let id = uuid::Uuid::new_v4();
         let builder = StorageBuilder {
-            string_value_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            u32_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            roaring_bitmap_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            int32_array_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            data_record_id_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
-            data_record_embedding_storage: Arc::new(RwLock::new(Some(HashMap::new()))),
+            bool_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            string_value_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            u32_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            f32_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            roaring_bitmap_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            int32_array_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            data_record_id_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            data_record_embedding_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             id,
         };
         let mut cache_guard = self.write_cache.write();
@@ -814,6 +1134,7 @@ impl StorageManager {
         let mut write_cache_guard = self.write_cache.write();
         let builder = write_cache_guard.remove(&id).unwrap();
         let storage = Storage {
+            bool_storage: builder.bool_storage.write().take().unwrap().into(),
             string_value_storage: builder.string_value_storage.write().take().unwrap().into(),
             int32_array_storage: builder.int32_array_storage.write().take().unwrap().into(),
             roaring_bitmap_storage: builder
@@ -823,6 +1144,7 @@ impl StorageManager {
                 .unwrap()
                 .into(),
             u32_storage: builder.u32_storage.write().take().unwrap().into(),
+            f32_storage: builder.f32_storage.write().take().unwrap().into(),
             data_record_id_storage: builder
                 .data_record_id_storage
                 .write()

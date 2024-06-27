@@ -16,10 +16,6 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 
-from hypothesis import Phase, settings
-
-settings.register_profile("ci", phases=[Phase.generate, Phase.target])
-
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [ubuntu-latest]
+        platform: [depot-ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
     defaults:
       run:

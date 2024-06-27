@@ -8,6 +8,8 @@ use crate::types::{Metadata, MetadataValue, MetadataValueConversionError, Segmen
 use thiserror::Error;
 use uuid::Uuid;
 
+const DEFAULT_MAX_ELEMENTS: usize = 10000;
+
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
 struct IndexPtrFFI {
@@ -19,7 +21,7 @@ struct IndexPtrFFI {
 // - Watchable - for dynamic updates
 // - Have a notion of static vs dynamic config
 // - Have a notion of default config
-// - HNSWIndex should store a ref to the config so it can look up the config values.
+// - TODO: HNSWIndex should store a ref to the config so it can look up the config values.
 //   deferring this for a config pass
 #[derive(Clone, Debug)]
 pub(crate) struct HnswIndexConfig {
@@ -98,12 +100,11 @@ impl HnswIndexConfig {
             }
         }
 
-        let max_elements = get_metadata_value_as::<i32>(metadata, "hsnw:max_elements")?;
-        let m = get_metadata_value_as::<i32>(metadata, "hnsw:m")?;
-        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:ef_construction")?;
-        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:ef_search")?;
+        let m = get_metadata_value_as::<i32>(metadata, "hnsw:M")?;
+        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:construction_ef")?;
+        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:search_ef")?;
         return Ok(HnswIndexConfig {
-            max_elements: max_elements as usize,
+            max_elements: DEFAULT_MAX_ELEMENTS,
             m: m as usize,
             ef_construction: ef_construction as usize,
             ef_search: ef_search as usize,
@@ -201,7 +202,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
     }
 
     fn add(&self, id: usize, vector: &[f32]) {
-        unsafe { add_item(self.ffi_ptr, vector.as_ptr(), id, false) }
+        unsafe { add_item(self.ffi_ptr, vector.as_ptr(), id, true) }
     }
 
     fn delete(&self, id: usize) {
@@ -297,6 +298,14 @@ impl HnswIndex {
     pub fn len(&self) -> usize {
         unsafe { len(self.ffi_ptr) as usize }
     }
+
+    pub fn capacity(&self) -> usize {
+        unsafe { capacity(self.ffi_ptr) as usize }
+    }
+
+    pub fn resize(&mut self, new_size: usize) {
+        unsafe { resize_index(self.ffi_ptr, new_size) }
+    }
 }
 
 #[link(name = "bindings", kind = "static")]
@@ -341,7 +350,8 @@ extern "C" {
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
     fn len(index: *const IndexPtrFFI) -> c_int;
-
+    fn capacity(index: *const IndexPtrFFI) -> c_int;
+    fn resize_index(index: *const IndexPtrFFI, new_size: usize);
 }
 
 #[cfg(test)]
@@ -564,6 +574,8 @@ pub mod test {
             index.add(ids[i], data);
         });
 
+        assert_eq!(index.len(), n);
+
         // Delete some of the data
         let mut rng = rand::thread_rng();
         let delete_ids: Vec<usize> = (0..n).choose_multiple(&mut rng, n / 20);
@@ -571,6 +583,8 @@ pub mod test {
         for id in &delete_ids {
             index.delete(*id);
         }
+
+        assert_eq!(index.len(), n - delete_ids.len());
 
         let allow_ids = &[];
         let disallow_ids = &[];
@@ -716,5 +730,55 @@ pub mod test {
         let (ids, distances) = index.query(query, 10, allow_ids, disallow_ids);
         assert_eq!(ids.len(), 2);
         assert_eq!(distances.len(), 2);
+    }
+
+    #[test]
+    fn it_can_resize() {
+        let n = 1000;
+        let d: usize = 960;
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+            Uuid::new_v4(),
+        );
+
+        let mut index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(2 * n, d);
+        let ids: Vec<usize> = (0..2 * n).collect();
+
+        (0..n).into_iter().for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data);
+        });
+        assert_eq!(index.capacity(), n);
+
+        // Resize the index to 2*n
+        index.resize(2 * n);
+
+        assert_eq!(index.len(), n);
+        assert_eq!(index.capacity(), 2 * n);
+
+        // Add another n elements from n to 2n
+        (n..2 * n).into_iter().for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data);
+        });
     }
 }

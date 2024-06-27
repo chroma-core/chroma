@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 from hypothesis import given, settings, HealthCheck
 import pytest
 from chromadb.api import ServerAPI
@@ -14,6 +14,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
+from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
@@ -21,8 +22,15 @@ import random
 import re
 
 
-def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
+def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
     """Return true if the where clause is true for the given metadata map"""
+    if metadata is None:
+        # None metadata does not match any clause
+        # Note: This includes cases where filtering for $ne or $nin
+        # as we require that the key is present in the metadata
+        # i.e for a record set of [{}, {}] and a filter of {"where": {"test": {"$ne": 1}}}
+        # the result should be [] as the key "test" is not present in the metadata
+        return False
 
     key, expr = list(clause.items())[0]
 
@@ -182,17 +190,12 @@ def test_filterable_metadata_get(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    api.reset()
+    reset(api)
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-
-    if not invariants.is_metadata_valid(invariants.wrap_all(record_set)):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
 
     coll.add(**record_set)
     for filter in filters:
@@ -225,17 +228,17 @@ def test_filterable_metadata_get_limit_offset(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    api.reset()
+    # The distributed system does not support limit/offset yet
+    # so we skip this test for now if the system is distributed
+    if not NOT_CLUSTER_ONLY:
+        pytest.skip("Distributed system does not support limit/offset yet")
+
+    reset(api)
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-
-    if not invariants.is_metadata_valid(invariants.wrap_all(record_set)):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
 
     coll.add(**record_set)
     for filter in filters:
@@ -270,18 +273,13 @@ def test_filterable_metadata_query(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    api.reset()
+    reset(api)
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
-
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
 
     coll.add(**record_set)
     total_count = len(normalized_record_set["ids"])
@@ -318,7 +316,7 @@ def test_filterable_metadata_query(
 
 def test_empty_filter(api: ServerAPI) -> None:
     """Test that a filter where no document matches returns an empty result"""
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
@@ -354,7 +352,7 @@ def test_empty_filter(api: ServerAPI) -> None:
 
 def test_boolean_metadata(api: ServerAPI) -> None:
     """Test that metadata with boolean values is correctly filtered"""
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
@@ -371,7 +369,7 @@ def test_boolean_metadata(api: ServerAPI) -> None:
 def test_get_empty(api: ServerAPI) -> None:
     """Tests that calling get() with empty filters returns nothing"""
 
-    api.reset()
+    reset(api)
     coll = api.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]

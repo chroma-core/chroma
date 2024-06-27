@@ -83,7 +83,7 @@ def _field_matches(
     actual_field = result[field_name]
 
     if len(normalized_record_set["ids"]) == 0:
-        assert isinstance(actual_field, list) and len(actual_field) == 0
+        assert actual_field == []
         return
 
     # This assert should never happen, if we include metadatas/documents it will be
@@ -161,12 +161,6 @@ def _exact_distances(
     )
     # Sort the distances and return the indices
     return np.argsort(distances).tolist(), distances.tolist()
-
-
-def is_metadata_valid(normalized_record_set: NormalizedRecordSet) -> bool:
-    if normalized_record_set["metadatas"] is None:
-        return True
-    return not any([len(m) == 0 for m in normalized_record_set["metadatas"]])
 
 
 def ann_accuracy(

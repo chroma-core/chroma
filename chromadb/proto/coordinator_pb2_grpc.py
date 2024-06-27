@@ -6,7 +6,7 @@ import warnings
 from chromadb.proto import coordinator_pb2 as chromadb_dot_proto_dot_coordinator__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
-GRPC_GENERATED_VERSION = '1.63.0'
+GRPC_GENERATED_VERSION = '1.64.1'
 GRPC_VERSION = grpc.__version__
 EXPECTED_ERROR_RELEASE = '1.65.0'
 SCHEDULED_RELEASE_DATE = 'June 25, 2024'
@@ -308,6 +308,7 @@ def add_SysDBServicer_to_server(servicer, server):
     generic_handler = grpc.method_handlers_generic_handler(
             'chroma.SysDB', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('chroma.SysDB', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.

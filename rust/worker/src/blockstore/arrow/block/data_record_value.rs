@@ -1,6 +1,6 @@
 use super::{
     delta::BlockDelta,
-    delta_storage::{BlockStorage, DataRecordStorage, Int32ArrayStorage},
+    delta_storage::{BlockStorage, DataRecordStorage},
 };
 use crate::{
     blockstore::{
@@ -10,16 +10,13 @@ use crate::{
     chroma_proto::UpdateMetadata,
     segment::DataRecord,
 };
-use arrow::array::{AsArray, BinaryArray};
+use arrow::array::BinaryArray;
 use arrow::{
-    array::{
-        Array, ArrayAccessor, FixedSizeBinaryArray, FixedSizeListArray, Float32Array, Int32Array,
-        ListArray, StringArray, StructArray,
-    },
+    array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray},
     util::bit_util,
 };
 use prost::Message;
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
@@ -30,6 +27,12 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         let document_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
         id_offset + metdata_offset + document_offset
+    }
+
+    fn validity_size(item_count: usize) -> usize {
+        let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count, 8));
+        // Both document and metadata can be null
+        return validity_bytes * 2;
     }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
@@ -73,11 +76,21 @@ impl ArrowWriteableValue for &DataRecord<'_> {
             BlockStorage::DataRecord(builder) => {
                 let mut id_storage = builder.id_storage.write();
                 let mut embedding_storage = builder.embedding_storage.write();
+                let mut metadata_storage = builder.metadata_storage.write();
+                let mut document_storage = builder.document_storage.write();
                 id_storage.remove(&CompositeKey {
                     prefix: prefix.to_string(),
                     key: key.clone(),
                 });
                 embedding_storage.remove(&CompositeKey {
+                    prefix: prefix.to_string(),
+                    key: key.clone(),
+                });
+                metadata_storage.remove(&CompositeKey {
+                    prefix: prefix.to_string(),
+                    key: key.clone(),
+                });
+                document_storage.remove(&CompositeKey {
                     prefix: prefix.to_string(),
                     key,
                 });

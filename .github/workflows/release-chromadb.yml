@@ -51,6 +51,7 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     with:
       python_versions: '["3.8", "3.9", "3.10", "3.11", "3.12"]'
+      property_testing_preset: 'normal'
 
   javascript-client-tests:
     name: JavaScript client tests
@@ -238,7 +239,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Release Latest
-        uses: ncipollo/release-action@v1.11.1
+        uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
         with:
           tag: "latest"
@@ -252,4 +253,27 @@ jobs:
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
           artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           allowUpdates: true
+          removeArtifacts: true
           prerelease: true
+
+  release-docs:
+    name: Deploy docs to Vercel
+    runs-on: ubuntu-latest
+    needs:
+      - check-tag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install vercel
+        run: npm install -g vercel
+      - name: Deploy
+        run: vercel deploy --token ${{ secrets.VERCEL_TOKEN }} ${{ needs.check-tag.outputs.tag_matches == 'true' && '--prod' || '' }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}

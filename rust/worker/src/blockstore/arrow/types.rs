@@ -21,12 +21,13 @@ pub(crate) trait ArrowWriteableValue: Value {
     type ReadableValue<'referred_data>: ArrowReadableValue<'referred_data>;
 
     fn offset_size(item_count: usize) -> usize;
+    fn validity_size(item_count: usize) -> usize;
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta);
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta);
     fn get_delta_builder() -> BlockStorage;
 }
 
-pub(crate) trait ArrowReadableKey<'referred_data>: Key + PartialEq {
+pub(crate) trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(
         prefix: &str,

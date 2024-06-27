@@ -1,5 +1,5 @@
 from typing import Dict, Optional, Tuple
-
+from overrides import overrides
 from hypothesis.stateful import (
     initialize,
     invariant,
@@ -8,18 +8,18 @@ from hypothesis.stateful import (
 )
 
 import uuid
-
 import logging
 import pytest
-
 from chromadb.api import AdminAPI
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import Settings, System
-from chromadb.test.conftest import fastapi_fixture_admin_and_singleton_tenant_db_user
+from chromadb.test.conftest import (
+    ClientFactories,
+    fastapi_fixture_admin_and_singleton_tenant_db_user,
+)
 from chromadb.test.property.test_collections_with_database_tenant import (
     TenantDatabaseCollectionStateMachine,
 )
-
 import chromadb.test.property.strategies as strategies
 import numpy
 import chromadb.api.types as types
@@ -37,8 +37,13 @@ class SingletonTenantDatabaseCollectionStateMachine(
     root_client: Client
     root_admin_client: AdminAPI
 
-    def __init__(self, singleton_client: Client, root_client: Client) -> None:
-        super().__init__(root_client)
+    def __init__(
+        self,
+        singleton_client: Client,
+        root_client: Client,
+        client_factories: ClientFactories,
+    ) -> None:
+        super().__init__(client_factories)
         self.root_client = root_client
         self.root_admin_client = self.admin_client
 
@@ -76,14 +81,11 @@ class SingletonTenantDatabaseCollectionStateMachine(
             self.api = self.singleton_client
             self.admin_client = self.singleton_admin_client
 
-    def has_tenant(self, tenant: str) -> bool:
-        if self.api == self.singleton_client:
-            tenant = SINGLETON_TENANT
-        return tenant in self.tenant_to_database_to_model
-
+    @overrides
     def set_api_tenant_database(self, tenant: str, database: str) -> None:
         self.root_client.set_tenant(tenant, database)
 
+    @overrides
     def get_tenant_model(
         self, tenant: str
     ) -> Dict[str, Dict[str, Optional[types.CollectionMetadata]]]:
@@ -91,6 +93,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             tenant = SINGLETON_TENANT
         return self.tenant_to_database_to_model[tenant]
 
+    @overrides
     def set_tenant_model(
         self,
         tenant: str,
@@ -105,12 +108,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             raise ValueError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant] = model
 
-    def has_database_for_tenant(self, tenant: str, database: str) -> bool:
-        if self.api == self.singleton_client:
-            tenant = SINGLETON_TENANT
-            database = SINGLETON_DATABASE
-        return database in self.tenant_to_database_to_model[tenant]
-
+    @overrides
     def set_database_model_for_tenant(
         self,
         tenant: str,
@@ -126,6 +124,18 @@ class SingletonTenantDatabaseCollectionStateMachine(
             raise ValueError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant][database] = database_model
 
+    @overrides
+    def overwrite_database(self, database: str) -> str:
+        if self.api == self.singleton_client:
+            return SINGLETON_DATABASE
+        return database
+
+    @overrides
+    def overwrite_tenant(self, tenant: str) -> str:
+        if self.api == self.singleton_client:
+            return SINGLETON_TENANT
+        return tenant
+
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
         if self.api == self.singleton_client:
@@ -135,12 +145,13 @@ class SingletonTenantDatabaseCollectionStateMachine(
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
-def _singleton_and_root_clients() -> Tuple[Client, Client]:
+def _singleton_and_root_clients() -> Tuple[Client, Client, ClientFactories]:
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
     sys.reset_state()
-    root_client = Client.from_system(sys)
-    _root_admin_client = AdminClient.from_system(sys)
+    client_factories = ClientFactories(sys)
+    root_client = client_factories.create_client()
+    _root_admin_client = client_factories.create_admin_client_from_system()
 
     # This is a little awkward but we have to create the tenant and DB
     # before we can instantiate a Client which connects to them. This also
@@ -154,7 +165,7 @@ def _singleton_and_root_clients() -> Tuple[Client, Client]:
     singleton_system.start()
     singleton_client = Client.from_system(singleton_system)
 
-    return singleton_client, root_client
+    return singleton_client, root_client, client_factories
 
 
 def test_collections_with_tenant_database_overwrite(
@@ -162,11 +173,10 @@ def test_collections_with_tenant_database_overwrite(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    singleton_client, root_client = _singleton_and_root_clients()
+    singleton_client, root_client, client_factories = _singleton_and_root_clients()
     run_state_machine_as_test(
         lambda: SingletonTenantDatabaseCollectionStateMachine(
-            singleton_client,
-            root_client,
+            singleton_client, root_client, client_factories
         )
     )  # type: ignore
 
@@ -176,11 +186,10 @@ def test_repeat_failure(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    singleton_client, root_client = _singleton_and_root_clients()
+    singleton_client, root_client, client_factories = _singleton_and_root_clients()
 
     state = SingletonTenantDatabaseCollectionStateMachine(
-        singleton_client,
-        root_client,
+        singleton_client, root_client, client_factories
     )
     state.initialize()
     state.check_api_and_admin_client_are_in_sync()

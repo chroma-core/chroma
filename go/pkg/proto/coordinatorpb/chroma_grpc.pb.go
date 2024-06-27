@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	MetadataReader_QueryMetadata_FullMethodName = "/chroma.MetadataReader/QueryMetadata"
+	MetadataReader_CountRecords_FullMethodName  = "/chroma.MetadataReader/CountRecords"
 )
 
 // MetadataReaderClient is the client API for MetadataReader service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MetadataReaderClient interface {
 	QueryMetadata(ctx context.Context, in *QueryMetadataRequest, opts ...grpc.CallOption) (*QueryMetadataResponse, error)
+	CountRecords(ctx context.Context, in *CountRecordsRequest, opts ...grpc.CallOption) (*CountRecordsResponse, error)
 }
 
 type metadataReaderClient struct {
@@ -46,11 +48,21 @@ func (c *metadataReaderClient) QueryMetadata(ctx context.Context, in *QueryMetad
 	return out, nil
 }
 
+func (c *metadataReaderClient) CountRecords(ctx context.Context, in *CountRecordsRequest, opts ...grpc.CallOption) (*CountRecordsResponse, error) {
+	out := new(CountRecordsResponse)
+	err := c.cc.Invoke(ctx, MetadataReader_CountRecords_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MetadataReaderServer is the server API for MetadataReader service.
 // All implementations must embed UnimplementedMetadataReaderServer
 // for forward compatibility
 type MetadataReaderServer interface {
 	QueryMetadata(context.Context, *QueryMetadataRequest) (*QueryMetadataResponse, error)
+	CountRecords(context.Context, *CountRecordsRequest) (*CountRecordsResponse, error)
 	mustEmbedUnimplementedMetadataReaderServer()
 }
 
@@ -60,6 +72,9 @@ type UnimplementedMetadataReaderServer struct {
 
 func (UnimplementedMetadataReaderServer) QueryMetadata(context.Context, *QueryMetadataRequest) (*QueryMetadataResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method QueryMetadata not implemented")
+}
+func (UnimplementedMetadataReaderServer) CountRecords(context.Context, *CountRecordsRequest) (*CountRecordsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CountRecords not implemented")
 }
 func (UnimplementedMetadataReaderServer) mustEmbedUnimplementedMetadataReaderServer() {}
 
@@ -92,6 +107,24 @@ func _MetadataReader_QueryMetadata_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MetadataReader_CountRecords_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CountRecordsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetadataReaderServer).CountRecords(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MetadataReader_CountRecords_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetadataReaderServer).CountRecords(ctx, req.(*CountRecordsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MetadataReader_ServiceDesc is the grpc.ServiceDesc for MetadataReader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -102,6 +135,10 @@ var MetadataReader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "QueryMetadata",
 			Handler:    _MetadataReader_QueryMetadata_Handler,
+		},
+		{
+			MethodName: "CountRecords",
+			Handler:    _MetadataReader_CountRecords_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

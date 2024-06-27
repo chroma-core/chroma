@@ -10,6 +10,7 @@ use crate::types::RecordConversionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
 use tonic::transport::Endpoint;
@@ -39,43 +40,57 @@ pub(crate) struct CollectionRecord {
     pub(crate) collection_version: i32,
 }
 
-#[async_trait]
-pub(crate) trait Log: Send + Sync + LogClone + Debug {
-    async fn read(
+#[derive(Clone, Debug)]
+pub(crate) enum Log {
+    Grpc(GrpcLog),
+    InMemory(InMemoryLog),
+}
+
+impl Log {
+    pub(crate) async fn read(
         &mut self,
         collection_id: Uuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError>;
+    ) -> Result<Vec<LogRecord>, PullLogsError> {
+        match self {
+            Log::Grpc(log) => {
+                log.read(collection_id, offset, batch_size, end_timestamp)
+                    .await
+            }
+            Log::InMemory(log) => {
+                log.read(collection_id, offset, batch_size, end_timestamp)
+                    .await
+            }
+        }
+    }
 
-    async fn get_collections_with_new_data(
+    pub(crate) async fn get_collections_with_new_data(
         &mut self,
-    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError>;
+        min_compaction_size: u64,
+    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+        match self {
+            Log::Grpc(log) => log.get_collections_with_new_data(min_compaction_size).await,
+            Log::InMemory(log) => log.get_collections_with_new_data(min_compaction_size).await,
+        }
+    }
 
-    async fn update_collection_log_offset(
+    pub(crate) async fn update_collection_log_offset(
         &mut self,
         collection_id: Uuid,
         new_offset: i64,
-    ) -> Result<(), UpdateCollectionLogOffsetError>;
-}
-
-pub(crate) trait LogClone {
-    fn clone_box(&self) -> Box<dyn Log>;
-}
-
-impl<T> LogClone for T
-where
-    T: 'static + Log + Clone,
-{
-    fn clone_box(&self) -> Box<dyn Log> {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for Box<dyn Log> {
-    fn clone(&self) -> Box<dyn Log> {
-        self.clone_box()
+    ) -> Result<(), UpdateCollectionLogOffsetError> {
+        match self {
+            Log::Grpc(log) => {
+                log.update_collection_log_offset(collection_id, new_offset)
+                    .await
+            }
+            Log::InMemory(log) => {
+                log.update_collection_log_offset(collection_id, new_offset)
+                    .await
+            }
+        }
     }
 }
 
@@ -126,13 +141,18 @@ impl Configurable<LogConfig> for GrpcLog {
                 // TODO: switch to logging when logging is implemented
                 println!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
-                let endpoint_res = Endpoint::from_shared(connection_string);
-                if endpoint_res.is_err() {
-                    return Err(Box::new(GrpcLogError::FailedToConnect(
-                        endpoint_res.err().unwrap(),
-                    )));
-                }
-                let client = endpoint_res.ok().unwrap().connect().await;
+                let endpoint_res = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => {
+                        return Err(Box::new(GrpcLogError::FailedToConnect(
+                            tonic::transport::Error::from(e),
+                        )))
+                    }
+                };
+                let endpoint_res = endpoint_res
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                let client = endpoint_res.connect().await;
                 match client {
                     Ok(client) => {
                         let channel: LogServiceClient<
@@ -152,8 +172,7 @@ impl Configurable<LogConfig> for GrpcLog {
     }
 }
 
-#[async_trait]
-impl Log for GrpcLog {
+impl GrpcLog {
     async fn read(
         &mut self,
         collection_id: Uuid,
@@ -163,7 +182,7 @@ impl Log for GrpcLog {
     ) -> Result<Vec<LogRecord>, PullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
-            None => -1,
+            None => i64::MAX,
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
             collection_id: collection_id.to_string(),
@@ -199,11 +218,14 @@ impl Log for GrpcLog {
 
     async fn get_collections_with_new_data(
         &mut self,
+        min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         let response = self
             .client
             .get_all_collection_info_to_compact(
-                chroma_proto::GetAllCollectionInfoToCompactRequest {},
+                chroma_proto::GetAllCollectionInfoToCompactRequest {
+                    min_compaction_size: min_compaction_size,
+                },
             )
             .await;
 
@@ -351,8 +373,7 @@ impl InMemoryLog {
     }
 }
 
-#[async_trait]
-impl Log for InMemoryLog {
+impl InMemoryLog {
     async fn read(
         &mut self,
         collection_id: Uuid,
@@ -380,6 +401,7 @@ impl Log for InMemoryLog {
 
     async fn get_collections_with_new_data(
         &mut self,
+        min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
         let mut collections = Vec::new();
         for (collection_id, log_records) in self.collection_to_log.iter() {
@@ -397,6 +419,11 @@ impl Log for InMemoryLog {
                 }
                 None => &log_records[..],
             };
+
+            if (filtered_records.len() as u64) < min_compaction_size {
+                continue;
+            }
+
             let mut logs = filtered_records.to_vec();
             logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {

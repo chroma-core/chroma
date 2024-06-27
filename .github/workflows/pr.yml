@@ -18,15 +18,47 @@ jobs:
         id: changes
         uses: dorny/paths-filter@v3
         with:
+          predicate-quantifier: 'every'
           filters: |
             outside-docs:
               - '!docs/**'
+            docs:
+              - 'docs/**'
+
+  deploy-docs-preview:
+    name: Deploy preview of docs
+    needs: paths-filter
+    if: needs.paths-filter.outputs.docs == 'true'
+    runs-on: depot-ubuntu-22.04
+    environment:
+      name: Preview
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install vercel
+        run: npm install -g vercel
+      - name: Deploy
+        id: deploy
+        run: echo "url=$(vercel deploy --token ${{ secrets.VERCEL_TOKEN }})" >> $GITHUB_OUTPUT
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+
 
   python-tests:
     name: Python tests
     needs: paths-filter
     if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-tests.yml
+    with:
+      property_testing_preset: 'fast'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
@@ -102,3 +134,27 @@ jobs:
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
+
+  # This job exists for our branch protection rule.
+  # We want to require status checks to pass before merging, but the set of
+  # checks that run for any given PR is dynamic based on the files changed.
+  # When creating a branch protection rule, you have to specify a static list
+  # of checks.
+  # So since this job always runs, we can specify it in the branch protection rule.
+  all-required-pr-checks-passed:
+    if: always()
+    needs:
+    - python-tests
+    - python-vulnerability-scan
+    - javascript-client-tests
+    - rust-tests
+    - go-tests
+    - check-title
+    - lint
+    runs-on: ubuntu-latest
+    steps:
+    - name: Decide whether the needed jobs succeeded or failed
+      uses: re-actors/alls-green@release/v1
+      with:
+        jobs: ${{ toJSON(needs) }}
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests

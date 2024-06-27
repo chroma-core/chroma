@@ -5,8 +5,9 @@ use crate::blockstore::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryBuilder, FixedSizeListBuilder, Float32Builder, Int32Array,
-        Int32Builder, ListBuilder, RecordBatch, StringBuilder, StructArray, UInt32Builder,
+        Array, ArrayRef, BinaryBuilder, BooleanBuilder, FixedSizeListBuilder, Float32Builder,
+        Int32Array, Int32Builder, ListBuilder, RecordBatch, StringBuilder, StructArray,
+        UInt32Builder,
     },
     datatypes::{Field, Fields},
     util::bit_util,
@@ -41,6 +42,7 @@ impl Debug for BlockStorage {
 }
 
 pub enum BlockKeyArrowBuilder {
+    Boolean((StringBuilder, BooleanBuilder)),
     String((StringBuilder, StringBuilder)),
     Float32((StringBuilder, Float32Builder)),
     UInt32((StringBuilder, UInt32Builder)),
@@ -70,7 +72,14 @@ impl BlockKeyArrowBuilder {
                 builder.1.append_value(value);
             }
             KeyWrapper::Bool(value) => {
-                todo!()
+                let builder = match self {
+                    BlockKeyArrowBuilder::Boolean(builder) => builder,
+                    _ => {
+                        unreachable!("Invariant violation. BlockKeyArrowBuilder should be Boolean.")
+                    }
+                };
+                builder.0.append_value(key.prefix);
+                builder.1.append_value(value);
             }
             KeyWrapper::Uint32(value) => {
                 let builder = match self {
@@ -102,6 +111,18 @@ impl BlockKeyArrowBuilder {
             BlockKeyArrowBuilder::Float32((ref mut prefix_builder, ref mut key_builder)) => {
                 let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
                 let key_field = Field::new("key", arrow::datatypes::DataType::Float32, false);
+                let prefix_arr = prefix_builder.finish();
+                let key_arr = key_builder.finish();
+                (
+                    prefix_field,
+                    (&prefix_arr as &dyn Array).slice(0, prefix_arr.len()),
+                    key_field,
+                    (&key_arr as &dyn Array).slice(0, key_arr.len()),
+                )
+            }
+            BlockKeyArrowBuilder::Boolean((ref mut prefix_builder, ref mut key_builder)) => {
+                let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
+                let key_field = Field::new("key", arrow::datatypes::DataType::Boolean, false);
                 let prefix_arr = prefix_builder.finish();
                 let key_arr = key_builder.finish();
                 (
@@ -169,7 +190,7 @@ impl StringValueStorage {
         }
     }
 
-    fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
         let storage = self.storage.read();
         match storage.as_ref() {
             None => unreachable!("Invariant violation. A StringValueBuilder should have storage."),
@@ -184,7 +205,7 @@ impl StringValueStorage {
         }
     }
 
-    fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         let storage = self.storage.read();
         match storage.as_ref() {
             None => unreachable!("Invariant violation. A StringValueBuilder should have storage."),
@@ -278,14 +299,14 @@ impl UInt32Storage {
         calculate_key_size(key_stream)
     }
 
-    fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
         let storage = self.storage.read();
         let value_stream = storage
             .iter()
             .skip(start)
             .take(end - start)
             .map(|(_, value)| value);
-        value_stream.fold(0, |acc, value| acc + value.to_string().len())
+        value_stream.fold(0, |acc, value| acc + value.get_size())
     }
 
     fn split(&self, prefix: &str, key: KeyWrapper) -> UInt32Storage {
@@ -314,7 +335,7 @@ impl UInt32Storage {
         builder
     }
 
-    fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         let storage = self.storage.read();
         storage.len()
     }
@@ -475,7 +496,7 @@ impl RoaringBitmapStorage {
         calculate_key_size(key_stream)
     }
 
-    fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
         let storage = self.storage.read();
         let value_stream = storage
             .iter()
@@ -501,7 +522,7 @@ impl RoaringBitmapStorage {
         storage.iter().fold(0, |acc, (_, value)| acc + value.len())
     }
 
-    fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         let storage = self.storage.read();
         storage.len()
     }
@@ -578,7 +599,7 @@ impl DataRecordStorage {
         calculate_key_size(key_stream)
     }
 
-    fn get_id_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_id_size(&self, start: usize, end: usize) -> usize {
         let id_storage = self.id_storage.read();
         let id_stream = id_storage
             .iter()
@@ -588,7 +609,7 @@ impl DataRecordStorage {
         id_stream.fold(0, |acc, value| acc + value.len())
     }
 
-    fn get_embedding_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_embedding_size(&self, start: usize, end: usize) -> usize {
         let embedding_storage = self.embedding_storage.read();
         let embedding_stream = embedding_storage
             .iter()
@@ -598,7 +619,7 @@ impl DataRecordStorage {
         embedding_stream.fold(0, |acc, value| acc + value.len() * 4)
     }
 
-    fn get_metadata_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_metadata_size(&self, start: usize, end: usize) -> usize {
         let metadata_storage = self.metadata_storage.read();
         let metadata_stream = metadata_storage
             .iter()
@@ -608,7 +629,7 @@ impl DataRecordStorage {
         metadata_stream.fold(0, |acc, value| acc + value.as_ref().map_or(0, |v| v.len()))
     }
 
-    fn get_document_size(&self, start: usize, end: usize) -> usize {
+    pub(super) fn get_document_size(&self, start: usize, end: usize) -> usize {
         let document_storage = self.document_storage.read();
         let document_stream = document_storage
             .iter()
@@ -631,11 +652,7 @@ impl DataRecordStorage {
             bit_util::round_upto_multiple_of_64(self.get_embedding_size(start, end));
         let metadata_size = bit_util::round_upto_multiple_of_64(self.get_metadata_size(start, end));
         let document_size = bit_util::round_upto_multiple_of_64(self.get_document_size(start, end));
-        // TODO: I think this will break can_add logic
-        let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(end - start, 8));
-        // Validity bytes are used for metadata and document fields since they are optional
-        let total_size =
-            id_size + embedding_size + metadata_size + document_size + validity_bytes * 2;
+        let total_size = id_size + embedding_size + metadata_size + document_size;
 
         total_size
     }
@@ -667,7 +684,7 @@ impl DataRecordStorage {
         }
     }
 
-    fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         let id_storage = self.id_storage.read();
         id_storage.len()
     }
@@ -797,6 +814,7 @@ impl BlockStorage {
         }
     }
 
+    /// Returns the arrow-padded (rounded to 64 bytes) size of the value data for the given range.
     pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_value_size(start, end),

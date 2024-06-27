@@ -1,9 +1,12 @@
 use super::config::SysDbConfig;
+use super::test_sysdb::TestSysDb;
 use crate::chroma_proto;
 use crate::chroma_proto::sys_db_client;
+use crate::chroma_proto::sys_db_client::SysDbClient;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
+use crate::tracing::util::client_interceptor;
 use crate::types::Collection;
 use crate::types::CollectionConversionError;
 use crate::types::FlushCompactionResponse;
@@ -15,67 +18,110 @@ use crate::types::SegmentFlushInfoConversionError;
 use crate::types::SegmentScope;
 use crate::types::Tenant;
 use async_trait::async_trait;
-use std::sync::Arc;
-
 use std::fmt::Debug;
+use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
+use tonic::service::interceptor;
+use tonic::transport::Endpoint;
+use tonic::Request;
+use tonic::Status;
 use uuid::Uuid;
 
 const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
-#[async_trait]
-pub(crate) trait SysDb: Send + Sync + SysDbClone + Debug {
-    async fn get_collections(
+#[derive(Debug, Clone)]
+pub(crate) enum SysDb {
+    Grpc(GrpcSysDb),
+    Test(TestSysDb),
+}
+
+impl SysDb {
+    pub(crate) async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
-    ) -> Result<Vec<Collection>, GetCollectionsError>;
+    ) -> Result<Vec<Collection>, GetCollectionsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                return grpc
+                    .get_collections(collection_id, name, tenant, database)
+                    .await;
+            }
+            SysDb::Test(test) => {
+                return test
+                    .get_collections(collection_id, name, tenant, database)
+                    .await;
+            }
+        }
+    }
 
-    async fn get_segments(
+    pub(crate) async fn get_segments(
         &mut self,
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
         collection: Option<Uuid>,
-    ) -> Result<Vec<Segment>, GetSegmentsError>;
+    ) -> Result<Vec<Segment>, GetSegmentsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                return grpc.get_segments(id, r#type, scope, collection).await;
+            }
+            SysDb::Test(test) => {
+                return test.get_segments(id, r#type, scope, collection).await;
+            }
+        }
+    }
 
-    async fn get_last_compaction_time(
+    pub(crate) async fn get_last_compaction_time(
         &mut self,
         tanant_ids: Vec<String>,
-    ) -> Result<Vec<Tenant>, GetLastCompactionTimeError>;
+    ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                return grpc.get_last_compaction_time(tanant_ids).await;
+            }
+            SysDb::Test(test) => {
+                return test.get_last_compaction_time(tanant_ids).await;
+            }
+        }
+    }
 
-    async fn flush_compaction(
+    pub(crate) async fn flush_compaction(
         &mut self,
         tenant_id: String,
         collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-    ) -> Result<FlushCompactionResponse, FlushCompactionError>;
-}
-
-// We'd like to be able to clone the trait object, so we need to use the
-// "clone box" pattern. See https://stackoverflow.com/questions/30353462/how-to-clone-a-struct-storing-a-boxed-trait-object#comment48814207_30353928
-// https://chat.openai.com/share/b3eae92f-0b80-446f-b79d-6287762a2420
-pub(crate) trait SysDbClone {
-    fn clone_box(&self) -> Box<dyn SysDb>;
-}
-
-impl<T> SysDbClone for T
-where
-    T: 'static + SysDb + Clone,
-{
-    fn clone_box(&self) -> Box<dyn SysDb> {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for Box<dyn SysDb> {
-    fn clone(&self) -> Box<dyn SysDb> {
-        self.clone_box()
+    ) -> Result<FlushCompactionResponse, FlushCompactionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                return grpc
+                    .flush_compaction(
+                        tenant_id,
+                        collection_id,
+                        log_position,
+                        collection_version,
+                        segment_flush_info,
+                    )
+                    .await;
+            }
+            SysDb::Test(test) => {
+                return test
+                    .flush_compaction(
+                        tenant_id,
+                        collection_id,
+                        log_position,
+                        collection_version,
+                        segment_flush_info,
+                    )
+                    .await;
+            }
+        }
     }
 }
 
@@ -83,7 +129,12 @@ impl Clone for Box<dyn SysDb> {
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
 pub(crate) struct GrpcSysDb {
-    client: sys_db_client::SysDbClient<tonic::transport::Channel>,
+    client: SysDbClient<
+        interceptor::InterceptedService<
+            tonic::transport::Channel,
+            fn(Request<()>) -> Result<Request<()>, Status>,
+        >,
+    >,
 }
 
 #[derive(Error, Debug)]
@@ -109,22 +160,40 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                 let port = &my_config.port;
                 println!("Connecting to sysdb at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
-                let client = sys_db_client::SysDbClient::connect(connection_string).await;
-                match client {
-                    Ok(client) => {
-                        return Ok(GrpcSysDb { client: client });
+                let endpoint = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => {
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(
+                            tonic::transport::Error::from(e),
+                        )));
+                    }
+                };
+
+                let endpoint = endpoint
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                match endpoint.connect().await {
+                    Ok(channel) => {
+                        let client: SysDbClient<
+                            interceptor::InterceptedService<
+                                tonic::transport::Channel,
+                                fn(Request<()>) -> Result<Request<()>, Status>,
+                            >,
+                        > = SysDbClient::with_interceptor(channel, client_interceptor);
+                        return Ok(GrpcSysDb { client });
                     }
                     Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(
+                            tonic::transport::Error::from(e),
+                        )));
                     }
-                }
+                };
             }
         }
     }
 }
 
-#[async_trait]
-impl SysDb for GrpcSysDb {
+impl GrpcSysDb {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
