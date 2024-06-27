@@ -21,6 +21,7 @@ import logging
 import random
 import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
+from hypothesis import reproduce_failure
 
 
 def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
@@ -213,7 +214,7 @@ def test_filterable_metadata_get(
     if not NOT_CLUSTER_ONLY:
         # Only wait for compaction if the size of the collection is
         # some minimal size
-        if should_compact and len(record_set["ids"]) > 10:
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
             # Wait for the model to be updated
             wait_for_version_increase(api, collection.name, initial_version)
 
@@ -270,7 +271,7 @@ def test_filterable_metadata_get_limit_offset(
     if not NOT_CLUSTER_ONLY:
         # Only wait for compaction if the size of the collection is
         # some minimal size
-        if should_compact and len(record_set["ids"]) > 10:
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
             # Wait for the model to be updated
             wait_for_version_increase(api, collection.name, initial_version)
 
@@ -324,7 +325,7 @@ def test_filterable_metadata_query(
     if not NOT_CLUSTER_ONLY:
         # Only wait for compaction if the size of the collection is
         # some minimal size
-        if should_compact and len(record_set["ids"]) > 10:
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
             # Wait for the model to be updated
             wait_for_version_increase(api, collection.name, initial_version)
 
