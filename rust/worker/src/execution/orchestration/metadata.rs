@@ -383,6 +383,8 @@ impl Component for CountQueryOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -419,6 +421,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
 
 #[async_trait]
 impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<CountRecordsOutput, CountRecordsError>,
@@ -741,6 +745,8 @@ impl Component for MetadataQueryOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -764,6 +770,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
 impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
     for MetadataQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<MetadataFilteringOutput, MetadataFilteringError>,
@@ -808,6 +816,8 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>>
     for MetadataQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>,

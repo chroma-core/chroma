@@ -48,7 +48,9 @@ pub(crate) trait Handler<M>
 where
     Self: Component + Sized + 'static,
 {
-    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ()
+    type Result: Send + Debug + 'static;
+
+    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> Self::Result
     // The need for this lifetime bound comes from the async_trait macro when we need generic lifetimes in our message type
     // https://stackoverflow.com/questions/69560112/how-to-use-rust-async-trait-generic-to-a-lifetime-parameter
     where
@@ -166,6 +168,8 @@ mod tests {
 
     #[async_trait]
     impl Handler<usize> for TestComponent {
+        type Result = ();
+
         async fn handle(&mut self, message: usize, _ctx: &ComponentContext<TestComponent>) -> () {
             self.counter.fetch_add(message, Ordering::SeqCst);
         }

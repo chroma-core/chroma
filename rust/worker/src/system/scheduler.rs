@@ -165,6 +165,8 @@ mod tests {
     }
     #[async_trait]
     impl Handler<ScheduleMessage> for TestComponent {
+        type Result = ();
+
         async fn handle(
             &mut self,
             _message: ScheduleMessage,

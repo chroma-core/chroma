@@ -186,6 +186,8 @@ impl Component for Dispatcher {
 
 #[async_trait]
 impl Handler<TaskMessage> for Dispatcher {
+    type Result = ();
+
     async fn handle(&mut self, task: TaskMessage, _ctx: &ComponentContext<Dispatcher>) {
         self.enqueue_task(task).await;
     }
@@ -194,6 +196,8 @@ impl Handler<TaskMessage> for Dispatcher {
 // Worker sends a request for task
 #[async_trait]
 impl Handler<TaskRequestMessage> for Dispatcher {
+    type Result = ();
+
     async fn handle(&mut self, message: TaskRequestMessage, _ctx: &ComponentContext<Dispatcher>) {
         self.handle_work_request(message).await;
     }
@@ -272,6 +276,8 @@ mod tests {
     }
     #[async_trait]
     impl Handler<TaskResult<String, ()>> for MockDispatchUser {
+        type Result = ();
+
         async fn handle(
             &mut self,
             _message: TaskResult<String, ()>,
@@ -289,6 +295,8 @@ mod tests {
 
     #[async_trait]
     impl Handler<()> for MockDispatchUser {
+        type Result = ();
+
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
             let task_id = task.id();
