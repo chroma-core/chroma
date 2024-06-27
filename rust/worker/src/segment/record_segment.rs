@@ -106,7 +106,7 @@ impl RecordSegmentWriter {
         let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) =
             match segment.file_path.len() {
                 0 => {
-                    tracing::debug!("No files found, creating new blockfiles for record segment");
+                    tracing::info!("No files found, creating new blockfiles for record segment");
                     let user_id_to_id = match blockfile_provider.create::<&str, u32>() {
                         Ok(user_id_to_id) => user_id_to_id,
                         Err(e) => {
@@ -135,7 +135,7 @@ impl RecordSegmentWriter {
                     (user_id_to_id, id_to_user_id, id_to_data, max_offset_id)
                 }
                 4 => {
-                    tracing::debug!("Found files, loading blockfiles for record segment");
+                    tracing::info!("Found files, loading blockfiles for record segment");
                     let user_id_to_id_bf_id = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
                         Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.get(0) {
                             Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
@@ -528,11 +528,14 @@ impl SegmentFlusher for RecordSegmentFlusher {
         let mut flushed_files = HashMap::new();
 
         match res_user_id_to_id {
-            Ok(f) => {
-                flushed_files.insert(
-                    USER_ID_TO_OFFSET_ID.to_string(),
-                    vec![user_id_to_id_bf_id.to_string()],
-                );
+            Ok(_) => {
+                match user_id_to_id_bf_id {
+                    Some(id) => {
+                        flushed_files
+                            .insert(USER_ID_TO_OFFSET_ID.to_string(), vec![id.to_string()]);
+                    }
+                    None => {}
+                };
             }
             Err(e) => {
                 return Err(e);
@@ -540,11 +543,14 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_user_id {
-            Ok(f) => {
-                flushed_files.insert(
-                    OFFSET_ID_TO_USER_ID.to_string(),
-                    vec![id_to_user_id_bf_id.to_string()],
-                );
+            Ok(_) => {
+                match id_to_user_id_bf_id {
+                    Some(id) => {
+                        flushed_files
+                            .insert(OFFSET_ID_TO_USER_ID.to_string(), vec![id.to_string()]);
+                    }
+                    None => {}
+                };
             }
             Err(e) => {
                 return Err(e);
@@ -552,11 +558,13 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_data {
-            Ok(f) => {
-                flushed_files.insert(
-                    OFFSET_ID_TO_DATA.to_string(),
-                    vec![id_to_data_bf_id.to_string()],
-                );
+            Ok(_) => {
+                match id_to_data_bf_id {
+                    Some(id) => {
+                        flushed_files.insert(OFFSET_ID_TO_DATA.to_string(), vec![id.to_string()]);
+                    }
+                    None => {}
+                };
             }
             Err(e) => {
                 return Err(e);
@@ -565,10 +573,12 @@ impl SegmentFlusher for RecordSegmentFlusher {
 
         match res_max_offset_id {
             Ok(f) => {
-                flushed_files.insert(
-                    MAX_OFFSET_ID.to_string(),
-                    vec![max_offset_id_bf_id.to_string()],
-                );
+                match max_offset_id_bf_id {
+                    Some(id) => {
+                        flushed_files.insert(MAX_OFFSET_ID.to_string(), vec![id.to_string()]);
+                    }
+                    None => {}
+                };
             }
             Err(e) => {
                 return Err(e);

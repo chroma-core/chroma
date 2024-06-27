@@ -12,11 +12,15 @@ def get_collection_version(api: ServerAPI, collection_name: str) -> int:
 
 def wait_for_version_increase(
     api: ServerAPI, collection_name: str, initial_version: int, additional_time: int = 0
-) -> None:
+) -> int:
     timeout = COMPACTION_SLEEP
     initial_time = time.time() + additional_time
 
-    while get_collection_version(api, collection_name) == initial_version:
+    curr_version = get_collection_version(api, collection_name)
+    while curr_version == initial_version:
         time.sleep(TIMEOUT_INTERVAL)
         if time.time() - initial_time > timeout:
             raise TimeoutError("Model was not updated in time")
+        curr_version = get_collection_version(api, collection_name)
+
+    return curr_version

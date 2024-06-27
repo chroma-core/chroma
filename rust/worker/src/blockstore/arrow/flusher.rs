@@ -11,8 +11,8 @@ pub(crate) struct ArrowBlockfileFlusher {
     block_manager: BlockManager,
     sparse_index_manager: SparseIndexManager,
     modified_delta_ids: HashSet<Uuid>,
-    sparse_index: SparseIndex,
-    id: Uuid,
+    sparse_index: Option<SparseIndex>,
+    id: Option<Uuid>,
 }
 
 impl ArrowBlockfileFlusher {
@@ -20,8 +20,8 @@ impl ArrowBlockfileFlusher {
         block_manager: BlockManager,
         sparse_index_manager: SparseIndexManager,
         modified_delta_ids: HashSet<Uuid>,
-        sparse_index: SparseIndex,
-        id: Uuid,
+        sparse_index: Option<SparseIndex>,
+        id: Option<Uuid>,
     ) -> Self {
         // let sparse_index = sparse_index_manager.get(&id).unwrap();
         Self {
@@ -40,13 +40,15 @@ impl ArrowBlockfileFlusher {
         for delta_id in self.modified_delta_ids {
             self.block_manager.flush(&delta_id).await?
         }
-        self.sparse_index_manager
-            .flush::<K>(&self.sparse_index.id)
-            .await?;
+        if let Some(sparse_index) = self.sparse_index {
+            self.sparse_index_manager
+                .flush::<K>(&sparse_index.id)
+                .await?;
+        }
         Ok(())
     }
 
-    pub(crate) fn id(&self) -> Uuid {
+    pub(crate) fn id(&self) -> Option<Uuid> {
         self.id
     }
 }

@@ -388,11 +388,11 @@ impl FullTextIndexFlusher {
         Ok(())
     }
 
-    pub fn pls_id(&self) -> Uuid {
+    pub fn pls_id(&self) -> Option<Uuid> {
         self.posting_lists_blockfile_flusher.id()
     }
 
-    pub fn freqs_id(&self) -> Uuid {
+    pub fn freqs_id(&self) -> Option<Uuid> {
         self.frequencies_blockfile_flusher.id()
     }
 }
