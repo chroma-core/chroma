@@ -106,7 +106,7 @@ impl RecordSegmentWriter {
         let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) =
             match segment.file_path.len() {
                 0 => {
-                    tracing::info!("No files found, creating new blockfiles for record segment");
+                    tracing::debug!("No files found, creating new blockfiles for record segment");
                     let user_id_to_id = match blockfile_provider.create::<&str, u32>() {
                         Ok(user_id_to_id) => user_id_to_id,
                         Err(e) => {
@@ -135,7 +135,7 @@ impl RecordSegmentWriter {
                     (user_id_to_id, id_to_user_id, id_to_data, max_offset_id)
                 }
                 4 => {
-                    tracing::info!("Found files, loading blockfiles for record segment");
+                    tracing::debug!("Found files, loading blockfiles for record segment");
                     let user_id_to_id_bf_id = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
                         Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.get(0) {
                             Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,

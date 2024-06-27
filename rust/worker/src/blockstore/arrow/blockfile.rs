@@ -232,7 +232,7 @@ impl ArrowBlockfileWriter {
             }
             Some(delta) => delta,
         };
-        delta.delete::<K, V>(prefix, key.clone());
+        delta.delete::<K, V>(prefix, key);
         Ok(())
     }
 

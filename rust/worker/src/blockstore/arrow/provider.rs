@@ -377,23 +377,33 @@ impl SparseIndexManager {
                         let res = self.storage.put_bytes(&key, bytes).await;
                         match res {
                             Ok(_) => {
-                                println!("Sparse index id {:?} written to storage", id);
+                                tracing::info!("Sparse index id {:?} written to storage", id);
                                 Ok(())
                             }
                             Err(e) => {
-                                println!("Error writing sparse index id {:?} to storage", id);
+                                tracing::error!(
+                                    "Error writing sparse index id {:?} to storage",
+                                    id
+                                );
                                 Err(Box::new(e))
                             }
                         }
                     }
                     Err(e) => {
-                        println!("Failed to convert sparse index to block");
+                        tracing::error!(
+                            "Failed to convert sparse index id {:?} to block {:?}",
+                            id,
+                            e
+                        );
                         Err(e)
                     }
                 }
             }
             None => {
-                println!("Tried to flush a sparse index that doesn't exist");
+                tracing::error!(
+                    "Tried to flush a sparse index id {:?} that doesn't exist",
+                    id
+                );
                 return Err(Box::new(SparseIndexFlushError::NotFound));
             }
         }
