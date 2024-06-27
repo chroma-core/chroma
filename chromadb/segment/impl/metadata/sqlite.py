@@ -289,12 +289,12 @@ class SqliteMetadataSegment(MetadataReader):
                 return
 
         if record["operation_record"]["metadata"]:
-            self._update_metadata(cur, id, record["operation_record"]["metadata"])
+            self._update_metadata(cur,self._db.uuid_to_db(self._id), id, record["operation_record"]["metadata"])
 
     @trace_method(
         "SqliteMetadataSegment._update_metadata", OpenTelemetryGranularity.ALL
     )
-    def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+    def _update_metadata(self, cur: Cursor,segment_id:str, id: int, metadata: UpdateMetadata) -> None:
         """Update the metadata for a single EmbeddingRecord"""
         t = Table("embedding_metadata")
         to_delete = [k for k, v in metadata.items() if v is None]
@@ -309,12 +309,12 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
-        self._insert_metadata(cur, id, metadata)
+        self._insert_metadata(cur,segment_id, id, metadata)
 
     @trace_method(
         "SqliteMetadataSegment._insert_metadata", OpenTelemetryGranularity.ALL
     )
-    def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+    def _insert_metadata(self, cur: Cursor,segment_id:str, id: int, metadata: UpdateMetadata) -> None:
         """Insert or update each metadata row for a single embedding record"""
         t = Table("embedding_metadata")
         q = (
@@ -323,6 +323,7 @@ class SqliteMetadataSegment(MetadataReader):
             .columns(
                 t.id,
                 t.key,
+                t.segment_id,
                 t.string_value,
                 t.int_value,
                 t.float_value,
@@ -334,6 +335,7 @@ class SqliteMetadataSegment(MetadataReader):
                 q = q.insert(
                     ParameterValue(id),
                     ParameterValue(key),
+                    ParameterValue(segment_id),
                     ParameterValue(value),
                     None,
                     None,
@@ -478,7 +480,7 @@ class SqliteMetadataSegment(MetadataReader):
         else:
             id = result[0]
             if record["operation_record"]["metadata"]:
-                self._update_metadata(cur, id, record["operation_record"]["metadata"])
+                self._update_metadata(cur,self._db.uuid_to_db(self._id), id, record["operation_record"]["metadata"])
 
     @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
     def _write_metadata(self, records: Sequence[LogRecord]) -> None:
@@ -535,6 +537,11 @@ class SqliteMetadataSegment(MetadataReader):
                     .from_(metadata_t)
                     .select(metadata_t.id)
                     .where(metadata_t.key == ParameterValue(k))
+                    .where(
+                        metadata_t.segment_id
+                        == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                    .where(metadata_t.key != "chroma:document")
                     .where(_where_clause(expr, metadata_t))
                 )
                 clause.append(metadata_t.id.isin(sq))
