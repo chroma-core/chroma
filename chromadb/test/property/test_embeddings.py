@@ -29,7 +29,7 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
-from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase, get_collection_version
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
@@ -92,6 +92,25 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
+        self.log_operation_count = 0
+        self.collection_version = self.collection.get_model()["version"]
+
+    @precondition(lambda self: not NOT_CLUSTER_ONLY and self.log_operation_count >= 10)
+    @rule()
+    def wait_for_compaction(self) -> None:
+        current_version = get_collection_version(self.api, self.collection.name)
+        # This means that there was a compaction from the last time this was
+        # invoked. Ok to start all over again.
+        if current_version != self.collection_version:
+            self.collection_version = current_version
+            # This is fine even if the log has some records right now
+            self.log_operation_count = 0
+        else:
+            new_version = wait_for_version_increase(self.api, self.collection.name, current_version)
+            # Everything got compacted.
+            self.log_operation_count = 0
+            self.collection_version = new_version
+
     @rule(
         target=embedding_ids,
         record_set=strategies.recordsets(collection_st),
@@ -102,8 +121,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     ) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
-
-        initial_version = self.collection.get_model()["version"]
 
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -131,31 +148,16 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 if normalized_record_set["embeddings"]
                 else None,
             }
+            # TODO(Sanket): Why is this the full list and not only the non-overlapping ones
             self.collection.add(**normalized_record_set)
+            self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
-
-            if not NOT_CLUSTER_ONLY:
-                # Only wait for compaction if the size of the collection is
-                # some minimal size
-                if should_compact and len(normalized_record_set["ids"]) > 10:
-                    # Wait for the model to be updated
-                    wait_for_version_increase(
-                        self.api, self.collection.name, initial_version
-                    )
-
             return multiple(*filtered_record_set["ids"])
 
         else:
             self.collection.add(**normalized_record_set)
+            self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
-            if not NOT_CLUSTER_ONLY:
-                # Only wait for compaction if the size of the collection is
-                # some minimal size
-                if should_compact and len(normalized_record_set["ids"]) > 10:
-                    # Wait for the model to be updated
-                    wait_for_version_increase(
-                        self.api, self.collection.name, initial_version
-                    )
             return multiple(*normalized_record_set["ids"])
 
     @rule(
@@ -166,16 +168,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
 
-        initial_version = self.collection.get_model()["version"]
-
         self.collection.delete(ids=ids)
+        self.log_operation_count += len(ids)
         self._remove_embeddings(set(indices_to_remove))
-        if not NOT_CLUSTER_ONLY:
-            if should_compact:
-                # Wait for the model to be updated
-                wait_for_version_increase(
-                    self.api, self.collection.name, initial_version
-                )
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
@@ -195,8 +190,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
-        initial_version = self.collection.get_model()["version"]
-
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
@@ -206,13 +199,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return
 
         self.collection.update(**record_set)
+        self.log_operation_count += len(record_set["ids"])
         self._upsert_embeddings(record_set)
-        if not NOT_CLUSTER_ONLY:
-            if should_compact:
-                # Wait for the model to be updated
-                wait_for_version_increase(
-                    self.api, self.collection.name, initial_version
-                )
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
     @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
@@ -231,8 +219,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
-        initial_version = self.collection.get_model()["version"]
-
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
@@ -242,13 +228,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return
 
         self.collection.upsert(**record_set)
+        self.log_operation_count += len(record_set["ids"])
         self._upsert_embeddings(record_set)
-        if not NOT_CLUSTER_ONLY:
-            if should_compact:
-                # Wait for the model to be updated
-                wait_for_version_increase(
-                    self.api, self.collection.name, initial_version
-                )
 
     @invariant()
     def count(self) -> None:

@@ -978,14 +978,18 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(
-            FULL_TEXT_PLS.to_string(),
-            vec![full_text_pls_id.to_string()],
-        );
-        flushed.insert(
-            FULL_TEXT_FREQS.to_string(),
-            vec![full_text_freqs_id.to_string()],
-        );
+        match full_text_pls_id {
+            Some(id) => {
+                flushed.insert(FULL_TEXT_PLS.to_string(), vec![id.to_string()]);
+            }
+            None => {}
+        };
+        match full_text_freqs_id {
+            Some(id) => {
+                flushed.insert(FULL_TEXT_FREQS.to_string(), vec![id.to_string()]);
+            }
+            None => {}
+        };
 
         match self
             .bool_metadata_index_flusher
@@ -996,22 +1000,34 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(
-            BOOL_METADATA.to_string(),
-            vec![bool_metadata_id.to_string()],
-        );
+        match bool_metadata_id {
+            Some(id) => {
+                flushed.insert(BOOL_METADATA.to_string(), vec![id.to_string()]);
+            }
+            None => {}
+        };
 
         match self.f32_metadata_index_flusher.flush().await.map_err(|e| e) {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(F32_METADATA.to_string(), vec![f32_metadata_id.to_string()]);
+        match f32_metadata_id {
+            Some(id) => {
+                flushed.insert(F32_METADATA.to_string(), vec![id.to_string()]);
+            }
+            None => {}
+        };
 
         match self.u32_metadata_index_flusher.flush().await.map_err(|e| e) {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(U32_METADATA.to_string(), vec![u32_metadata_id.to_string()]);
+        match u32_metadata_id {
+            Some(id) => {
+                flushed.insert(U32_METADATA.to_string(), vec![id.to_string()]);
+            }
+            None => {}
+        };
 
         match self
             .string_metadata_index_flusher
@@ -1022,10 +1038,12 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(
-            STRING_METADATA.to_string(),
-            vec![string_metadata_id.to_string()],
-        );
+        match string_metadata_id {
+            Some(id) => {
+                flushed.insert(STRING_METADATA.to_string(), vec![id.to_string()]);
+            }
+            None => {}
+        };
 
         Ok(flushed)
     }

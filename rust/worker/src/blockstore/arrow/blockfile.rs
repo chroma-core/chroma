@@ -56,6 +56,10 @@ impl ArrowBlockfileWriter {
             let mut block_deltas_map = block_deltas.lock();
             block_deltas_map.insert(initial_block.id, initial_block);
         }
+        tracing::debug!(
+            "Constructed blockfile writer on empty sparse index with id {:?}",
+            id
+        );
         Self {
             block_manager,
             sparse_index_manager,
@@ -73,6 +77,10 @@ impl ArrowBlockfileWriter {
         new_sparse_index: SparseIndex,
     ) -> Self {
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
+        tracing::debug!(
+            "Constructed blockfile writer from existing sparse index id {:?}",
+            id
+        );
         Self {
             block_manager,
             sparse_index_manager,
@@ -88,18 +96,31 @@ impl ArrowBlockfileWriter {
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut delta_ids = HashSet::new();
         for delta in self.block_deltas.lock().values() {
+            // Commit only if non-empty.
+            if delta.len() == 0 {
+                tracing::debug!("Delta with id {:?} is empty", delta.id);
+                self.sparse_index.remove_block(delta.id);
+                continue;
+            }
             // TODO: might these error?
             self.block_manager.commit::<K, V>(delta);
             delta_ids.insert(delta.id);
         }
-        self.sparse_index_manager.commit(self.sparse_index.clone());
+        let mut sparse_index_option = None;
+        let mut id = None;
+        // Commit only if non-empty.
+        if self.sparse_index.len() > 0 {
+            self.sparse_index_manager.commit(self.sparse_index.clone());
+            sparse_index_option = Some(self.sparse_index);
+            id = Some(self.id);
+        }
 
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
             self.sparse_index_manager,
             delta_ids,
-            self.sparse_index,
-            self.id,
+            sparse_index_option,
+            id,
         );
 
         // TODO: we need to update the sparse index with the new min keys?
@@ -211,7 +232,7 @@ impl ArrowBlockfileWriter {
             }
             Some(delta) => delta,
         };
-        delta.delete::<K, V>(prefix, key);
+        delta.delete::<K, V>(prefix, key.clone());
         Ok(())
     }
 

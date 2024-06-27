@@ -351,6 +351,14 @@ impl SparseIndex {
         }
     }
 
+    pub(super) fn remove_block(&self, block_id: Uuid) {
+        let mut forward = self.forward.lock();
+        let mut reverse = self.reverse.lock();
+        if let Some(start_key) = reverse.remove(&block_id) {
+            forward.remove(&start_key);
+        }
+    }
+
     pub(super) fn len(&self) -> usize {
         self.forward.lock().len()
     }

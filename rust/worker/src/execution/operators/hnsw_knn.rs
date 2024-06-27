@@ -1,4 +1,5 @@
 use crate::execution::data::data_chunk::Chunk;
+use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::{LogMaterializer, LogMaterializerError, MaterializedLogRecord};
 use crate::types::{LogRecord, Operation};
 use crate::{
@@ -115,12 +116,22 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         .await
         {
             Ok(reader) => reader,
-            Err(e) => {
-                // This should not happen even for uninitialized segment because
-                // we return early in case when record segment is uninitialized.
-                tracing::error!("[HnswKnnOperation]: Error creating record segment {:?}", e);
-                return Err(Box::new(HnswKnnOperatorError::RecordSegmentError));
-            }
+            Err(e) => match *e {
+                RecordSegmentReaderCreationError::UninitializedSegment => {
+                    tracing::error!(
+                        "[HnswKnnOperation]: Error creating record segment reader {:?}",
+                        *e
+                    );
+                    return Ok(HnswKnnOperatorOutput {
+                        offset_ids: vec![],
+                        distances: vec![],
+                    });
+                }
+                _ => {
+                    tracing::error!("[HnswKnnOperation]: Error creating record segment {:?}", e);
+                    return Err(Box::new(HnswKnnOperatorError::RecordSegmentError));
+                }
+            },
         };
         let log_materializer = LogMaterializer::new(
             Some(record_segment_reader.clone()),
