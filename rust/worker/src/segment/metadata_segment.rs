@@ -438,7 +438,6 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                     // for fresh adds. TODO on whether to propagate error.
                     match &record.0.metadata_to_be_merged {
                         Some(metadata) => {
-                            tracing::debug!("Metadata to be written {:?}", metadata);
                             for (key, value) in metadata.iter() {
                                 match value {
                                     MetadataValue::Str(value) => {
