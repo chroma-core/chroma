@@ -1,6 +1,8 @@
 import pytest
 
-from chromadb.utils.embedding_functions import FastEmbedEmbeddingFunction
+from chromadb.utils.embedding_functions.fastembed_embedding_function import (
+    FastEmbedEmbeddingFunction,
+)
 
 # Skip test if the 'fastembed' package is not installed is not installed
 fastembed = pytest.importorskip("fastembed", reason="fastembed not installed")

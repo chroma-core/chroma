@@ -12,12 +12,12 @@ This embedding function requires the `fastembed` package. To install it, run
 
 You can find a list of all the supported models [here](https://qdrant.github.io/fastembed/examples/Supported_Models/).
 
-## Example usage:
+## Example usage
 
 Using the default BAAI/bge-small-en-v1.5 model.
 
 ```python
-from chromadb.utils.embedding_functions import FastEmbedEmbeddingFunction
+from chromadb.utils.embedding_functions.fastembed_embedding_function import FastEmbedEmbeddingFunction
 ef = FastEmbedEmbeddingFunction()
 ```
 
