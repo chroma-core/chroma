@@ -37,10 +37,6 @@ jobs:
 
   cluster-test:
     runs-on: "depot-ubuntu-22.04-16"
-    permissions:
-      # allow issuing OIDC tokens for this workflow run (for Depot)
-      id-token: write
-      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v3

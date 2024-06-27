@@ -1,5 +1,5 @@
 name: Start Tilt services
-description: "This action starts Tilt services. Requires id-token: write and contents: read permissions."
+description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
@@ -18,11 +18,6 @@ runs:
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
-    - name: Set up Depot CLI
-      uses: depot/setup-action@v1
-    - name: Configure Docker with Depot
-      shell: bash
-      run: depot configure-docker
     - name: Start Tilt
       shell: bash
       run: tilt ci
