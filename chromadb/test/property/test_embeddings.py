@@ -28,6 +28,7 @@ from collections import defaultdict
 import chromadb.test.property.invariants as invariants
 from chromadb.test.conftest import reset
 import numpy as np
+import uuid
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
@@ -102,11 +103,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(normalized_record_set["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                self.collection.add(**normalized_record_set)
-            return multiple()
-
         intersection = set(normalized_record_set["ids"]).intersection(
             self.record_set_state["ids"]
         )
@@ -159,14 +155,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
-        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
-            record_set
-        )
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                self.collection.update(**normalized_record_set)
-            return
-
         self.collection.update(**record_set)
         self._upsert_embeddings(record_set)
 
@@ -183,14 +171,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
-
-        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
-            record_set
-        )
-        if not invariants.is_metadata_valid(normalized_record_set):
-            with pytest.raises(Exception):
-                self.collection.upsert(**normalized_record_set)
-            return
 
         self.collection.upsert(**record_set)
         self._upsert_embeddings(record_set)
@@ -251,7 +231,17 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                         record_set_state = cast(
                             Dict[str, Union[str, int, float]], record_set_state
                         )
-                        record_set_state.update(normalized_record_set["metadatas"][idx])
+                        if normalized_record_set["metadatas"][idx] is not None:
+                            record_set_state.update(
+                                normalized_record_set["metadatas"][idx]
+                            )
+                        else:
+                            # None in the update metadata is a no-op
+                            pass
+                    else:
+                        self.record_set_state["metadatas"][
+                            target_idx
+                        ] = normalized_record_set["metadatas"][idx]
                 if normalized_record_set["documents"] is not None:
                     self.record_set_state["documents"][
                         target_idx
@@ -304,6 +294,60 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
         lambda: EmbeddingStateMachine(api),
     )  # type: ignore
     print_traces()
+
+
+def test_update_none(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
+    state = EmbeddingStateMachine(api)
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+            },
+            embedding_function=None,
+            id=uuid.UUID("2fb0c945-b877-42ab-9417-bfe0f6b172af"),
+            dimension=2,
+            dtype=np.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    v1, v2, v3, v4, v5 = state.add_embeddings(
+        record_set={
+            "ids": ["0", "1", "2", "3", "4"],
+            "embeddings": [
+                [0.09765625, 0.430419921875],
+                [0.20556640625, 0.08978271484375],
+                [-0.1527099609375, 0.291748046875],
+                [-0.12481689453125, 0.78369140625],
+                [0.92724609375, -0.233154296875],
+            ],
+            "metadatas": [None, None, None, None, None],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.update_embeddings(
+        record_set={
+            "ids": [v5],
+            "embeddings": [[0.58349609375, 0.05780029296875]],
+            "metadatas": [{v1: v1}],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.teardown()
 
 
 def test_multi_add(api: ServerAPI) -> None:

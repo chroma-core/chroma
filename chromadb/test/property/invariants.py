@@ -163,12 +163,6 @@ def _exact_distances(
     return np.argsort(distances).tolist(), distances.tolist()
 
 
-def is_metadata_valid(normalized_record_set: NormalizedRecordSet) -> bool:
-    if normalized_record_set["metadatas"] is None:
-        return True
-    return not any([len(m) == 0 for m in normalized_record_set["metadatas"]])
-
-
 def ann_accuracy(
     collection: Collection,
     record_set: RecordSet,
