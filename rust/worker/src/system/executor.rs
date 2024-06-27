@@ -87,7 +87,10 @@ where
                                     scheduler: self.inner.scheduler.clone(),
                             };
                             let task_future = message.handle(&mut self.handler, &component_context);
-                            task_future.instrument(child_span).await;
+                            let result = task_future.instrument(child_span).await;
+                            println!("got result in executor: {:?}", result);
+                            let tx = message.response_tx.unwrap();
+                            tx.send(result).unwrap();
                         }
                         None => {
                             // TODO: Log error

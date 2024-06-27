@@ -5,6 +5,9 @@ use crate::errors::{ChromaError, ErrorCodes};
 use super::{Component, ComponentContext, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
+use tokio::sync::oneshot;
+
+type AnyMessageResult = Box<dyn Debug + Send>;
 
 // Message Wrapper
 #[derive(Debug)]
@@ -12,13 +15,21 @@ pub(crate) struct Wrapper<C>
 where
     C: Component,
 {
+    // todo: rename
     wrapper: Box<dyn WrapperTrait<C>>,
+    // todo: limit pub scope?
+    pub response_tx: Option<oneshot::Sender<AnyMessageResult>>,
     tracing_context: Option<tracing::Span>,
 }
 
 impl<C: Component> Wrapper<C> {
-    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
-        self.wrapper.handle(component, ctx).await;
+    pub(super) async fn handle(
+        &mut self,
+        component: &mut C,
+        ctx: &ComponentContext<C>,
+        // todo: wrap in Option?
+    ) -> AnyMessageResult {
+        self.wrapper.handle(component, ctx).await
     }
 
     pub(super) fn get_tracing_context(&self) -> Option<tracing::Span> {
@@ -31,7 +42,7 @@ pub(super) trait WrapperTrait<C>: Debug + Send
 where
     C: Component,
 {
-    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> ();
+    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> AnyMessageResult;
 }
 
 #[async_trait]
@@ -40,20 +51,28 @@ where
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
-    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
+    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> AnyMessageResult {
         if let Some(message) = self.take() {
-            component.handle(message, ctx).await;
+            return Box::new(Some(component.handle(message, ctx).await));
         }
+
+        Box::new(None::<()>)
     }
 }
 
-pub(crate) fn wrap<C, M>(message: M, tracing_context: Option<tracing::Span>) -> Wrapper<C>
+pub(crate) fn wrap<C, M>(
+    message: M,
+    response_tx: oneshot::Sender<AnyMessageResult>,
+    tracing_context: Option<tracing::Span>,
+) -> Wrapper<C>
 where
+    // todo
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
     Wrapper {
         wrapper: Box::new(Some(message)),
+        response_tx: Some(response_tx),
         tracing_context,
     }
 }
@@ -80,10 +99,19 @@ where
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError>
     where
+        // todo
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
-        let res = self.sender.send(wrap(message, tracing_context)).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        //       let channel = tokio::sync::oneshot::channel();
+        // let res = self.sender.send(wrap(message, channel, tracing_context)).await;
+        // channel.recv().await;
+        println!("sending message...");
+        let res = self.sender.send(wrap(message, tx, tracing_context)).await;
+        println!("waiting for result...");
+        let result = rx.await;
+        println!("got result in sender: {:?}", result);
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
@@ -118,7 +146,7 @@ pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<(), ChannelError>;
+    ) -> Result<Box<dyn Debug + Send>, ChannelError>;
 }
 
 trait ReceiverClone<M> {
@@ -172,6 +200,7 @@ where
 #[async_trait]
 impl<C, M> Receiver<M> for ReceiverImpl<C>
 where
+    // todo
     C: Component + Handler<M>,
     M: Send + Debug + 'static,
 {
@@ -179,10 +208,13 @@ where
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<(), ChannelError> {
-        let res = self.sender.send(wrap(message, tracing_context)).await;
+    ) -> Result<Box<dyn Debug + Send>, ChannelError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let res = self.sender.send(wrap(message, tx, tracing_context)).await;
+        let result = rx.await.unwrap();
+        println!("got result in receiver: {:?}", result);
         match res {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(result),
             Err(_) => Err(ChannelError::SendError),
         }
     }

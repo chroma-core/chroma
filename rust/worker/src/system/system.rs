@@ -124,3 +124,83 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::AtomicUsize;
+
+    #[derive(Debug)]
+    struct TestComponent {
+        queue_size: usize,
+        counter: Arc<AtomicUsize>,
+    }
+
+    impl TestComponent {
+        fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
+            TestComponent {
+                queue_size,
+                counter,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Handler<usize> for TestComponent {
+        type Result = usize;
+
+        async fn handle(
+            &mut self,
+            message: usize,
+            _ctx: &ComponentContext<TestComponent>,
+        ) -> Self::Result {
+            self.counter
+                .fetch_add(message, std::sync::atomic::Ordering::SeqCst);
+            return self.counter.load(std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait]
+    impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
+        fn queue_size(&self) -> usize {
+            self.queue_size
+        }
+
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+            // let test_stream = stream::iter(vec![1, 2, 3]);
+            // self.register_stream(test_stream, ctx);
+        }
+    }
+
+    #[tokio::test]
+    async fn response_types() {
+        let system = System::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let component = TestComponent::new(10, counter.clone());
+        let mut handle = system.start_component(component);
+
+        let result = handle.receiver().send(1, None).await.unwrap();
+        println!("Result: {:?}", result);
+
+        // let result = handle.receiver().send(1, None).await.unwrap();
+        // handle.sender.send(1, None).await.unwrap();
+
+        // // yield to allow the component to process the messages
+        tokio::task::yield_now().await;
+        // // With the streaming data and the messages we should have 12
+        // assert_eq!(counter.load(Ordering::SeqCst), 12);
+        // handle.stop();
+        // // Yield to allow the component to stop
+        // tokio::task::yield_now().await;
+        // // Expect the component to be stopped
+        // assert_eq!(*handle.state(), ComponentState::Stopped);
+        // let res = handle.sender.send(4, None).await;
+        // // Expect an error because the component is stopped
+        // assert!(res.is_err());
+    }
+}
