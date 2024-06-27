@@ -371,7 +371,7 @@ impl CompactOrchestrator {
             .iter()
             .find(|segment| segment.r#type == SegmentType::BlockfileRecord);
 
-        tracing::info!("Found Record Segment: {:?}", record_segment);
+        tracing::debug!("Found Record Segment: {:?}", record_segment);
 
         if record_segment.is_none() {
             return Err(Box::new(GetSegmentWritersError::NoRecordSegmentFound));
@@ -383,12 +383,12 @@ impl CompactOrchestrator {
             {
                 Ok(writer) => writer,
                 Err(e) => {
-                    println!("Error creating Record Segment Writer: {:?}", e);
+                    tracing::error!("Error creating Record Segment Writer: {:?}", e);
                     return Err(Box::new(GetSegmentWritersError::RecordSegmentWriterError));
                 }
             };
 
-        tracing::info!("Record Segment Writer created");
+        tracing::debug!("Record Segment Writer created");
         match RecordSegmentReader::from_segment(record_segment, &self.blockfile_provider).await {
             Ok(reader) => {
                 self.curr_max_offset_id = reader.get_current_max_offset_id();
@@ -403,7 +403,7 @@ impl CompactOrchestrator {
             .iter()
             .find(|segment| segment.r#type == SegmentType::BlockfileMetadata);
 
-        tracing::info!("Found metadata segment {:?}", metadata_segment);
+        tracing::debug!("Found metadata segment {:?}", metadata_segment);
 
         if metadata_segment.is_none() {
             return Err(Box::new(GetSegmentWritersError::NoMetadataSegmentFound));
@@ -419,7 +419,7 @@ impl CompactOrchestrator {
                 }
             };
 
-        tracing::info!("Metadata Segment Writer created");
+        tracing::debug!("Metadata Segment Writer created");
 
         // Create a hnsw segment writer
         let collection_res = self
