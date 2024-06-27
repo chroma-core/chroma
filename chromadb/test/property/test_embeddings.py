@@ -100,7 +100,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @precondition(
         lambda self: not NOT_CLUSTER_ONLY
-        and self.log_operation_count >= 10
+        and self.log_operation_count > 10
         and self.__class__.__name__ == "EmbeddingStateMachine"
     )
     @rule()
