@@ -1,65 +1,52 @@
 update_settings(max_parallel_updates=6)
 
-docker_build(
+custom_build(
   'local:postgres',
-  context='./k8s/test/postgres',
-  dockerfile='./k8s/test/postgres/Dockerfile'
+  'docker build -t $EXPECTED_REF --load -f ./k8s/test/postgres/Dockerfile k8s/test/postgres',
+  ["./k8s/test/postgres"]
 )
 
-docker_build(
+custom_build(
   'local:log-service',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile',
-  target='logservice'
+  'docker build -t $EXPECTED_REF --load -f ./go/Dockerfile --target logservice .',
+  ["./go"]
 )
 
-
-docker_build(
+custom_build(
   'local:sysdb-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target='sysdb-migration'
+  'docker build -t $EXPECTED_REF --load -f ./go/Dockerfile.migration --target sysdb-migration .',
+  ["./go"]
 )
 
-docker_build(
+custom_build(
   'local:logservice-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target="logservice-migration"
+  'docker build -t $EXPECTED_REF --load -f ./go/Dockerfile.migration --target logservice-migration .',
+  ["./go"]
 )
 
-docker_build(
+custom_build(
   'local:sysdb',
-  '.',
-  only=['go/', 'idl/'],
-  dockerfile='./go/Dockerfile',
-  target='sysdb'
+  'docker build -t $EXPECTED_REF --load -f ./go/Dockerfile --target sysdb .',
+  ["./go", "./idl"]
 )
 
-docker_build(
+
+custom_build(
   'local:frontend-service',
-  '.',
-  only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
-  dockerfile='./Dockerfile',
+  'docker build -t $EXPECTED_REF --load .',
+  ["./chromadb", "./idl", "./requirements.txt", "./bin"]
 )
 
-docker_build(
+custom_build(
   'local:query-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/worker/Dockerfile',
-  target='query_service'
+  'docker build -t $EXPECTED_REF --load -f ./rust/worker/Dockerfile --target query_service .',
+  ["./rust", "./idl", "./Cargo.toml", "./Cargo.lock"]
 )
 
-docker_build(
+custom_build(
   'local:compaction-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/worker/Dockerfile',
-  target='compaction_service'
+  'docker build -t $EXPECTED_REF --load -f ./rust/worker/Dockerfile --target compaction_service .',
+  ["./rust", "./idl", "./Cargo.toml", "./Cargo.lock"]
 )
 
 k8s_resource(
