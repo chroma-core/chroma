@@ -29,7 +29,10 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
-from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase, get_collection_version
+from chromadb.test.utils.wait_for_version_increase import (
+    wait_for_version_increase,
+    get_collection_version,
+)
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
@@ -106,7 +109,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             # This is fine even if the log has some records right now
             self.log_operation_count = 0
         else:
-            new_version = wait_for_version_increase(self.api, self.collection.name, current_version)
+            new_version = wait_for_version_increase(
+                self.api, self.collection.name, current_version
+            )
             # Everything got compacted.
             self.log_operation_count = 0
             self.collection_version = new_version
