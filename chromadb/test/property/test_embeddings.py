@@ -94,11 +94,15 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.record_set_state = strategies.StateMachineRecordSet(
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count = 0
+            self.collection_version = self.collection.get_model()["version"]
 
-        self.log_operation_count = 0
-        self.collection_version = self.collection.get_model()["version"]
-
-    @precondition(lambda self: not NOT_CLUSTER_ONLY and self.log_operation_count >= 10)
+    @precondition(
+        lambda self: not NOT_CLUSTER_ONLY
+        and self.log_operation_count >= 10
+        and self.__class__.__name__ == "EmbeddingStateMachine"
+    )
     @rule()
     def wait_for_compaction(self) -> None:
         current_version = get_collection_version(self.api, self.collection.name)
@@ -119,11 +123,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @rule(
         target=embedding_ids,
         record_set=strategies.recordsets(collection_st),
-        should_compact=st.booleans(),
     )
-    def add_embeddings(
-        self, record_set: strategies.RecordSet, should_compact: bool
-    ) -> MultipleResults[ID]:
+    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
 
@@ -155,26 +156,27 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             }
             # TODO(Sanket): Why is this the full list and not only the non-overlapping ones
             self.collection.add(**normalized_record_set)
-            self.log_operation_count += len(normalized_record_set["ids"])
+            if self.__class__.__name__ == "EmbeddingStateMachine":
+                self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
             return multiple(*filtered_record_set["ids"])
 
         else:
             self.collection.add(**normalized_record_set)
-            self.log_operation_count += len(normalized_record_set["ids"])
+            if self.__class__.__name__ == "EmbeddingStateMachine":
+                self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
-    @rule(
-        ids=st.lists(consumes(embedding_ids), min_size=1), should_compact=st.booleans()
-    )
-    def delete_by_ids(self, ids: IDs, should_compact: bool) -> None:
+    @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
+    def delete_by_ids(self, ids: IDs) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
 
         self.collection.delete(ids=ids)
-        self.log_operation_count += len(ids)
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count += len(ids)
         self._remove_embeddings(set(indices_to_remove))
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
@@ -187,16 +189,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             min_size=1,
             max_size=5,
         ),
-        should_compact=st.booleans(),
     )
-    def update_embeddings(
-        self, record_set: strategies.RecordSet, should_compact: bool
-    ) -> None:
+    def update_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
         self.collection.update(**record_set)
-        self.log_operation_count += len(record_set["ids"])
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count += len(record_set["ids"])
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
@@ -207,17 +207,15 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             id_strategy=st.one_of(embedding_ids, strategies.safe_text),
             min_size=1,
             max_size=5,
-        ),
-        should_compact=st.booleans(),
+        )
     )
-    def upsert_embeddings(
-        self, record_set: strategies.RecordSet, should_compact: bool
-    ) -> None:
+    def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
         self.collection.upsert(**record_set)
-        self.log_operation_count += len(record_set["ids"])
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count += len(record_set["ids"])
         self._upsert_embeddings(record_set)
 
     @invariant()
