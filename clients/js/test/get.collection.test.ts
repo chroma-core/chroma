@@ -4,7 +4,7 @@ import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
 import { ChromaValueError, InvalidCollectionError } from "../src/Errors";
 import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
 
-test("it should get a collection", async () => {
+test("it should get documents from a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.addDocuments(collection, {

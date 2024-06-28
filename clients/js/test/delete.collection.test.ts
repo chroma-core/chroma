@@ -3,7 +3,7 @@ import chroma from "./initClient";
 import { EMBEDDINGS, IDS, METADATAS } from "./data";
 import { InvalidCollectionError } from "../src/Errors";
 
-test("it should delete a collection", async () => {
+test("it should delete documents from a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.addDocuments(collection, {
