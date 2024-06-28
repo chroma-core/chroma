@@ -100,6 +100,10 @@ impl ConsumableJoinHandle {
     }
 }
 
+/// A ComponentSender is generic over a component type. This struct is internal to the system module.
+/// It's implemented as a struct instead of a type alias so that it can implement common logic around the channel.
+///
+/// See ReceiverForMessage for a trait generic over a message type.
 #[derive(Debug)]
 pub(super) struct ComponentSender<C: Component> {
     sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>,

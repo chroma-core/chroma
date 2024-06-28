@@ -6,7 +6,7 @@ use super::{Component, ComponentSender, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
 
-// Receiver Traits
+/// A ReceiverForMessage is generic over a message type, and useful if you want to send a given message type to any component that can handle it.
 #[async_trait]
 pub(crate) trait ReceiverForMessage<M>:
     Send + Sync + Debug + ReceiverForMessageClone<M>

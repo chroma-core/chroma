@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{Component, ComponentContext, Handler, ReceiverForMessage};
+use super::{Component, ComponentContext, Handler};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
@@ -69,8 +69,6 @@ impl Scheduler {
     {
         let cancel = ctx.cancellation_token.clone();
 
-        // todo: rename? (also above)
-        // todo: is it possible to schedule on a different component?
         let sender = ctx.as_receiver().clone();
 
         let handle = tokio::spawn(async move {
