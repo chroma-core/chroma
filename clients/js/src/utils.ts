@@ -11,7 +11,7 @@ import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 // a function to convert a non-Array object to an Array
 export function toArray<T>(
   obj: T | T[],
-  isSingular: (el: T | T[]) => boolean = (el) => !Array.isArray(el)
+  isSingular: (el: T | T[]) => boolean = (el) => !Array.isArray(el),
 ): Array<T> {
   if (isSingular(obj)) {
     return [obj as T];
@@ -22,7 +22,7 @@ export function toArray<T>(
 
 // a function to convert an array to array of arrays
 export function toArrayOfArrays<T>(
-  obj: Array<Array<T>> | Array<T>
+  obj: Array<Array<T>> | Array<T>,
 ): Array<Array<T>> {
   if (Array.isArray(obj[0])) {
     return obj as Array<Array<T>>;
@@ -46,7 +46,7 @@ export function repack(value: unknown): any {
 }
 
 export async function handleSuccess(
-  response: Response | string | Count200Response
+  response: Response | string | Count200Response,
 ) {
   switch (true) {
     case response instanceof Response:
@@ -76,13 +76,13 @@ export async function importOptionalModule(moduleName: string) {
 export async function validateTenantDatabase(
   adminClient: AdminClient,
   tenant: string,
-  database: string
+  database: string,
 ): Promise<void> {
   try {
     await adminClient.getTenant({ name: tenant });
   } catch (error) {
     throw new Error(
-      `Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`
+      `Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`,
     );
   }
 
@@ -90,7 +90,7 @@ export async function validateTenantDatabase(
     await adminClient.getDatabase({ name: database, tenantName: tenant });
   } catch (error) {
     throw new Error(
-      `Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`
+      `Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`,
     );
   }
 }
@@ -102,7 +102,7 @@ export function isBrowser() {
 }
 
 function isMultiDocumentParams(
-  arg: unknown
+  arg: unknown,
 ): arg is MultiDocumentOperationParams {
   if (!arg || typeof arg !== "object") {
     return false;
@@ -112,7 +112,7 @@ function isMultiDocumentParams(
 
 export async function prepareDocumentRequest(
   reqParams: AddDocumentsParams,
-  embeddingFunction: IEmbeddingFunction
+  embeddingFunction: IEmbeddingFunction,
 ): Promise<AddDocumentsParams> {
   if (!reqParams?.embeddings && !reqParams?.documents) {
     throw new Error("embeddings and documents cannot both be undefined");
@@ -139,7 +139,7 @@ export async function prepareDocumentRequest(
   for (let i = 0; i < idsArray.length; i += 1) {
     if (typeof idsArray[i] !== "string") {
       throw new Error(
-        `Expected ids to be strings, found ${typeof idsArray[i]} at index ${i}`
+        `Expected ids to be strings, found ${typeof idsArray[i]} at index ${i}`,
       );
     }
   }
@@ -152,17 +152,17 @@ export async function prepareDocumentRequest(
     (documentsArray !== undefined && idsArray.length !== documentsArray.length)
   ) {
     throw new Error(
-      "ids, embeddings, metadatas, and documents must all be the same length"
+      "ids, embeddings, metadatas, and documents must all be the same length",
     );
   }
 
   const uniqueIds = new Set(idsArray);
   if (uniqueIds.size !== idsArray.length) {
     const duplicateIds = idsArray.filter(
-      (item, index) => idsArray.indexOf(item) !== index
+      (item, index) => idsArray.indexOf(item) !== index,
     );
     throw new Error(
-      `ID's must be unique, found duplicates for: ${duplicateIds}`
+      `ID's must be unique, found duplicates for: ${duplicateIds}`,
     );
   }
 
@@ -183,7 +183,7 @@ export async function prepareDocumentRequest(
 //
 // This function turns that into an array of strings or an array of embeddings
 export function toQueryArray(
-  query: string | string[] | number[] | number[][]
+  query: string | string[] | number[] | number[][],
 ): [string[] | number[][], boolean] {
   if (typeof query === "string") {
     return [[query], true];

@@ -35,7 +35,7 @@ test("it should create a collection", async () => {
     },
   ]).toEqual(expect.arrayContaining(collections));
   expect([{ name: "test2", metadata: null }]).not.toEqual(
-    expect.arrayContaining(collections)
+    expect.arrayContaining(collections),
   );
 
   await chroma.reset();

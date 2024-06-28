@@ -19,7 +19,7 @@ test("it should get a collection", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
   expect(results.included).toEqual(
-    expect.arrayContaining(["metadatas", "documents"])
+    expect.arrayContaining(["metadatas", "documents"]),
   );
 
   const results2 = await chroma.getDocuments(collection, {
@@ -50,7 +50,7 @@ test("wrong code returns an error", async () => {
     expect(error).toBeDefined();
     expect(error).toBeInstanceOf(ChromaValueError);
     expect(error.message).toMatchInlineSnapshot(
-      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`
+      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
     );
   }
 });
@@ -123,6 +123,6 @@ test("it should throw an error if the collection does not exist", async () => {
       await chroma.getCollection({
         name: "test",
         embeddingFunction: new DefaultEmbeddingFunction(),
-      })
+      }),
   ).rejects.toThrow(Error);
 });

@@ -500,7 +500,7 @@ export class ChromaClient {
   ): Promise<SingleGetResponse>;
   async getDocuments(
     collection: Collection,
-    params: MultiGetParams,
+    params?: MultiGetParams,
   ): Promise<MultiGetResponse>;
   async getDocuments(
     collection: Collection,

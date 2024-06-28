@@ -60,3 +60,5 @@ repos:
     hooks:
       - id: prettier
         files: "^clients/js/.+"
+        additional_dependencies:
+          - prettier@2.8.7

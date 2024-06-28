@@ -21,7 +21,7 @@ test("it should delete a collection", async () => {
 
   var remainingEmbeddings = await chroma.getDocuments(collection);
   expect(["test2", "test3"]).toEqual(
-    expect.arrayContaining(remainingEmbeddings.ids)
+    expect.arrayContaining(remainingEmbeddings.ids),
   );
 });
 

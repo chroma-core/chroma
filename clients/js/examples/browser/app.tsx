@@ -66,7 +66,7 @@ const useDocuments = (query?: string) => {
                 document: document!,
                 relativeDistance: distance / maxDistance,
               };
-            })
+            }),
           );
         } else {
           chroma.getDocuments(collection).then((results) => {
@@ -77,7 +77,7 @@ const useDocuments = (query?: string) => {
             setDocuments(
               results.documents.map((document) => ({
                 document: document!,
-              }))
+              })),
             );
           });
         }
@@ -85,7 +85,7 @@ const useDocuments = (query?: string) => {
         setIsLoading(false);
       }
     },
-    [collection, query]
+    [collection, query],
   );
 
   useEffect(() => {
@@ -105,7 +105,7 @@ export function App() {
   const trimmedQuery = query.trim();
 
   const { documents, revalidate, isLoading } = useDocuments(
-    trimmedQuery === "" ? undefined : trimmedQuery
+    trimmedQuery === "" ? undefined : trimmedQuery,
   );
 
   const handleDocumentAdd = async (event: React.FormEvent<HTMLFormElement>) => {

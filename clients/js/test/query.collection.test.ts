@@ -31,7 +31,7 @@ test("it should query a collection", async () => {
   expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
   expect(["test3"]).not.toEqual(expect.arrayContaining(results.ids));
   expect(results.included).toEqual(
-    expect.arrayContaining(["metadatas", "documents"])
+    expect.arrayContaining(["metadatas", "documents"]),
   );
 });
 
@@ -202,7 +202,7 @@ test("it should query a collection with text and where nin", async () => {
   expect(results.ids).toEqual(expect.arrayContaining(["test3"]));
   expect(results.ids).not.toEqual(expect.arrayContaining(["test2"]));
   expect(results.documents).toEqual(
-    expect.arrayContaining(["This is a third test"])
+    expect.arrayContaining(["This is a third test"]),
   );
 });
 
