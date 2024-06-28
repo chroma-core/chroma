@@ -100,7 +100,40 @@ impl ConsumableJoinHandle {
     }
 }
 
-pub(crate) type ComponentSender<C> = tokio::sync::mpsc::Sender<WrappedMessage<C>>;
+#[derive(Debug)]
+pub(super) struct ComponentSender<C: Component> {
+    sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>,
+}
+
+impl<C: Component> ComponentSender<C> {
+    pub(super) fn new(sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>) -> Self {
+        ComponentSender { sender }
+    }
+
+    pub(super) async fn wrap_and_send<M>(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<(), ChannelError>
+    where
+        C: Handler<M>,
+        M: Send + Debug + 'static,
+    {
+        self.sender
+            .send(wrap(message, tracing_context))
+            .await
+            .map_err(|_| ChannelError::SendError)
+    }
+}
+
+// Cannot automatically derive, see https://github.com/rust-lang/rust/issues/26925
+impl<C: Component> Clone for ComponentSender<C> {
+    fn clone(&self) -> Self {
+        ComponentSender {
+            sender: self.sender.clone(),
+        }
+    }
+}
 
 /// A component handle is a handle to a component that can be used to stop it.
 /// and introspect its state.
@@ -184,10 +217,7 @@ impl<C: Component> ComponentHandle<C> {
         C: Handler<M>,
         M: Send + Debug + 'static,
     {
-        self.sender
-            .send(wrap(message, tracing_context))
-            .await
-            .map_err(|_| ChannelError::SendError)
+        self.sender.wrap_and_send(message, tracing_context).await
     }
 }
 
@@ -220,12 +250,7 @@ impl<C: Component> ComponentContext<C> {
         C: Handler<M>,
         M: Send + Debug + 'static,
     {
-        self.sender
-            .send(wrap(message, tracing_context))
-            .await
-            .map_err(|_| ChannelError::SendError)?;
-
-        Ok(())
+        self.sender.wrap_and_send(message, tracing_context).await
     }
 }
 

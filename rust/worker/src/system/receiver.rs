@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::errors::{ChromaError, ErrorCodes};
 
-use super::{wrapped_message::wrap, Component, ComponentSender, Handler};
+use super::{Component, ComponentSender, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -48,12 +48,7 @@ where
         message: M,
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError> {
-        // todo: is there a way to share these implementations?
-        let res = self.send(wrap(message, tracing_context)).await;
-        match res {
-            Ok(_) => Ok(()),
-            Err(_) => Err(ChannelError::SendError),
-        }
+        self.wrap_and_send(message, tracing_context).await
     }
 }
 
