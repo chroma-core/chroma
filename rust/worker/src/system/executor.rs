@@ -70,7 +70,6 @@ where
                 message = channel.recv() => {
                     match message {
                         Some(mut message) => {
-                            println!("got message in executor: {:?}", message);
                             let parent_span: tracing::Span;
                             match message.get_tracing_context() {
                                 Some(spn) => {
@@ -88,12 +87,7 @@ where
                                     scheduler: self.inner.scheduler.clone(),
                             };
                             let task_future = message.handle(&mut self.handler, &component_context);
-                            let result = task_future.instrument(child_span).await;
-                            println!("got result in executor: {:?}", result);
-                            // message.
-                            // message.response_tx.reply();
-                            // let tx = message.response_tx.unwrap();
-                            // tx.send(result).unwrap();
+                            task_future.instrument(child_span).await;
                         }
                         None => {
                             // TODO: Log error

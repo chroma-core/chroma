@@ -129,19 +129,18 @@ where
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use std::sync::atomic::AtomicUsize;
 
     #[derive(Debug)]
     struct TestComponent {
         queue_size: usize,
-        counter: Arc<AtomicUsize>,
+        counter: usize,
     }
 
     impl TestComponent {
-        fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
+        fn new(queue_size: usize) -> Self {
             TestComponent {
                 queue_size,
-                counter,
+                counter: 0,
             }
         }
     }
@@ -155,9 +154,8 @@ mod tests {
             message: usize,
             _ctx: &ComponentContext<TestComponent>,
         ) -> Self::Result {
-            self.counter
-                .fetch_add(message, std::sync::atomic::Ordering::SeqCst);
-            return self.counter.load(std::sync::atomic::Ordering::SeqCst);
+            self.counter += message;
+            return self.counter;
         }
     }
 
@@ -170,22 +168,29 @@ mod tests {
         fn queue_size(&self) -> usize {
             self.queue_size
         }
-
-        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
-            // let test_stream = stream::iter(vec![1, 2, 3]);
-            // self.register_stream(test_stream, ctx);
-        }
     }
 
     #[tokio::test]
     async fn response_types() {
         let system = System::new();
-        let counter = Arc::new(AtomicUsize::new(0));
-        let component = TestComponent::new(10, counter.clone());
+        let component = TestComponent::new(10);
         let handle = system.start_component(component);
 
-        // todo: type should include error
-        assert_eq!(1, handle.requestable_receiver().request(1, None).await);
-        assert_eq!(2, handle.requestable_receiver().request(1, None).await);
+        assert_eq!(
+            1,
+            handle
+                .requestable_receiver()
+                .request(1, None)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            2,
+            handle
+                .requestable_receiver()
+                .request(1, None)
+                .await
+                .unwrap()
+        );
     }
 }

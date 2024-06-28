@@ -7,23 +7,18 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
-type AnyMessageResult = Box<dyn Debug + Send>;
-
 // Message Wrapper
 #[derive(Debug)]
 pub(crate) struct Wrapper<C>
 where
     C: Component,
 {
-    // todo: rename
     wrapper: Box<dyn WrapperTrait<C>>,
-    // todo: limit pub scope?
-    // pub response_tx: Box<dyn ResultReplyTrait<C>>, //Option<oneshot::Sender<AnyMessageResult>>,
     tracing_context: Option<tracing::Span>,
 }
 
 impl<C: Component> Wrapper<C> {
-    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) {
+    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
         self.wrapper.handle(component, ctx).await;
     }
 
@@ -41,7 +36,7 @@ where
 }
 
 #[derive(Debug)]
-struct MessageWithReplyChannel<M: Debug + Send + 'static, Result: Send> {
+pub(crate) struct MessageWithReplyChannel<M: Debug + Send + 'static, Result: Send> {
     message: M,
     reply_channel: oneshot::Sender<Result>,
 }
@@ -74,7 +69,6 @@ pub(crate) fn wrap<C, M>(
     tracing_context: Option<tracing::Span>,
 ) -> Wrapper<C>
 where
-    // todo
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
@@ -106,7 +100,6 @@ where
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError>
     where
-        // todo
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
@@ -161,13 +154,25 @@ trait ReceiverClone<M> {
     fn clone_box(&self) -> Box<dyn Receiver<M>>;
 }
 
+#[derive(Error, Debug)]
+pub(crate) enum RequestError {
+    #[error("failed to send message")]
+    SendError,
+    #[error("failed to receive result")]
+    ReceiveError,
+}
+
 #[async_trait]
 pub(crate) trait RequestableReceiver<C, M>
 where
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
-    async fn request(&self, message: M, tracing_context: Option<tracing::Span>) -> C::Result;
+    async fn request(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<C::Result, RequestError>;
 }
 
 pub(crate) trait AllReceiver<C, M>: Receiver<M> + RequestableReceiver<C, M>
@@ -224,7 +229,6 @@ where
 #[async_trait]
 impl<C, M> Receiver<M> for ReceiverImpl<C>
 where
-    // todo
     C: Component + Handler<M>,
     M: Send + Debug + 'static,
 {
@@ -256,17 +260,21 @@ where
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
-    async fn request(&self, message: M, tracing_context: Option<tracing::Span>) -> C::Result {
+    async fn request(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<C::Result, RequestError> {
         let (tx, rx) = oneshot::channel();
         let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
 
-        let res = self
-            .sender
+        self.sender
             .send(wrap(message_with_reply_channel, tracing_context))
-            .await;
+            .await
+            .map_err(|_| RequestError::SendError)?;
 
-        let result = rx.await.unwrap();
-        result
+        let result = rx.await.map_err(|_| RequestError::ReceiveError)?;
+        Ok(result)
     }
 }
 
