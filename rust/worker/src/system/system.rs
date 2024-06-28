@@ -1,5 +1,4 @@
 use super::scheduler::Scheduler;
-use super::sender::Sender;
 use super::ComponentContext;
 use super::ComponentRuntime;
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
@@ -35,10 +34,9 @@ impl System {
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
-        let sender = Sender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
         let mut executor = ComponentExecutor::new(
-            sender.clone(),
+            tx.clone(),
             cancel_token.clone(),
             component,
             self.clone(),
@@ -51,7 +49,7 @@ impl System {
                     trace_span!(parent: Span::current(), "component spawn", "name" = C::get_name());
                 let task_future = async move { executor.run(rx).await };
                 let join_handle = tokio::spawn(task_future.instrument(child_span));
-                return ComponentHandle::new(cancel_token, Some(join_handle), sender);
+                return ComponentHandle::new(cancel_token, Some(join_handle), tx);
             }
             ComponentRuntime::Dedicated => {
                 println!("Spawning on dedicated thread");
@@ -61,7 +59,7 @@ impl System {
                     rt.block_on(async move { executor.run(rx).await });
                 });
                 // TODO: Implement Join for dedicated threads
-                return ComponentHandle::new(cancel_token, None, sender);
+                return ComponentHandle::new(cancel_token, None, tx);
             }
         }
     }
@@ -105,7 +103,7 @@ where
             message = stream.next() => {
                 match message {
                     Some(message) => {
-                        let res = ctx.sender.send(message, None).await;
+                        let res = ctx.send(message, None).await;
                         match res {
                             Ok(_) => {}
                             Err(e) => {

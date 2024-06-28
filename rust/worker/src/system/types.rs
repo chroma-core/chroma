@@ -1,11 +1,12 @@
-use super::scheduler::Scheduler;
+use super::{scheduler::Scheduler, wrap, ChannelError, Wrapper};
 use async_trait::async_trait;
 use futures::Stream;
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
+use tokio::sync::Mutex;
 
-use super::{sender::Sender, system::System, Receiver, ReceiverImpl};
+use super::{system::System, Receiver, ReceiverImpl};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 /// The state of a component
 /// A component can be running or stopped
 /// A component is stopped when it is cancelled
@@ -78,11 +79,24 @@ where
 /// - cancellation_token: A cancellation token that can be used to stop the component
 /// - state: The state of the component
 /// - join_handle: The join handle for the component, used to join on the component
-pub(crate) struct ComponentHandle<C: Component> {
+#[derive(Debug)]
+pub(crate) struct ComponentHandle<C: Component + Debug> {
     cancellation_token: tokio_util::sync::CancellationToken,
-    state: ComponentState,
-    join_handle: Option<tokio::task::JoinHandle<()>>,
-    sender: Sender<C>,
+    state: Arc<Mutex<ComponentState>>,
+    join_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+}
+
+// Implemented manually because of https://github.com/rust-lang/rust/issues/26925.
+impl<C: Component> Clone for ComponentHandle<C> {
+    fn clone(&self) -> Self {
+        ComponentHandle {
+            cancellation_token: self.cancellation_token.clone(),
+            state: self.state.clone(),
+            join_handle: self.join_handle.clone(),
+            sender: self.sender.clone(),
+        }
+    }
 }
 
 impl<C: Component> ComponentHandle<C> {
@@ -92,23 +106,25 @@ impl<C: Component> ComponentHandle<C> {
         // and instead use a one shot channel to signal completion
         // TODO: implement this
         join_handle: Option<tokio::task::JoinHandle<()>>,
-        sender: Sender<C>,
+        sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
-            state: ComponentState::Running,
-            join_handle: join_handle,
+            state: Arc::new(Mutex::new(ComponentState::Running)),
+            join_handle: Arc::new(Mutex::new(join_handle)),
             sender: sender,
         }
     }
 
-    pub(crate) fn stop(&mut self) {
+    pub(crate) async fn stop(&mut self) {
         self.cancellation_token.cancel();
-        self.state = ComponentState::Stopped;
+        let mut state = self.state.lock().await;
+        *state = ComponentState::Stopped;
     }
 
     pub(crate) async fn join(&mut self) {
-        match self.join_handle.take() {
+        // todo: panic?
+        match self.join_handle.lock().await.take() {
             Some(handle) => {
                 handle.await;
             }
@@ -116,17 +132,34 @@ impl<C: Component> ComponentHandle<C> {
         };
     }
 
-    pub(crate) fn state(&self) -> &ComponentState {
-        return &self.state;
+    pub(crate) async fn get_current_state(&self) -> ComponentState {
+        return self.state.lock().await.clone();
     }
 
-    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M> + Send>
+    pub(crate) fn as_receiver<M>(&self) -> Box<dyn Receiver<M>>
+    where
+        C: Component + Handler<M>,
+        M: Debug + Send + 'static,
+    {
+        Box::new(ReceiverImpl::new(self.sender.clone()))
+    }
+
+    pub(crate) async fn send<M>(
+        &mut self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
         M: Send + Debug + 'static,
     {
-        let sender = self.sender.sender.clone();
-        Box::new(ReceiverImpl::new(sender))
+        self.sender
+            .send(wrap(message, tracing_context))
+            .await
+            .unwrap();
+
+        // todo: return correct error
+        Ok(())
     }
 }
 
@@ -136,9 +169,38 @@ where
     C: Component + 'static,
 {
     pub(crate) system: System,
-    pub(crate) sender: Sender<C>,
+    pub(crate) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
     pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
     pub(crate) scheduler: Scheduler,
+}
+
+impl<C: Component> ComponentContext<C> {
+    // todo: correct name?
+    pub(crate) fn as_receiver<M>(&self) -> Box<dyn Receiver<M>>
+    where
+        C: Component + Handler<M>,
+        M: Debug + Send + 'static,
+    {
+        Box::new(ReceiverImpl::new(self.sender.clone()))
+    }
+
+    pub(crate) async fn send<M>(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<(), ChannelError>
+    where
+        C: Handler<M>,
+        M: Send + Debug + 'static,
+    {
+        self.sender
+            .send(wrap(message, tracing_context))
+            .await
+            .unwrap();
+
+        // todo
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -194,9 +256,9 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
         let mut handle = system.start_component(component);
-        handle.sender.send(1, None).await.unwrap();
-        handle.sender.send(2, None).await.unwrap();
-        handle.sender.send(3, None).await.unwrap();
+        handle.send(1, None).await.unwrap();
+        handle.send(2, None).await.unwrap();
+        handle.send(3, None).await.unwrap();
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         // With the streaming data and the messages we should have 12
@@ -205,8 +267,8 @@ mod tests {
         // Yield to allow the component to stop
         tokio::task::yield_now().await;
         // Expect the component to be stopped
-        assert_eq!(*handle.state(), ComponentState::Stopped);
-        let res = handle.sender.send(4, None).await;
+        assert_eq!(handle.get_current_state().await, ComponentState::Stopped);
+        let res = handle.send(4, None).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());
     }
