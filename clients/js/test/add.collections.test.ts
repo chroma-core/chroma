@@ -14,8 +14,12 @@ test("it should add single embeddings to a collection", async () => {
   const ids = "test1";
   const embeddings = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const metadatas = { test: "test" };
-  await chroma.addDocuments(collection, { ids, embeddings, metadatas });
-  const count = await chroma.countCollections();
+  await chroma.addDocuments(collection, {
+    ids,
+    embeddings,
+    metadatas,
+  });
+  const count = await chroma.countDocuments(collection);
   expect(count).toBe(1);
   var res = await chroma.getDocuments(collection, {
     ids: [ids],
@@ -28,7 +32,7 @@ test("it should add batch embeddings to a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.addDocuments(collection, { ids: IDS, embeddings: EMBEDDINGS });
-  const count = await chroma.countCollections();
+  const count = await chroma.countDocuments(collection);
   expect(count).toBe(3);
   var res = await chroma.getDocuments(collection, {
     ids: IDS,
@@ -95,7 +99,7 @@ test("add documents", async () => {
   });
   expect(resp).toBe(true);
   const results = await chroma.getDocuments(collection, { ids: "test1" });
-  expect(results.documents).toBe(["This is a test"]);
+  expect(results.documents).toStrictEqual(["This is a test"]);
 });
 
 test("should error on non existing collection", async () => {

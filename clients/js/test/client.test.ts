@@ -201,7 +201,7 @@ test("wrong code returns an error", async () => {
   const metadatas = [{ test: "test1" }, { test: "test2" }, { test: "test3" }];
   await chroma.addDocuments(collection, { ids, embeddings, metadatas });
   try {
-    await chroma.getDocuments({
+    await chroma.getDocuments(collection, {
       // @ts-ignore - supposed to fail
       where: { test: { $contains: "hello" } },
     });

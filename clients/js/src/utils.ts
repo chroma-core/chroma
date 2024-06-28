@@ -119,7 +119,7 @@ export async function prepareDocumentRequest(
   }
 
   const embeddingsArray = reqParams.embeddings
-    ? toArray<Embedding>(reqParams.embeddings)
+    ? toArrayOfArrays<number>(reqParams.embeddings)
     : reqParams.documents
     ? await embeddingFunction.generate(toArray(reqParams.documents))
     : undefined;
@@ -166,16 +166,12 @@ export async function prepareDocumentRequest(
     );
   }
 
-  if (isMultiDocumentParams(reqParams)) {
-    return {
-      ...reqParams,
-      embeddings: embeddingsArray,
-    };
-  }
-
   return {
     ...reqParams,
-    embeddings: embeddingsArray[0],
+    ids: idsArray,
+    metadatas: metadatasArray,
+    documents: documentsArray,
+    embeddings: embeddingsArray,
   };
 }
 

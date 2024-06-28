@@ -6,12 +6,12 @@ test("it should modify collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   expect(collection.name).toBe("test");
-  expect(collection.metadata).toBeUndefined();
+  expect(collection.metadata).toBeNull();
 
   collection.name = "test2";
   await chroma.updateCollection(collection);
   expect(collection.name).toBe("test2");
-  expect(collection.metadata).toBeUndefined();
+  expect(collection.metadata).toBeNull();
 
   const collection2 = await chroma.getCollection({
     name: "test2",

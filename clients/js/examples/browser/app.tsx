@@ -26,7 +26,7 @@ const useCollection = () => {
 
   useEffect(() => {
     chroma
-      .collection({ name: "demo-collection" })
+      .getOrCreateCollection({ name: "demo-collection" })
       .then((collection) => setCollection(collection));
   }, []);
 
