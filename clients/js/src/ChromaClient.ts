@@ -33,6 +33,10 @@ import {
   MultiQueryResponse,
   DeleteParams,
   PeekParams,
+  SingleGetResponse,
+  SingleGetParams,
+  MultiGetResponse,
+  MultiGetParams,
 } from "./types";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
@@ -195,7 +199,7 @@ export class ChromaClient {
           name,
           metadata,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -248,7 +252,7 @@ export class ChromaClient {
           metadata,
           get_or_create: true,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -285,7 +289,7 @@ export class ChromaClient {
       offset,
       this.tenant,
       this.database,
-      this.api.options
+      this.api.options,
     );
     return handleSuccess(response);
   }
@@ -306,7 +310,7 @@ export class ChromaClient {
     const response = await this.api.countCollections(
       this.tenant,
       this.database,
-      this.api.options
+      this.api.options,
     );
     return handleSuccess(response);
   }
@@ -366,7 +370,7 @@ export class ChromaClient {
           new_name: collection.name,
           new_metadata: collection.metadata,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
 
@@ -417,7 +421,7 @@ export class ChromaClient {
    */
   async addDocuments(
     collection: Collection,
-    params: AddDocumentsParams
+    params: AddDocumentsParams,
   ): Promise<AddResponse> {
     await this.initPromise;
     return await this.api
@@ -426,9 +430,9 @@ export class ChromaClient {
         // TODO: For some reason the auto generated code requires metadata to be defined here.
         (await prepareDocumentRequest(
           params,
-          collection.embeddingFunction
+          collection.embeddingFunction,
         )) as GeneratedApi.AddEmbedding,
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
   }
@@ -460,9 +464,9 @@ export class ChromaClient {
         // TODO: For some reason the auto generated code requires metadata to be defined here.
         (await prepareDocumentRequest(
           params,
-          collection.embeddingFunction
+          collection.embeddingFunction,
         )) as GeneratedApi.AddEmbedding,
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
   }
@@ -492,12 +496,20 @@ export class ChromaClient {
    */
   async getDocuments(
     collection: Collection,
-    { ids, where, limit, offset, include, whereDocument }: GetParams = {}
+    params: SingleGetParams,
+  ): Promise<SingleGetResponse>;
+  async getDocuments(
+    collection: Collection,
+    params: MultiGetParams,
+  ): Promise<MultiGetResponse>;
+  async getDocuments(
+    collection: Collection,
+    { ids, where, limit, offset, include, whereDocument }: GetParams = {},
   ): Promise<GetResponse> {
     await this.initPromise;
     const idsArray = ids ? toArray(ids) : undefined;
 
-    return (await this.api
+    const resp = (await this.api
       .aGet(
         collection.id,
         {
@@ -508,9 +520,22 @@ export class ChromaClient {
           include,
           where_document: whereDocument,
         },
-        this.api.options
+        this.api.options,
       )
-      .then(handleSuccess)) as GetResponse;
+      .then(handleSuccess)) as MultiGetResponse;
+
+    if (Array.isArray(ids)) {
+      return resp;
+    }
+
+    return {
+      ids: resp.ids?.[0] ?? null,
+      embeddings: resp.embeddings?.[0] ?? null,
+      documents: resp.documents?.[0] ?? null,
+      metadatas: resp.metadatas?.[0] ?? null,
+      included: resp.included,
+      error: resp.error,
+    };
   }
 
   /**
@@ -548,11 +573,11 @@ export class ChromaClient {
    */
   queryDocuments(
     collection: Collection,
-    params: SingleQueryParams
+    params: SingleQueryParams,
   ): Promise<SingleQueryResponse>;
   queryDocuments(
     collection: Collection,
-    params: MultiQueryParams
+    params: MultiQueryParams,
   ): Promise<MultiQueryResponse>;
   public async queryDocuments(
     collection: Collection,
@@ -562,7 +587,7 @@ export class ChromaClient {
       whereDocument,
       include,
       query,
-    }: QueryDocumentsParams
+    }: QueryDocumentsParams,
   ): Promise<SingleQueryResponse | MultiQueryResponse> {
     await this.initPromise;
     const [arrayQuery, wasSingular] = toQueryArray(query);
@@ -586,7 +611,7 @@ export class ChromaClient {
           where_document: whereDocument,
           include,
         },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess)) as MultiQueryResponse;
 
@@ -629,7 +654,7 @@ export class ChromaClient {
    */
   public async deleteDocuments(
     collection: Collection,
-    { ids, where, whereDocument }: DeleteParams = {}
+    { ids, where, whereDocument }: DeleteParams = {},
   ): Promise<string[]> {
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
@@ -637,7 +662,7 @@ export class ChromaClient {
       .aDelete(
         collection.id,
         { ids: idsArray, where: where, where_document: whereDocument },
-        this.api.options
+        this.api.options,
       )
       .then(handleSuccess);
   }
@@ -658,7 +683,7 @@ export class ChromaClient {
    */
   async peekDocuments(
     collection: Collection,
-    { limit }: PeekParams = {}
+    { limit }: PeekParams = {},
   ): Promise<GetResponse> {
     if (limit === undefined) limit = 10;
     const response = await this.api.aGet(
@@ -666,7 +691,7 @@ export class ChromaClient {
       {
         limit,
       },
-      this.api.options
+      this.api.options,
     );
     return handleSuccess(response);
   }

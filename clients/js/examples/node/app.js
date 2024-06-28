@@ -13,7 +13,7 @@ app.get("/", async (req, res) => {
     googleApiKey: "<APIKEY>",
   });
 
-  const collection = await cc.collection({
+  const collection = await cc.createCollection({
     name: "test-from-js",
     embeddingFunction: google,
   });
@@ -31,7 +31,7 @@ app.get("/", async (req, res) => {
     taskType: "RETRIEVAL_QUERY",
   });
 
-  const queryCollection = await cc.collection({
+  const queryCollection = await cc.getCollection({
     name: "test-from-js",
     embeddingFunction: googleQuery,
   });

@@ -8,15 +8,14 @@ export enum IncludeEnum {
   Distances = "distances",
 }
 
-type Number = number;
-export type Embedding = Array<Number>;
-export type Embeddings = Array<Embedding>;
+export type Embedding = number[];
+export type Embeddings = Embedding[];
 
 export type Metadata = Record<string, string | number | boolean>;
-export type Metadatas = Array<Metadata>;
+export type Metadatas = Metadata[];
 
 export type Document = string;
-export type Documents = Array<Document>;
+export type Documents = Document[];
 
 export type ID = string;
 export type IDs = ID[];
@@ -61,7 +60,7 @@ export type CollectionType = {
   metadata: Metadata | null;
 };
 
-export type GetResponse = {
+export type MultiGetResponse = {
   ids: IDs;
   embeddings: Embeddings | null;
   documents: (Document | null)[];
@@ -69,6 +68,17 @@ export type GetResponse = {
   error: string | null;
   included: IncludeEnum[];
 };
+
+export type SingleGetResponse = {
+  ids: ID | null;
+  embeddings: Embedding | null;
+  documents: Document | null;
+  metadatas: Metadata | null;
+  error: string | null;
+  included: IncludeEnum[];
+};
+
+export type GetResponse = SingleGetResponse | MultiGetResponse;
 
 export type SingleQueryResponse = {
   ids: IDs;
@@ -116,6 +126,14 @@ export type GetParams = {
   offset?: PositiveInteger;
   include?: IncludeEnum[];
   whereDocument?: WhereDocument;
+};
+
+export type SingleGetParams = GetParams & {
+  ids: ID;
+};
+
+export type MultiGetParams = GetParams & {
+  ids?: IDs;
 };
 
 export type ListCollectionsParams = {

@@ -22,23 +22,29 @@ test("it should add single embeddings to a collection", async () => {
   const count = await chroma.countDocuments(collection);
   expect(count).toBe(1);
   var res = await chroma.getDocuments(collection, {
-    ids: [ids],
+    ids,
     include: [IncludeEnum.Embeddings],
   });
-  expect(res.embeddings![0]).toEqual(embeddings);
+  expect(res.embeddings).toEqual(embeddings);
 });
 
 test("it should add batch embeddings to a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await chroma.addDocuments(collection, { ids: IDS, embeddings: EMBEDDINGS });
+  await chroma.addDocuments(collection, {
+    ids: IDS,
+    embeddings: EMBEDDINGS,
+    documents: DOCUMENTS,
+  });
   const count = await chroma.countDocuments(collection);
   expect(count).toBe(3);
   var res = await chroma.getDocuments(collection, {
-    ids: IDS,
+    whereDocument: {
+      $contains: "another",
+    },
     include: [IncludeEnum.Embeddings],
   });
-  expect(res.embeddings).toEqual(EMBEDDINGS); // reverse because of the order of the ids
+  expect(res.embeddings).toEqual(EMBEDDINGS);
 });
 
 if (!process.env.OPENAI_API_KEY) {
