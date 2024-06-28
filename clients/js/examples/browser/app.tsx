@@ -69,17 +69,16 @@ const useDocuments = (query?: string) => {
             }),
           );
         } else {
-          chroma.getDocuments(collection).then((results) => {
-            if (abortSignal?.aborted) {
-              return;
-            }
+          const results = await chroma.getDocuments(collection);
+          if (abortSignal?.aborted) {
+            return;
+          }
 
-            setDocuments(
-              results.documents.map((document) => ({
-                document: document!,
-              })),
-            );
-          });
+          setDocuments(
+            results.documents.map((document) => ({
+              document: document!,
+            })),
+          );
         }
       } finally {
         setIsLoading(false);

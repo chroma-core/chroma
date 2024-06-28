@@ -15,7 +15,7 @@ test("it should get embedding with matching documents", async () => {
   });
 
   const results = await chroma.getDocuments(collection, {
-    ids: "test1",
+    id: "test1",
     include: [
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
@@ -33,7 +33,7 @@ test("it should get embedding with matching documents", async () => {
   });
 
   const results2 = await chroma.getDocuments(collection, {
-    ids: "test1",
+    id: "test1",
     include: [
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,

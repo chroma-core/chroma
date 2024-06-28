@@ -3,8 +3,11 @@ import Count200Response = Api.Count200Response;
 import { AdminClient } from "./AdminClient";
 import {
   AddDocumentsParams,
+  BaseDocumentOperationParams,
   Embedding,
+  MultiAddDocumentOperationParams,
   MultiDocumentOperationParams,
+  SingleAddDocumentOperationParams,
 } from "./types";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 
@@ -83,56 +86,72 @@ function isMultiDocumentParams(
   return Array.isArray((arg as MultiDocumentOperationParams).ids);
 }
 
+function singleToMultiDocumentParams(
+  params: SingleAddDocumentOperationParams,
+): MultiAddDocumentOperationParams {
+  if ("embedding" in params) {
+    return {
+      ids: [params.id],
+      embeddings: [params.embedding!],
+      metadatas: params.metadata ? [params.metadata] : undefined,
+      documents: params.document ? [params.document] : undefined,
+    };
+  }
+
+  return {
+    ids: [params.id],
+    embeddings: params.embedding ? [params.embedding] : undefined,
+    metadatas: params.metadata ? [params.metadata] : undefined,
+    documents: [params.document],
+  };
+}
+
 export async function prepareDocumentRequest(
   reqParams: AddDocumentsParams,
   embeddingFunction: IEmbeddingFunction,
-): Promise<AddDocumentsParams> {
-  if (!reqParams?.embeddings && !reqParams?.documents) {
+): Promise<MultiDocumentOperationParams> {
+  const { ids, embeddings, metadatas, documents } = isMultiDocumentParams(
+    reqParams,
+  )
+    ? reqParams
+    : singleToMultiDocumentParams(reqParams);
+
+  if (!embeddings && !documents) {
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
-  const embeddingsArray = reqParams.embeddings
-    ? toArrayOfArrays<number>(reqParams.embeddings)
-    : reqParams.documents
-    ? await embeddingFunction.generate(toArray(reqParams.documents))
+  const embeddingsArray = embeddings
+    ? embeddings
+    : documents
+    ? await embeddingFunction.generate(documents)
     : undefined;
 
   if (!embeddingsArray) {
     throw new Error("Wasn't able to generate embeddings for your request.");
   }
 
-  const idsArray = toArray(reqParams.ids);
-  const metadatasArray = reqParams.metadatas
-    ? toArray(reqParams.metadatas)
-    : undefined;
-  const documentsArray = reqParams.documents
-    ? toArray(reqParams.documents)
-    : undefined;
-
-  for (let i = 0; i < idsArray.length; i += 1) {
-    if (typeof idsArray[i] !== "string") {
+  for (let i = 0; i < ids.length; i += 1) {
+    if (typeof ids[i] !== "string") {
       throw new Error(
-        `Expected ids to be strings, found ${typeof idsArray[i]} at index ${i}`,
+        `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
       );
     }
   }
 
   if (
-    (embeddingsArray !== undefined &&
-      idsArray.length !== embeddingsArray.length) ||
-    (metadatasArray !== undefined &&
-      idsArray.length !== metadatasArray.length) ||
-    (documentsArray !== undefined && idsArray.length !== documentsArray.length)
+    (embeddingsArray !== undefined && ids.length !== embeddingsArray.length) ||
+    (metadatas !== undefined && ids.length !== metadatas.length) ||
+    (documents !== undefined && ids.length !== documents.length)
   ) {
     throw new Error(
       "ids, embeddings, metadatas, and documents must all be the same length",
     );
   }
 
-  const uniqueIds = new Set(idsArray);
-  if (uniqueIds.size !== idsArray.length) {
-    const duplicateIds = idsArray.filter(
-      (item, index) => idsArray.indexOf(item) !== index,
+  const uniqueIds = new Set(ids);
+  if (uniqueIds.size !== ids.length) {
+    const duplicateIds = ids.filter(
+      (item, index) => ids.indexOf(item) !== index,
     );
     throw new Error(
       `ID's must be unique, found duplicates for: ${duplicateIds}`,
@@ -140,10 +159,9 @@ export async function prepareDocumentRequest(
   }
 
   return {
-    ...reqParams,
-    ids: idsArray,
-    metadatas: metadatasArray,
-    documents: documentsArray,
+    ids,
+    metadatas,
+    documents,
     embeddings: embeddingsArray,
   };
 }

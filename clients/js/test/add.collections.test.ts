@@ -11,21 +11,21 @@ import { InvalidCollectionError } from "../src/Errors";
 test("it should add single embeddings to a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  const ids = "test1";
-  const embeddings = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const metadatas = { test: "test" };
+  const id = "test1";
+  const embedding = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const metadata = { test: "test" };
   await chroma.addDocuments(collection, {
-    ids,
-    embeddings,
-    metadatas,
+    id,
+    embedding,
+    metadata,
   });
   const count = await chroma.countDocuments(collection);
   expect(count).toBe(1);
   var res = await chroma.getDocuments(collection, {
-    ids,
+    id,
     include: [IncludeEnum.Embeddings],
   });
-  expect(res.embeddings).toEqual(embeddings);
+  expect(res.embeddings).toEqual(embedding);
 });
 
 test("it should add batch embeddings to a collection", async () => {
@@ -101,7 +101,7 @@ test("add documents", async () => {
     documents: DOCUMENTS,
   });
   expect(resp).toBe(true);
-  const results = await chroma.getDocuments(collection, { ids: "test1" });
+  const results = await chroma.getDocuments(collection, { id: "test1" });
   expect(results.documents).toBe("This is a test");
 });
 

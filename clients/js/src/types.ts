@@ -115,8 +115,9 @@ export type ConfigOptions = {
   options?: RequestInit;
 };
 
-export type GetParams = {
-  ids?: ID | IDs;
+export type BaseGetParams = {
+  id?: ID;
+  ids?: IDs;
   where?: Where;
   limit?: PositiveInteger;
   offset?: PositiveInteger;
@@ -124,13 +125,17 @@ export type GetParams = {
   whereDocument?: WhereDocument;
 };
 
-export type SingleGetParams = GetParams & {
-  ids: ID;
+export type SingleGetParams = BaseGetParams & {
+  id: ID;
+  ids?: never;
 };
 
-export type MultiGetParams = GetParams & {
+export type MultiGetParams = BaseGetParams & {
   ids?: IDs;
+  id?: never;
 };
+
+export type GetParams = SingleGetParams | MultiGetParams;
 
 export type ListCollectionsParams = {
   limit?: PositiveInteger;
@@ -162,30 +167,52 @@ export type DeleteCollectionParams = {
   name: string;
 };
 
-type SingleDocumentOperationParams = {
-  ids: ID;
-  embeddings?: Embedding;
-  metadatas?: Metadata;
-  documents?: Document;
+export type BaseDocumentOperationParams = {
+  id?: ID;
+  embedding?: Embedding;
+  metadata?: Metadata;
+  document?: Document;
+
+  ids?: IDs;
+  embeddings?: Embeddings;
+  metadatas?: Metadatas;
+  documents?: Documents;
+};
+
+type SingleDocumentOperationParams = BaseDocumentOperationParams & {
+  id: ID;
+  embedding?: Embedding;
+  metadata?: Metadata;
+  document?: Document;
+
+  ids?: never;
+  embeddings?: never;
+  metadatas?: never;
+  documents?: never;
 };
 
 type SingleEmbeddingDocumentOperationParams = SingleDocumentOperationParams & {
-  embeddings: Embedding;
+  embedding: Embedding;
 };
 
 type SingleContentDocumentOperationParams = SingleDocumentOperationParams & {
-  documents: Document;
+  document: Document;
 };
 
-type SingleAddDocumentOperationParams =
+export type SingleAddDocumentOperationParams =
   | SingleEmbeddingDocumentOperationParams
   | SingleContentDocumentOperationParams;
 
-export type MultiDocumentOperationParams = {
+export type MultiDocumentOperationParams = BaseDocumentOperationParams & {
   ids: IDs;
   embeddings?: Embeddings;
   metadatas?: Metadatas;
   documents?: Documents;
+
+  id?: never;
+  embedding?: never;
+  metadata?: never;
+  document?: never;
 };
 
 type MultiEmbeddingDocumentOperationParams = MultiDocumentOperationParams & {
@@ -196,7 +223,7 @@ type MultiContentDocumentOperationParams = MultiDocumentOperationParams & {
   documents: Documents;
 };
 
-type MultiAddDocumentOperationParams =
+export type MultiAddDocumentOperationParams =
   | MultiEmbeddingDocumentOperationParams
   | MultiContentDocumentOperationParams;
 

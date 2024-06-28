@@ -36,6 +36,10 @@ import {
   SingleGetParams,
   MultiGetResponse,
   MultiGetParams,
+  BaseGetParams,
+  BaseDocumentOperationParams,
+  SingleAddDocumentOperationParams,
+  MultiAddDocumentOperationParams,
 } from "./types";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
@@ -406,6 +410,14 @@ export class ChromaClient {
    */
   async addDocuments(
     collection: Collection,
+    params: SingleAddDocumentOperationParams,
+  ): Promise<AddResponse>;
+  async addDocuments(
+    collection: Collection,
+    params: MultiAddDocumentOperationParams,
+  ): Promise<AddResponse>;
+  async addDocuments(
+    collection: Collection,
     params: AddDocumentsParams,
   ): Promise<AddResponse> {
     await this.initPromise;
@@ -439,6 +451,14 @@ export class ChromaClient {
    * });
    * ```
    */
+  async setDocuments(
+    collection: Collection,
+    params: SingleAddDocumentOperationParams,
+  ): Promise<AddResponse>;
+  async setDocuments(
+    collection: Collection,
+    params: MultiAddDocumentOperationParams,
+  ): Promise<AddResponse>;
   async setDocuments(collection: Collection, params: UpsertDocumentsParams) {
     await this.initPromise;
     return await this.api.upsert(
@@ -485,10 +505,18 @@ export class ChromaClient {
   ): Promise<MultiGetResponse>;
   async getDocuments(
     collection: Collection,
-    { ids, where, limit, offset, include, whereDocument }: GetParams = {},
+    {
+      id,
+      ids,
+      where,
+      limit,
+      offset,
+      include,
+      whereDocument,
+    }: BaseGetParams = {},
   ): Promise<GetResponse> {
     await this.initPromise;
-    const idsArray = ids ? toArray(ids) : undefined;
+    const idsArray = id ? [id] : ids;
 
     const resp = (await this.api.aGet(
       collection.id,
@@ -503,7 +531,7 @@ export class ChromaClient {
       this.api.options,
     )) as MultiGetResponse;
 
-    if (typeof ids === "string") {
+    if (id !== undefined) {
       return {
         ids: resp.ids?.[0] ?? null,
         embeddings: resp.embeddings?.[0] ?? null,
