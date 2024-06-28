@@ -1,4 +1,4 @@
-use super::{scheduler::Scheduler, sender::Wrapper, system::System, ChannelError, Component};
+use super::{scheduler::Scheduler, sender::Wrapper, system::System, Component, ComponentSender};
 use crate::system::ComponentContext;
 use std::sync::Arc;
 use tokio::select;
@@ -8,7 +8,7 @@ struct Inner<C>
 where
     C: Component,
 {
-    pub(super) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+    pub(super) sender: ComponentSender<C>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
     pub(super) system: System,
     pub(super) scheduler: Scheduler,
@@ -31,8 +31,7 @@ where
     C: Component + Send + 'static,
 {
     pub(super) fn new(
-        // todo: alias for this type?
-        sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+        sender: ComponentSender<C>,
         cancellation_token: tokio_util::sync::CancellationToken,
         handler: C,
         system: System,

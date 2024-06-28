@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::errors::{ChromaError, ErrorCodes};
 
-use super::{Component, ComponentContext, Handler};
+use super::{Component, ComponentContext, ComponentSender, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -58,59 +58,6 @@ where
     }
 }
 
-// // Sender
-// #[derive(Debug)]
-// pub(crate) struct Sender<C>
-// where
-//     C: Component + Send + 'static,
-// {
-//     pub(super) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
-// }
-
-// impl<C> Sender<C>
-// where
-//     C: Component + Send + 'static,
-// {
-//     pub(super) fn new(sender: tokio::sync::mpsc::Sender<Wrapper<C>>) -> Self {
-//         Sender { sender }
-//     }
-
-//     pub(crate) async fn send<M>(
-//         &self,
-//         message: M,
-//         tracing_context: Option<tracing::Span>,
-//     ) -> Result<(), ChannelError>
-//     where
-//         C: Component + Handler<M>,
-//         M: Debug + Send + 'static,
-//     {
-//         let res = self.sender.send(wrap(message, tracing_context)).await;
-//         match res {
-//             Ok(_) => Ok(()),
-//             Err(_) => Err(ChannelError::SendError),
-//         }
-//     }
-
-//     pub(crate) fn as_receiver<M>(&self) -> Box<dyn Receiver<M>>
-//     where
-//         C: Component + Handler<M>,
-//         M: Debug + Send + 'static,
-//     {
-//         Box::new(ReceiverImpl::new(self.sender.clone()))
-//     }
-// }
-
-// impl<C> Clone for Sender<C>
-// where
-//     C: Component,
-// {
-//     fn clone(&self) -> Self {
-//         Sender {
-//             sender: self.sender.clone(),
-//         }
-//     }
-// }
-
 // Reciever Traits
 
 #[async_trait]
@@ -122,7 +69,7 @@ pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
     ) -> Result<(), ChannelError>;
 }
 
-trait ReceiverClone<M> {
+pub(crate) trait ReceiverClone<M> {
     fn clone_box(&self) -> Box<dyn Receiver<M>>;
 }
 
@@ -147,7 +94,7 @@ pub(super) struct ReceiverImpl<C>
 where
     C: Component,
 {
-    pub(super) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+    pub(super) sender: ComponentSender<C>,
 }
 
 impl<C> Clone for ReceiverImpl<C>
@@ -165,7 +112,7 @@ impl<C> ReceiverImpl<C>
 where
     C: Component,
 {
-    pub(super) fn new(sender: tokio::sync::mpsc::Sender<Wrapper<C>>) -> Self {
+    pub(super) fn new(sender: ComponentSender<C>) -> Self {
         ReceiverImpl { sender }
     }
 }

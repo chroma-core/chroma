@@ -1,8 +1,9 @@
 use super::{scheduler::Scheduler, wrap, ChannelError, Wrapper};
 use async_trait::async_trait;
+use core::panic;
 use futures::Stream;
 use std::{fmt::Debug, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task::JoinError};
 
 use super::{system::System, Receiver, ReceiverImpl};
 
@@ -73,6 +74,34 @@ where
     }
 }
 
+/// A thin wrapper over a join handle that will panic if it is consumed twice.
+#[derive(Debug)]
+struct ConsumableJoinHandle {
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ConsumableJoinHandle {
+    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+        ConsumableJoinHandle {
+            handle: Some(handle),
+        }
+    }
+
+    async fn consume(&mut self) -> Result<(), JoinError> {
+        match self.handle.take() {
+            Some(handle) => {
+                handle.await?;
+                Ok(())
+            }
+            None => {
+                panic!("Join handle already consumed");
+            }
+        }
+    }
+}
+
+pub(crate) type ComponentSender<C> = tokio::sync::mpsc::Sender<Wrapper<C>>;
+
 /// A component handle is a handle to a component that can be used to stop it.
 /// and introspect its state.
 /// # Fields
@@ -83,8 +112,8 @@ where
 pub(crate) struct ComponentHandle<C: Component + Debug> {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: Arc<Mutex<ComponentState>>,
-    join_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+    join_handle: Arc<Mutex<Option<ConsumableJoinHandle>>>,
+    sender: ComponentSender<C>,
 }
 
 // Implemented manually because of https://github.com/rust-lang/rust/issues/26925.
@@ -106,12 +135,14 @@ impl<C: Component> ComponentHandle<C> {
         // and instead use a one shot channel to signal completion
         // TODO: implement this
         join_handle: Option<tokio::task::JoinHandle<()>>,
-        sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+        sender: ComponentSender<C>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: Arc::new(Mutex::new(ComponentState::Running)),
-            join_handle: Arc::new(Mutex::new(join_handle)),
+            join_handle: Arc::new(Mutex::new(
+                join_handle.map(|handle| ConsumableJoinHandle::new(handle)),
+            )),
             sender: sender,
         }
     }
@@ -122,14 +153,13 @@ impl<C: Component> ComponentHandle<C> {
         *state = ComponentState::Stopped;
     }
 
-    pub(crate) async fn join(&mut self) {
-        // todo: panic?
-        match self.join_handle.lock().await.take() {
-            Some(handle) => {
-                handle.await;
-            }
-            None => return,
-        };
+    /// Consumes the underlying join handle. Panics if it is consumed twice.
+    pub(crate) async fn join(&mut self) -> Result<(), JoinError> {
+        if let Some(join_handle) = self.join_handle.lock().await.as_mut() {
+            join_handle.consume().await
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) async fn get_current_state(&self) -> ComponentState {
@@ -156,10 +186,7 @@ impl<C: Component> ComponentHandle<C> {
         self.sender
             .send(wrap(message, tracing_context))
             .await
-            .unwrap();
-
-        // todo: return correct error
-        Ok(())
+            .map_err(|_| ChannelError::SendError)
     }
 }
 
@@ -169,7 +196,7 @@ where
     C: Component + 'static,
 {
     pub(crate) system: System,
-    pub(crate) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+    pub(crate) sender: ComponentSender<C>,
     pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
     pub(crate) scheduler: Scheduler,
 }
@@ -196,9 +223,8 @@ impl<C: Component> ComponentContext<C> {
         self.sender
             .send(wrap(message, tracing_context))
             .await
-            .unwrap();
+            .map_err(|_| ChannelError::SendError)?;
 
-        // todo
         Ok(())
     }
 }
