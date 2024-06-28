@@ -1,4 +1,4 @@
-use super::{scheduler::Scheduler, sender::Wrapper, system::System, Component, ComponentSender};
+use super::{scheduler::Scheduler, system::System, Component, ComponentSender, WrappedMessage};
 use crate::system::ComponentContext;
 use std::sync::Arc;
 use tokio::select;
@@ -48,7 +48,10 @@ where
         }
     }
 
-    pub(super) async fn run(&mut self, mut channel: tokio::sync::mpsc::Receiver<Wrapper<C>>) {
+    pub(super) async fn run(
+        &mut self,
+        mut channel: tokio::sync::mpsc::Receiver<WrappedMessage<C>>,
+    ) {
         self.handler
             .on_start(&ComponentContext {
                 system: self.inner.system.clone(),

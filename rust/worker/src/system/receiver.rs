@@ -2,64 +2,11 @@ use std::fmt::Debug;
 
 use crate::errors::{ChromaError, ErrorCodes};
 
-use super::{Component, ComponentContext, ComponentSender, Handler};
+use super::{wrapped_message::wrap, Component, ComponentSender, Handler};
 use async_trait::async_trait;
 use thiserror::Error;
 
-// Message Wrapper
-#[derive(Debug)]
-pub(crate) struct Wrapper<C>
-where
-    C: Component,
-{
-    wrapper: Box<dyn WrapperTrait<C>>,
-    tracing_context: Option<tracing::Span>,
-}
-
-impl<C: Component> Wrapper<C> {
-    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
-        self.wrapper.handle(component, ctx).await;
-    }
-
-    pub(super) fn get_tracing_context(&self) -> Option<tracing::Span> {
-        return self.tracing_context.clone();
-    }
-}
-
-#[async_trait]
-pub(super) trait WrapperTrait<C>: Debug + Send
-where
-    C: Component,
-{
-    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> ();
-}
-
-#[async_trait]
-impl<C, M> WrapperTrait<C> for Option<M>
-where
-    C: Component + Handler<M>,
-    M: Debug + Send + 'static,
-{
-    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
-        if let Some(message) = self.take() {
-            component.handle(message, ctx).await;
-        }
-    }
-}
-
-pub(crate) fn wrap<C, M>(message: M, tracing_context: Option<tracing::Span>) -> Wrapper<C>
-where
-    C: Component + Handler<M>,
-    M: Debug + Send + 'static,
-{
-    Wrapper {
-        wrapper: Box::new(Some(message)),
-        tracing_context,
-    }
-}
-
 // Receiver Traits
-
 #[async_trait]
 pub(crate) trait ReceiverForMessage<M>:
     Send + Sync + Debug + ReceiverForMessageClone<M>

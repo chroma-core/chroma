@@ -1,4 +1,4 @@
-use super::{scheduler::Scheduler, wrap, ChannelError, Wrapper};
+use super::{scheduler::Scheduler, wrap, ChannelError, WrappedMessage};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
@@ -100,7 +100,7 @@ impl ConsumableJoinHandle {
     }
 }
 
-pub(crate) type ComponentSender<C> = tokio::sync::mpsc::Sender<Wrapper<C>>;
+pub(crate) type ComponentSender<C> = tokio::sync::mpsc::Sender<WrappedMessage<C>>;
 
 /// A component handle is a handle to a component that can be used to stop it.
 /// and introspect its state.
