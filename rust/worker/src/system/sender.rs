@@ -58,10 +58,12 @@ where
     }
 }
 
-// Reciever Traits
+// Receiver Traits
 
 #[async_trait]
-pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
+pub(crate) trait ReceiverForMessage<M>:
+    Send + Sync + Debug + ReceiverForMessageClone<M>
+{
     async fn send(
         &self,
         message: M,
@@ -69,26 +71,26 @@ pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
     ) -> Result<(), ChannelError>;
 }
 
-pub(crate) trait ReceiverClone<M> {
-    fn clone_box(&self) -> Box<dyn Receiver<M>>;
+pub(crate) trait ReceiverForMessageClone<M> {
+    fn clone_box(&self) -> Box<dyn ReceiverForMessage<M>>;
 }
 
-impl<M> Clone for Box<dyn Receiver<M>> {
-    fn clone(&self) -> Box<dyn Receiver<M>> {
+impl<M> Clone for Box<dyn ReceiverForMessage<M>> {
+    fn clone(&self) -> Box<dyn ReceiverForMessage<M>> {
         self.clone_box()
     }
 }
 
-impl<T, M> ReceiverClone<M> for T
+impl<T, M> ReceiverForMessageClone<M> for T
 where
-    T: 'static + Receiver<M> + Clone,
+    T: 'static + ReceiverForMessage<M> + Clone,
 {
-    fn clone_box(&self) -> Box<dyn Receiver<M>> {
+    fn clone_box(&self) -> Box<dyn ReceiverForMessage<M>> {
         Box::new(self.clone())
     }
 }
 
-// Reciever Impls
+// Receiver Impls
 #[derive(Debug)]
 pub(super) struct ReceiverImpl<C>
 where
@@ -118,7 +120,7 @@ where
 }
 
 #[async_trait]
-impl<C, M> Receiver<M> for ReceiverImpl<C>
+impl<C, M> ReceiverForMessage<M> for ReceiverImpl<C>
 where
     C: Component + Handler<M>,
     M: Send + Debug + 'static,
@@ -128,6 +130,7 @@ where
         message: M,
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError> {
+        // todo: is there a way to share these implementations?
         let res = self.sender.send(wrap(message, tracing_context)).await;
         match res {
             Ok(_) => Ok(()),

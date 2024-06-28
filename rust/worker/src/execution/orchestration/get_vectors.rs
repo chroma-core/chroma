@@ -19,7 +19,8 @@ use crate::{
     log::log::{Log, PullLogsError},
     sysdb::sysdb::SysDb,
     system::{
-        ChannelError, Component, ComponentContext, ComponentHandle, Handler, Receiver, System,
+        ChannelError, Component, ComponentContext, ComponentHandle, Handler, ReceiverForMessage,
+        System,
     },
     types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
@@ -104,7 +105,7 @@ impl GetVectorsOrchestrator {
 
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
         ctx: &ComponentContext<Self>,
     ) {
         self.state = ExecutionState::PullLogs;
@@ -147,7 +148,7 @@ impl GetVectorsOrchestrator {
     async fn get_vectors(
         &mut self,
         self_address: Box<
-            dyn Receiver<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
         >,
         log: Chunk<LogRecord>,
         ctx: &ComponentContext<Self>,

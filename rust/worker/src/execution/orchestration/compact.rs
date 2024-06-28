@@ -36,7 +36,7 @@ use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::ComponentHandle;
 use crate::system::Handler;
-use crate::system::Receiver;
+use crate::system::ReceiverForMessage;
 use crate::system::System;
 use crate::types::LogRecord;
 use crate::types::Segment;
@@ -182,7 +182,7 @@ impl CompactOrchestrator {
     // of the segment, and not fully respect the offset_id from the compaction job
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
     ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -217,7 +217,7 @@ impl CompactOrchestrator {
     async fn partition(
         &mut self,
         records: Chunk<LogRecord>,
-        self_address: Box<dyn Receiver<TaskResult<PartitionOutput, PartitionError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PartitionOutput, PartitionError>>>,
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
@@ -238,7 +238,7 @@ impl CompactOrchestrator {
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
         self_address: Box<
-            dyn Receiver<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
         >,
     ) {
         self.state = ExecutionState::Write;
@@ -284,7 +284,7 @@ impl CompactOrchestrator {
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
         metadata_segment_writer: MetadataSegmentWriter<'static>,
-        self_address: Box<dyn Receiver<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
     ) {
         self.state = ExecutionState::Flush;
 
@@ -308,7 +308,7 @@ impl CompactOrchestrator {
         &mut self,
         log_position: i64,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-        self_address: Box<dyn Receiver<TaskResult<RegisterOutput, RegisterError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<RegisterOutput, RegisterError>>>,
     ) {
         self.state = ExecutionState::Register;
         let operator = RegisterOperator::new();

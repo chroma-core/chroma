@@ -1,5 +1,5 @@
 use super::{dispatcher::TaskRequestMessage, operator::TaskMessage};
-use crate::system::{Component, ComponentContext, ComponentRuntime, Handler, Receiver};
+use crate::system::{Component, ComponentContext, ComponentRuntime, Handler, ReceiverForMessage};
 use async_trait::async_trait;
 use std::fmt::{Debug, Formatter, Result};
 
@@ -8,13 +8,13 @@ use std::fmt::{Debug, Formatter, Result};
 /// # Implementation notes
 /// - The actor loop will block until work is available
 pub(super) struct WorkerThread {
-    dispatcher: Box<dyn Receiver<TaskRequestMessage>>,
+    dispatcher: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     queue_size: usize,
 }
 
 impl WorkerThread {
     pub(super) fn new(
-        dispatcher: Box<dyn Receiver<TaskRequestMessage>>,
+        dispatcher: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
         queue_size: usize,
     ) -> WorkerThread {
         WorkerThread {

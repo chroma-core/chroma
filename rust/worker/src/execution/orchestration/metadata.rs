@@ -26,7 +26,7 @@ use crate::{
     execution::operator::TaskMessage,
     log::log::Log,
     sysdb::sysdb::SysDb,
-    system::{Receiver, System},
+    system::{ReceiverForMessage, System},
     types::Segment,
 };
 use async_trait::async_trait;

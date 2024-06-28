@@ -3,7 +3,7 @@ use crate::execution::config::DispatcherConfig;
 use crate::{
     config::Configurable,
     errors::ChromaError,
-    system::{Component, ComponentContext, Handler, Receiver, System},
+    system::{Component, ComponentContext, Handler, ReceiverForMessage, System},
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -83,7 +83,7 @@ impl Dispatcher {
     fn spawn_workers(
         &self,
         system: &mut System,
-        self_receiver: Box<dyn Receiver<TaskRequestMessage>>,
+        self_receiver: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     ) {
         for _ in 0..self.n_worker_threads {
             let worker = WorkerThread::new(self_receiver.clone(), self.worker_queue_size);
@@ -154,7 +154,7 @@ impl Configurable<DispatcherConfig> for Dispatcher {
 /// - reply_to: The receiver to send the task to, this is the worker thread
 #[derive(Debug)]
 pub(super) struct TaskRequestMessage {
-    reply_to: Box<dyn Receiver<TaskMessage>>,
+    reply_to: Box<dyn ReceiverForMessage<TaskMessage>>,
 }
 
 impl TaskRequestMessage {
@@ -162,7 +162,7 @@ impl TaskRequestMessage {
     /// # Parameters
     /// - reply_to: The receiver to send the task to, this is the worker thread
     /// that is requesting the task
-    pub(super) fn new(reply_to: Box<dyn Receiver<TaskMessage>>) -> Self {
+    pub(super) fn new(reply_to: Box<dyn ReceiverForMessage<TaskMessage>>) -> Self {
         TaskRequestMessage { reply_to }
     }
 }

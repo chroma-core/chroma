@@ -19,7 +19,7 @@ use crate::execution::orchestration::{
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::{ComponentHandle, Receiver, System};
+use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;

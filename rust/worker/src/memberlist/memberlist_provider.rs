@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::RwLock};
 
 use super::config::MemberlistProviderConfig;
-use crate::system::Receiver;
+use crate::system::ReceiverForMessage;
 use crate::{
     config::Configurable,
     errors::{ChromaError, ErrorCodes},
@@ -26,7 +26,7 @@ pub(crate) type Memberlist = Vec<String>;
 pub(crate) trait MemberlistProvider:
     Component + Configurable<MemberlistProviderConfig>
 {
-    fn subscribe(&mut self, receiver: Box<dyn Receiver<Memberlist> + Send>) -> ();
+    fn subscribe(&mut self, receiver: Box<dyn ReceiverForMessage<Memberlist> + Send>) -> ();
 }
 
 /* =========== CRD ============== */
@@ -56,7 +56,7 @@ pub(crate) struct CustomResourceMemberlistProvider {
     memberlist_cr_client: Api<MemberListKubeResource>,
     queue_size: usize,
     current_memberlist: RwLock<Memberlist>,
-    subscribers: Vec<Box<dyn Receiver<Memberlist> + Send>>,
+    subscribers: Vec<Box<dyn ReceiverForMessage<Memberlist> + Send>>,
 }
 
 impl Debug for CustomResourceMemberlistProvider {
@@ -245,7 +245,7 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
 
 #[async_trait]
 impl MemberlistProvider for CustomResourceMemberlistProvider {
-    fn subscribe(&mut self, sender: Box<dyn Receiver<Memberlist> + Send>) -> () {
+    fn subscribe(&mut self, sender: Box<dyn ReceiverForMessage<Memberlist> + Send>) -> () {
         self.subscribers.push(sender);
     }
 }

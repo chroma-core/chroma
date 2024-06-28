@@ -21,7 +21,6 @@ use crate::system::Component;
 use crate::system::ComponentContext;
 use crate::system::ComponentHandle;
 use crate::system::Handler;
-use crate::system::Receiver;
 use crate::system::System;
 use async_trait::async_trait;
 use futures::stream::FuturesUnordered;

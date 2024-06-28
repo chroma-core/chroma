@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{Component, ComponentContext, Handler, Receiver};
+use super::{Component, ComponentContext, Handler, ReceiverForMessage};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {

@@ -5,7 +5,7 @@ use futures::Stream;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::Mutex, task::JoinError};
 
-use super::{system::System, Receiver, ReceiverImpl};
+use super::{system::System, ReceiverForMessage, ReceiverImpl};
 
 #[derive(Debug, PartialEq, Clone)]
 /// The state of a component
@@ -166,7 +166,7 @@ impl<C: Component> ComponentHandle<C> {
         return self.state.lock().await.clone();
     }
 
-    pub(crate) fn as_receiver<M>(&self) -> Box<dyn Receiver<M>>
+    pub(crate) fn as_receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
@@ -203,7 +203,7 @@ where
 
 impl<C: Component> ComponentContext<C> {
     // todo: correct name?
-    pub(crate) fn as_receiver<M>(&self) -> Box<dyn Receiver<M>>
+    pub(crate) fn as_receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,

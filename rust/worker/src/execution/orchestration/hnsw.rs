@@ -32,7 +32,7 @@ use crate::system::{ComponentContext, ComponentHandle, System};
 use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
 use crate::{
     log::log::Log,
-    system::{Component, Handler, Receiver},
+    system::{Component, Handler, ReceiverForMessage},
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -210,7 +210,7 @@ impl HnswQueryOrchestrator {
 
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
     ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -252,7 +252,9 @@ impl HnswQueryOrchestrator {
         &mut self,
         logs: Chunk<LogRecord>,
         self_address: Box<
-            dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>>,
+            dyn ReceiverForMessage<
+                TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>,
+            >,
         >,
     ) {
         self.state = ExecutionState::QueryKnn;
