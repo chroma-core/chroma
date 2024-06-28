@@ -9,6 +9,7 @@ use arrow::{
         Int32Array, Int32Builder, ListBuilder, RecordBatch, StringBuilder, StructArray,
         UInt32Builder,
     },
+    buffer::{Buffer, MutableBuffer},
     datatypes::{Field, Fields},
     util::bit_util,
 };

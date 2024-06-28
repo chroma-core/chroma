@@ -228,6 +228,7 @@ mod test {
     #[tokio::test]
     async fn test_sizing_string_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &str>();
@@ -243,6 +244,9 @@ mod test {
         let size = delta.get_size::<&str, &str>();
         block_manager.commit::<&str, &str>(&delta);
         let block = block_manager.get(&delta_id).await.unwrap();
+        // TODO: uncomment this when sizing is fixed
+        println!("==== COMPUTING DUMPED BLOCK SIZE ==== ");
+        let dumped_block_size = block.get_size();
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
@@ -255,7 +259,11 @@ mod test {
         let loaded = Block::load("test.arrow", delta_id).unwrap();
         assert_eq!(loaded.id, delta_id);
         // TODO: make this sizing work
-        // assert_eq!(block.get_size(), loaded.get_size());
+        println!("==== COMPUTING ORIGINAL BLOCK SIZE ==== ");
+        let original_size = block.get_size();
+        println!("==== COMPUTING LOADED BLOCK SIZE ==== ");
+        let loaded_size = loaded.get_size();
+        assert_eq!(block.get_size(), loaded.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
             let read = loaded.get::<&str, &str>("prefix", &key);
