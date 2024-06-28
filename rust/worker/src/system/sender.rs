@@ -38,11 +38,12 @@ where
 #[derive(Debug)]
 pub(crate) struct MessageWithReplyChannel<M: Debug + Send + 'static, Result: Send> {
     message: M,
-    reply_channel: oneshot::Sender<Result>,
+    // Optional because not all messages require a reply, .send() does not provide a reply channel but .request() does.
+    reply_channel: Option<oneshot::Sender<Result>>,
 }
 
 impl<M: Debug + Send + 'static, Result: Send> MessageWithReplyChannel<M, Result> {
-    fn new(message: M, reply_channel: oneshot::Sender<Result>) -> Self {
+    fn new(message: M, reply_channel: Option<oneshot::Sender<Result>>) -> Self {
         MessageWithReplyChannel {
             message,
             reply_channel,
@@ -59,7 +60,10 @@ where
     async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) {
         if let Some(message) = self.take() {
             let result = component.handle(message.message, ctx).await;
-            message.reply_channel.send(result).unwrap();
+            if let Some(reply_channel) = message.reply_channel {
+                // todo: avoid unwrap?
+                reply_channel.send(result).unwrap();
+            }
         }
     }
 }
@@ -103,16 +107,11 @@ where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
-        println!("sending message...");
+        let message_with_reply_channel = MessageWithReplyChannel::new(message, None);
         let res = self
             .sender
             .send(wrap(message_with_reply_channel, tracing_context))
             .await;
-        println!("waiting for result...");
-        let result = rx.await;
-        println!("got result in sender: {:?}", result);
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
@@ -237,10 +236,7 @@ where
         message: M,
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError> {
-        let (tx, rx) = oneshot::channel();
-        let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
-
-        println!("sending message... {:?}", message_with_reply_channel);
+        let message_with_reply_channel = MessageWithReplyChannel::new(message, None);
 
         let res = self
             .sender
@@ -266,7 +262,7 @@ where
         tracing_context: Option<tracing::Span>,
     ) -> Result<C::Result, RequestError> {
         let (tx, rx) = oneshot::channel();
-        let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
+        let message_with_reply_channel = MessageWithReplyChannel::new(message, Some(tx));
 
         self.sender
             .send(wrap(message_with_reply_channel, tracing_context))
