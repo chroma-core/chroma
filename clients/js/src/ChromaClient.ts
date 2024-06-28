@@ -533,10 +533,10 @@ export class ChromaClient {
 
     if (id !== undefined) {
       return {
-        ids: resp.ids?.[0] ?? null,
-        embeddings: resp.embeddings?.[0] ?? null,
-        documents: resp.documents?.[0] ?? null,
-        metadatas: resp.metadatas?.[0] ?? null,
+        id: resp.ids?.[0] ?? null,
+        embedding: resp.embeddings?.[0] ?? null,
+        document: resp.documents?.[0] ?? null,
+        metadata: resp.metadatas?.[0] ?? null,
         included: resp.included,
       };
     }

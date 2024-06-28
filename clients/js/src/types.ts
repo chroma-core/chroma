@@ -69,10 +69,10 @@ export type MultiGetResponse = {
 };
 
 export type SingleGetResponse = {
-  ids: ID | null;
-  embeddings: Embedding | null;
-  documents: Document | null;
-  metadatas: Metadata | null;
+  id: ID | null;
+  embedding: Embedding | null;
+  document: Document | null;
+  metadata: Metadata | null;
   included: IncludeEnum[];
 };
 

@@ -23,7 +23,7 @@ test("it should get embedding with matching documents", async () => {
     ],
   });
 
-  expect(results?.embeddings).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  expect(results?.embedding).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   await chroma.setDocuments(collection, {
     ids: ["test1"],
@@ -40,9 +40,9 @@ test("it should get embedding with matching documents", async () => {
       IncludeEnum.Documents,
     ],
   });
-  expect(results2?.embeddings).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
-  expect(results2.metadatas).toEqual({ test: "test1new", float_value: -2 });
-  expect(results2.documents).toEqual("doc1new");
+  expect(results2?.embedding).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
+  expect(results2.metadata).toEqual({ test: "test1new", float_value: -2 });
+  expect(results2.document).toEqual("doc1new");
 });
 
 test("should error on non existing collection", async () => {

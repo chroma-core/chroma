@@ -121,8 +121,8 @@ export function App() {
     setIsMutating(true);
     try {
       await chroma.setDocuments(collection, {
-        ids: await hashString(document),
-        documents: document,
+        id: await hashString(document),
+        document: document,
       });
 
       await revalidate();
