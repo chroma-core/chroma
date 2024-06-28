@@ -18,18 +18,13 @@ where
     // todo: rename
     wrapper: Box<dyn WrapperTrait<C>>,
     // todo: limit pub scope?
-    pub response_tx: Option<oneshot::Sender<AnyMessageResult>>,
+    // pub response_tx: Box<dyn ResultReplyTrait<C>>, //Option<oneshot::Sender<AnyMessageResult>>,
     tracing_context: Option<tracing::Span>,
 }
 
 impl<C: Component> Wrapper<C> {
-    pub(super) async fn handle(
-        &mut self,
-        component: &mut C,
-        ctx: &ComponentContext<C>,
-        // todo: wrap in Option?
-    ) -> AnyMessageResult {
-        self.wrapper.handle(component, ctx).await
+    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) {
+        self.wrapper.handle(component, ctx).await;
     }
 
     pub(super) fn get_tracing_context(&self) -> Option<tracing::Span> {
@@ -42,27 +37,40 @@ pub(super) trait WrapperTrait<C>: Debug + Send
 where
     C: Component,
 {
-    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> AnyMessageResult;
+    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>);
+}
+
+#[derive(Debug)]
+struct MessageWithReplyChannel<M: Debug + Send + 'static, Result: Send> {
+    message: M,
+    reply_channel: oneshot::Sender<Result>,
+}
+
+impl<M: Debug + Send + 'static, Result: Send> MessageWithReplyChannel<M, Result> {
+    fn new(message: M, reply_channel: oneshot::Sender<Result>) -> Self {
+        MessageWithReplyChannel {
+            message,
+            reply_channel,
+        }
+    }
 }
 
 #[async_trait]
-impl<C, M> WrapperTrait<C> for Option<M>
+impl<C, M> WrapperTrait<C> for Option<MessageWithReplyChannel<M, C::Result>>
 where
     C: Component + Handler<M>,
     M: Debug + Send + 'static,
 {
-    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> AnyMessageResult {
+    async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) {
         if let Some(message) = self.take() {
-            return Box::new(Some(component.handle(message, ctx).await));
+            let result = component.handle(message.message, ctx).await;
+            message.reply_channel.send(result).unwrap();
         }
-
-        Box::new(None::<()>)
     }
 }
 
 pub(crate) fn wrap<C, M>(
-    message: M,
-    response_tx: oneshot::Sender<AnyMessageResult>,
+    message: MessageWithReplyChannel<M, C::Result>,
     tracing_context: Option<tracing::Span>,
 ) -> Wrapper<C>
 where
@@ -72,7 +80,6 @@ where
 {
     Wrapper {
         wrapper: Box::new(Some(message)),
-        response_tx: Some(response_tx),
         tracing_context,
     }
 }
@@ -104,11 +111,12 @@ where
         M: Debug + Send + 'static,
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        //       let channel = tokio::sync::oneshot::channel();
-        // let res = self.sender.send(wrap(message, channel, tracing_context)).await;
-        // channel.recv().await;
+        let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
         println!("sending message...");
-        let res = self.sender.send(wrap(message, tx, tracing_context)).await;
+        let res = self
+            .sender
+            .send(wrap(message_with_reply_channel, tracing_context))
+            .await;
         println!("waiting for result...");
         let result = rx.await;
         println!("got result in sender: {:?}", result);
@@ -146,7 +154,7 @@ pub(crate) trait Receiver<M>: Send + Sync + Debug + ReceiverClone<M> {
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<Box<dyn Debug + Send>, ChannelError>;
+    ) -> Result<(), ChannelError>;
 }
 
 trait ReceiverClone<M> {
@@ -208,13 +216,21 @@ where
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<Box<dyn Debug + Send>, ChannelError> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let res = self.sender.send(wrap(message, tx, tracing_context)).await;
+    ) -> Result<(), ChannelError> {
+        let (tx, rx) = oneshot::channel();
+        let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
+
+        println!("sending message... {:?}", message_with_reply_channel);
+
+        let res = self
+            .sender
+            .send(wrap(message_with_reply_channel, tracing_context))
+            .await;
+
         let result = rx.await.unwrap();
         println!("got result in receiver: {:?}", result);
         match res {
-            Ok(_) => Ok(result),
+            Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
         }
     }
