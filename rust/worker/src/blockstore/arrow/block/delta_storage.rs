@@ -267,7 +267,7 @@ impl StringValueStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct UInt32Storage {
     pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
 }
@@ -355,7 +355,7 @@ impl UInt32Storage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct Int32ArrayStorage {
     pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
 }
@@ -464,7 +464,7 @@ impl Int32ArrayStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct RoaringBitmapStorage {
     pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
 }
@@ -561,7 +561,7 @@ impl RoaringBitmapStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct DataRecordStorage {
     pub(super) id_storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
     pub(super) embedding_storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<f32>>>>,

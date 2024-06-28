@@ -275,14 +275,21 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
         let block = self.get_block(target_block_id).await;
         let res = match block {
-            Some(block) => block.get(prefix, key),
+            Some(block) => block.get(prefix, key.clone()),
             None => {
+                tracing::error!("Block with id {:?} not found", target_block_id);
                 return Err(Box::new(ArrowBlockfileError::BlockNotFound));
             }
         };
         match res {
             Some(value) => Ok(value),
             None => {
+                tracing::error!(
+                    "Key {:?}/{:?} not found in block {:?}",
+                    prefix,
+                    key,
+                    target_block_id
+                );
                 return Err(Box::new(BlockfileError::NotFoundError));
             }
         }
@@ -309,6 +316,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     block_offset += b.len();
                 }
                 None => {
+                    tracing::error!("Block id {:?} not found", uuid);
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             }
@@ -320,6 +328,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 return Ok((prefix, key, value));
             }
             _ => {
+                tracing::error!(
+                    "Value not found at index {:?} for block",
+                    index - block_offset,
+                );
                 return Err(Box::new(BlockfileError::NotFoundError));
             }
         }
