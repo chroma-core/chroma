@@ -49,33 +49,34 @@ const useDocuments = (query?: string) => {
         }
 
         if (query) {
-          const { results } = await chroma.queryDocuments(collection, {
+          const results = await chroma.queryDocuments(collection, {
             query,
           });
           if (abortSignal?.aborted) {
             return;
           }
 
-          const maxDistance = Math.max(
-            ...(results.map((r) => r.distance) ?? [])
-          );
+          const maxDistance = results.distances
+            ? Math.max(...results.distances)
+            : -Infinity;
           setDocuments(
-            results.map(({ distance, doc }) => {
+            results.documents.map((document, i) => {
+              const distance = results.distances?.[i] ?? 0;
               return {
-                document: doc.contents!,
+                document: document!,
                 relativeDistance: distance / maxDistance,
               };
             })
           );
         } else {
-          chroma.getDocuments(collection).then((docs) => {
+          chroma.getDocuments(collection).then((results) => {
             if (abortSignal?.aborted) {
               return;
             }
 
             setDocuments(
-              docs.map((document) => ({
-                document: document.contents!,
+              results.documents.map((document) => ({
+                document: document!,
               }))
             );
           });
@@ -120,12 +121,10 @@ export function App() {
 
     setIsMutating(true);
     try {
-      await chroma.setDocuments(collection, [
-        {
-          id: await hashString(document),
-          contents: document,
-        },
-      ]);
+      await chroma.setDocuments(collection, {
+        ids: await hashString(document),
+        documents: document,
+      });
 
       await revalidate();
       currentTarget.reset();
@@ -143,15 +142,10 @@ export function App() {
 
     setIsMutating(true);
     try {
-      await chroma.setDocuments(
-        collection,
-        await Promise.all(
-          SAMPLE_DOCUMENTS.map(async (d) => ({
-            id: await hashString(d),
-            contents: d,
-          }))
-        )
-      );
+      await chroma.setDocuments(collection, {
+        ids: await Promise.all(SAMPLE_DOCUMENTS.map((d) => hashString(d))),
+        documents: SAMPLE_DOCUMENTS,
+      });
 
       await revalidate();
     } finally {

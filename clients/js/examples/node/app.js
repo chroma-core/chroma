@@ -18,10 +18,10 @@ app.get("/", async (req, res) => {
     embeddingFunction: google,
   });
 
-  await cc.addDocuments(collection, [
-    { id: "doc1", contents: "doc1" },
-    { id: "doc2", contents: "doc2" },
-  ]);
+  await cc.addDocuments(collection, {
+    ids: ["doc1", "doc2"],
+    documents: ["doc1", "doc2"],
+  });
 
   let count = await cc.countDocuments(collection);
   console.log("count", count);
