@@ -65,7 +65,6 @@ export type MultiGetResponse = {
   embeddings: Embeddings | null;
   documents: (Document | null)[];
   metadatas: (Metadata | null)[];
-  error: string | null;
   included: IncludeEnum[];
 };
 
@@ -74,7 +73,6 @@ export type SingleGetResponse = {
   embeddings: Embedding | null;
   documents: Document | null;
   metadatas: Metadata | null;
-  error: string | null;
   included: IncludeEnum[];
 };
 
@@ -100,9 +98,7 @@ export type MultiQueryResponse = {
 
 export type QueryResponse = SingleQueryResponse | MultiQueryResponse;
 
-export type AddResponse = {
-  error: string;
-};
+export type AddResponse = {};
 
 export interface Collection {
   name: string;

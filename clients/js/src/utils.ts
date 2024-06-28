@@ -31,33 +31,6 @@ export function toArrayOfArrays<T>(
   }
 }
 
-// we need to override constructors to make it work with jest
-// https://stackoverflow.com/questions/76007003/jest-tobeinstanceof-expected-constructor-array-received-constructor-array
-export function repack(value: unknown): any {
-  if (Boolean(value) && typeof value === "object") {
-    if (Array.isArray(value)) {
-      return new Array(...value);
-    } else {
-      return { ...value };
-    }
-  } else {
-    return value;
-  }
-}
-
-export async function handleSuccess(
-  response: Response | string | Count200Response,
-) {
-  switch (true) {
-    case response instanceof Response:
-      return repack(await (response as Response).json());
-    case typeof response === "string":
-      return repack(response as string); // currently version is the only thing that return non-JSON
-    default:
-      return repack(response);
-  }
-}
-
 /**
  * Dynamically imports a specified module, providing a workaround for browser environments.
  * This function is necessary because we dynamically import optional dependencies

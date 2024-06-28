@@ -26,10 +26,9 @@ test("it should query a collection", async () => {
     query: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     nResults: 2,
   });
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
-  expect(["test3"]).not.toEqual(expect.arrayContaining(results.ids));
+  expect(results.ids).toHaveLength(2);
+  expect(results.ids).toEqual(expect.arrayContaining(["test1", "test2"]));
+  expect(results.ids).not.toContain("test3");
   expect(results.included).toEqual(
     expect.arrayContaining(["metadatas", "documents"]),
   );
@@ -53,12 +52,10 @@ test("it should get embedding with matching documents", async () => {
   });
 
   // it should only return doc1
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
-  expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
-  expect(["This is a test"]).toEqual(expect.arrayContaining(results.documents));
+  expect(results?.ids).toHaveLength(1);
+  expect(results.ids).toContain("test1");
+  expect(results.ids).not.toContain("test2");
+  expect(results.documents).toContain("This is a test");
 
   const results2 = await chroma.queryDocuments(collection, {
     query: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -67,7 +64,6 @@ test("it should get embedding with matching documents", async () => {
     include: [IncludeEnum.Embeddings],
   });
 
-  // expect(results2.embeddings[0][0]).toBeInstanceOf(Array);
   expect(results2.embeddings?.length).toBe(1);
   expect(results2.embeddings?.[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   expect(results2.included).toEqual(expect.arrayContaining(["embeddings"]));
@@ -90,8 +86,7 @@ test("it should exclude documents matching - not_contains", async () => {
   });
 
   // it should only return doc1
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
+  expect(results?.ids).toHaveLength(2);
   expect(results.ids).toEqual(expect.arrayContaining(["test2", "test3"]));
 });
 
@@ -116,12 +111,10 @@ test("it should query a collection with text", async () => {
     whereDocument: { $contains: "This is a test" },
   });
 
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
-  expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
-  expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
-  expect(["This is a test"]).toEqual(expect.arrayContaining(results.documents));
+  expect(results?.ids).toHaveLength(1);
+  expect(results.ids).toContain("test1");
+  expect(results.ids).not.toContain("test2");
+  expect(results.documents).toContain("This is a test");
 });
 
 test("it should query a collection with text and where", async () => {
@@ -144,9 +137,7 @@ test("it should query a collection with text and where", async () => {
     where: { float_value: 2 },
   });
 
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
+  expect(results?.ids).toHaveLength(1);
   expect(results.ids).toContain("test3");
   expect(results.ids).not.toContain("test2");
   expect(results.documents).toContain("This is a third test");
@@ -172,8 +163,7 @@ test("it should query a collection with text and where in", async () => {
     where: { float_value: { $in: [2, 5, 10] } },
   });
 
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
+  expect(results.ids).toHaveLength(1);
   expect(results.ids).toContain("test3");
   expect(results.ids).not.toContain("test2");
   expect(results.documents).toContain("This is a third test");

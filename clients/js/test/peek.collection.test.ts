@@ -9,7 +9,7 @@ test("it should peek a collection", async () => {
   await chroma.addDocuments(collection, { ids: IDS, embeddings: EMBEDDINGS });
   const results = await chroma.peekDocuments(collection, { limit: 2 });
   expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
+  expect(typeof results).toBe("object");
   expect(results.ids.length).toBe(2);
   expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
 });

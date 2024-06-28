@@ -25,19 +25,19 @@ test("it should reset the database", async () => {
   await chroma.reset();
   const collections = await chroma.listCollections();
   expect(collections).toBeDefined();
-  expect(collections).toBeInstanceOf(Array);
+  expect(Array.isArray(collections)).toBe(true);
   expect(collections.length).toBe(0);
 
   const collection = await chroma.createCollection({ name: "test" });
   const collections2 = await chroma.listCollections();
   expect(collections2).toBeDefined();
-  expect(collections2).toBeInstanceOf(Array);
+  expect(Array.isArray(collections2)).toBe(true);
   expect(collections2.length).toBe(1);
 
   await chroma.reset();
   const collections3 = await chroma.listCollections();
   expect(collections3).toBeDefined();
-  expect(collections3).toBeInstanceOf(Array);
+  expect(Array.isArray(collections3)).toBe(true);
   expect(collections3.length).toBe(0);
 });
 
@@ -45,7 +45,7 @@ test("it should list collections", async () => {
   await chroma.reset();
   let collections = await chroma.listCollections();
   expect(collections).toBeDefined();
-  expect(collections).toBeInstanceOf(Array);
+  expect(Array.isArray(collections)).toBe(true);
   expect(collections.length).toBe(0);
   const collection = await chroma.createCollection({ name: "test" });
   collections = await chroma.listCollections();
@@ -119,7 +119,7 @@ test("it should query a collection", async () => {
     nResults: 2,
   });
   expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
+  expect(typeof results).toBe("object");
   // expect(results.embeddings[0].length).toBe(2)
   const result: string[] = ["test1", "test2"];
   expect(result).toEqual(expect.arrayContaining(results.ids));
@@ -138,7 +138,7 @@ test("it should peek a collection", async () => {
   await chroma.addDocuments(collection, { ids, embeddings });
   const results = await chroma.peekDocuments(collection, { limit: 2 });
   expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
+  expect(typeof results).toBe("object");
   expect(results.ids.length).toBe(2);
   expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
 });
@@ -155,18 +155,14 @@ test("it should get a collection", async () => {
   const metadatas = [{ test: "test1" }, { test: "test2" }, { test: "test3" }];
   await chroma.addDocuments(collection, { ids, embeddings, metadatas });
   const results = await chroma.getDocuments(collection, { ids: ["test1"] });
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
+  expect(results?.ids).toHaveLength(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
 
   const results2 = await chroma.getDocuments(collection, {
     where: { test: "test1" },
   });
-  expect(results2).toBeDefined();
-  expect(results2).toBeInstanceOf(Object);
-  expect(results2.ids.length).toBe(1);
+  expect(results2?.ids).toHaveLength(1);
 });
 
 test("it should delete a collection", async () => {

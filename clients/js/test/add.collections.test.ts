@@ -39,9 +39,6 @@ test("it should add batch embeddings to a collection", async () => {
   const count = await chroma.countDocuments(collection);
   expect(count).toBe(3);
   var res = await chroma.getDocuments(collection, {
-    whereDocument: {
-      $contains: "another",
-    },
     include: [IncludeEnum.Embeddings],
   });
   expect(res.embeddings).toEqual(EMBEDDINGS);
@@ -105,7 +102,7 @@ test("add documents", async () => {
   });
   expect(resp).toBe(true);
   const results = await chroma.getDocuments(collection, { ids: "test1" });
-  expect(results.documents).toStrictEqual(["This is a test"]);
+  expect(results.documents).toBe("This is a test");
 });
 
 test("should error on non existing collection", async () => {

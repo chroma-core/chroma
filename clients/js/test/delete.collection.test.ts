@@ -13,15 +13,15 @@ test("it should delete a collection", async () => {
   });
   let count = await chroma.countDocuments(collection);
   expect(count).toBe(3);
-  var resp = await chroma.deleteDocuments(collection, {
+  await chroma.deleteDocuments(collection, {
     where: { test: "test1" },
   });
   count = await chroma.countDocuments(collection);
   expect(count).toBe(2);
 
-  var remainingEmbeddings = await chroma.getDocuments(collection);
-  expect(["test2", "test3"]).toEqual(
-    expect.arrayContaining(remainingEmbeddings.ids),
+  const remainingEmbeddings = await chroma.getDocuments(collection);
+  expect(remainingEmbeddings?.ids).toEqual(
+    expect.arrayContaining(["test2", "test3"]),
   );
 });
 

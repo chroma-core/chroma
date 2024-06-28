@@ -13,9 +13,7 @@ test("it should get a collection", async () => {
     metadatas: METADATAS,
   });
   const results = await chroma.getDocuments(collection, { ids: ["test1"] });
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.ids.length).toBe(1);
+  expect(results?.ids).toHaveLength(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
   expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
   expect(results.included).toEqual(
@@ -25,9 +23,7 @@ test("it should get a collection", async () => {
   const results2 = await chroma.getDocuments(collection, {
     where: { test: "test1" },
   });
-  expect(results2).toBeDefined();
-  expect(results2).toBeInstanceOf(Object);
-  expect(results2.ids.length).toBe(1);
+  expect(results2?.ids).toHaveLength(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
@@ -67,9 +63,7 @@ test("it should get embedding with matching documents", async () => {
   const results2 = await chroma.getDocuments(collection, {
     whereDocument: { $contains: "This is a test" },
   });
-  expect(results2).toBeDefined();
-  expect(results2).toBeInstanceOf(Object);
-  expect(results2.ids.length).toBe(1);
+  expect(results2?.ids).toHaveLength(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
@@ -85,9 +79,7 @@ test("it should get records not matching", async () => {
   const results2 = await chroma.getDocuments(collection, {
     whereDocument: { $not_contains: "This is another" },
   });
-  expect(results2).toBeDefined();
-  expect(results2).toBeInstanceOf(Object);
-  expect(results2.ids.length).toBe(2);
+  expect(results2?.ids).toHaveLength(2);
   expect(["test1", "test3"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
@@ -102,7 +94,7 @@ test("test gt, lt, in a simple small way", async () => {
   const items = await chroma.getDocuments(collection, {
     where: { float_value: { $gt: -1.4 } },
   });
-  expect(items.ids.length).toBe(2);
+  expect(items.ids).toHaveLength(2);
   expect(["test2", "test3"]).toEqual(expect.arrayContaining(items.ids));
 });
 

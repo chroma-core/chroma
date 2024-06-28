@@ -22,9 +22,8 @@ test("it should get embedding with matching documents", async () => {
       IncludeEnum.Documents,
     ],
   });
-  expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
-  expect(results.embeddings![0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+  expect(results?.embeddings).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   await chroma.setDocuments(collection, {
     ids: ["test1"],
@@ -34,18 +33,16 @@ test("it should get embedding with matching documents", async () => {
   });
 
   const results2 = await chroma.getDocuments(collection, {
-    ids: ["test1"],
+    ids: "test1",
     include: [
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
       IncludeEnum.Documents,
     ],
   });
-  expect(results2).toBeDefined();
-  expect(results2).toBeInstanceOf(Object);
-  expect(results2.embeddings![0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
-  expect(results2.metadatas[0]).toEqual({ test: "test1new", float_value: -2 });
-  expect(results2.documents[0]).toEqual("doc1new");
+  expect(results2?.embeddings).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
+  expect(results2.metadatas).toEqual({ test: "test1new", float_value: -2 });
+  expect(results2.documents).toEqual("doc1new");
 });
 
 test("should error on non existing collection", async () => {

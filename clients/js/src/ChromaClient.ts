@@ -4,7 +4,6 @@ import {
   Api as GeneratedApi,
 } from "./generated";
 import {
-  handleSuccess,
   prepareDocumentRequest,
   toArray,
   toQueryArray,
@@ -142,8 +141,7 @@ export class ChromaClient {
    */
   async version(): Promise<string> {
     await this.initPromise;
-    const response = await this.api.version(this.api.options);
-    return await handleSuccess(response);
+    return await this.api.version(this.api.options);
   }
 
   /**
@@ -159,8 +157,7 @@ export class ChromaClient {
   async heartbeat(): Promise<number> {
     await this.initPromise;
     const response = await this.api.heartbeat(this.api.options);
-    let ret = await handleSuccess(response);
-    return ret["nanosecond heartbeat"];
+    return response["nanosecond heartbeat"];
   }
 
   /**
@@ -191,23 +188,15 @@ export class ChromaClient {
     embeddingFunction = new DefaultEmbeddingFunction(),
   }: CreateCollectionParams): Promise<Collection> {
     await this.initPromise;
-    const newCollection = await this.api
-      .createCollection(
-        this.tenant,
-        this.database,
-        {
-          name,
-          metadata,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    if (newCollection.error) {
-      throw newCollection.error instanceof Error
-        ? newCollection.error
-        : new Error(newCollection.error);
-    }
+    const newCollection = (await this.api.createCollection(
+      this.tenant,
+      this.database,
+      {
+        name,
+        metadata,
+      },
+      this.api.options,
+    )) as Collection;
 
     return {
       name: newCollection.name,
@@ -243,18 +232,16 @@ export class ChromaClient {
     metadata,
     embeddingFunction = new DefaultEmbeddingFunction(),
   }: GetOrCreateCollectionParams): Promise<Collection> {
-    const newCollection = await this.api
-      .createCollection(
-        this.tenant,
-        this.database,
-        {
-          name,
-          metadata,
-          get_or_create: true,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
+    const newCollection = (await this.api.createCollection(
+      this.tenant,
+      this.database,
+      {
+        name,
+        metadata,
+        get_or_create: true,
+      },
+      this.api.options,
+    )) as Collection;
 
     return {
       name: newCollection.name,
@@ -284,14 +271,13 @@ export class ChromaClient {
     Collection[]
   > {
     await this.initPromise;
-    const response = await this.api.listCollections(
+    return (await this.api.listCollections(
       limit,
       offset,
       this.tenant,
       this.database,
       this.api.options,
-    );
-    return handleSuccess(response);
+    )) as Collection[];
   }
 
   /**
@@ -307,12 +293,11 @@ export class ChromaClient {
    */
   async countCollections(): Promise<number> {
     await this.initPromise;
-    const response = await this.api.countCollections(
+    return (await this.api.countCollections(
       this.tenant,
       this.database,
       this.api.options,
-    );
-    return handleSuccess(response);
+    )) as number;
   }
 
   /**
@@ -334,9 +319,12 @@ export class ChromaClient {
     name,
     embeddingFunction,
   }: GetCollectionParams): Promise<Collection> {
-    const response = await this.api
-      .getCollection(name, this.tenant, this.database, this.api.options)
-      .then(handleSuccess);
+    const response = (await this.api.getCollection(
+      name,
+      this.tenant,
+      this.database,
+      this.api.options,
+    )) as Collection;
 
     return {
       name: response.name,
@@ -363,18 +351,14 @@ export class ChromaClient {
    */
   async updateCollection(collection: Collection): Promise<Collection> {
     await this.initPromise;
-    const response = await this.api
-      .updateCollection(
-        collection.id,
-        {
-          new_name: collection.name,
-          new_metadata: collection.metadata,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    return response;
+    return (await this.api.updateCollection(
+      collection.id,
+      {
+        new_name: collection.name,
+        new_metadata: collection.metadata,
+      },
+      this.api.options,
+    )) as Collection;
   }
 
   /**
@@ -391,13 +375,14 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async deleteCollection({
-    name,
-  }: DeleteCollectionParams): Promise<void> {
+  async deleteCollection({ name }: DeleteCollectionParams): Promise<void> {
     await this.initPromise;
-    return await this.api
-      .deleteCollection(name, this.tenant, this.database, this.api.options)
-      .then(handleSuccess);
+    await this.api.deleteCollection(
+      name,
+      this.tenant,
+      this.database,
+      this.api.options,
+    );
   }
 
   /**
@@ -424,17 +409,15 @@ export class ChromaClient {
     params: AddDocumentsParams,
   ): Promise<AddResponse> {
     await this.initPromise;
-    return await this.api
-      .add(
-        collection.id,
-        // TODO: For some reason the auto generated code requires metadata to be defined here.
-        (await prepareDocumentRequest(
-          params,
-          collection.embeddingFunction,
-        )) as GeneratedApi.AddEmbedding,
-        this.api.options,
-      )
-      .then(handleSuccess);
+    return await this.api.add(
+      collection.id,
+      // TODO: For some reason the auto generated code requires metadata to be defined here.
+      (await prepareDocumentRequest(
+        params,
+        collection.embeddingFunction,
+      )) as GeneratedApi.AddEmbedding,
+      this.api.options,
+    );
   }
 
   /**
@@ -458,17 +441,15 @@ export class ChromaClient {
    */
   async setDocuments(collection: Collection, params: UpsertDocumentsParams) {
     await this.initPromise;
-    return await this.api
-      .upsert(
-        collection.id,
-        // TODO: For some reason the auto generated code requires metadata to be defined here.
-        (await prepareDocumentRequest(
-          params,
-          collection.embeddingFunction,
-        )) as GeneratedApi.AddEmbedding,
-        this.api.options,
-      )
-      .then(handleSuccess);
+    return await this.api.upsert(
+      collection.id,
+      // TODO: For some reason the auto generated code requires metadata to be defined here.
+      (await prepareDocumentRequest(
+        params,
+        collection.embeddingFunction,
+      )) as GeneratedApi.AddEmbedding,
+      this.api.options,
+    );
   }
 
   /**
@@ -509,33 +490,30 @@ export class ChromaClient {
     await this.initPromise;
     const idsArray = ids ? toArray(ids) : undefined;
 
-    const resp = (await this.api
-      .aGet(
-        collection.id,
-        {
-          ids: idsArray,
-          where,
-          limit,
-          offset,
-          include,
-          where_document: whereDocument,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess)) as MultiGetResponse;
+    const resp = (await this.api.aGet(
+      collection.id,
+      {
+        ids: idsArray,
+        where,
+        limit,
+        offset,
+        include,
+        where_document: whereDocument,
+      },
+      this.api.options,
+    )) as MultiGetResponse;
 
-    if (Array.isArray(ids)) {
-      return resp;
+    if (typeof ids === "string") {
+      return {
+        ids: resp.ids?.[0] ?? null,
+        embeddings: resp.embeddings?.[0] ?? null,
+        documents: resp.documents?.[0] ?? null,
+        metadatas: resp.metadatas?.[0] ?? null,
+        included: resp.included,
+      };
     }
 
-    return {
-      ids: resp.ids?.[0] ?? null,
-      embeddings: resp.embeddings?.[0] ?? null,
-      documents: resp.documents?.[0] ?? null,
-      metadatas: resp.metadatas?.[0] ?? null,
-      included: resp.included,
-      error: resp.error,
-    };
+    return resp;
   }
 
   /**
@@ -579,7 +557,7 @@ export class ChromaClient {
     collection: Collection,
     params: MultiQueryParams,
   ): Promise<MultiQueryResponse>;
-  public async queryDocuments(
+  async queryDocuments(
     collection: Collection,
     {
       nResults = 10,
@@ -601,19 +579,17 @@ export class ChromaClient {
         ? await collection.embeddingFunction.generate(arrayQuery as string[])
         : (arrayQuery as Embeddings);
 
-    const response = (await this.api
-      .getNearestNeighbors(
-        collection.id,
-        {
-          query_embeddings: embeddings,
-          where,
-          n_results: nResults,
-          where_document: whereDocument,
-          include,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess)) as MultiQueryResponse;
+    const response = (await this.api.getNearestNeighbors(
+      collection.id,
+      {
+        query_embeddings: embeddings,
+        where,
+        n_results: nResults,
+        where_document: whereDocument,
+        include,
+      },
+      this.api.options,
+    )) as MultiQueryResponse;
 
     return wasSingular
       ? {
@@ -629,9 +605,7 @@ export class ChromaClient {
 
   async countDocuments(collection: Collection): Promise<number> {
     await this.initPromise;
-    return await this.api
-      .count(collection.id, this.api.options)
-      .then(handleSuccess);
+    return (await this.api.count(collection.id, this.api.options)) as number;
   }
 
   /**
@@ -652,19 +626,17 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async deleteDocuments(
+  async deleteDocuments(
     collection: Collection,
     { ids, where, whereDocument }: DeleteParams = {},
   ): Promise<string[]> {
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
-    return await this.api
-      .aDelete(
-        collection.id,
-        { ids: idsArray, where: where, where_document: whereDocument },
-        this.api.options,
-      )
-      .then(handleSuccess);
+    return (await this.api.aDelete(
+      collection.id,
+      { ids: idsArray, where: where, where_document: whereDocument },
+      this.api.options,
+    )) as string[];
   }
 
   /**
@@ -684,15 +656,14 @@ export class ChromaClient {
   async peekDocuments(
     collection: Collection,
     { limit }: PeekParams = {},
-  ): Promise<GetResponse> {
+  ): Promise<MultiGetResponse> {
     if (limit === undefined) limit = 10;
-    const response = await this.api.aGet(
+    return (await this.api.aGet(
       collection.id,
       {
         limit,
       },
       this.api.options,
-    );
-    return handleSuccess(response);
+    )) as MultiGetResponse;
   }
 }
