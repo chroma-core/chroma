@@ -37,37 +37,8 @@ where
     }
 }
 
-// Receiver Impls
-#[derive(Debug)]
-pub(super) struct ReceiverImpl<C>
-where
-    C: Component,
-{
-    pub(super) sender: ComponentSender<C>,
-}
-
-impl<C> Clone for ReceiverImpl<C>
-where
-    C: Component,
-{
-    fn clone(&self) -> Self {
-        ReceiverImpl {
-            sender: self.sender.clone(),
-        }
-    }
-}
-
-impl<C> ReceiverImpl<C>
-where
-    C: Component,
-{
-    pub(super) fn new(sender: ComponentSender<C>) -> Self {
-        ReceiverImpl { sender }
-    }
-}
-
 #[async_trait]
-impl<C, M> ReceiverForMessage<M> for ReceiverImpl<C>
+impl<C, M> ReceiverForMessage<M> for ComponentSender<C>
 where
     C: Component + Handler<M>,
     M: Send + Debug + 'static,
@@ -78,7 +49,7 @@ where
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError> {
         // todo: is there a way to share these implementations?
-        let res = self.sender.send(wrap(message, tracing_context)).await;
+        let res = self.send(wrap(message, tracing_context)).await;
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),

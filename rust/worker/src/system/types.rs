@@ -5,7 +5,7 @@ use futures::Stream;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::Mutex, task::JoinError};
 
-use super::{system::System, ReceiverForMessage, ReceiverImpl};
+use super::{system::System, ReceiverForMessage};
 
 #[derive(Debug, PartialEq, Clone)]
 /// The state of a component
@@ -108,6 +108,7 @@ pub(crate) type ComponentSender<C> = tokio::sync::mpsc::Sender<WrappedMessage<C>
 /// - cancellation_token: A cancellation token that can be used to stop the component
 /// - state: The state of the component
 /// - join_handle: The join handle for the component, used to join on the component
+/// - sender: A channel to send messages to the component
 #[derive(Debug)]
 pub(crate) struct ComponentHandle<C: Component + Debug> {
     cancellation_token: tokio_util::sync::CancellationToken,
@@ -171,7 +172,7 @@ impl<C: Component> ComponentHandle<C> {
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
-        Box::new(ReceiverImpl::new(self.sender.clone()))
+        Box::new(self.sender.clone())
     }
 
     pub(crate) async fn send<M>(
@@ -202,13 +203,12 @@ where
 }
 
 impl<C: Component> ComponentContext<C> {
-    // todo: correct name?
     pub(crate) fn as_receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
-        Box::new(ReceiverImpl::new(self.sender.clone()))
+        Box::new(self.sender.clone())
     }
 
     pub(crate) async fn send<M>(
