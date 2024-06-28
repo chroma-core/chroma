@@ -1,4 +1,4 @@
-use super::scheduler::Scheduler;
+use super::{scheduler::Scheduler, AllReceiver};
 use async_trait::async_trait;
 use futures::Stream;
 use std::fmt::Debug;
@@ -123,6 +123,15 @@ impl<C: Component> ComponentHandle<C> {
     }
 
     pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M> + Send>
+    where
+        C: Handler<M>,
+        M: Send + Debug + 'static,
+    {
+        let sender = self.sender.sender.clone();
+        Box::new(ReceiverImpl::new(sender))
+    }
+
+    pub(crate) fn requestable_receiver<M>(&self) -> Box<dyn AllReceiver<C, M> + Send>
     where
         C: Handler<M>,
         M: Send + Debug + 'static,

@@ -182,25 +182,10 @@ mod tests {
         let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
-        let mut handle = system.start_component(component);
+        let handle = system.start_component(component);
 
-        let result = handle.receiver().send(1, None).await.unwrap();
-        println!("Result: {:?}", result);
-
-        // let result = handle.receiver().send(1, None).await.unwrap();
-        // handle.sender.send(1, None).await.unwrap();
-
-        // // yield to allow the component to process the messages
-        tokio::task::yield_now().await;
-        // // With the streaming data and the messages we should have 12
-        // assert_eq!(counter.load(Ordering::SeqCst), 12);
-        // handle.stop();
-        // // Yield to allow the component to stop
-        // tokio::task::yield_now().await;
-        // // Expect the component to be stopped
-        // assert_eq!(*handle.state(), ComponentState::Stopped);
-        // let res = handle.sender.send(4, None).await;
-        // // Expect an error because the component is stopped
-        // assert!(res.is_err());
+        // todo: type should include error
+        assert_eq!(1, handle.requestable_receiver().request(1, None).await);
+        assert_eq!(2, handle.requestable_receiver().request(1, None).await);
     }
 }

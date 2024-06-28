@@ -161,6 +161,22 @@ trait ReceiverClone<M> {
     fn clone_box(&self) -> Box<dyn Receiver<M>>;
 }
 
+#[async_trait]
+pub(crate) trait RequestableReceiver<C, M>
+where
+    C: Component + Handler<M>,
+    M: Debug + Send + 'static,
+{
+    async fn request(&self, message: M, tracing_context: Option<tracing::Span>) -> C::Result;
+}
+
+pub(crate) trait AllReceiver<C, M>: Receiver<M> + RequestableReceiver<C, M>
+where
+    C: Component + Handler<M>,
+    M: Debug + Send + 'static,
+{
+}
+
 impl<M> Clone for Box<dyn Receiver<M>> {
     fn clone(&self) -> Box<dyn Receiver<M>> {
         self.clone_box()
@@ -227,13 +243,39 @@ where
             .send(wrap(message_with_reply_channel, tracing_context))
             .await;
 
-        let result = rx.await.unwrap();
-        println!("got result in receiver: {:?}", result);
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
         }
     }
+}
+
+#[async_trait]
+impl<C, M> RequestableReceiver<C, M> for ReceiverImpl<C>
+where
+    C: Component + Handler<M>,
+    M: Debug + Send + 'static,
+{
+    async fn request(&self, message: M, tracing_context: Option<tracing::Span>) -> C::Result {
+        let (tx, rx) = oneshot::channel();
+        let message_with_reply_channel = MessageWithReplyChannel::new(message, tx);
+
+        let res = self
+            .sender
+            .send(wrap(message_with_reply_channel, tracing_context))
+            .await;
+
+        let result = rx.await.unwrap();
+        result
+    }
+}
+
+#[async_trait]
+impl<C, M> AllReceiver<C, M> for ReceiverImpl<C>
+where
+    C: Component + Handler<M>,
+    M: Debug + Send + 'static,
+{
 }
 
 // Errors
