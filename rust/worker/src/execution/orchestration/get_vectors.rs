@@ -6,6 +6,7 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
     execution::{
         data::data_chunk::Chunk,
+        dispatcher::Dispatcher,
         operator::{wrap, TaskMessage, TaskResult},
         operators::{
             get_vectors_operator::{
@@ -17,7 +18,10 @@ use crate::{
     },
     log::log::{Log, PullLogsError},
     sysdb::sysdb::SysDb,
-    system::{ChannelError, Component, ComponentContext, Handler, Receiver, System},
+    system::{
+        ChannelError, Component, ComponentContext, ComponentHandle, Handler, ReceiverForMessage,
+        System,
+    },
     types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
 use async_trait::async_trait;
@@ -67,7 +71,7 @@ pub struct GetVectorsOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel:
@@ -81,7 +85,7 @@ impl GetVectorsOrchestrator {
         hnsw_segment_id: Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
     ) -> Self {
         Self {
@@ -101,7 +105,7 @@ impl GetVectorsOrchestrator {
 
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
         ctx: &ComponentContext<Self>,
     ) {
         self.state = ExecutionState::PullLogs;
@@ -144,7 +148,7 @@ impl GetVectorsOrchestrator {
     async fn get_vectors(
         &mut self,
         self_address: Box<
-            dyn Receiver<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
         >,
         log: Chunk<LogRecord>,
         ctx: &ComponentContext<Self>,
@@ -257,7 +261,7 @@ impl Component for GetVectorsOrchestrator {
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
 
-        self.pull_logs(ctx.sender.as_receiver(), ctx).await;
+        self.pull_logs(ctx.as_receiver(), ctx).await;
     }
 }
 
@@ -276,7 +280,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrat
         match message {
             Ok(output) => {
                 let logs = output.logs();
-                self.get_vectors(ctx.sender.as_receiver(), logs, ctx).await;
+                self.get_vectors(ctx.as_receiver(), logs, ctx).await;
             }
             Err(e) => {
                 self.terminate_with_error(Box::new(e), ctx);

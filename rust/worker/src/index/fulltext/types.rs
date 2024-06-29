@@ -448,6 +448,10 @@ impl<'me> FullTextIndexReader<'me> {
             // Throw away the "value" since we store frequencies in the keys.
             token_frequencies.push((token.text.to_string(), res.1));
         }
+
+        if token_frequencies.len() == 0 {
+            return Ok(vec![]);
+        }
         // TODO sort by frequency. This adds an additional layer of complexity
         // with repeat characters where we need to keep track of which positions
         // for the character have been seen/used in the matching algorithm. By
@@ -459,17 +463,13 @@ impl<'me> FullTextIndexReader<'me> {
         // doc ID -> possible starting locations for the query.
         let mut candidates: HashMap<u32, Vec<i32>> = HashMap::new();
         let first_token = token_frequencies[0].0.as_str();
-        let first_token_offset = tokens[0].offset_from as i32;
         let first_token_positional_posting_list = self
             .posting_lists_blockfile_reader
             .get_by_prefix(first_token)
             .await
             .unwrap();
         for (_, doc_id, positions) in first_token_positional_posting_list.iter() {
-            let positions_vec: Vec<i32> = positions
-                .iter()
-                .map(|x| x.unwrap() - first_token_offset)
-                .collect();
+            let positions_vec: Vec<i32> = positions.iter().map(|x| x.unwrap()).collect();
             candidates.insert(*doc_id, positions_vec);
         }
 

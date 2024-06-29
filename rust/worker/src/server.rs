@@ -10,6 +10,7 @@ use crate::chroma_proto::{
 };
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
@@ -18,7 +19,7 @@ use crate::execution::orchestration::{
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::{Receiver, System};
+use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
@@ -33,7 +34,7 @@ pub struct WorkerServer {
     // System
     system: Option<System>,
     // Component dependencies
-    dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
+    dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -116,7 +117,7 @@ impl WorkerServer {
         Ok(())
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.dispatcher = Some(dispatcher);
     }
 
@@ -155,7 +156,7 @@ impl WorkerServer {
         });
 
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 return Err(Status::internal("No dispatcher found"));
             }
@@ -175,7 +176,7 @@ impl WorkerServer {
                     self.sysdb.clone(),
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
-                    dispatcher.clone(),
+                    dispatcher,
                 );
                 orchestrator.run().await
             }
@@ -244,7 +245,7 @@ impl WorkerServer {
         };
 
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 return Err(Status::internal("No dispatcher found"));
             }
@@ -263,7 +264,7 @@ impl WorkerServer {
             segment_uuid,
             self.log.clone(),
             self.sysdb.clone(),
-            dispatcher.clone(),
+            dispatcher,
             self.blockfile_provider.clone(),
         );
         let result = orchestrator.run().await;
@@ -599,7 +600,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         server.set_system(system.clone());
-        server.set_dispatcher(dispatcher_handle.receiver());
+        server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
             let _ = crate::server::WorkerServer::run(server).await;

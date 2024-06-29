@@ -7,6 +7,7 @@ use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
     BruteForceKnnOperator, BruteForceKnnOperatorError, BruteForceKnnOperatorInput,
@@ -27,11 +28,11 @@ use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
-use crate::system::{ComponentContext, System};
+use crate::system::{ComponentContext, ComponentHandle, System};
 use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
 use crate::{
     log::log::Log,
-    system::{Component, Handler, Receiver},
+    system::{Component, Handler, ReceiverForMessage},
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -135,7 +136,7 @@ pub(crate) struct HnswQueryOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Result channel
@@ -156,7 +157,7 @@ impl HnswQueryOrchestrator {
         sysdb: Box<SysDb>,
         hnsw_index_provider: HnswIndexProvider,
         blockfile_provider: BlockfileProvider,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
     ) -> Self {
         // Set the merge dependency count to the number of query vectors * 2
         // N for the HNSW query and N for the Brute force query
@@ -209,7 +210,7 @@ impl HnswQueryOrchestrator {
 
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
     ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -251,7 +252,9 @@ impl HnswQueryOrchestrator {
         &mut self,
         logs: Chunk<LogRecord>,
         self_address: Box<
-            dyn Receiver<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>>,
+            dyn ReceiverForMessage<
+                TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>,
+            >,
         >,
     ) {
         self.state = ExecutionState::QueryKnn;
@@ -355,7 +358,7 @@ impl HnswQueryOrchestrator {
                 allowed_ids_hnsw: self.allowed_ids_hnsw_segment.clone(),
                 logs: logs.clone(),
             };
-            let task = wrap(operator, input, ctx.sender.as_receiver());
+            let task = wrap(operator, input, ctx.as_receiver());
             self.hnsw_task_id_to_query_index.insert(task.id(), i);
             match self.dispatcher.send(task, Some(Span::current())).await {
                 Ok(_) => (),
@@ -423,7 +426,7 @@ impl HnswQueryOrchestrator {
             self.blockfile_provider.clone(),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.as_receiver());
         self.merge_task_id_to_query_index
             .insert(task.id(), query_vector_index);
         match self.dispatcher.send(task, Some(Span::current())).await {
@@ -577,7 +580,7 @@ impl Component for HnswQueryOrchestrator {
         self.hnsw_segment = Some(hnsw_segment);
         self.collection = Some(collection);
 
-        self.pull_logs(ctx.sender.as_receiver()).await;
+        self.pull_logs(ctx.as_receiver()).await;
     }
 }
 
@@ -617,7 +620,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
                 }
                 self.allowed_ids_brute_force = allowed_ids_brute_force.into();
                 self.allowed_ids_hnsw_segment = allowed_ids_hnsw.into();
-                self.brute_force_query(logs.clone(), ctx.sender.as_receiver())
+                self.brute_force_query(logs.clone(), ctx.as_receiver())
                     .await;
                 self.hnsw_segment_query(logs, ctx).await;
             }

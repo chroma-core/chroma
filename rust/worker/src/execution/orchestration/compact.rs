@@ -3,6 +3,7 @@ use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::CompactionJob;
 use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::flush_s3::FlushS3Input;
 use crate::execution::operators::flush_s3::FlushS3Operator;
@@ -33,8 +34,9 @@ use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
+use crate::system::ComponentHandle;
 use crate::system::Handler;
-use crate::system::Receiver;
+use crate::system::ReceiverForMessage;
 use crate::system::System;
 use crate::types::LogRecord;
 use crate::types::Segment;
@@ -92,7 +94,7 @@ pub struct CompactOrchestrator {
     pulled_log_offset: Option<i64>,
     record_segment: Option<Segment>,
     // Dispatcher
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     // number of write segments tasks
     num_write_tasks: i32,
     // Result Channel
@@ -149,7 +151,7 @@ impl CompactOrchestrator {
         sysdb: Box<SysDb>,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
         >,
@@ -180,7 +182,7 @@ impl CompactOrchestrator {
     // of the segment, and not fully respect the offset_id from the compaction job
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
     ) {
         self.state = ExecutionState::PullLogs;
         let operator = PullLogsOperator::new(self.log.clone());
@@ -215,7 +217,7 @@ impl CompactOrchestrator {
     async fn partition(
         &mut self,
         records: Chunk<LogRecord>,
-        self_address: Box<dyn Receiver<TaskResult<PartitionOutput, PartitionError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PartitionOutput, PartitionError>>>,
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
@@ -236,7 +238,7 @@ impl CompactOrchestrator {
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
         self_address: Box<
-            dyn Receiver<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
         >,
     ) {
         self.state = ExecutionState::Write;
@@ -282,7 +284,7 @@ impl CompactOrchestrator {
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
         metadata_segment_writer: MetadataSegmentWriter<'static>,
-        self_address: Box<dyn Receiver<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
     ) {
         self.state = ExecutionState::Flush;
 
@@ -306,7 +308,7 @@ impl CompactOrchestrator {
         &mut self,
         log_position: i64,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-        self_address: Box<dyn Receiver<TaskResult<RegisterOutput, RegisterError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<RegisterOutput, RegisterError>>>,
     ) {
         self.state = ExecutionState::Register;
         let operator = RegisterOperator::new();
@@ -494,7 +496,7 @@ impl Component for CompactOrchestrator {
     }
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
-        self.pull_logs(ctx.sender.as_receiver()).await;
+        self.pull_logs(ctx.as_receiver()).await;
     }
 }
 
@@ -530,7 +532,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CompactOrchestrator 
             Some(record) => {
                 self.pulled_log_offset = Some(record.log_offset);
                 println!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
-                self.partition(records, ctx.sender.as_receiver()).await;
+                self.partition(records, ctx.as_receiver()).await;
             }
             None => {
                 // Log an error and return
@@ -565,7 +567,7 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
                 return;
             }
         };
-        self.write(records, _ctx.sender.as_receiver()).await;
+        self.write(records, _ctx.as_receiver()).await;
     }
 }
 
@@ -608,7 +610,7 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
                 output.metadata_segment_writer,
-                _ctx.sender.as_receiver(),
+                _ctx.as_receiver(),
             )
             .await;
         }
@@ -631,7 +633,7 @@ impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchest
                 self.register(
                     self.pulled_log_offset.unwrap(),
                     msg.segment_flush_info,
-                    _ctx.sender.as_receiver(),
+                    _ctx.as_receiver(),
                 )
                 .await;
             }

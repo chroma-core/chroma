@@ -3,7 +3,7 @@ use crate::execution::config::DispatcherConfig;
 use crate::{
     config::Configurable,
     errors::ChromaError,
-    system::{Component, ComponentContext, Handler, Receiver, System},
+    system::{Component, ComponentContext, Handler, ReceiverForMessage, System},
 };
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -83,7 +83,7 @@ impl Dispatcher {
     fn spawn_workers(
         &self,
         system: &mut System,
-        self_receiver: Box<dyn Receiver<TaskRequestMessage>>,
+        self_receiver: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     ) {
         for _ in 0..self.n_worker_threads {
             let worker = WorkerThread::new(self_receiver.clone(), self.worker_queue_size);
@@ -154,7 +154,7 @@ impl Configurable<DispatcherConfig> for Dispatcher {
 /// - reply_to: The receiver to send the task to, this is the worker thread
 #[derive(Debug)]
 pub(super) struct TaskRequestMessage {
-    reply_to: Box<dyn Receiver<TaskMessage>>,
+    reply_to: Box<dyn ReceiverForMessage<TaskMessage>>,
 }
 
 impl TaskRequestMessage {
@@ -162,7 +162,7 @@ impl TaskRequestMessage {
     /// # Parameters
     /// - reply_to: The receiver to send the task to, this is the worker thread
     /// that is requesting the task
-    pub(super) fn new(reply_to: Box<dyn Receiver<TaskMessage>>) -> Self {
+    pub(super) fn new(reply_to: Box<dyn ReceiverForMessage<TaskMessage>>) -> Self {
         TaskRequestMessage { reply_to }
     }
 }
@@ -180,7 +180,7 @@ impl Component for Dispatcher {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        self.spawn_workers(&mut ctx.system.clone(), ctx.sender.as_receiver());
+        self.spawn_workers(&mut ctx.system.clone(), ctx.as_receiver());
     }
 }
 
@@ -211,7 +211,7 @@ mod tests {
     use super::*;
     use crate::{
         execution::operator::{wrap, Operator, TaskResult},
-        system::System,
+        system::{ComponentHandle, System},
     };
     use std::{
         collections::HashSet,
@@ -247,7 +247,7 @@ mod tests {
 
     #[derive(Debug)]
     struct MockDispatchUser {
-        pub dispatcher: Box<dyn Receiver<TaskMessage>>,
+        pub dispatcher: ComponentHandle<Dispatcher>,
         counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
         sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
         received_tasks: Arc<Mutex<HashSet<Uuid>>>,
@@ -265,13 +265,8 @@ mod tests {
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
-            ctx.scheduler.schedule_interval(
-                ctx.sender.clone(),
-                (),
-                duration,
-                Some(DISPATCH_COUNT),
-                ctx,
-            );
+            ctx.scheduler
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
         }
     }
     #[async_trait]
@@ -298,7 +293,7 @@ mod tests {
         type Result = ();
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.sender.as_receiver());
+            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.as_receiver());
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let res = self.dispatcher.send(task, None).await;
@@ -314,7 +309,7 @@ mod tests {
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
         let received_tasks = Arc::new(Mutex::new(HashSet::new()));
         let dispatch_user = MockDispatchUser {
-            dispatcher: dispatcher_handle.receiver(),
+            dispatcher: dispatcher_handle,
             counter: counter.clone(),
             sent_tasks: sent_tasks.clone(),
             received_tasks: received_tasks.clone(),

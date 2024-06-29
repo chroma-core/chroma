@@ -20,6 +20,7 @@ import hypothesis.strategies as st
 import logging
 import random
 import re
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 
 
 def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
@@ -175,18 +176,26 @@ recordset_st = st.shared(
 
 
 @settings(
+    deadline=90000,
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-    ]
+        HealthCheck.filter_too_much,
+    ],
 )  # type: ignore
 @given(
     collection=collection_st,
     record_set=recordset_st,
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
+    should_compact=st.booleans(),
 )
 def test_filterable_metadata_get(
-    caplog, api: ServerAPI, collection: strategies.Collection, record_set, filters
+    caplog,
+    api: ServerAPI,
+    collection: strategies.Collection,
+    record_set,
+    filters,
+    should_compact: bool,
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -197,7 +206,17 @@ def test_filterable_metadata_get(
         embedding_function=collection.embedding_function,
     )
 
+    initial_version = coll.get_model()["version"]
+
     coll.add(**record_set)
+
+    if not NOT_CLUSTER_ONLY:
+        # Only wait for compaction if the size of the collection is
+        # some minimal size
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+            # Wait for the model to be updated
+            wait_for_version_increase(api, collection.name, initial_version)
+
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
@@ -205,10 +224,12 @@ def test_filterable_metadata_get(
 
 
 @settings(
+    deadline=90000,
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-    ]
+        HealthCheck.filter_too_much,
+    ],
 )  # type: ignore
 @given(
     collection=collection_st,
@@ -216,6 +237,7 @@ def test_filterable_metadata_get(
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
     limit=st.integers(min_value=1, max_value=10),
     offset=st.integers(min_value=0, max_value=10),
+    should_compact=st.booleans(),
 )
 def test_filterable_metadata_get_limit_offset(
     caplog,
@@ -225,6 +247,7 @@ def test_filterable_metadata_get_limit_offset(
     filters,
     limit,
     offset,
+    should_compact: bool,
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -240,7 +263,17 @@ def test_filterable_metadata_get_limit_offset(
         embedding_function=collection.embedding_function,
     )
 
+    initial_version = coll.get_model()["version"]
+
     coll.add(**record_set)
+
+    if not NOT_CLUSTER_ONLY:
+        # Only wait for compaction if the size of the collection is
+        # some minimal size
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+            # Wait for the model to be updated
+            wait_for_version_increase(api, collection.name, initial_version)
+
     for filter in filters:
         # add limit and offset to filter
         filter["limit"] = limit
@@ -251,10 +284,12 @@ def test_filterable_metadata_get_limit_offset(
 
 
 @settings(
+    deadline=90000,
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-    ]
+        HealthCheck.filter_too_much,
+    ],
 )
 @given(
     collection=collection_st,
@@ -263,6 +298,7 @@ def test_filterable_metadata_get_limit_offset(
         strategies.filters(collection_st, recordset_st, include_all_ids=True),
         min_size=1,
     ),
+    should_compact=st.booleans(),
 )
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
@@ -270,6 +306,7 @@ def test_filterable_metadata_query(
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
+    should_compact: bool,
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -279,9 +316,18 @@ def test_filterable_metadata_query(
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
+    initial_version = coll.get_model()["version"]
     normalized_record_set = invariants.wrap_all(record_set)
 
     coll.add(**record_set)
+
+    if not NOT_CLUSTER_ONLY:
+        # Only wait for compaction if the size of the collection is
+        # some minimal size
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+            # Wait for the model to be updated
+            wait_for_version_increase(api, collection.name, initial_version)
+
     total_count = len(normalized_record_set["ids"])
     # Pick a random vector
     random_query: Embedding

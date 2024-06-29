@@ -783,6 +783,11 @@ impl RecordSegmentReader<'_> {
                     data.push(data_record);
                 }
                 Err(e) => {
+                    tracing::error!(
+                        "[GetAllData] Error getting data record for index {:?}: {:?}",
+                        i,
+                        e
+                    );
                     return Err(e);
                 }
             }

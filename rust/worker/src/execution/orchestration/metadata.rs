@@ -1,5 +1,6 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
 use crate::execution::operators::count_records::{
     CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
@@ -17,7 +18,7 @@ use crate::index::metadata::types::MetadataIndexError;
 use crate::log::log::PullLogsError;
 use crate::segment::metadata_segment::MetadataSegmentReader;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
-use crate::system::{Component, ComponentContext, Handler};
+use crate::system::{Component, ComponentContext, ComponentHandle, Handler};
 use crate::types::{Collection, LogRecord, Metadata, SegmentType};
 use crate::types::{Where, WhereDocument};
 use crate::{
@@ -25,7 +26,7 @@ use crate::{
     execution::operator::TaskMessage,
     log::log::Log,
     sysdb::sysdb::SysDb,
-    system::{Receiver, System},
+    system::{ReceiverForMessage, System},
     types::Segment,
 };
 use async_trait::async_trait;
@@ -64,7 +65,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Query params
     where_clause: Option<Where>,
@@ -85,7 +86,7 @@ pub(crate) struct CountQueryOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
@@ -131,7 +132,7 @@ impl CountQueryOrchestrator {
         metadata_segment_id: &Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
     ) -> Self {
         Self {
@@ -234,7 +235,7 @@ impl CountQueryOrchestrator {
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -402,7 +403,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
                     self.blockfile_provider.clone(),
                     logs.logs(),
                 );
-                let msg = wrap(operator, input, ctx.sender.as_receiver());
+                let msg = wrap(operator, input, ctx.as_receiver());
                 match self.dispatcher.send(msg, None).await {
                     Ok(_) => (),
                     Err(e) => {
@@ -456,7 +457,7 @@ impl MetadataQueryOrchestrator {
         query_ids: Option<Vec<String>>,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
         where_clause: Option<Where>,
         where_document_clause: Option<WhereDocument>,
@@ -564,7 +565,7 @@ impl MetadataQueryOrchestrator {
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -596,7 +597,7 @@ impl MetadataQueryOrchestrator {
         );
 
         let op = MetadataFilteringOperator::new();
-        let task = wrap(op, input, ctx.sender.as_receiver());
+        let task = wrap(op, input, ctx.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -800,7 +801,7 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
             self.blockfile_provider.clone(),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.as_receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {

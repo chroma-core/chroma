@@ -7,6 +7,7 @@ use crate::config::CompactionServiceConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
@@ -18,8 +19,8 @@ use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::ComponentContext;
+use crate::system::ComponentHandle;
 use crate::system::Handler;
-use crate::system::Receiver;
 use crate::system::System;
 use async_trait::async_trait;
 use futures::stream::FuturesUnordered;
@@ -42,7 +43,7 @@ pub(crate) struct CompactionManager {
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
     // Dispatcher
-    dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
+    dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Config
     compaction_manager_queue_size: usize,
     compaction_interval: Duration,
@@ -95,7 +96,7 @@ impl CompactionManager {
         compaction_job: &CompactionJob,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 println!("No dispatcher found");
                 return Err(Box::new(CompactionError::FailedToCompact));
@@ -112,7 +113,7 @@ impl CompactionManager {
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
                     self.hnsw_index_provider.clone(),
-                    dispatcher.clone(),
+                    dispatcher,
                     None,
                     None,
                     Arc::new(AtomicU32::new(0)),
@@ -161,7 +162,7 @@ impl CompactionManager {
         (num_completed_jobs, num_failed_jobs)
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.dispatcher = Some(dispatcher);
     }
 
@@ -253,12 +254,8 @@ impl Component for CompactionManager {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
-        ctx.scheduler.schedule(
-            ctx.sender.clone(),
-            ScheduleMessage {},
-            self.compaction_interval,
-            ctx,
-        );
+        ctx.scheduler
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
     }
 }
 
@@ -281,12 +278,8 @@ impl Handler<ScheduleMessage> for CompactionManager {
         println!("CompactionManager: Performing compaction");
         self.compact_batch().await;
         // Compaction is done, schedule the next compaction
-        ctx.scheduler.schedule(
-            ctx.sender.clone(),
-            ScheduleMessage {},
-            self.compaction_interval,
-            ctx,
-        );
+        ctx.scheduler
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
     }
 }
 
@@ -512,7 +505,7 @@ mod tests {
 
         let dispatcher = Dispatcher::new(10, 10, 10);
         let dispatcher_handle = system.start_component(dispatcher);
-        manager.set_dispatcher(dispatcher_handle.receiver());
+        manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);
         let (num_completed, number_failed) = manager.compact_batch().await;
         assert_eq!(num_completed, 2);
