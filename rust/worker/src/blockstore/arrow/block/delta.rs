@@ -244,9 +244,6 @@ mod test {
         let size = delta.get_size::<&str, &str>();
         block_manager.commit::<&str, &str>(&delta);
         let block = block_manager.get(&delta_id).await.unwrap();
-        // TODO: uncomment this when sizing is fixed
-        println!("==== COMPUTING DUMPED BLOCK SIZE ==== ");
-        let dumped_block_size = block.get_size();
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
@@ -256,13 +253,8 @@ mod test {
 
         // test save/load
         block.save("test.arrow").unwrap();
-        let loaded = Block::load("test.arrow", delta_id).unwrap();
+        let loaded = Block::load_with_validation("test.arrow", delta_id).unwrap();
         assert_eq!(loaded.id, delta_id);
-        // TODO: make this sizing work
-        println!("==== COMPUTING ORIGINAL BLOCK SIZE ==== ");
-        let original_size = block.get_size();
-        println!("==== COMPUTING LOADED BLOCK SIZE ==== ");
-        let loaded_size = loaded.get_size();
         assert_eq!(block.get_size(), loaded.get_size());
         for i in 0..n {
             let key = format!("key{}", i);

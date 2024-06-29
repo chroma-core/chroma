@@ -4677,6 +4677,7 @@ dependencies = [
  "cc",
  "criterion",
  "figment",
+ "flatbuffers",
  "futures",
  "k8s-openapi",
  "kube",
