@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 import logging
+import os
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
 from chromadb.api.async_client import AsyncClient as AsyncClientCreator
@@ -72,15 +73,17 @@ if not is_client:
     import sqlite3
 
     if sqlite3.sqlite_version_info < (3, 35, 0):
-        if IN_COLAB:
-            # In Colab, hotswap to pysqlite-binary if it's too old
+        if IN_COLAB or os.getenv('USE_PYSQLITE3'):
+            # In Colab, hot swap to pysqlite3-binary if it's too old
             import subprocess
             import sys
-
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "pysqlite3-binary"]
-            )
-            __import__("pysqlite3")
+            try:
+                __import__("pysqlite3")
+            except ModuleNotFoundError:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "pysqlite3-binary"]
+                )
+                __import__("pysqlite3")
             sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
         else:
             raise RuntimeError(
