@@ -80,7 +80,7 @@ pub async fn query_service_entrypoint() {
         // Kubernetes will send SIGTERM to stop the pod gracefully
         // TODO: add more signal handling
         _ = sigterm.recv() => {
-            dispatcher_handle.stop();
+            dispatcher_handle.stop().await;
             dispatcher_handle.join().await;
             system.stop().await;
             system.join().await;
@@ -154,11 +154,11 @@ pub async fn compaction_service_entrypoint() {
         // Kubernetes will send SIGTERM to stop the pod gracefully
         // TODO: add more signal handling
         _ = sigterm.recv() => {
-            memberlist_handle.stop();
+            memberlist_handle.stop().await;
             memberlist_handle.join().await;
-            dispatcher_handle.stop();
+            dispatcher_handle.stop().await;
             dispatcher_handle.join().await;
-            compaction_manager_handle.stop();
+            compaction_manager_handle.stop().await;
             compaction_manager_handle.join().await;
             system.stop().await;
             system.join().await;

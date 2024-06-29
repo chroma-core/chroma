@@ -186,8 +186,8 @@ impl<C: Component> ComponentHandle<C> {
     }
 
     pub(crate) async fn stop(&mut self) {
-        self.cancellation_token.cancel();
         let mut state = self.state.lock().await;
+        self.cancellation_token.cancel();
         *state = ComponentState::Stopped;
     }
 
@@ -318,7 +318,7 @@ mod tests {
         tokio::task::yield_now().await;
         // With the streaming data and the messages we should have 12
         assert_eq!(counter.load(Ordering::SeqCst), 12);
-        handle.stop();
+        handle.stop().await;
         // Yield to allow the component to stop
         tokio::task::yield_now().await;
         // Expect the component to be stopped
