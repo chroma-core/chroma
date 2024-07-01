@@ -121,7 +121,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         if "json" in kwargs:
             data = orjson.dumps(kwargs.pop("json"))
             kwargs["data"] = data
-        
+
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
