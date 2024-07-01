@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-    runs-on: depot-ubuntu-22.04-64
+    runs-on: depot-ubuntu-22.04-32
     steps:
       - uses: actions/checkout@v3
       - name: Setup
