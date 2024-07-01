@@ -180,7 +180,7 @@ impl Component for Dispatcher {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        self.spawn_workers(&mut ctx.system.clone(), ctx.as_receiver());
+        self.spawn_workers(&mut ctx.system.clone(), ctx.receiver());
     }
 }
 
@@ -293,7 +293,7 @@ mod tests {
         type Result = ();
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.as_receiver());
+            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let res = self.dispatcher.send(task, None).await;

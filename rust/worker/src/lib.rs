@@ -138,7 +138,7 @@ pub async fn compaction_service_entrypoint() {
     compaction_manager.set_system(system.clone());
 
     let mut compaction_manager_handle = system.start_component(compaction_manager);
-    memberlist.subscribe(compaction_manager_handle.as_receiver());
+    memberlist.subscribe(compaction_manager_handle.receiver());
 
     let mut memberlist_handle = system.start_component(memberlist);
 

@@ -1,14 +1,14 @@
-use super::ChannelRequestError;
-use super::{scheduler::Scheduler, ChannelError, WrappedMessage};
+use super::{scheduler::Scheduler, ChannelError, ChannelRequestError, WrappedMessage};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
+use parking_lot::Mutex;
 use std::{fmt::Debug, sync::Arc};
-use tokio::{sync::Mutex, task::JoinError};
+use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 /// The state of a component
 /// A component can be running or stopped
 /// A component is stopped when it is cancelled
@@ -18,7 +18,7 @@ pub(crate) enum ComponentState {
     Stopped,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum ComponentRuntime {
     Inherit,
     Dedicated,
@@ -77,22 +77,24 @@ where
     }
 }
 
-/// A thin wrapper over a join handle that will panic if it is consumed twice.
-#[derive(Debug)]
+/// A thin wrapper over a join handle that will panic if it is consumed more than once.
+#[derive(Debug, Clone)]
 struct ConsumableJoinHandle {
-    handle: Option<tokio::task::JoinHandle<()>>,
+    handle: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
 
 impl ConsumableJoinHandle {
     fn new(handle: tokio::task::JoinHandle<()>) -> Self {
         ConsumableJoinHandle {
-            handle: Some(handle),
+            handle: Some(Arc::new(handle)),
         }
     }
 
     async fn consume(&mut self) -> Result<(), JoinError> {
         match self.handle.take() {
             Some(handle) => {
+                let handle = Arc::into_inner(handle)
+                    .expect("there should be no other strong references to the join handle");
                 handle.await?;
                 Ok(())
             }
@@ -172,7 +174,7 @@ impl<C: Component> Clone for ComponentSender<C> {
 pub(crate) struct ComponentHandle<C: Component + Debug> {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: Arc<Mutex<ComponentState>>,
-    join_handle: Arc<Mutex<Option<ConsumableJoinHandle>>>,
+    join_handle: Option<ConsumableJoinHandle>,
     sender: ComponentSender<C>,
 }
 
@@ -200,33 +202,31 @@ impl<C: Component> ComponentHandle<C> {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: Arc::new(Mutex::new(ComponentState::Running)),
-            join_handle: Arc::new(Mutex::new(
-                join_handle.map(|handle| ConsumableJoinHandle::new(handle)),
-            )),
+            join_handle: join_handle.map(|handle| ConsumableJoinHandle::new(handle)),
             sender: sender,
         }
     }
 
-    pub(crate) async fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
+        let mut state = self.state.lock();
         self.cancellation_token.cancel();
-        let mut state = self.state.lock().await;
         *state = ComponentState::Stopped;
     }
 
     /// Consumes the underlying join handle. Panics if it is consumed twice.
     pub(crate) async fn join(&mut self) -> Result<(), JoinError> {
-        if let Some(join_handle) = self.join_handle.lock().await.as_mut() {
+        if let Some(join_handle) = &mut self.join_handle {
             join_handle.consume().await
         } else {
             Ok(())
         }
     }
 
-    pub(crate) async fn get_current_state(&self) -> ComponentState {
-        return self.state.lock().await.clone();
+    pub(crate) async fn state(&self) -> ComponentState {
+        return *self.state.lock();
     }
 
-    pub(crate) fn as_receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
+    pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
@@ -271,7 +271,7 @@ where
 }
 
 impl<C: Component> ComponentContext<C> {
-    pub(crate) fn as_receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
+    pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
@@ -358,9 +358,20 @@ mod tests {
         // Yield to allow the component to stop
         tokio::task::yield_now().await;
         // Expect the component to be stopped
-        assert_eq!(handle.get_current_state().await, ComponentState::Stopped);
+        assert_eq!(handle.state().await, ComponentState::Stopped);
         let res = handle.send(4, None).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Join handle already consumed")]
+    async fn join_handle_panics_if_consumed_twice() {
+        let handle = tokio::spawn(async {});
+        let mut handle = ConsumableJoinHandle::new(handle);
+
+        handle.consume().await.unwrap();
+        // Expected to panic
+        handle.consume().await.unwrap();
     }
 }
