@@ -14,6 +14,8 @@ use std::io::SeekFrom;
 use thiserror::Error;
 use uuid::Uuid;
 
+const ARROW_ALIGNMENT: usize = 64;
+
 /// A block in a blockfile. A block is a sorted collection of data that is immutable once it has been committed.
 /// Blocks are the fundamental unit of storage in the blockstore and are used to store data in the form of (key, value) pairs.
 /// These pairs are stored in an Arrow record batch with the schema (prefix, key, value).
@@ -275,13 +277,16 @@ impl Block {
         // We force the block to be written with 64 byte alignment
         // this is the default, but we are just being defensive
         let mut writer = std::io::BufWriter::new(file);
-        let options =
-            match arrow::ipc::writer::IpcWriteOptions::try_new(64, false, MetadataVersion::V5) {
-                Ok(options) => options,
-                Err(e) => {
-                    return Err(BlockSaveError::ArrowError(e));
-                }
-            };
+        let options = match arrow::ipc::writer::IpcWriteOptions::try_new(
+            ARROW_ALIGNMENT,
+            false,
+            MetadataVersion::V5,
+        ) {
+            Ok(options) => options,
+            Err(e) => {
+                return Err(BlockSaveError::ArrowError(e));
+            }
+        };
 
         let writer = arrow::ipc::writer::FileWriter::try_new_with_options(
             &mut writer,
@@ -657,15 +662,15 @@ where
             let mut prev_offset = blocks.get(0).offset();
             for block in blocks.iter().skip(1) {
                 let curr_offset = block.offset();
-                let len = curr_offset - prev_offset;
-                if len % 64 != 0 {
+                let len = (curr_offset - prev_offset) as usize;
+                if len % ARROW_ALIGNMENT != 0 {
                     return Err(ArrowLayoutVerificationError::BufferLengthNotAligned);
                 }
                 prev_offset = curr_offset;
             }
             // Check the remaining buffer length based on the body length
             let last_buffer_len = record_batch_body_len - prev_offset as usize;
-            if last_buffer_len % 64 != 0 {
+            if last_buffer_len % ARROW_ALIGNMENT != 0 {
                 return Err(ArrowLayoutVerificationError::BufferLengthNotAligned);
             }
         }
