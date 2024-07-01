@@ -485,7 +485,7 @@ impl HnswQueryOrchestrator {
         self.result_channel = Some(tx);
         let mut handle = self.system.clone().start_component(self);
         let result = rx.await;
-        handle.stop().await;
+        handle.stop();
         result.unwrap()
     }
 }

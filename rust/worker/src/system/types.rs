@@ -2,8 +2,9 @@ use super::{scheduler::Scheduler, wrap, ChannelError, WrappedMessage};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
+use parking_lot::Mutex;
 use std::{fmt::Debug, sync::Arc};
-use tokio::{sync::Mutex, task::JoinError};
+use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
 
@@ -185,8 +186,8 @@ impl<C: Component> ComponentHandle<C> {
         }
     }
 
-    pub(crate) async fn stop(&mut self) {
-        let mut state = self.state.lock().await;
+    pub(crate) fn stop(&mut self) {
+        let mut state = self.state.lock();
         self.cancellation_token.cancel();
         *state = ComponentState::Stopped;
     }
@@ -201,10 +202,10 @@ impl<C: Component> ComponentHandle<C> {
     }
 
     pub(crate) async fn state(&self) -> ComponentState {
-        return self.state.lock().await.clone();
+        return self.state.lock().clone();
     }
 
-    pub(crate) fn as_receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
+    pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
@@ -318,7 +319,7 @@ mod tests {
         tokio::task::yield_now().await;
         // With the streaming data and the messages we should have 12
         assert_eq!(counter.load(Ordering::SeqCst), 12);
-        handle.stop().await;
+        handle.stop();
         // Yield to allow the component to stop
         tokio::task::yield_now().await;
         // Expect the component to be stopped
