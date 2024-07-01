@@ -335,10 +335,15 @@ impl Block {
         Ok(bytes)
     }
 
+    /// Load a block from bytes in Arrow IPC format with the given id
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::from_bytes_internal(bytes, id, false);
     }
 
+    /// Load a block from bytes in Arrow IPC format with the given id and validate the layout
+    /// ### Notes
+    /// - This method should be used in tests to ensure that the layout of the IPC file is as expected
+    /// - The validation is not performant and should not be used in production code
     pub fn from_bytes_with_validation(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::from_bytes_internal(bytes, id, true);
     }
@@ -348,10 +353,15 @@ impl Block {
         return Self::load_with_reader(cursor, id, validate);
     }
 
+    /// Load a block from the given path with the given id and validate the layout
+    /// ### Notes
+    /// - This method should be used in tests to ensure that the layout of the IPC file is as expected
+    /// - The validation is not performant and should not be used in production code
     pub fn load_with_validation(path: &str, id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::load_internal(path, id, true);
     }
 
+    /// Load a block from the given path with the given id
     pub fn load(path: &str, id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::load_internal(path, id, false);
     }
