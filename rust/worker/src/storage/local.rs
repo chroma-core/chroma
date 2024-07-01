@@ -22,12 +22,13 @@ impl LocalStorage {
         key: &str,
     ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, String> {
         let file_path = format!("{}/{}", self.root, key);
-        let file = tokio::fs::File::open(file_path).await;
-        match file {
+        tracing::debug!("Reading from path: {}", file_path);
+        match tokio::fs::File::open(file_path).await {
             Ok(file) => {
                 return Ok(Box::new(tokio::io::BufReader::new(file)));
             }
             Err(e) => {
+                println!("Error: {:?}", e);
                 return Err::<_, String>(e.to_string());
             }
         }
@@ -35,6 +36,7 @@ impl LocalStorage {
 
     pub(crate) async fn put_bytes(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
         let path = format!("{}/{}", self.root, key);
+        tracing::debug!("Writing to path: {}", path);
         // Create the path if it doesn't exist, we unwrap since this should only be used in tests
         let as_path = std::path::Path::new(&path);
         let parent = as_path.parent().unwrap();

@@ -103,6 +103,8 @@ pub(crate) struct QueryServiceConfig {
     pub(crate) storage: crate::storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub(crate) block_cache: crate::cache::config::CacheConfig,
+    pub(crate) sparse_index_cache: crate::cache::config::CacheConfig,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +130,8 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
+    pub(crate) block_cache: crate::cache::config::CacheConfig,
+    pub(crate) sparse_index_cache: crate::cache::config::CacheConfig,
 }
 
 /// # Description
@@ -178,6 +182,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -214,6 +224,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -275,6 +291,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -311,6 +333,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -390,6 +418,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -426,6 +460,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -499,6 +539,12 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"
@@ -527,6 +573,12 @@ mod tests {
                             port: 50051
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                    block_cache:
+                        lru:
+                            capacity: 1000
+                    sparse_index_cache:
+                        lru:
+                            capacity: 1000
                     log:
                         Grpc:
                             host: "localhost"

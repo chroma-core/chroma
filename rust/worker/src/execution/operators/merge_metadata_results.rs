@@ -368,8 +368,12 @@ mod test {
 
     use uuid::Uuid;
 
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::{
         blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
+        cache,
         execution::{
             data::data_chunk::Chunk,
             operator::Operator,
@@ -392,7 +396,10 @@ mod test {
     async fn test_merge_and_hydrate() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, block_cache, sparse_index_cache);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -680,7 +687,10 @@ mod test {
     async fn test_merge_and_hydrate_full_scan() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, block_cache, sparse_index_cache);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
