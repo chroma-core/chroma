@@ -8,6 +8,7 @@ use crate::chroma_proto::{
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::dispatcher::Dispatcher;
+use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
