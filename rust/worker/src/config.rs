@@ -195,6 +195,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -239,6 +247,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
                 "#,
             );
             let config = RootConfig::load();
@@ -299,6 +315,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -343,6 +367,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -421,6 +453,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -465,6 +505,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
                 "#,
             );
             let config = RootConfig::load();
@@ -537,6 +585,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -573,6 +629,14 @@ mod tests {
                     blockfile_provider:
                         Arrow:
                             max_block_size_bytes: 16384
+                            block_manager_config:
+                                block_cache_config:
+                                    lru:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    lru:
+                                        capacity: 1000
                 "#,
             );
             let config = RootConfig::load();

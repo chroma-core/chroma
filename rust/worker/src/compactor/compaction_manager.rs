@@ -301,6 +301,9 @@ mod tests {
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -492,12 +495,19 @@ mod tests {
         // Set memberlist
         scheduler.set_memberlist(vec![my_member_id.clone()]);
 
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let mut manager = CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone(), TEST_MAX_BLOCK_SIZE_BYTES),
+            BlockfileProvider::new_arrow(
+                storage.clone(),
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            ),
             HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
             compaction_manager_queue_size,
             compaction_interval,

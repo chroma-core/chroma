@@ -73,7 +73,6 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             storage.clone(),
         ))
         .await?;
-
         // TODO: inject hnsw index provider somehow
         // TODO: real path
         let path = PathBuf::from("~/tmp");
@@ -564,6 +563,8 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 mod tests {
     use super::*;
     use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::storage::local::LocalStorage;
@@ -579,7 +580,8 @@ mod tests {
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,
@@ -590,7 +592,12 @@ mod tests {
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage, TEST_MAX_BLOCK_SIZE_BYTES),
+            blockfile_provider: BlockfileProvider::new_arrow(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            ),
             port,
         };
 

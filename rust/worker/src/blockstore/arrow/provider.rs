@@ -1,10 +1,11 @@
 use super::{
-    block::{delta::BlockDelta, Block},
+    block::{self, delta::BlockDelta, Block},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
+use crate::cache::cache::Cache;
 use crate::{
     blockstore::{
         key::KeyWrapper,
@@ -18,9 +19,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use core::panic;
-use foyer::{Cache, CacheBuilder};
-use parking_lot::RwLock;
-use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tracing::{Instrument, Span};
@@ -35,10 +33,15 @@ pub(crate) struct ArrowBlockfileProvider {
 }
 
 impl ArrowBlockfileProvider {
-    pub(crate) fn new(storage: Storage, max_block_size_bytes: usize) -> Self {
+    pub(crate) fn new(
+        storage: Storage,
+        max_block_size_bytes: usize,
+        block_cache: Cache<Uuid, Block>,
+        sparse_index_cache: Cache<Uuid, SparseIndex>,
+    ) -> Self {
         Self {
-            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes),
-            sparse_index_manager: SparseIndexManager::new(storage),
+            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
+            sparse_index_manager: SparseIndexManager::new(storage, sparse_index_cache),
         }
     }
 
@@ -101,9 +104,33 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         config: &(ArrowBlockfileProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
+        let block_cache = match crate::cache::from_config(
+            &blockfile_config.block_manager_config.block_cache_config,
+        )
+        .await
+        {
+            Ok(cache) => cache,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        let sparse_index_cache = match crate::cache::from_config(
+            &blockfile_config
+                .sparse_index_manager_config
+                .sparse_index_cache_config,
+        )
+        .await
+        {
+            Ok(cache) => cache,
+            Err(e) => {
+                return Err(e);
+            }
+        };
         Ok(ArrowBlockfileProvider::new(
             storage.clone(),
             blockfile_config.max_block_size_bytes,
+            block_cache,
+            sparse_index_cache,
         ))
     }
 }
@@ -116,15 +143,19 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
 /// is a placeholder for that.
 #[derive(Clone)]
 pub(super) struct BlockManager {
-    read_cache: Cache<Uuid, Block>,
+    block_cache: Cache<Uuid, Block>,
     storage: Storage,
     max_block_size_bytes: usize,
 }
 
 impl BlockManager {
-    pub(super) fn new(storage: Storage, max_block_size_bytes: usize) -> Self {
+    pub(super) fn new(
+        storage: Storage,
+        max_block_size_bytes: usize,
+        block_cache: Cache<Uuid, Block>,
+    ) -> Self {
         Self {
-            read_cache: CacheBuilder::new(16).build(),
+            block_cache,
             storage,
             max_block_size_bytes,
         }
@@ -136,27 +167,21 @@ impl BlockManager {
         block
     }
 
-    pub(super) fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(
+    pub(super) async fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(
         &self,
-        id: &Uuid,
+        block_id: &Uuid,
     ) -> BlockDelta {
-        // let cache_guard = self.read_cache.read();
-        let entry = self.read_cache.get(id);
-        if entry.is_none() {
-            panic!("Tried to fork a block not owned by this manager");
-        }
-        let entry = entry.unwrap();
-        let block = entry.value();
-        // let block = match entry {
-        //     Some(entry) => entry.value(),
-        //     None => {
-        //         // TODO: Err - tried to fork a block not owned by this manager
-        //         panic!("Tried to fork a block not owned by this manager")
-        //     }
-        // };
-        let new_id = Uuid::new_v4();
-        let delta = BlockDelta::new::<KeyWrite, ValueWrite>(new_id);
-        let populated_delta = self.fork_lifetime_scope::<KeyWrite, ValueWrite>(block, delta);
+        let block = self.get(block_id).await;
+        let block = match block {
+            Some(block) => block,
+            None => {
+                // TODO: Err - tried to fork a block not owned by this manager
+                panic!("Tried to fork a block not owned by this manager")
+            }
+        };
+        let new_block_id = Uuid::new_v4();
+        let delta = BlockDelta::new::<KeyWrite, ValueWrite>(new_block_id);
+        let populated_delta = self.fork_lifetime_scope::<KeyWrite, ValueWrite>(&block, delta);
         populated_delta
     }
 
@@ -172,16 +197,19 @@ impl BlockManager {
         block.to_block_delta::<KeyWrite::ReadableKey<'new>, ValueWrite::ReadableValue<'new>>(delta)
     }
 
-    pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, delta: &BlockDelta) {
+    pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+        delta: &BlockDelta,
+    ) -> Block {
         let record_batch = delta.finish::<K, V>();
         let block = Block::from_record_batch(delta.id, record_batch);
-        self.read_cache.insert(block.id, block);
+        block
     }
 
     pub(super) async fn get(&self, id: &Uuid) -> Option<Block> {
-        let entry = self.read_cache.get(id);
-        match entry {
-            Some(entry) => Some(entry.value().to_owned()),
+        let block = self.block_cache.get(id);
+        match block {
+            Some(block) => Some(block.clone()),
             None => {
                 async {
                     let key = format!("block/{}", id);
@@ -211,7 +239,7 @@ impl BlockManager {
                             let block = deserialization_span.in_scope(|| Block::from_bytes(&buf, *id));
                             match block {
                                 Ok(block) => {
-                                    self.read_cache.insert(*id, block.clone());
+                                    self.block_cache.insert(*id, block.clone());
                                     Some(block)
                                 }
                                 Err(e) => {
@@ -238,35 +266,28 @@ impl BlockManager {
         }
     }
 
-    pub(super) async fn flush(&self, id: &Uuid) -> Result<(), Box<dyn ChromaError>> {
-        let block = self.get(id).await;
-
-        match block {
-            Some(block) => {
-                let bytes = match block.to_bytes() {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        return Err(Box::new(e));
-                    }
-                };
-
-                let key = format!("block/{}", id);
-                let res = self.storage.put_bytes(&key, bytes).await;
-                match res {
-                    Ok(_) => {
-                        println!("Block: {} written to storage", id);
-                        Ok(())
-                    }
-                    Err(e) => {
-                        println!("Error writing block to storage {}", e);
-                        Err(Box::new(e))
-                    }
+    pub(super) async fn flush(&self, block: &Vec<Block>) -> Result<(), Box<dyn ChromaError>> {
+        for block in block {
+            let bytes = match block.to_bytes() {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::error!("Failed to convert block to bytes");
+                    return Err(Box::new(e));
+                }
+            };
+            let key = format!("block/{}", block.id);
+            let res = self.storage.put_bytes(&key, bytes).await;
+            match res {
+                Ok(_) => {
+                    tracing::info!("Block: {} written to storage", block.id);
+                }
+                Err(e) => {
+                    tracing::info!("Error writing block to storage {}", e);
+                    return Err(Box::new(e));
                 }
             }
-            None => {
-                return Err(Box::new(BlockFlushError::NotFound));
-            }
         }
+        Ok(())
     }
 
     pub(super) fn max_block_size_bytes(&self) -> usize {
@@ -290,32 +311,27 @@ impl ChromaError for BlockFlushError {
 
 #[derive(Clone)]
 pub(super) struct SparseIndexManager {
-    cache: Arc<RwLock<HashMap<Uuid, SparseIndex>>>,
+    cache: Cache<Uuid, SparseIndex>,
     storage: Storage,
 }
 
 impl SparseIndexManager {
-    pub fn new(storage: Storage) -> Self {
-        Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            storage,
-        }
+    pub fn new(storage: Storage, cache: Cache<Uuid, SparseIndex>) -> Self {
+        Self { cache, storage }
     }
 
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
         &self,
         id: &Uuid,
     ) -> Option<SparseIndex> {
-        let read = match self.cache.read().get(id) {
-            Some(index) => Some(index.clone()),
-            None => None,
-        };
-        match read {
+        let index = self.cache.get(id);
+        match index {
             Some(index) => Some(index),
             None => {
-                println!("Cache miss - fetching sparse index from storage");
                 // TODO: move this to a separate function
+                tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
+                tracing::debug!("Reading sparse index from storage with key: {}", key);
                 let bytes = self.storage.get(&key).await;
                 let mut buf: Vec<u8> = Vec::new();
                 match bytes {
@@ -325,7 +341,7 @@ impl SparseIndexManager {
                             Ok(_) => {}
                             Err(e) => {
                                 // TODO: return error
-                                println!("Error reading sparse index from storage: {}", e);
+                                tracing::error!("Error reading sparse index from storage: {}", e);
                                 return None;
                             }
                         }
@@ -341,26 +357,29 @@ impl SparseIndexManager {
                                 let index = SparseIndex::from_block::<K>(promoted_block);
                                 match index {
                                     Ok(index) => {
-                                        self.cache.write().insert(*id, index.clone());
+                                        self.cache.insert(*id, index.clone());
                                         return Some(index);
                                     }
                                     Err(e) => {
                                         // TODO: return error
-                                        println!("Error turning block into sparse index: {}", e);
+                                        tracing::error!(
+                                            "Error turning block into sparse index: {}",
+                                            e
+                                        );
                                         return None;
                                     }
                                 }
                             }
                             Err(e) => {
                                 // TODO: return error
-                                println!("Error turning bytes into block: {}", e);
+                                tracing::error!("Error turning bytes into block: {}", e);
                                 return None;
                             }
                         }
                     }
                     Err(e) => {
                         // TODO: return error
-                        println!("Error reading sparse index from storage: {}", e);
+                        tracing::error!("Error reading sparse index from storage: {}", e);
                         return None;
                     }
                 }
@@ -373,59 +392,36 @@ impl SparseIndexManager {
         index
     }
 
-    pub fn commit(&self, index: SparseIndex) {
-        self.cache.write().insert(index.id, index);
-    }
-
     pub async fn flush<'read, K: ArrowWriteableKey + 'read>(
         &self,
-        id: &Uuid,
+        index: &SparseIndex,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let index = self.get::<K::ReadableKey<'read>>(id).await;
-        match index {
-            Some(index) => {
-                let as_block = index.to_block::<K>();
-                match as_block {
-                    Ok(block) => {
-                        let bytes = match block.to_bytes() {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                return Err(Box::new(e));
-                            }
-                        };
-
-                        let key = format!("sparse_index/{}", id);
-                        let res = self.storage.put_bytes(&key, bytes).await;
-                        match res {
-                            Ok(_) => {
-                                tracing::info!("Sparse index id {:?} written to storage", id);
-                                Ok(())
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error writing sparse index id {:?} to storage",
-                                    id
-                                );
-                                Err(Box::new(e))
-                            }
-                        }
+        let as_block = index.to_block::<K>();
+        match as_block {
+            Ok(block) => {
+                let bytes = match block.to_bytes() {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        tracing::error!("Failed to convert sparse index to bytes");
+                        return Err(Box::new(e));
+                    }
+                };
+                let key = format!("sparse_index/{}", index.id);
+                let res = self.storage.put_bytes(&key, bytes).await;
+                match res {
+                    Ok(_) => {
+                        tracing::info!("Sparse index written to storage");
+                        Ok(())
                     }
                     Err(e) => {
-                        tracing::error!(
-                            "Failed to convert sparse index id {:?} to block {:?}",
-                            id,
-                            e
-                        );
-                        Err(e)
+                        tracing::error!("Error writing sparse index to storage");
+                        Err(Box::new(e))
                     }
                 }
             }
-            None => {
-                tracing::error!(
-                    "Tried to flush a sparse index id {:?} that doesn't exist",
-                    id
-                );
-                return Err(Box::new(SparseIndexFlushError::NotFound));
+            Err(e) => {
+                tracing::error!("Failed to convert sparse index to block");
+                Err(e)
             }
         }
     }
@@ -436,10 +432,9 @@ impl SparseIndexManager {
         new_id: Uuid,
     ) -> SparseIndex {
         // TODO: error handling
-        println!("Forking sparse index from {:?}", old_id);
+        tracing::info!("Forking sparse index from {:?}", old_id);
         let original = self.get::<K::ReadableKey<'key>>(old_id).await.unwrap();
         let forked = original.fork(new_id);
-        self.cache.write().insert(new_id, forked.clone());
         forked
     }
 }

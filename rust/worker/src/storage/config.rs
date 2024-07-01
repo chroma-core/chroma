@@ -1,3 +1,4 @@
+use crate::cache::config::CacheConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
