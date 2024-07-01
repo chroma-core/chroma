@@ -1,5 +1,5 @@
+use super::ChannelRequestError;
 use super::{scheduler::Scheduler, ChannelError, WrappedMessage};
-use super::{ChannelRequestError, MessageWithReplyChannel};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
