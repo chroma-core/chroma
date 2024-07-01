@@ -20,8 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04-8, depot-ubuntu-22.04-16, depot-ubuntu-22.04-32]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v3
       - name: Setup
