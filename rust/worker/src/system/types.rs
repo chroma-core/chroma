@@ -8,7 +8,7 @@ use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 /// The state of a component
 /// A component can be running or stopped
 /// A component is stopped when it is cancelled
@@ -202,7 +202,7 @@ impl<C: Component> ComponentHandle<C> {
     }
 
     pub(crate) async fn state(&self) -> ComponentState {
-        return self.state.lock().clone();
+        return *self.state.lock();
     }
 
     pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
