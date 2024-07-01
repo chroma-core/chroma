@@ -3,6 +3,13 @@ use async_trait::async_trait;
 use std::fmt::Debug;
 use tokio::sync::oneshot;
 
+// Why is this separate from the WrappedMessage struct? The size of WrappedMessage
+// must be constant for all messages on a given component, so the alternative would
+// be to add a field to WrappedMessage like Box<dyn ReplyableMessage<C>>
+// (similar to how the outgoing message is boxed). Unfortunately this doesn't work
+// as the message generic (M) would have to be declared at the method level and this
+// is incompatible with dynamic dispatch.
+// (https://doc.rust-lang.org/error_codes/E0038.html#method-has-generic-type-parameters)
 #[derive(Debug)]
 pub(crate) struct MessageWithReplyChannel<M: Debug + Send + 'static, Result: Send> {
     message: M,
@@ -30,6 +37,21 @@ where
 }
 
 impl<C: Component> WrappedMessage<C> {
+    pub(super) fn new<M>(
+        message: M,
+        reply_channel: Option<oneshot::Sender<C::Result>>,
+        tracing_context: Option<tracing::Span>,
+    ) -> Self
+    where
+        C: Component + Handler<M>,
+        M: Debug + Send + 'static,
+    {
+        WrappedMessage {
+            boxed_message: Box::new(Some(MessageWithReplyChannel::new(message, reply_channel))),
+            tracing_context,
+        }
+    }
+
     pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
         self.boxed_message.handle(component, ctx).await;
     }
@@ -57,23 +79,8 @@ where
         if let Some(message) = self.take() {
             let result = component.handle(message.message, ctx).await;
             if let Some(reply_channel) = message.reply_channel {
-                // todo: avoid unwrap?
                 reply_channel.send(result).unwrap();
             }
         }
-    }
-}
-
-pub(crate) fn wrap<C, M>(
-    message: MessageWithReplyChannel<M, C::Result>,
-    tracing_context: Option<tracing::Span>,
-) -> WrappedMessage<C>
-where
-    C: Component + Handler<M>,
-    M: Debug + Send + 'static,
-{
-    WrappedMessage {
-        boxed_message: Box::new(Some(message)),
-        tracing_context,
     }
 }

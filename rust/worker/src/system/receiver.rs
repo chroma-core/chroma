@@ -64,3 +64,17 @@ impl ChromaError for ChannelError {
         ErrorCodes::Internal
     }
 }
+
+#[derive(Error, Debug)]
+pub enum ChannelRequestError {
+    #[error("Failed to send request")]
+    RequestError,
+    #[error("Failed to receive response")]
+    ResponseError,
+}
+
+impl ChromaError for ChannelRequestError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}

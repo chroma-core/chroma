@@ -1,5 +1,5 @@
-use super::MessageWithReplyChannel;
-use super::{scheduler::Scheduler, wrap, ChannelError, WrappedMessage};
+use super::{scheduler::Scheduler, ChannelError, WrappedMessage};
+use super::{ChannelRequestError, MessageWithReplyChannel};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
@@ -127,10 +127,7 @@ impl<C: Component> ComponentSender<C> {
         M: Send + Debug + 'static,
     {
         self.sender
-            .send(wrap(
-                MessageWithReplyChannel::new(message, None),
-                tracing_context,
-            ))
+            .send(WrappedMessage::new(message, None, tracing_context))
             .await
             .map_err(|_| ChannelError::SendError)
     }
@@ -139,21 +136,18 @@ impl<C: Component> ComponentSender<C> {
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<C::Result, ChannelError>
+    ) -> Result<C::Result, ChannelRequestError>
     where
         C: Handler<M>,
         M: Send + Debug + 'static,
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sender
-            .send(wrap(
-                MessageWithReplyChannel::new(message, Some(tx)),
-                tracing_context,
-            ))
-            // todo: handle error?
-            .await;
-        // todo: handle error?
-        let result = rx.await.unwrap();
+            .send(WrappedMessage::new(message, Some(tx), tracing_context))
+            .await
+            .map_err(|_| ChannelRequestError::RequestError)?;
+
+        let result = rx.await.map_err(|_| ChannelRequestError::ResponseError)?;
         Ok(result)
     }
 }
@@ -256,22 +250,13 @@ impl<C: Component> ComponentHandle<C> {
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<C::Result, ChannelError>
+    ) -> Result<C::Result, ChannelRequestError>
     where
         C: Handler<M>,
         M: Send + Debug + 'static,
     {
         self.sender.wrap_and_request(message, tracing_context).await
     }
-
-    // pub(crate) fn requestable_receiver<M>(&self) -> Box<dyn AllReceiver<C, M> + Send>
-    // where
-    //     C: Handler<M>,
-    //     M: Send + Debug + 'static,
-    // {
-    //     let sender = self.sender.sender.clone();
-    //     Box::new(ReceiverImpl::new(sender))
-    // }
 }
 
 /// The component context is passed to all Component Handler methods
