@@ -217,17 +217,7 @@ impl Block {
         for column in self.data.columns() {
             let array_data = column.to_data();
             total_size += get_size_of_array_data(&array_data);
-
-            let column_buffer_size = column.get_buffer_memory_size();
-            let alt_column_size = get_size_of_array_data(&array_data);
-            alt_size += column_buffer_size;
-            let alt_column_size = get_size_of_array_data(&array_data);
-            println!(
-                "Column buffer size: {} vs {}",
-                column_buffer_size, alt_column_size
-            );
         }
-        println!("Total size: {} vs {}", total_size, alt_size);
         return total_size;
     }
 
