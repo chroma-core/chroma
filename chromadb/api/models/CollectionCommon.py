@@ -135,6 +135,9 @@ class CollectionCommon(Generic[ClientT]):
             and data_loader_match
         )
 
+    def __repr__(self) -> str:
+        return f"Collection(id={self.id}, name={self.name})"
+
     def get_model(self) -> CollectionModel:
         return self._model
 
