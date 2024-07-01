@@ -381,7 +381,7 @@ fn get_size_of_array_data(array_data: &ArrayData) -> usize {
     for child in array_data.child_data() {
         total_size += get_size_of_array_data(child);
     }
-    // Some data types have null buffers
+    // Some data types (like our data record) have null buffers
     if let Some(buffer) = array_data.nulls() {
         let size = bit_util::round_upto_multiple_of_64(buffer.len());
         total_size += size;
