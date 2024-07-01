@@ -128,7 +128,7 @@ def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
         return [sqlite, sqlite_persistent, grpc_with_mock_server]
 
 
-@pytest.fixture(scope="module", params=db_fixtures())
+@pytest.fixture(params=db_fixtures())
 def sysdb(request: FixtureRequest) -> Generator[SysDB, None, None]:
     yield next(request.param())
 

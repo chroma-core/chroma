@@ -26,7 +26,7 @@ def db_fixtures() -> List[Callable[[], Generator[migrations.MigratableDB, None, 
     return [sqlite]
 
 
-@pytest.fixture(scope="module", params=db_fixtures())
+@pytest.fixture(params=db_fixtures())
 def db(request: FixtureRequest) -> Generator[migrations.MigratableDB, None, None]:
     yield next(request.param())
 
@@ -50,6 +50,7 @@ def test_setup_migrations(db: migrations.MigratableDB) -> None:
 
 def test_migrations(db: migrations.MigratableDB) -> None:
     db.initialize_migrations()
+    db.setup_migrations()
 
     dir = files("chromadb.test.db.migrations")
     db_migrations = db.db_migrations(dir)

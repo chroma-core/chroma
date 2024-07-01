@@ -20,7 +20,26 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04, windows-latest]
+    runs-on: depot-ubuntu-22.04-64
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test
+        run: python -m pytest -n auto --dist loadgroup --durations 10 --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+
+  # todo: combine this job with the above job and run on a single large machine, or more intelligently select a subset of tests to run on Windows
+  test-windows:
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
@@ -35,7 +54,7 @@ jobs:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
       - name: Setup
@@ -43,7 +62,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
+        run: python -m pytest --durations 10 ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -108,7 +127,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest --durations 10 "${{ matrix.test-globs }}"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -144,7 +163,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest chromadb/test/stress/
+        run: python -m pytest --durations 10 chromadb/test/stress/
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}

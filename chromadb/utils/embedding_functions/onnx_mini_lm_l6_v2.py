@@ -5,6 +5,7 @@ import os
 import tarfile
 from functools import cached_property
 from pathlib import Path
+import filelock
 from typing import List, Optional, cast
 
 import numpy as np
@@ -36,7 +37,7 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    DOWNLOAD_PATH: Path
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
@@ -46,7 +47,11 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # https://github.com/python/mypy/issues/7291 mypy makes you type the constructor if
     # no args
-    def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
+    def __init__(
+        self,
+        preferred_providers: Optional[List[str]] = None,
+        download_path: Optional[Path] = None,
+    ) -> None:
         # Import dependencies on demand to mirror other embedding functions. This
         # breaks typechecking, thus the ignores.
         # convert the list to set for unique values
@@ -81,6 +86,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The tqdm python package is not installed. Please install it with `pip install tqdm`"
             )
+
+        self.DOWNLOAD_PATH = (
+            download_path
+            if download_path
+            else Path.home() / ".cache" / "chroma" / "onnx_models" / self.MODEL_NAME
+        )
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
@@ -210,27 +221,31 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             "tokenizer.json",
             "vocab.txt",
         ]
+
         extracted_folder = os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME)
-        onnx_files_exist = True
-        for f in onnx_files:
-            if not os.path.exists(os.path.join(extracted_folder, f)):
-                onnx_files_exist = False
-                break
-        # Model is not downloaded yet
-        if not onnx_files_exist:
-            os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
-            if not os.path.exists(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
-            ) or not _verify_sha256(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                self._MODEL_SHA256,
-            ):
-                self._download(
-                    url=self.MODEL_DOWNLOAD_URL,
-                    fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                )
-            with tarfile.open(
-                name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                mode="r:gz",
-            ) as tar:
-                tar.extractall(path=self.DOWNLOAD_PATH)
+        lock_file = os.path.join(self.DOWNLOAD_PATH, ".lock")
+        os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
+
+        with filelock.FileLock(lock_file):
+            onnx_files_exist = True
+            for f in onnx_files:
+                if not os.path.exists(os.path.join(extracted_folder, f)):
+                    onnx_files_exist = False
+                    break
+            # Model is not downloaded yet
+            if not onnx_files_exist:
+                if not os.path.exists(
+                    os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+                ) or not _verify_sha256(
+                    os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    self._MODEL_SHA256,
+                ):
+                    self._download(
+                        url=self.MODEL_DOWNLOAD_URL,
+                        fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    )
+                with tarfile.open(
+                    name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    mode="r:gz",
+                ) as tar:
+                    tar.extractall(path=self.DOWNLOAD_PATH)
