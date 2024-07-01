@@ -2,10 +2,13 @@ import inspect
 import asyncio
 from typing import Any, Callable, Coroutine, TypeVar
 from typing_extensions import ParamSpec
+import multiprocessing
 
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+get_or_create_event_loop_mutex = multiprocessing.Lock()
 
 
 def async_to_sync(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
@@ -16,11 +19,12 @@ def async_to_sync(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
 
     def sync_wrapper(*args, **kwargs):  # type: ignore
         loop = None
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        with get_or_create_event_loop_mutex:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
 
         if loop.is_running():
             return func(*args, **kwargs)
