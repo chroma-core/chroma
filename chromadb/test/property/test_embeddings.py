@@ -196,7 +196,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
         self.collection.update(**record_set)
         if self.__class__.__name__ == "EmbeddingStateMachine":
-            self.log_operation_count += len(record_set["ids"])
+            self.log_operation_count += len(invariants.wrap(record_set["ids"]))
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
@@ -215,7 +215,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
         self.collection.upsert(**record_set)
         if self.__class__.__name__ == "EmbeddingStateMachine":
-            self.log_operation_count += len(record_set["ids"])
+            self.log_operation_count += len(invariants.wrap(record_set["ids"]))
         self._upsert_embeddings(record_set)
 
     @invariant()
