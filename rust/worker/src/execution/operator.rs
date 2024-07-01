@@ -1,4 +1,4 @@
-use crate::system::Receiver;
+use crate::system::ReceiverForMessage;
 use async_trait::async_trait;
 use std::fmt::Debug;
 use uuid::Uuid;
@@ -45,7 +45,7 @@ where
 {
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
-    reply_channel: Box<dyn Receiver<TaskResult<Output, Error>>>,
+    reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
     task_id: Uuid,
 }
 
@@ -89,7 +89,7 @@ where
 pub(super) fn wrap<Input, Output, Error>(
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
-    reply_channel: Box<dyn Receiver<TaskResult<Output, Error>>>,
+    reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
 ) -> TaskMessage
 where
     Error: Debug + 'static,

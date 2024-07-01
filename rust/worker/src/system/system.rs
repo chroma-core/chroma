@@ -1,7 +1,7 @@
 use super::scheduler::Scheduler;
-use super::sender::Sender;
 use super::ComponentContext;
 use super::ComponentRuntime;
+use super::ComponentSender;
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
 use futures::Stream;
 use futures::StreamExt;
@@ -35,7 +35,7 @@ impl System {
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
-        let sender = Sender::new(tx);
+        let sender: ComponentSender<C> = ComponentSender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
         let mut executor = ComponentExecutor::new(
             sender.clone(),
@@ -105,7 +105,7 @@ where
             message = stream.next() => {
                 match message {
                     Some(message) => {
-                        let res = ctx.sender.send(message, None).await;
+                        let res = ctx.send(message, None).await;
                         match res {
                             Ok(_) => {}
                             Err(e) => {

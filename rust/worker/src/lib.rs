@@ -61,7 +61,7 @@ pub async fn query_service_entrypoint() {
         }
     };
     worker_server.set_system(system.clone());
-    worker_server.set_dispatcher(dispatcher_handle.receiver());
+    worker_server.set_dispatcher(dispatcher_handle.clone());
 
     let server_join_handle = tokio::spawn(async move {
         let _ = crate::server::WorkerServer::run(worker_server).await;
@@ -134,7 +134,7 @@ pub async fn compaction_service_entrypoint() {
                 return;
             }
         };
-    compaction_manager.set_dispatcher(dispatcher_handle.receiver());
+    compaction_manager.set_dispatcher(dispatcher_handle.clone());
     compaction_manager.set_system(system.clone());
 
     let mut compaction_manager_handle = system.start_component(compaction_manager);
