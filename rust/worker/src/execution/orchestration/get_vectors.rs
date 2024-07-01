@@ -261,7 +261,7 @@ impl Component for GetVectorsOrchestrator {
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
 
-        self.pull_logs(ctx.as_receiver(), ctx).await;
+        self.pull_logs(ctx.receiver(), ctx).await;
     }
 }
 
@@ -278,7 +278,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrat
         match message {
             Ok(output) => {
                 let logs = output.logs();
-                self.get_vectors(ctx.as_receiver(), logs, ctx).await;
+                self.get_vectors(ctx.receiver(), logs, ctx).await;
             }
             Err(e) => {
                 self.terminate_with_error(Box::new(e), ctx);

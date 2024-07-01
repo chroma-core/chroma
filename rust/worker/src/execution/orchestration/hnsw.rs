@@ -358,7 +358,7 @@ impl HnswQueryOrchestrator {
                 allowed_ids_hnsw: self.allowed_ids_hnsw_segment.clone(),
                 logs: logs.clone(),
             };
-            let task = wrap(operator, input, ctx.as_receiver());
+            let task = wrap(operator, input, ctx.receiver());
             self.hnsw_task_id_to_query_index.insert(task.id(), i);
             match self.dispatcher.send(task, Some(Span::current())).await {
                 Ok(_) => (),
@@ -426,7 +426,7 @@ impl HnswQueryOrchestrator {
             self.blockfile_provider.clone(),
         );
 
-        let task = wrap(operator, input, ctx.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         self.merge_task_id_to_query_index
             .insert(task.id(), query_vector_index);
         match self.dispatcher.send(task, Some(Span::current())).await {
@@ -580,7 +580,7 @@ impl Component for HnswQueryOrchestrator {
         self.hnsw_segment = Some(hnsw_segment);
         self.collection = Some(collection);
 
-        self.pull_logs(ctx.as_receiver()).await;
+        self.pull_logs(ctx.receiver()).await;
     }
 }
 
@@ -618,8 +618,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
                 }
                 self.allowed_ids_brute_force = allowed_ids_brute_force.into();
                 self.allowed_ids_hnsw_segment = allowed_ids_hnsw.into();
-                self.brute_force_query(logs.clone(), ctx.as_receiver())
-                    .await;
+                self.brute_force_query(logs.clone(), ctx.receiver()).await;
                 self.hnsw_segment_query(logs, ctx).await;
             }
             Err(e) => {

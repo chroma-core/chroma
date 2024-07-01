@@ -235,7 +235,7 @@ impl CountQueryOrchestrator {
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -401,7 +401,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
                     self.blockfile_provider.clone(),
                     logs.logs(),
                 );
-                let msg = wrap(operator, input, ctx.as_receiver());
+                let msg = wrap(operator, input, ctx.receiver());
                 match self.dispatcher.send(msg, None).await {
                     Ok(_) => (),
                     Err(e) => {
@@ -561,7 +561,7 @@ impl MetadataQueryOrchestrator {
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -593,7 +593,7 @@ impl MetadataQueryOrchestrator {
         );
 
         let op = MetadataFilteringOperator::new();
-        let task = wrap(op, input, ctx.as_receiver());
+        let task = wrap(op, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -793,7 +793,7 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
             self.blockfile_provider.clone(),
         );
 
-        let task = wrap(operator, input, ctx.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {

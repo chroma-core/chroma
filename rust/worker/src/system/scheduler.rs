@@ -30,7 +30,7 @@ impl Scheduler {
         M: Debug + Send + 'static,
     {
         let cancel = ctx.cancellation_token.clone();
-        let sender = ctx.as_receiver().clone();
+        let sender = ctx.receiver().clone();
         let handle = tokio::spawn(async move {
             select! {
                 _ = cancel.cancelled() => {
@@ -69,7 +69,7 @@ impl Scheduler {
     {
         let cancel = ctx.cancellation_token.clone();
 
-        let sender = ctx.as_receiver().clone();
+        let sender = ctx.receiver().clone();
 
         let handle = tokio::spawn(async move {
             let mut counter = 0;
