@@ -200,7 +200,13 @@ impl BlockManager {
 
         match block {
             Some(block) => {
-                let bytes = block.to_bytes();
+                let bytes = match block.to_bytes() {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+
                 let key = format!("block/{}", id);
                 let res = self.storage.put_bytes(&key, bytes).await;
                 match res {
@@ -334,7 +340,13 @@ impl SparseIndexManager {
                 let as_block = index.to_block::<K>();
                 match as_block {
                     Ok(block) => {
-                        let bytes = block.to_bytes();
+                        let bytes = match block.to_bytes() {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                return Err(Box::new(e));
+                            }
+                        };
+
                         let key = format!("sparse_index/{}", id);
                         let res = self.storage.put_bytes(&key, bytes).await;
                         match res {

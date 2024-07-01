@@ -34,10 +34,12 @@ pub struct Block {
 }
 
 impl Block {
+    /// Create a concrete block from an id and the underlying record batch of data
     pub fn from_record_batch(id: Uuid, data: RecordBatch) -> Self {
         Self { id, data }
     }
 
+    /// Converts the block to a block delta for writing to a new block
     pub fn to_block_delta<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         mut delta: BlockDelta,
@@ -58,6 +60,13 @@ impl Block {
         delta
     }
 
+    /*
+        ===== Block Queries =====
+    */
+
+    /// Get the value for a given key in the block
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -79,6 +88,9 @@ impl Block {
         None
     }
 
+    /// Get all the values for a given prefix in the block
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -103,6 +115,9 @@ impl Block {
         return Some(res);
     }
 
+    /// Get all the values for a given prefix in the block where the key is greater than the given key
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get_gt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -125,6 +140,9 @@ impl Block {
         return Some(res);
     }
 
+    /// Get all the values for a given prefix in the block where the key is less than the given key
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get_lt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -147,6 +165,9 @@ impl Block {
         return Some(res);
     }
 
+    /// Get all the values for a given prefix in the block where the key is less than or equal to the given key
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get_lte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -169,6 +190,9 @@ impl Block {
         return Some(res);
     }
 
+    /// Get all the values for a given prefix in the block where the key is greater than or equal to the given key
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get_gte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
@@ -191,6 +215,12 @@ impl Block {
         return Some(res);
     }
 
+    /// Get all the values for a given prefix in the block where the key is between the given keys
+    /// ### Notes
+    /// - Returns a tuple of (prefix, key, value)
+    /// - Returns None if the requested index is out of bounds
+    /// ### Panics
+    /// - If the underlying data types are not the same as the types specified in the function signature
     pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         index: usize,
@@ -210,10 +240,13 @@ impl Block {
         Some((prefix, key, value))
     }
 
+    /*
+        ===== Block Metadata =====
+    */
+
     /// Returns the size of the block in bytes
     pub(crate) fn get_size(&self) -> usize {
         let mut total_size = 0;
-        let mut alt_size = 0;
         for column in self.data.columns() {
             let array_data = column.to_data();
             total_size += get_size_of_array_data(&array_data);
@@ -226,20 +259,27 @@ impl Block {
         self.data.num_rows()
     }
 
-    pub fn save(&self, path: &str) -> Result<(), Box<dyn ChromaError>> {
+    /*
+        ===== Block Serialization =====
+    */
+
+    /// Save the block in Arrow IPC format to the given path
+    pub fn save(&self, path: &str) -> Result<(), BlockSaveError> {
         let file = match std::fs::File::create(path) {
             Ok(file) => file,
             Err(e) => {
-                // TODO: Return a proper error
-                panic!("Error creating file: {:?}", e)
+                return Err(BlockSaveError::IOError(e));
             }
         };
+
+        // We force the block to be written with 64 byte alignment
+        // this is the default, but we are just being defensive
         let mut writer = std::io::BufWriter::new(file);
         let options =
             match arrow::ipc::writer::IpcWriteOptions::try_new(64, false, MetadataVersion::V5) {
                 Ok(options) => options,
                 Err(e) => {
-                    panic!("Error creating options: {:?}", e);
+                    return Err(BlockSaveError::ArrowError(e));
                 }
             };
 
@@ -251,82 +291,84 @@ impl Block {
         let mut writer = match writer {
             Ok(writer) => writer,
             Err(e) => {
-                // TODO: Return a proper error
-                panic!("Error creating writer: {:?}", e)
+                return Err(BlockSaveError::ArrowError(e));
             }
         };
         match writer.write(&self.data) {
             Ok(_) => match writer.finish() {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    panic!("Error finishing writer: {:?}", e);
+                    return Err(BlockSaveError::ArrowError(e));
                 }
             },
             Err(e) => {
-                panic!("Error writing data: {:?}", e);
+                return Err(BlockSaveError::ArrowError(e));
             }
         }
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    /// Convert the block to bytes in Arrow IPC format
+    pub fn to_bytes(&self) -> Result<Vec<u8>, BlockToBytesError> {
         let mut bytes = Vec::new();
         // Scope the writer so that it is dropped before we return the bytes
         {
             let mut writer =
-                arrow::ipc::writer::FileWriter::try_new(&mut bytes, &self.data.schema())
-                    .expect("Error creating writer");
-            writer.write(&self.data).expect("Error writing data");
-            writer.finish().expect("Error finishing writer");
+                match arrow::ipc::writer::FileWriter::try_new(&mut bytes, &self.data.schema()) {
+                    Ok(writer) => writer,
+                    Err(e) => {
+                        return Err(BlockToBytesError::ArrowError(e));
+                    }
+                };
+            match writer.write(&self.data) {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(BlockToBytesError::ArrowError(e));
+                }
+            }
+            match writer.finish() {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(BlockToBytesError::ArrowError(e));
+                }
+            }
         }
-        bytes
+        Ok(bytes)
     }
 
-    pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, Box<dyn ChromaError>> {
+    pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::from_bytes_internal(bytes, id, false);
     }
 
-    pub fn from_bytes_with_validation(
-        bytes: &[u8],
-        id: Uuid,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    pub fn from_bytes_with_validation(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::from_bytes_internal(bytes, id, true);
     }
 
-    fn from_bytes_internal(
-        bytes: &[u8],
-        id: Uuid,
-        validate: bool,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    fn from_bytes_internal(bytes: &[u8], id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
         let cursor = std::io::Cursor::new(bytes);
         return Self::load_with_reader(cursor, id, validate);
     }
 
-    pub fn load_with_validation(path: &str, id: Uuid) -> Result<Self, Box<dyn ChromaError>> {
+    pub fn load_with_validation(path: &str, id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::load_internal(path, id, true);
     }
 
-    pub fn load(path: &str, id: Uuid) -> Result<Self, Box<dyn ChromaError>> {
+    pub fn load(path: &str, id: Uuid) -> Result<Self, BlockLoadError> {
         return Self::load_internal(path, id, false);
     }
 
-    fn load_internal(path: &str, id: Uuid, validate: bool) -> Result<Self, Box<dyn ChromaError>> {
+    fn load_internal(path: &str, id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
         let file = std::fs::File::open(path);
         let file = match file {
             Ok(file) => file,
             Err(e) => {
-                // TODO: Return a proper error
-                panic!("Error opening file: {:?}", e)
+                return Err(BlockLoadError::IOError(e));
             }
         };
         let reader = std::io::BufReader::new(file);
         return Self::load_with_reader(reader, id, validate);
     }
 
-    fn load_with_reader<R>(
-        mut reader: R,
-        id: Uuid,
-        validate: bool,
-    ) -> Result<Self, Box<dyn ChromaError>>
+    fn load_with_reader<R>(mut reader: R, id: Uuid, validate: bool) -> Result<Self, BlockLoadError>
     where
         R: std::io::Read + std::io::Seek,
     {
@@ -335,22 +377,30 @@ impl Block {
             match res {
                 Ok(_) => {}
                 Err(e) => {
-                    return Err(Box::new(e));
+                    return Err(BlockLoadError::ArrowLayoutVerificationError(e));
                 }
             }
         }
 
-        let mut arrow_reader = arrow::ipc::reader::FileReader::try_new(&mut reader, None)
-            .expect("Error creating reader");
-
-        let batch = arrow_reader.next().unwrap();
-        // TODO: how to store / hydrate id?
-        match batch {
-            Ok(batch) => Ok(Self::from_record_batch(id, batch)),
+        let mut arrow_reader = match arrow::ipc::reader::FileReader::try_new(&mut reader, None) {
+            Ok(arrow_reader) => arrow_reader,
             Err(e) => {
-                panic!("Error reading batch: {:?}", e);
+                return Err(BlockLoadError::ArrowError(e));
             }
-        }
+        };
+
+        let batch = match arrow_reader.next() {
+            Some(Ok(batch)) => batch,
+            Some(Err(e)) => {
+                return Err(BlockLoadError::ArrowError(e));
+            }
+            None => {
+                return Err(BlockLoadError::NoRecordBatches);
+            }
+        };
+
+        // TODO: how to store / hydrate id?
+        Ok(Self::from_record_batch(id, batch))
     }
 }
 
@@ -358,12 +408,27 @@ fn get_size_of_array_data(array_data: &ArrayData) -> usize {
     let mut total_size = 0;
     for buffer in array_data.buffers() {
         // SYSTEM ASSUMPTION: ALL BUFFERS ARE PADDED TO 64 bytes
-        // We maintain this invariant in two places
+        // We maintain this invariant in three places
         // 1. In the to_arrow methods of delta storage, we allocate
         // padded buffers
-        // 2. In block load() we validate that the buffers are of size 64
+        // 2. In calls to load() in tests we validate that the buffers are of size 64
+        // 3. In writing to the IPC block file we use an option ensure 64 byte alignment
+        // which makes the arrow writer add padding to the buffers
         // Why do we do this instead of using get_buffer_memory_size()
-        // or using the buffers capacity? TODO: answer
+        // or using the buffers capacity?
+        // The reason is that arrow can dramatically overreport the size of buffers
+        // if the underlying buffers are shared. If we use something like get_buffer_memory_size()
+        // or capacity. This is because the buffer may be shared with other arrays.
+        // In the case of Arrow IPC data, all the data is one buffer
+        // so get_buffer_memory_size() would overreport the size of the buffer
+        // by the number of columns and also by the number of validity, and offset buffers.
+        // This is why we use the buffer.len() method which gives us the actual size of the buffer
+        // however len() excludes the capacity of the buffer which is why we round up to the nearest
+        // multiple of 64 bytes. We ensure, both when we construct the buffer and when we write it to disk
+        // that the buffer is also block.len() + padding of 64 bytes exactly.
+        // (As an added note, arrow throws away explicit knowledge of this padding,
+        // see verify_buffers_layout() for how we infer the padding based on
+        // the offsets of each buffer)
         let size = bit_util::round_upto_multiple_of_64(buffer.len());
         total_size += size;
     }
@@ -379,6 +444,57 @@ fn get_size_of_array_data(array_data: &ArrayData) -> usize {
     return total_size;
 }
 
+/*
+===== ErrorTypes =====
+*/
+
+#[derive(Error, Debug)]
+pub enum BlockSaveError {
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+    #[error(transparent)]
+    ArrowError(#[from] arrow::error::ArrowError),
+}
+
+impl ChromaError for BlockSaveError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BlockSaveError::IOError(_) => ErrorCodes::Internal,
+            BlockSaveError::ArrowError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BlockToBytesError {
+    #[error(transparent)]
+    ArrowError(#[from] arrow::error::ArrowError),
+}
+
+impl ChromaError for BlockToBytesError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BlockToBytesError::ArrowError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BlockLoadError {
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+    #[error(transparent)]
+    ArrowError(#[from] arrow::error::ArrowError),
+    #[error(transparent)]
+    ArrowLayoutVerificationError(#[from] ArrowLayoutVerificationError),
+    #[error("No record batches in IPC file")]
+    NoRecordBatches,
+}
+
+/*
+===== Layout Verification =====
+*/
+
 #[derive(Error, Debug)]
 pub enum ArrowLayoutVerificationError {
     #[error("Buffer length is not 64 byte aligned")]
@@ -389,8 +505,6 @@ pub enum ArrowLayoutVerificationError {
     ArrowError(#[from] arrow::error::ArrowError),
     #[error(transparent)]
     InvalidFlatbuffer(#[from] flatbuffers::InvalidFlatbuffer),
-    #[error("No schema in footer")]
-    NoSchema,
     #[error("No record batches in footer")]
     NoRecordBatches,
     #[error("More than one record batch in IPC file")]
@@ -399,27 +513,21 @@ pub enum ArrowLayoutVerificationError {
     InvalidMessageType,
     #[error("Error decoding record batch message as record batch")]
     RecordBatchDecodeError,
-    #[error("Record batch has no buffer blocks")]
-    NoBufferBlocks,
 }
 
 impl ChromaError for ArrowLayoutVerificationError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ArrowLayoutVerificationError::BufferLengthNotAligned => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::IOError(_) => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::ArrowError(_) => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::InvalidFlatbuffer(_) => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::NoSchema => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::NoRecordBatches => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::MultipleRecordBatches => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::InvalidMessageType => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::RecordBatchDecodeError => ErrorCodes::Internal,
-            ArrowLayoutVerificationError::NoBufferBlocks => ErrorCodes::Internal,
+            // All errors are internal for this error type
+            _ => ErrorCodes::Internal,
         }
     }
 }
 
+/// Verifies that the buffers in the IPC file are 64 byte aligned
+/// and stored in Arrow in the way we expect.
+/// All non-benchmark test code should use this by loading the block
+/// with verification enabled.
 fn verify_buffers_layout<R>(mut reader: R) -> Result<(), ArrowLayoutVerificationError>
 where
     R: std::io::Read + std::io::Seek,
