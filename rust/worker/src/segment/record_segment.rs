@@ -4,10 +4,7 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::types::{
-    merge_update_metadata, update_metdata_to_metdata, LogRecord, Metadata, MetadataValue,
-    Operation, Segment, SegmentType,
-};
+use crate::types::{Operation, Segment, SegmentType};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -294,8 +291,12 @@ pub enum ApplyMaterializedLogError {
     BlockfileSetError,
     #[error("Error deleting from blockfile")]
     BlockfileDeleteError,
+    #[error("Error updating blockfile")]
+    BlockfileUpdateError,
     #[error("Embedding not set in the user write")]
     EmbeddingNotSet,
+    #[error("Metadata update not valid")]
+    MetadataUpdateNotValid,
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -303,6 +304,8 @@ impl ChromaError for ApplyMaterializedLogError {
         match self {
             ApplyMaterializedLogError::BlockfileSetError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BlockfileUpdateError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::MetadataUpdateNotValid => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
         }
     }
@@ -780,6 +783,11 @@ impl RecordSegmentReader<'_> {
                     data.push(data_record);
                 }
                 Err(e) => {
+                    tracing::error!(
+                        "[GetAllData] Error getting data record for index {:?}: {:?}",
+                        i,
+                        e
+                    );
                     return Err(e);
                 }
             }

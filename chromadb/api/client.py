@@ -1,10 +1,10 @@
-from typing import ClassVar, Dict, Optional, Sequence
+from typing import Optional, Sequence
 from uuid import UUID
-import uuid
 
 from overrides import override
-import requests
+import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
     DataLoader,
@@ -24,95 +24,8 @@ from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.errors import ChromaError
-from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
-
-
-class SharedSystemClient:
-    _identifer_to_system: ClassVar[Dict[str, System]] = {}
-    _identifier: str
-
-    # region Initialization
-    def __init__(
-        self,
-        settings: Settings = Settings(),
-    ) -> None:
-        self._identifier = SharedSystemClient._get_identifier_from_settings(settings)
-        SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
-
-    @classmethod
-    def _create_system_if_not_exists(
-        cls, identifier: str, settings: Settings
-    ) -> System:
-        if identifier not in cls._identifer_to_system:
-            new_system = System(settings)
-            cls._identifer_to_system[identifier] = new_system
-
-            new_system.instance(ProductTelemetryClient)
-            new_system.instance(ServerAPI)
-
-            new_system.start()
-        else:
-            previous_system = cls._identifer_to_system[identifier]
-
-            # For now, the settings must match
-            if previous_system.settings != settings:
-                raise ValueError(
-                    f"An instance of Chroma already exists for {identifier} with different settings"
-                )
-
-        return cls._identifer_to_system[identifier]
-
-    @staticmethod
-    def _get_identifier_from_settings(settings: Settings) -> str:
-        identifier = ""
-        api_impl = settings.chroma_api_impl
-
-        if api_impl is None:
-            raise ValueError("Chroma API implementation must be set in settings")
-        elif api_impl == "chromadb.api.segment.SegmentAPI":
-            if settings.is_persistent:
-                identifier = settings.persist_directory
-            else:
-                identifier = (
-                    "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
-                )
-        elif api_impl in [
-            "chromadb.api.fastapi.FastAPI",
-            "chromadb.api.async_fastapi.AsyncFastAPI",
-        ]:
-            # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
-            identifier = str(uuid.uuid4())
-        else:
-            raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
-
-        return identifier
-
-    @staticmethod
-    def _populate_data_from_system(system: System) -> str:
-        identifier = SharedSystemClient._get_identifier_from_settings(system.settings)
-        SharedSystemClient._identifer_to_system[identifier] = system
-        return identifier
-
-    @classmethod
-    def from_system(cls, system: System) -> "SharedSystemClient":
-        """Create a client from an existing system. This is useful for testing and debugging."""
-
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(system.settings)
-        return instance
-
-    @staticmethod
-    def clear_system_cache() -> None:
-        SharedSystemClient._identifer_to_system = {}
-
-    @property
-    def _system(self) -> System:
-        return SharedSystemClient._identifer_to_system[self._identifier]
-
-    # endregion
 
 
 class Client(SharedSystemClient, ClientAPI):
@@ -149,9 +62,7 @@ class Client(SharedSystemClient, ClientAPI):
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
 
-        # Submit event for a client start
-        telemetry_client = self._system.instance(ProductTelemetryClient)
-        telemetry_client.capture(ClientStartEvent())
+        self._submit_client_start_event()
 
     @classmethod
     @override
@@ -438,7 +349,7 @@ class Client(SharedSystemClient, ClientAPI):
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
-        except requests.exceptions.ConnectionError:
+        except httpx.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
@@ -452,7 +363,7 @@ class Client(SharedSystemClient, ClientAPI):
 
         try:
             self._admin_client.get_database(name=database, tenant=tenant)
-        except requests.exceptions.ConnectionError:
+        except httpx.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )

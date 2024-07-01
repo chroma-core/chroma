@@ -1,7 +1,9 @@
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
-from typing_extensions import Literal, TypedDict, Protocol
+from typing_extensions import TypedDict, Protocol, runtime_checkable
+from enum import Enum
+from pydantic import Field
 import chromadb.errors as errors
 from chromadb.types import (
     Metadata,
@@ -56,7 +58,7 @@ Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(
-    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]
+    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]  # type: ignore[type-arg]
 ) -> Embeddings:
     if isinstance(target, List):
         # One Embedding
@@ -101,7 +103,7 @@ def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
 
 
 # Images
-ImageDType = Union[np.uint, np.int_, np.float_]
+ImageDType = Union[np.uint, np.int_, np.float_]  # type: ignore[name-defined]
 Image = NDArray[ImageDType]
 Images = List[Image]
 
@@ -123,18 +125,29 @@ def maybe_cast_one_to_many_image(target: OneOrMany[Image]) -> Images:
 
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
+
+class IncludeEnum(str, Enum):
+    documents = "documents"
+    embeddings = "embeddings"
+    metadatas = "metadatas"
+    distances = "distances"
+    uris = "uris"
+    data = "data"
+
+
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
-Include = List[
-    Union[
-        Literal["documents"],
-        Literal["embeddings"],
-        Literal["metadatas"],
-        Literal["distances"],
-        Literal["uris"],
-        Literal["data"],
-    ]
-]
+Include = List[IncludeEnum]
+IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
+IncludeMetadataDocumentsEmbeddings = Field(
+    default=["metadatas", "documents", "embeddings"]
+)
+IncludeMetadataDocumentsEmbeddingsDistances = Field(
+    default=["metadatas", "documents", "embeddings", "distances"]
+)
+IncludeMetadataDocumentsDistances = Field(
+    default=["metadatas", "documents", "distances"]
+)
 
 # Re-export types from chromadb.types
 LiteralValue = LiteralValue
@@ -184,6 +197,7 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+@runtime_checkable
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
@@ -199,8 +213,10 @@ class EmbeddingFunction(Protocol[D]):
 
         setattr(cls, "__call__", __call__)
 
-    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
-        return retry(**retry_kwargs)(self.__call__)(input)
+    def embed_with_retries(
+        self, input: D, **retry_kwargs: Dict[str, Any]
+    ) -> Embeddings:
+        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
 
 
 def validate_embedding_function(

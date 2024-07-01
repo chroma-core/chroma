@@ -19,6 +19,7 @@ use crate::{
 };
 use core::panic;
 use futures::stream::Count;
+use regex::Regex;
 use roaring::RoaringBitmap;
 use std::{
     collections::{HashMap, HashSet},
@@ -152,16 +153,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             }
         };
         // Step 1: Materialize the logs.
-        let mut offset_id = Arc::new(AtomicU32::new(1));
-        match record_segment_reader.as_ref() {
-            Some(reader) => {
-                offset_id = reader.get_current_max_offset_id();
-                offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            None => {}
-        };
         let materializer =
-            LogMaterializer::new(record_segment_reader, input.log_record.clone(), offset_id);
+            LogMaterializer::new(record_segment_reader, input.log_record.clone(), None);
         let mat_records = match materializer.materialize().await {
             Ok(records) => records,
             Err(e) => {
@@ -516,12 +509,19 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     let mut matching_contains = vec![];
                     // Upstream sorts materialized records by offset id so matching_contains
                     // will be sorted.
+                    // Note: Uncomment this out when adding FTS support for queries
+                    // containing _ or %. Currently, we disable such scenarios in tests
+                    // for distributed version.
+                    // Emulate sqlite behavior. _ and % match to any character in sqlite.
+                    // let normalized_query = query.replace("_", ".").replace("%", ".");
+                    // let re = Regex::new(normalized_query.as_str()).unwrap();
                     for (record, _) in mat_records.iter() {
                         if record.final_operation == Operation::Delete {
                             continue;
                         }
                         match record.merged_document_ref() {
                             Some(doc) => {
+                                /* if re.is_match(doc) { */
                                 if doc.contains(query) {
                                     matching_contains.push(record.offset_id as i32);
                                 }
@@ -851,8 +851,7 @@ mod test {
                     };
                 }
             };
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -1064,8 +1063,7 @@ mod test {
                     };
                 }
             };
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
                 .await
@@ -1248,8 +1246,7 @@ mod test {
                     };
                 }
             };
-            let materializer =
-                LogMaterializer::new(record_segment_reader, data, Arc::new(AtomicU32::new(1)));
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
                 .await

@@ -128,6 +128,7 @@ impl BlockDelta {
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
         let mut output = Vec::new();
+        let mut first_iter = true;
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
             let curr_block = blocks_to_split.pop().unwrap();
@@ -168,7 +169,11 @@ impl BlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),
             };
-
+            if first_iter {
+                first_iter = false;
+            } else {
+                output.push((curr_block.builder.get_key(0).clone(), curr_block));
+            }
             if new_block.get_size::<K, V>() > MAX_BLOCK_SIZE {
                 blocks_to_split.push(new_block);
             } else {

@@ -20,7 +20,7 @@ impl PositionalPostingList {
     }
 
     pub(crate) fn get_positions_for_doc_id(&self, doc_id: i32) -> Option<Int32Array> {
-        let index = self.doc_ids.iter().position(|x| x == Some(doc_id));
+        let index = self.doc_ids.values().binary_search(&doc_id).ok();
         match index {
             Some(index) => {
                 let target_positions = self.positions.value(index);
@@ -113,6 +113,8 @@ impl PositionalPostingListBuilder {
             return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
         }
 
+        // Safe to unwrap here since this is called for >= 2nd time a token
+        // exists in the document.
         self.positions.get_mut(&doc_id).unwrap().extend(positions);
         Ok(())
     }

@@ -12,7 +12,8 @@ use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::{
-    CountQueryOrchestrator, HnswQueryOrchestrator, MetadataQueryOrchestrator,
+    CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
+    MetadataQueryOrchestrator,
 };
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
@@ -34,8 +35,8 @@ pub struct WorkerServer {
     // Component dependencies
     dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
     // Service dependencies
-    log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    log: Box<Log>,
+    sysdb: Box<SysDb>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
@@ -93,18 +94,23 @@ impl WorkerServer {
             ))
             .add_service(
                 chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker.clone()),
-            )
-            .serve_with_shutdown(addr, async {
-                let mut sigterm = match signal(SignalKind::terminate()) {
-                    Ok(sigterm) => sigterm,
-                    Err(e) => {
-                        tracing::error!("Failed to create signal handler: {:?}", e);
-                        return;
-                    }
-                };
-                sigterm.recv().await;
-                tracing::info!("Received SIGTERM, shutting down");
-            });
+            );
+
+        #[cfg(debug_assertions)]
+        let server =
+            server.add_service(chroma_proto::debug_server::DebugServer::new(worker.clone()));
+
+        let server = server.serve_with_shutdown(addr, async {
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(sigterm) => sigterm,
+                Err(e) => {
+                    tracing::error!("Failed to create signal handler: {:?}", e);
+                    return;
+                }
+            };
+            sigterm.recv().await;
+            tracing::info!("Received SIGTERM, shutting down");
+        });
 
         server.await?;
         Ok(())
@@ -223,6 +229,76 @@ impl WorkerServer {
         };
 
         return Ok(Response::new(resp));
+    }
+
+    async fn get_vectors_instrumented(
+        &self,
+        request: Request<GetVectorsRequest>,
+    ) -> Result<Response<GetVectorsResponse>, Status> {
+        let request = request.into_inner();
+        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher,
+            None => {
+                return Err(Status::internal("No dispatcher found"));
+            }
+        };
+
+        let system = match self.system {
+            Some(ref system) => system,
+            None => {
+                return Err(Status::internal("No system found"));
+            }
+        };
+
+        let orchestrator = GetVectorsOrchestrator::new(
+            system.clone(),
+            request.ids,
+            segment_uuid,
+            self.log.clone(),
+            self.sysdb.clone(),
+            dispatcher.clone(),
+            self.blockfile_provider.clone(),
+        );
+        let result = orchestrator.run().await;
+        let mut result = match result {
+            Ok(result) => result,
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "Error running orchestrator: {}",
+                    e
+                )));
+            }
+        };
+
+        let mut output = Vec::new();
+        let id_drain = result.ids.drain(..);
+        let vector_drain = result.vectors.drain(..);
+
+        for (id, vector) in id_drain.zip(vector_drain) {
+            let vector_len = vector.len();
+            let proto_vector = match (vector, ScalarEncoding::FLOAT32, vector_len).try_into() {
+                Ok(vector) => vector,
+                Err(_) => {
+                    return Err(Status::internal("Error converting vector"));
+                }
+            };
+
+            let proto_vector_record = chroma_proto::VectorEmbeddingRecord {
+                id,
+                vector: Some(proto_vector),
+            };
+            output.push(proto_vector_record);
+        }
+
+        let response = chroma_proto::GetVectorsResponse { records: output };
+        Ok(Response::new(response))
     }
 
     async fn query_metadata_instrumented(
@@ -353,15 +429,18 @@ impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
         &self,
         request: Request<GetVectorsRequest>,
     ) -> Result<Response<GetVectorsResponse>, Status> {
-        let request = request.into_inner();
-        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid UUID"));
-            }
-        };
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let request_span = trace_span!(
+            "Get vectors",
+            segment_id = request.get_ref().segment_id,
+            ids = ?request.get_ref().ids
+        );
 
-        Err(Status::unimplemented("Not yet implemented"))
+        let instrumented_span = wrap_span_with_parent_context(request_span, request.metadata());
+        self.get_vectors_instrumented(request)
+            .instrument(instrumented_span)
+            .await
     }
 
     async fn query_vectors(
@@ -446,5 +525,96 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         self.query_metadata_instrumented(request)
             .instrument(instrumented_span)
             .await
+    }
+}
+
+#[cfg(debug_assertions)]
+#[tonic::async_trait]
+impl chroma_proto::debug_server::Debug for WorkerServer {
+    async fn get_info(
+        &self,
+        request: Request<()>,
+    ) -> Result<Response<chroma_proto::GetInfoResponse>, Status> {
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let request_span = trace_span!("Get info");
+
+        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
+            let response = chroma_proto::GetInfoResponse {
+                version: option_env!("CARGO_PKG_VERSION")
+                    .unwrap_or("unknown")
+                    .to_string(),
+            };
+            Ok(Response::new(response))
+        })
+    }
+
+    async fn trigger_panic(&self, request: Request<()>) -> Result<Response<()>, Status> {
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let request_span = trace_span!("Trigger panic");
+
+        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
+            panic!("Intentional panic triggered");
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::execution::dispatcher;
+    use crate::log::log::InMemoryLog;
+    use crate::storage::local::LocalStorage;
+    use crate::storage::Storage;
+    use crate::sysdb::test_sysdb::TestSysDb;
+    use crate::system;
+
+    use super::*;
+    use chroma_proto::debug_client::DebugClient;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn gracefully_handles_panics() {
+        let sysdb = TestSysDb::new();
+        let log = InMemoryLog::new();
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+        let mut server = WorkerServer {
+            dispatcher: None,
+            system: None,
+            sysdb: Box::new(SysDb::Test(sysdb)),
+            log: Box::new(Log::InMemory(log)),
+            hnsw_index_provider: HnswIndexProvider::new(
+                storage.clone(),
+                tmp_dir.path().to_path_buf(),
+            ),
+            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            port,
+        };
+
+        let system: system::System = system::System::new();
+        let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        server.set_system(system.clone());
+        server.set_dispatcher(dispatcher_handle.receiver());
+
+        tokio::spawn(async move {
+            let _ = crate::server::WorkerServer::run(server).await;
+        });
+
+        let mut client = DebugClient::connect(format!("http://localhost:{}", port))
+            .await
+            .unwrap();
+
+        // Test response when handler panics
+        let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
+        assert_eq!(err_response.code(), tonic::Code::Cancelled);
+
+        // The server should still work, even after a panic was thrown
+        let response = client.get_info(Request::new(())).await;
+        assert!(response.is_ok());
     }
 }

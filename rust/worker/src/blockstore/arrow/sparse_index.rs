@@ -341,8 +341,13 @@ impl SparseIndex {
             forward.remove(&old_start_key);
             if old_start_key == SparseIndexDelimiter::Start {
                 forward.insert(SparseIndexDelimiter::Start, new_block_id);
+                reverse.insert(new_block_id, SparseIndexDelimiter::Start);
             } else {
-                forward.insert(SparseIndexDelimiter::Key(new_start_key), new_block_id);
+                forward.insert(
+                    SparseIndexDelimiter::Key(new_start_key.clone()),
+                    new_block_id,
+                );
+                reverse.insert(new_block_id, SparseIndexDelimiter::Key(new_start_key));
             }
         }
     }

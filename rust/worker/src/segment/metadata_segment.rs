@@ -434,6 +434,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
             let segment_offset_id = record.0.offset_id;
             match record.0.final_operation {
                 Operation::Add => {
+                    // We can ignore record.0.metadata_to_be_deleted
+                    // for fresh adds. TODO on whether to propagate error.
                     match &record.0.metadata_to_be_merged {
                         Some(metadata) => {
                             for (key, value) in metadata.iter() {
@@ -584,282 +586,318 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                     None => {}
                 },
                 Operation::Update => {
-                    let old_metadata = match &record.0.data_record {
-                        Some(data_record) => match &data_record.metadata {
-                            Some(metadata) => Some(metadata),
-                            None => None,
-                        },
-                        None => None,
-                    };
-                    let metadata_updates = match &record.0.metadata_to_be_merged {
-                        Some(metadata) => Some(metadata),
-                        None => None,
-                    };
-                    match metadata_updates {
-                        None => {}
-                        Some(metadata_updates) => {
-                            for (key, value) in metadata_updates.iter() {
-                                match value {
-                                    MetadataValue::Str(value) => {
-                                        match &self.string_metadata_index_writer {
-                                            Some(writer) => {
-                                                match old_metadata {
-                                                    // TODO this doesn't handle deletes
-                                                    Some(old_metadata) => match old_metadata
-                                                        .get(key)
-                                                    {
-                                                        Some(old_value) => match old_value {
-                                                            MetadataValue::Str(old_value) => {
-                                                                match writer
-                                                                    .update(
-                                                                        key,
-                                                                        old_value.as_str().into(),
-                                                                        value.as_str().into(),
-                                                                        segment_offset_id,
-                                                                    )
-                                                                    .await
-                                                                {
-                                                                    Ok(_) => {}
-                                                                    Err(e) => {
-                                                                        tracing::error!(
-                                                                            "Error updating string metadata index: {}",
-                                                                            e
-                                                                        )
-                                                                    }
-                                                                }
-                                                            }
-                                                            _ => {
-                                                                tracing::error!(
-                                                                    "Invariant violation: previous value is not a string"
-                                                                );
-                                                            }
-                                                        },
-                                                        None => {
-                                                            match writer
-                                                                .set(
-                                                                    key,
-                                                                    value.as_str(),
-                                                                    segment_offset_id,
-                                                                )
-                                                                .await
-                                                            {
-                                                                Ok(_) => {}
-                                                                Err(e) => {
-                                                                    tracing::error!(
-                                                                        "Error setting string metadata index: {}",
-                                                                        e
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    },
-                                                    None => {}
-                                                };
+                    let metadata_delta = record.0.metadata_delta();
+                    // Updates.
+                    for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
+                        match new_value {
+                            MetadataValue::Str(new_val_str) => match old_value {
+                                MetadataValue::Str(old_val_str) => {
+                                    match &self.string_metadata_index_writer {
+                                        Some(writer) => {
+                                            match writer
+                                                .update(
+                                                    update_key,
+                                                    old_val_str.as_str().into(),
+                                                    new_val_str.as_str().into(),
+                                                    segment_offset_id,
+                                                )
+                                                .await
+                                            {
+                                                Ok(()) => {}
+                                                Err(e) => {
+                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                                                }
                                             }
-                                            None => {
-                                                tracing::error!(
-                                                    "No writer found for string metadata index"
+                                        }
+                                        None => {
+                                            panic!("Invariant violation. String metadata index writer should be set");
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
+                                }
+                            },
+                            MetadataValue::Float(new_val_float) => match old_value {
+                                MetadataValue::Float(old_val_float) => {
+                                    match &self.f32_metadata_index_writer {
+                                        Some(writer) => {
+                                            match writer
+                                                .update(
+                                                    update_key,
+                                                    (*old_val_float as f32).into(),
+                                                    (*new_val_float as f32).into(),
+                                                    segment_offset_id,
+                                                )
+                                                .await
+                                            {
+                                                Ok(()) => {}
+                                                Err(e) => {
+                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            panic!("Invariant violation. Float metadata index writer should be set");
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
+                                }
+                            },
+                            MetadataValue::Int(new_val_int) => match old_value {
+                                MetadataValue::Int(old_val_int) => {
+                                    match &self.u32_metadata_index_writer {
+                                        Some(writer) => {
+                                            match writer
+                                                .update(
+                                                    update_key,
+                                                    (*old_val_int as u32).into(),
+                                                    (*new_val_int as u32).into(),
+                                                    segment_offset_id,
+                                                )
+                                                .await
+                                            {
+                                                Ok(()) => {}
+                                                Err(e) => {
+                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            panic!("Invariant violation. u32 metadata index writer should be set");
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
+                                }
+                            },
+                            MetadataValue::Bool(new_val_bool) => match old_value {
+                                MetadataValue::Bool(old_val_bool) => {
+                                    match &self.bool_metadata_index_writer {
+                                        Some(writer) => {
+                                            match writer
+                                                .update(
+                                                    update_key,
+                                                    (*old_val_bool).into(),
+                                                    (*new_val_bool).into(),
+                                                    segment_offset_id,
+                                                )
+                                                .await
+                                            {
+                                                Ok(()) => {}
+                                                Err(e) => {
+                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            panic!("Invariant violation. Bool metadata index writer should be set");
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
+                                }
+                            },
+                        }
+                    }
+                    // Inserts.
+                    for (insert_key, new_value) in metadata_delta.metadata_to_insert {
+                        match new_value {
+                            MetadataValue::Str(new_val_str) => {
+                                match &self.string_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .set(
+                                                insert_key,
+                                                new_val_str.as_str(),
+                                                segment_offset_id,
+                                            )
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileSetError,
                                                 );
                                             }
                                         }
                                     }
-                                    MetadataValue::Float(value) => {
-                                        match &self.f32_metadata_index_writer {
-                                            Some(writer) => {
-                                                match old_metadata {
-                                                    // TODO this doesn't handle deletes
-                                                    Some(old_metadata) => {
-                                                        match old_metadata.get(key) {
-                                                            Some(old_value) => match old_value {
-                                                                MetadataValue::Float(old_value) => {
-                                                                    match writer
-                                                                        .update(
-                                                                            key,
-                                                                            (*old_value as f32)
-                                                                                .into(),
-                                                                            (*value as f32).into(),
-                                                                            segment_offset_id,
-                                                                        )
-                                                                        .await
-                                                                    {
-                                                                        Ok(_) => {}
-                                                                        Err(e) => {
-                                                                            tracing::error!(
-                                                                            "Error updating f32 metadata index: {}",
-                                                                            e
-                                                                        )
-                                                                        }
-                                                                    }
-                                                                }
-                                                                _ => {
-                                                                    tracing::error!(
-                                                                    "Invariant violation: previous value is not a float"
-                                                                );
-                                                                }
-                                                            },
-                                                            None => {
-                                                                match writer
-                                                                    .set(
-                                                                        key,
-                                                                        *value as f32,
-                                                                        segment_offset_id,
-                                                                    )
-                                                                    .await
-                                                                {
-                                                                    Ok(_) => {}
-                                                                    Err(e) => {
-                                                                        tracing::error!(
-                                                                        "Error setting f32 metadata index: {}",
-                                                                        e
-                                                                    )
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    None => {}
-                                                };
-                                            }
-                                            None => {
-                                                tracing::error!(
-                                                    "No writer found for f32 metadata index"
+                                    None => {
+                                        panic!("Invariant violation. String metadata index writer should be set");
+                                    }
+                                }
+                            }
+                            MetadataValue::Float(new_val_float) => {
+                                match &self.f32_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .set(
+                                                insert_key,
+                                                *new_val_float as f32,
+                                                segment_offset_id,
+                                            )
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileSetError,
                                                 );
                                             }
                                         }
                                     }
-                                    MetadataValue::Bool(value) => {
-                                        match &self.bool_metadata_index_writer {
-                                            Some(writer) => {
-                                                match old_metadata {
-                                                    // TODO this doesn't handle deletes
-                                                    Some(old_metadata) => {
-                                                        match old_metadata.get(key) {
-                                                            Some(old_value) => match old_value {
-                                                                MetadataValue::Bool(old_value) => {
-                                                                    match writer
-                                                                        .update(
-                                                                            key,
-                                                                            (*old_value).into(),
-                                                                            (*value).into(),
-                                                                            segment_offset_id,
-                                                                        )
-                                                                        .await
-                                                                    {
-                                                                        Ok(_) => {}
-                                                                        Err(e) => {
-                                                                            tracing::error!(
-                                                                            "Error updating bool metadata index: {}",
-                                                                            e
-                                                                        )
-                                                                        }
-                                                                    }
-                                                                }
-                                                                _ => {
-                                                                    tracing::error!(
-                                                                    "Invariant violation: previous value is not a bool"
-                                                                );
-                                                                }
-                                                            },
-                                                            None => {
-                                                                match writer
-                                                                    .set(
-                                                                        key,
-                                                                        *value,
-                                                                        segment_offset_id,
-                                                                    )
-                                                                    .await
-                                                                {
-                                                                    Ok(_) => {}
-                                                                    Err(e) => {
-                                                                        tracing::error!(
-                                                                        "Error setting bool metadata index: {}",
-                                                                        e
-                                                                    )
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    None => {}
-                                                };
-                                            }
-                                            None => {
-                                                tracing::error!(
-                                                    "No writer found for bool metadata index"
+                                    None => {
+                                        panic!("Invariant violation. Float metadata index writer should be set");
+                                    }
+                                }
+                            }
+                            MetadataValue::Int(new_val_int) => {
+                                match &self.u32_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .set(insert_key, *new_val_int as u32, segment_offset_id)
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileSetError,
                                                 );
                                             }
                                         }
                                     }
-                                    MetadataValue::Int(value) => {
-                                        match &self.u32_metadata_index_writer {
-                                            Some(writer) => {
-                                                match old_metadata {
-                                                    // TODO this doesn't handle deletes
-                                                    Some(old_metadata) => {
-                                                        match old_metadata.get(key) {
-                                                            Some(old_value) => match old_value {
-                                                                MetadataValue::Int(old_value) => {
-                                                                    match writer
-                                                                        .update(
-                                                                            key,
-                                                                            (*old_value as u32)
-                                                                                .into(),
-                                                                            (*value as u32).into(),
-                                                                            segment_offset_id,
-                                                                        )
-                                                                        .await
-                                                                    {
-                                                                        Ok(_) => {}
-                                                                        Err(e) => {
-                                                                            tracing::error!(
-                                                                            "Error updating u32 metadata index: {}",
-                                                                            e
-                                                                        )
-                                                                        }
-                                                                    }
-                                                                }
-                                                                _ => {
-                                                                    tracing::error!(
-                                                                    "Invariant violation: previous value is not an int"
-                                                                );
-                                                                }
-                                                            },
-                                                            None => {
-                                                                match writer
-                                                                    .set(
-                                                                        key,
-                                                                        *value as u32,
-                                                                        segment_offset_id,
-                                                                    )
-                                                                    .await
-                                                                {
-                                                                    Ok(_) => {}
-                                                                    Err(e) => {
-                                                                        tracing::error!(
-                                                                        "Error setting u32 metadata index: {}",
-                                                                        e
-                                                                    )
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    None => {}
-                                                };
-                                            }
-                                            None => {
-                                                tracing::error!(
-                                                    "No writer found for u32 metadata index"
+                                    None => {
+                                        panic!("Invariant violation. Int metadata index writer should be set");
+                                    }
+                                }
+                            }
+                            MetadataValue::Bool(new_val_bool) => {
+                                match &self.bool_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .set(insert_key, *new_val_bool, segment_offset_id)
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileSetError,
                                                 );
                                             }
                                         }
+                                    }
+                                    None => {
+                                        panic!("Invariant violation. Bool metadata index writer should be set");
                                     }
                                 }
                             }
                         }
-                    };
+                    }
+                    // Deletes.
+                    for (delete_key, old_value) in metadata_delta.metadata_to_delete {
+                        match old_value {
+                            MetadataValue::Str(old_val_str) => {
+                                match &self.string_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .delete(
+                                                delete_key,
+                                                old_val_str.as_str(),
+                                                segment_offset_id,
+                                            )
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        panic!("Invariant violation. String metadata index writer should be set");
+                                    }
+                                }
+                            }
+                            MetadataValue::Float(old_val_float) => {
+                                match &self.f32_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .delete(
+                                                delete_key,
+                                                *old_val_float as f32,
+                                                segment_offset_id,
+                                            )
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        panic!("Invariant violation. Float metadata index writer should be set");
+                                    }
+                                }
+                            }
+                            MetadataValue::Int(old_val_int) => {
+                                match &self.u32_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .delete(
+                                                delete_key,
+                                                *old_val_int as u32,
+                                                segment_offset_id,
+                                            )
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        panic!("Invariant violation. Int metadata index writer should be set");
+                                    }
+                                }
+                            }
+                            MetadataValue::Bool(old_val_bool) => {
+                                match &self.bool_metadata_index_writer {
+                                    Some(writer) => {
+                                        match writer
+                                            .set(delete_key, *old_val_bool, segment_offset_id)
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        panic!("Invariant violation. Bool metadata index writer should be set");
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                _ => todo!(),
+                Operation::Upsert => {
+                    panic!("Invariant violation. There should be no upserts in materialized log");
+                }
             }
         }
         Ok(())

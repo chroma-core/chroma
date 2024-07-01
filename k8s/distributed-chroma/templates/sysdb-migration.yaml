@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sysdb-migration
+  name: sysdb-migration-{{ .Values.sysdbMigration.image.tag }}
   namespace: {{ .Values.namespace }}
   annotations:
   {{ range .Values.sysdbMigration.annotations }}

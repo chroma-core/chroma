@@ -239,7 +239,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Release Latest
-        uses: ncipollo/release-action@v1.11.1
+        uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
         with:
           tag: "latest"
@@ -253,6 +253,7 @@ jobs:
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
           artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           allowUpdates: true
+          removeArtifacts: true
           prerelease: true
 
   release-docs:

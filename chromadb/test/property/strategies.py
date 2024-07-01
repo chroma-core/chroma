@@ -9,12 +9,8 @@ import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
-from hypothesis.errors import InvalidDefinition
-from hypothesis.stateful import RuleBasedStateMachine
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
-
 from dataclasses import dataclass
-
 from chromadb.api.types import (
     Documents,
     Embeddable,
@@ -62,7 +58,7 @@ class RecordSet(TypedDict):
 
     ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-    metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
+    metadatas: Optional[Union[List[Optional[types.Metadata]], types.Metadata]]
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
@@ -73,7 +69,7 @@ class NormalizedRecordSet(TypedDict):
 
     ids: List[types.ID]
     embeddings: Optional[types.Embeddings]
-    metadatas: Optional[List[types.Metadata]]
+    metadatas: Optional[List[Optional[types.Metadata]]]
     documents: Optional[List[types.Document]]
 
 
@@ -103,11 +99,16 @@ class Record(TypedDict):
 # TODO: support empty strings everywhere
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
+sql_alphabet_minus_underscore = (
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+)
+safe_text_min_size_3 = st.text(alphabet=sql_alphabet_minus_underscore, min_size=3)
 tenant_database_name = st.text(alphabet=sql_alphabet, min_size=3)
 
 # Workaround for FastAPI json encoding peculiarities
 # https://github.com/tiangolo/fastapi/blob/8ac8d70d52bb0dd9eb55ba4e22d3e383943da05c/fastapi/encoders.py#L104
 safe_text = safe_text.filter(lambda s: not s.startswith("_sa"))
+safe_text_min_size_3 = safe_text_min_size_3.filter(lambda s: not s.startswith("_sa"))
 tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_sa"))
 
 safe_integers = st.integers(
@@ -331,10 +332,23 @@ def collections(
         uses_metadata_like = draw(st.booleans())
     assert has_documents is not None
     assert uses_metadata_like is not None
-    if has_documents and add_filterable_data:
-        known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
+
+    # For cluster tests, we want to avoid generating documents and where_document
+    # clauses of length < 3. We also don't want them to contain certan special
+    # characters like _ and % that implicitly involve searching for a regex in sqlite.
+    if not NOT_CLUSTER_ONLY:
+        if has_documents and add_filterable_data:
+            known_document_keywords = draw(
+                st.lists(safe_text_min_size_3, min_size=5, max_size=5)
+            )
+        else:
+            known_document_keywords = []
+
     else:
-        known_document_keywords = []
+        if has_documents and add_filterable_data:
+            known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
+        else:
+            known_document_keywords = []
 
     if uses_metadata_like and add_filterable_data:
         known_str_list = draw(
@@ -377,10 +391,16 @@ def collections(
 
 
 @st.composite
-def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
+def metadata(
+    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
-    metadata: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    metadata: types.Metadata = draw(
+        st.dictionaries(
+            safe_text, st.one_of(*safe_values), min_size=min_size, max_size=max_size
+        )
+    )
     # Then, remove keys that overlap with the known keys for the coll
     # to avoid type errors when comparing.
     if collection.known_metadata_keys:
@@ -393,6 +413,7 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
         }
 
         metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))  # type: ignore
+
         blacklist_categories = ("Cc", "Cs")
         for k in collection.known_metadata_strkeys:
             if collection.known_document_keywords:
@@ -406,12 +427,37 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
                 )
                 mywords = " ".join(words)
                 metadata.update({k: mywords})
+
+    # We don't allow submitting empty metadata
+    if metadata == {}:
+        return None
     return metadata
 
 
 @st.composite
 def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
+    # For cluster tests, we want to avoid generating documents of length < 3.
+    # We also don't want them to contain certan special
+    # characters like _ and % that implicitly involve searching for a regex in sqlite.
+    if not NOT_CLUSTER_ONLY:
+        # Blacklist certain unicode characters that affect sqlite processing.
+        # For example, the null (/x00) character makes sqlite stop processing a string.
+        # Also, blacklist _ and % for cluster tests.
+        blacklist_categories = ("Cc", "Cs", "Pc", "Po")
+        if collection.known_document_keywords:
+            known_words_st = st.sampled_from(collection.known_document_keywords)
+        else:
+            known_words_st = st.text(
+                min_size=3,
+                alphabet=st.characters(blacklist_categories=blacklist_categories),  # type: ignore
+            )
+
+        random_words_st = st.text(
+            min_size=3, alphabet=st.characters(blacklist_categories=blacklist_categories)  # type: ignore
+        )
+        words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
+        return " ".join(words)
 
     # Blacklist certain unicode characters that affect sqlite processing.
     # For example, the null (/x00) character makes sqlite stop processing a string.
@@ -438,6 +484,12 @@ def recordsets(
     id_strategy: SearchStrategy[str] = safe_text,
     min_size: int = 1,
     max_size: int = 50,
+    # If num_unique_metadata is not None, then the number of metadata generations
+    # will be the size of the record set. If set, the number of metadata
+    # generations will be the value of num_unique_metadata.
+    num_unique_metadata: Optional[int] = None,
+    min_metadata_size: int = 0,
+    max_metadata_size: Optional[int] = None,
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
@@ -448,9 +500,20 @@ def recordsets(
     embeddings: Optional[Embeddings] = None
     if collection.has_embeddings:
         embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
-    metadatas = draw(
-        st.lists(metadata(collection), min_size=len(ids), max_size=len(ids))
+    num_metadata = num_unique_metadata if num_unique_metadata is not None else len(ids)
+    generated_metadatas = draw(
+        st.lists(
+            metadata(
+                collection, min_size=min_metadata_size, max_size=max_metadata_size
+            ),
+            min_size=num_metadata,
+            max_size=num_metadata,
+        )
     )
+    metadatas = []
+    for i in range(len(ids)):
+        metadatas.append(generated_metadatas[i % len(generated_metadatas)])
+
     documents: Optional[Documents] = None
     if collection.has_documents:
         documents = draw(
@@ -467,7 +530,7 @@ def recordsets(
             if embeddings is not None and draw(st.booleans())
             else embeddings
         )
-        single_metadata: Union[Metadata, List[Metadata]] = (
+        single_metadata: Union[Optional[Metadata], List[Optional[Metadata]]] = (
             metadatas[0] if draw(st.booleans()) else metadatas
         )
         single_document = (
@@ -479,65 +542,12 @@ def recordsets(
             "metadatas": single_metadata,
             "documents": single_document,
         }
-
     return {
         "ids": ids,
         "embeddings": embeddings,
         "metadatas": metadatas,
         "documents": documents,
     }
-
-
-# This class is mostly cloned from from hypothesis.stateful.RuleStrategy,
-# but always runs all the rules, instead of using a FeatureStrategy to
-# enable/disable rules. Disabled rules cause the entire test to be marked invalida and,
-# combined with the complexity of our other strategies, leads to an
-# unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
-class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
-    def __init__(self, machine: RuleBasedStateMachine) -> None:
-        super().__init__()  # type: ignore
-        self.machine = machine
-        self.rules = list(machine.rules())  # type: ignore
-
-        # The order is a bit arbitrary. Primarily we're trying to group rules
-        # that write to the same location together, and to put rules with no
-        # target first as they have less effect on the structure. We order from
-        # fewer to more arguments on grounds that it will plausibly need less
-        # data. This probably won't work especially well and we could be
-        # smarter about it, but it's better than just doing it in definition
-        # order.
-        self.rules.sort(
-            key=lambda rule: (
-                sorted(rule.targets),
-                len(rule.arguments),
-                rule.function.__name__,
-            )
-        )
-
-    def __repr__(self) -> str:
-        return "{}(machine={}({{...}}))".format(
-            self.__class__.__name__,
-            self.machine.__class__.__name__,
-        )
-
-    def do_draw(self, data):  # type: ignore
-        if not any(self.is_valid(rule) for rule in self.rules):
-            msg = f"No progress can be made from state {self.machine!r}"
-            raise InvalidDefinition(msg) from None
-
-        rule = data.draw(st.sampled_from([r for r in self.rules if self.is_valid(r)]))
-        argdata = data.draw(rule.arguments_strategy)
-        return (rule, argdata)
-
-    def is_valid(self, rule) -> bool:  # type: ignore
-        if not all(precond(self.machine) for precond in rule.preconditions):
-            return False
-
-        for b in rule.bundles:
-            bundle = self.machine.bundle(b.name)  # type: ignore
-            if not bundle:
-                return False
-        return True
 
 
 def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
@@ -628,10 +638,19 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
 @st.composite
 def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
-    if collection.known_document_keywords:
-        word = draw(st.sampled_from(collection.known_document_keywords))
+    # For cluster tests, we want to avoid generating where_document
+    # clauses of length < 3. We also don't want them to contain certan special
+    # characters like _ and % that implicitly involve searching for a regex in sqlite.
+    if not NOT_CLUSTER_ONLY:
+        if collection.known_document_keywords:
+            word = draw(st.sampled_from(collection.known_document_keywords))
+        else:
+            word = draw(safe_text_min_size_3)
     else:
-        word = draw(safe_text)
+        if collection.known_document_keywords:
+            word = draw(st.sampled_from(collection.known_document_keywords))
+        else:
+            word = draw(safe_text)
 
     # This is hacky, but the distributed system does not support $not_contains
     # so we need to avoid generating these operators for now in that case.

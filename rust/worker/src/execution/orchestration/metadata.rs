@@ -62,8 +62,8 @@ pub(crate) struct MetadataQueryOrchestrator {
     // State machine management
     merge_dependency_count: u32,
     // Services
-    log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    log: Box<Log>,
+    sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
     // Query params
@@ -83,8 +83,8 @@ pub(crate) struct CountQueryOrchestrator {
     record_segment: Option<Segment>,
     collection: Option<Collection>,
     // Services
-    log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    log: Box<Log>,
+    sysdb: Box<SysDb>,
     dispatcher: Box<dyn Receiver<TaskMessage>>,
     blockfile_provider: BlockfileProvider,
     // Result channel
@@ -129,8 +129,8 @@ impl CountQueryOrchestrator {
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
-        log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        log: Box<Log>,
+        sysdb: Box<SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
     ) -> Self {
@@ -247,7 +247,7 @@ impl CountQueryOrchestrator {
 
     async fn get_metadata_segment_from_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         metadata_segment_id: &Uuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
@@ -279,7 +279,7 @@ impl CountQueryOrchestrator {
 
     async fn get_record_segment_from_collection_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
@@ -310,7 +310,7 @@ impl CountQueryOrchestrator {
 
     async fn get_collection_from_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
         ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
@@ -450,8 +450,8 @@ impl MetadataQueryOrchestrator {
         system: System,
         metadata_segment_id: &Uuid,
         query_ids: Option<Vec<String>>,
-        log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        log: Box<Log>,
+        sysdb: Box<SysDb>,
         dispatcher: Box<dyn Receiver<TaskMessage>>,
         blockfile_provider: BlockfileProvider,
         where_clause: Option<Where>,
@@ -605,7 +605,7 @@ impl MetadataQueryOrchestrator {
 
     async fn get_metadata_segment_from_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         metadata_segment_id: &Uuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
@@ -637,7 +637,7 @@ impl MetadataQueryOrchestrator {
 
     async fn get_record_segment_from_collection_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
@@ -668,7 +668,7 @@ impl MetadataQueryOrchestrator {
 
     async fn get_collection_from_id(
         &self,
-        mut sysdb: Box<dyn SysDb>,
+        mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
         ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {

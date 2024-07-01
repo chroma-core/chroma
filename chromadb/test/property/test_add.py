@@ -22,9 +22,12 @@ from chromadb.utils.batch_utils import create_batches
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
+# Hypothesis tends to generate smaller values so we explicitly segregate the
+# the tests into tiers, Small, Medium. Hypothesis struggles to generate large
+# record sets so we explicitly create a large record set without using Hypothesis
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st),
+    record_set=strategies.recordsets(collection_st, min_size=1, max_size=500),
     should_compact=st.booleans(),
 )
 @settings(
@@ -34,47 +37,110 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
         fast=hypothesis.settings(max_examples=200),
     ),
 )
-def test_add(
+def test_add_small(
     api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
 ) -> None:
+    _test_add(api, collection, record_set, should_compact)
+
+
+@given(
+    collection=collection_st,
+    record_set=strategies.recordsets(
+        collection_st,
+        min_size=250,
+        max_size=500,
+        num_unique_metadata=5,
+        min_metadata_size=1,
+        max_metadata_size=5,
+    ),
+    should_compact=st.booleans(),
+)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=10),
+        fast=hypothesis.settings(max_examples=5),
+    ),
+    suppress_health_check=[
+        hypothesis.HealthCheck.too_slow,
+        hypothesis.HealthCheck.data_too_large,
+        hypothesis.HealthCheck.large_base_example,
+        hypothesis.HealthCheck.function_scoped_fixture,
+    ],
+)
+def test_add_medium(
+    api: ServerAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    should_compact: bool,
+) -> None:
+    # Cluster tests transmit their results over grpc, which has a payload limit
+    # This breaks the ann_accuracy invariant by default, since
+    # the vector reader returns a payload of dataset size. So we need to batch
+    # the queries in the ann_accuracy invariant
+    _test_add(api, collection, record_set, should_compact, batch_ann_accuracy=True)
+
+
+def _test_add(
+    api: ServerAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    should_compact: bool,
+    batch_ann_accuracy: bool = False,
+) -> None:
     reset(api)
+
     # TODO: Generative embedding functions
     coll = api.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-
     normalized_record_set = invariants.wrap_all(record_set)
 
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**normalized_record_set)
-        return
-
-    coll.add(**record_set)
-
-    if not NOT_CLUSTER_ONLY:
+    # TODO: The type of add() is incorrect as it does not allow for metadatas
+    # like [{"a": 1}, None, {"a": 3}]
+    coll.add(**record_set)  # type: ignore
+    if (
+        not NOT_CLUSTER_ONLY
+        and should_compact
+        and len(normalized_record_set["ids"]) > 10
+    ):
         # Only wait for compaction if the size of the collection is
         # some minimal size
-        if should_compact and len(normalized_record_set["ids"]) > 10:
-            initial_version = coll.get_model()["version"]
-            # Wait for the model to be updated
-            wait_for_version_increase(api, collection.name, initial_version)
+        initial_version = coll.get_model()["version"]
+        # Wait for the model to be updated
+        wait_for_version_increase(api, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
-    invariants.ann_accuracy(
-        coll,
-        cast(strategies.RecordSet, normalized_record_set),
-        n_results=n_results,
-        embedding_function=collection.embedding_function,
-    )
+
+    if batch_ann_accuracy:
+        batch_size = 10
+        for i in range(0, len(normalized_record_set["ids"]), batch_size):
+            invariants.ann_accuracy(
+                coll,
+                cast(strategies.RecordSet, normalized_record_set),
+                n_results=n_results,
+                embedding_function=collection.embedding_function,
+                query_indices=list(
+                    range(i, min(i + batch_size, len(normalized_record_set["ids"])))
+                ),
+            )
+    else:
+        invariants.ann_accuracy(
+            coll,
+            cast(strategies.RecordSet, normalized_record_set),
+            n_results=n_results,
+            embedding_function=collection.embedding_function,
+        )
 
 
+# Hypothesis struggles to generate large record sets so we explicitly create
+# a large record set
 def create_large_recordset(
     min_size: int = 45000,
     max_size: int = 50000,
@@ -94,9 +160,11 @@ def create_large_recordset(
     return cast(strategies.RecordSet, record_set)
 
 
-@given(collection=collection_st)
-@settings(deadline=None, max_examples=1)
-def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
+@given(collection=collection_st, should_compact=st.booleans())
+@settings(deadline=None, max_examples=5)
+def test_add_large(
+    api: ServerAPI, collection: strategies.Collection, should_compact: bool
+) -> None:
     reset(api)
 
     record_set = create_large_recordset(
@@ -111,10 +179,6 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
     )
     normalized_record_set = invariants.wrap_all(record_set)
 
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**normalized_record_set)
-        return
     for batch in create_batches(
         api=api,
         ids=cast(List[str], record_set["ids"]),
@@ -123,6 +187,18 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
         documents=cast(List[str], record_set["documents"]),
     ):
         coll.add(*batch)
+
+    if (
+        not NOT_CLUSTER_ONLY
+        and should_compact
+        and len(normalized_record_set["ids"]) > 10
+    ):
+        initial_version = coll.get_model()["version"]
+        # Wait for the model to be updated, since the record set is larger, add some additional time
+        wait_for_version_increase(
+            api, collection.name, initial_version, additional_time=240
+        )
+
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
 
 
@@ -141,12 +217,7 @@ def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) 
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    normalized_record_set = invariants.wrap_all(record_set)
 
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**normalized_record_set)
-        return
     with pytest.raises(Exception) as e:
         coll.add(**record_set)
     assert "exceeds maximum batch size" in str(e.value)

@@ -170,14 +170,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -200,14 +206,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -216,6 +228,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load();
@@ -254,14 +267,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -284,14 +303,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -300,6 +325,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -356,14 +382,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -386,14 +418,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -402,6 +440,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load();
@@ -426,6 +465,14 @@ mod tests {
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
+            let _ = jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__CONNECT_TIMEOUT_MS",
+                5000,
+            );
+            let _ = jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__REQUEST_TIMEOUT_MS",
+                1000,
+            );
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
@@ -444,14 +491,20 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     storage:
                         S3:
                             bucket: "chroma"
                             credentials: Minio
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -472,10 +525,14 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     log:
                         Grpc:
                             host: "localhost"
                             port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
                     dispatcher:
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
@@ -484,6 +541,7 @@ mod tests {
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
+                        min_compaction_size: 10
                 "#,
             );
             let config = RootConfig::load();
@@ -501,6 +559,8 @@ mod tests {
                         s.credentials,
                         crate::storage::config::S3CredentialsConfig::AWS
                     );
+                    assert_eq!(s.connect_timeout_ms, 5000);
+                    assert_eq!(s.request_timeout_ms, 1000);
                 }
                 _ => panic!("Invalid storage config"),
             }

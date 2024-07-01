@@ -2,7 +2,7 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -271,6 +271,7 @@ Metadata
 */
 
 pub(crate) type Metadata = HashMap<String, MetadataValue>;
+pub(crate) type DeletedMetadata = HashSet<String>;
 
 impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     type Error = MetadataValueConversionError;
@@ -289,22 +290,23 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     }
 }
 
-pub(crate) fn update_metdata_to_metdata(
-    update_metdata: &UpdateMetadata,
-) -> Result<Metadata, MetadataValueConversionError> {
-    let mut metadata = Metadata::new();
-    for (key, value) in update_metdata {
-        let res = value.try_into();
-        match res {
-            Ok(value) => {
-                metadata.insert(key.clone(), value);
-            }
-            Err(err) => {
-                return Err(err);
-            }
+pub(crate) struct MetadataDelta<'referred_data> {
+    pub(crate) metadata_to_update: HashMap<
+        &'referred_data str,
+        (&'referred_data MetadataValue, &'referred_data MetadataValue),
+    >,
+    pub(crate) metadata_to_delete: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+    pub(crate) metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+}
+
+impl<'referred_data> MetadataDelta<'referred_data> {
+    pub(crate) fn new() -> Self {
+        Self {
+            metadata_to_update: HashMap::new(),
+            metadata_to_delete: HashMap::new(),
+            metadata_to_insert: HashMap::new(),
         }
     }
-    Ok(metadata)
 }
 
 /*
@@ -705,34 +707,6 @@ impl TryFrom<chroma_proto::WhereDocumentOperator> for WhereDocumentOperator {
             }
         }
     }
-}
-
-pub(crate) fn merge_update_metadata(
-    base_metadata: &Option<Metadata>,
-    update_metadata: &Option<UpdateMetadata>,
-) -> Result<Option<Metadata>, MetadataValueConversionError> {
-    let mut merged_metadata = HashMap::new();
-    if base_metadata.is_some() {
-        for (key, value) in base_metadata.as_ref().unwrap() {
-            merged_metadata.insert(key.clone(), value.clone());
-        }
-    }
-    if update_metadata.is_some() {
-        match update_metdata_to_metdata(update_metadata.as_ref().unwrap()) {
-            Ok(metadata) => {
-                for (key, value) in metadata {
-                    merged_metadata.insert(key, value);
-                }
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        };
-    }
-    if merged_metadata.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(merged_metadata))
 }
 
 #[cfg(test)]

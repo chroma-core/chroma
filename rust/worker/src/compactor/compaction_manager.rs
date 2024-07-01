@@ -13,7 +13,6 @@ use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::segment::record_segment::RecordSegmentReader;
 use crate::storage::Storage;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
@@ -37,8 +36,8 @@ pub(crate) struct CompactionManager {
     system: Option<System>,
     scheduler: Scheduler,
     // Dependencies
-    log: Box<dyn Log>,
-    sysdb: Box<dyn SysDb>,
+    log: Box<Log>,
+    sysdb: Box<SysDb>,
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
@@ -47,6 +46,7 @@ pub(crate) struct CompactionManager {
     // Config
     compaction_manager_queue_size: usize,
     compaction_interval: Duration,
+    min_compaction_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -66,13 +66,14 @@ impl ChromaError for CompactionError {
 impl CompactionManager {
     pub(crate) fn new(
         scheduler: Scheduler,
-        log: Box<dyn Log>,
-        sysdb: Box<dyn SysDb>,
+        log: Box<Log>,
+        sysdb: Box<SysDb>,
         storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
+        min_compaction_size: usize,
     ) -> Self {
         CompactionManager {
             system: None,
@@ -85,6 +86,7 @@ impl CompactionManager {
             dispatcher: None,
             compaction_manager_queue_size,
             compaction_interval,
+            min_compaction_size,
         }
     }
 
@@ -113,7 +115,7 @@ impl CompactionManager {
                     dispatcher.clone(),
                     None,
                     None,
-                    Arc::new(AtomicU32::new(1)),
+                    Arc::new(AtomicU32::new(0)),
                 );
 
                 match orchestrator.run().await {
@@ -200,6 +202,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
+        let min_compaction_size = config.compactor.min_compaction_size;
 
         let assignment_policy_config = &config.assignment_policy;
         let assignment_policy = match crate::assignment::from_config(assignment_policy_config).await
@@ -215,6 +218,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             sysdb.clone(),
             policy,
             max_concurrent_jobs,
+            min_compaction_size,
             assignment_policy,
         );
 
@@ -231,6 +235,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             HnswIndexProvider::new(storage.clone(), path),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
+            min_compaction_size,
         ))
     }
 }
@@ -312,12 +317,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_manager() {
-        let mut log = Box::new(InMemoryLog::new());
+        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
+        let mut in_memory_log = match *log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
         let tmpdir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_1.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_1.clone(),
@@ -338,7 +347,7 @@ mod tests {
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        log.add_log(
+        in_memory_log.add_log(
             collection_uuid_2.clone(),
             Box::new(InternalLogRecord {
                 collection_id: collection_uuid_2.clone(),
@@ -358,7 +367,7 @@ mod tests {
             }),
         );
 
-        let mut sysdb = Box::new(TestSysDb::new());
+        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -383,8 +392,13 @@ mod tests {
             log_position: -1,
             version: 0,
         };
-        sysdb.add_collection(collection_1);
-        sysdb.add_collection(collection_2);
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection_1);
+                sysdb.add_collection(collection_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let collection_1_record_segment = Segment {
             id: Uuid::new_v4(),
@@ -440,22 +454,27 @@ mod tests {
             file_path: HashMap::new(),
         };
 
-        sysdb.add_segment(collection_1_record_segment);
-        sysdb.add_segment(collection_2_record_segment);
-        sysdb.add_segment(collection_1_hnsw_segment);
-        sysdb.add_segment(collection_2_hnsw_segment);
-        sysdb.add_segment(collection_1_metadata_segment);
-        sysdb.add_segment(collection_2_metadata_segment);
-
-        let last_compaction_time_1 = 2;
-        sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
-        let last_compaction_time_2 = 1;
-        sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+        match *sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(collection_1_record_segment);
+                sysdb.add_segment(collection_2_record_segment);
+                sysdb.add_segment(collection_1_hnsw_segment);
+                sysdb.add_segment(collection_2_hnsw_segment);
+                sysdb.add_segment(collection_1_metadata_segment);
+                sysdb.add_segment(collection_2_metadata_segment);
+                let last_compaction_time_1 = 2;
+                sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+                let last_compaction_time_2 = 1;
+                sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let my_member_id = "1".to_string();
         let compaction_manager_queue_size = 1000;
         let max_concurrent_jobs = 10;
         let compaction_interval = Duration::from_secs(1);
+        let min_compaction_size = 0;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
@@ -467,6 +486,7 @@ mod tests {
             sysdb.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
+            min_compaction_size,
             assignment_policy,
         );
         // Set memberlist
@@ -481,6 +501,7 @@ mod tests {
             HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
             compaction_manager_queue_size,
             compaction_interval,
+            min_compaction_size,
         );
 
         let system = System::new();
