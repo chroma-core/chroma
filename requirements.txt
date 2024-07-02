@@ -15,6 +15,7 @@ opentelemetry-instrumentation-fastapi>=0.41b0
 opentelemetry-sdk>=1.2.0
 orjson>=3.9.12
 overrides>=7.3.1
+portalocker>=2.8.2
 posthog>=2.4.0
 pydantic>=1.9
 pypika>=0.48.9

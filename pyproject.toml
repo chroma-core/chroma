@@ -43,6 +43,7 @@ dependencies = [
   'mmh3>=4.0.1',
   'orjson>=3.9.12',
   'httpx>=0.27.0',
+  'portalocker>=2.8.2',
 ]
 
 [tool.black]
