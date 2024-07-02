@@ -595,8 +595,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
-                self.brute_force_query(logs.clone(), ctx.as_receiver())
-                    .await;
+                self.brute_force_query(logs.clone(), ctx.receiver()).await;
                 self.hnsw_segment_query(logs, ctx).await;
             }
             Err(e) => {
