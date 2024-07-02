@@ -1,7 +1,6 @@
 export { ChromaClient } from "./ChromaClient";
 export { AdminClient } from "./AdminClient";
 export { CloudClient } from "./CloudClient";
-export { Collection } from "./Collection";
 export { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 export { OpenAIEmbeddingFunction } from "./embeddings/OpenAIEmbeddingFunction";
 export { CohereEmbeddingFunction } from "./embeddings/CohereEmbeddingFunction";
@@ -35,11 +34,12 @@ export {
   GetOrCreateCollectionParams,
   GetCollectionParams,
   DeleteCollectionParams,
-  AddParams,
-  UpsertParams,
-  UpdateParams,
+  AddDocumentsParams,
+  UpsertDocumentsParams,
+  UpdateDocumentsParams,
   ModifyCollectionParams,
-  QueryParams,
+  QueryDocumentsParams as QueryParams,
   PeekParams,
   DeleteParams,
+  Collection,
 } from "./types";

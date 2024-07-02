@@ -30,10 +30,9 @@ if (!process.env.XTOKEN_TEST) {
   test("it should list collections with default token config", async () => {
     await chromaTokenDefault.reset();
     let collections = await chromaTokenDefault.listCollections();
-    expect(collections).toBeDefined();
-    expect(collections).toBeInstanceOf(Array);
-    expect(collections.length).toBe(0);
-    const collection = await chromaTokenDefault.createCollection({
+    expect(Array.isArray(collections)).toBe(true);
+    expect(collections).toHaveLength(0);
+    await chromaTokenDefault.createCollection({
       name: "test",
     });
     collections = await chromaTokenDefault.listCollections();
@@ -43,37 +42,34 @@ if (!process.env.XTOKEN_TEST) {
   test("it should list collections with explicit bearer token config", async () => {
     await chromaTokenBearer.reset();
     let collections = await chromaTokenBearer.listCollections();
-    expect(collections).toBeDefined();
-    expect(collections).toBeInstanceOf(Array);
-    expect(collections.length).toBe(0);
-    const collection = await chromaTokenBearer.createCollection({
+    expect(Array.isArray(collections)).toBe(true);
+    expect(collections).toHaveLength(0);
+    await chromaTokenBearer.createCollection({
       name: "test",
     });
     collections = await chromaTokenBearer.listCollections();
-    expect(collections.length).toBe(1);
+    expect(collections).toHaveLength(1);
   });
 } else {
   test("it should list collections with explicit x-token token config", async () => {
     await chromaTokenXToken.reset();
     let collections = await chromaTokenXToken.listCollections();
-    expect(collections).toBeDefined();
-    expect(collections).toBeInstanceOf(Array);
-    expect(collections.length).toBe(0);
-    const collection = await chromaTokenXToken.createCollection({
+    expect(Array.isArray(collections)).toBe(true);
+    expect(collections).toHaveLength(0);
+    await chromaTokenXToken.createCollection({
       name: "test",
     });
     collections = await chromaTokenXToken.listCollections();
-    expect(collections.length).toBe(1);
+    expect(collections).toHaveLength(1);
   });
 
   test("it should list collections with explicit x-token token config in CloudClient", async () => {
     await cloudClient.reset();
     let collections = await cloudClient.listCollections();
-    expect(collections).toBeDefined();
-    expect(collections).toBeInstanceOf(Array);
-    expect(collections.length).toBe(0);
-    const collection = await cloudClient.createCollection({ name: "test" });
+    expect(Array.isArray(collections)).toBe(true);
+    expect(collections).toHaveLength(0);
+    await cloudClient.createCollection({ name: "test" });
     collections = await cloudClient.listCollections();
-    expect(collections.length).toBe(1);
+    expect(collections).toHaveLength(1);
   });
 }

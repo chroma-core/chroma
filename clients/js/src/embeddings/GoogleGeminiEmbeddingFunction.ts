@@ -68,6 +68,7 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const googleGenAi = GoogleGenerativeAI;
+      // @ts-ignore
       return { googleGenAi };
     } catch (e) {
       throw new Error(

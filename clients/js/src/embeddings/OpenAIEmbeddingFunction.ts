@@ -147,6 +147,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       const { default: openai } = await import("openai");
       // @ts-ignore
       const { VERSION } = await import("openai/version");
+      // @ts-ignore
       return { openai, version: VERSION };
     } catch (e) {
       throw new Error(

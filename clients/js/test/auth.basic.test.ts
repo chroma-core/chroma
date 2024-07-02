@@ -24,10 +24,9 @@ test("it should raise error when non authenticated", async () => {
 test("it should list collections", async () => {
   await chromaBasic.reset();
   let collections = await chromaBasic.listCollections();
-  expect(collections).toBeDefined();
-  expect(collections).toBeInstanceOf(Array);
-  expect(collections.length).toBe(0);
+  expect(Array.isArray(collections)).toBe(true);
+  expect(collections).toHaveLength(0);
   await chromaBasic.createCollection({ name: "test" });
   collections = await chromaBasic.listCollections();
-  expect(collections.length).toBe(1);
+  expect(collections).toHaveLength(1);
 });
