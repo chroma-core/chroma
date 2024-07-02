@@ -199,7 +199,7 @@ console.log(results)
 
 ### 6. Inspect Results
 
-From the above query - you can see that our query about `hawaii` is the semantically most similar to the document about `pineapple`. This, intuitively, makes sense!
+From the above query - you can see that our query about `hawaii` is the semantically most similar to the document about `pineapple`. This, intuitively, makes sense! (Note: the distance values given are "distance" rather then similarity)
 
 ```js
 {
