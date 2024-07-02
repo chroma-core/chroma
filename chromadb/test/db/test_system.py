@@ -19,7 +19,7 @@ from chromadb.db.system import SysDB
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.configuration import CollectionConfigurationInternal
 
 TENANT = "default"
 NAMESPACE = "default"
@@ -30,7 +30,7 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
-        configuration=CollectionConfiguration(),
+        configuration=CollectionConfigurationInternal(),
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -40,7 +40,7 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
-        configuration=CollectionConfiguration(),
+        configuration=CollectionConfigurationInternal(),
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -50,7 +50,7 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
-        configuration=CollectionConfiguration(),
+        configuration=CollectionConfigurationInternal(),
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -256,7 +256,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
     result, created = sysdb.create_collection(
         name=collection.name,
         id=uuid.uuid4(),
-        configuration=CollectionConfiguration(),
+        configuration=CollectionConfigurationInternal(),
         get_or_create=True,
         metadata=collection["metadata"],
     )
