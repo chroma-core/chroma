@@ -43,7 +43,7 @@ def main(
         google_api_key = os.environ["GOOGLE_API_KEY"]
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
+    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
         api_key=google_api_key
     )
 
