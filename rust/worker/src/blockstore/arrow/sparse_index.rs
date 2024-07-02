@@ -328,43 +328,17 @@ impl SparseIndex {
             .insert(block_id, SparseIndexDelimiter::Key(start_key));
     }
 
-    pub(super) fn replace_block(
-        &self,
-        old_block_id: Uuid,
-        new_block_id: Uuid,
-        new_start_key: CompositeKey,
-    ) {
+    pub(super) fn replace_block(&self, old_block_id: Uuid, new_block_id: Uuid) {
         let mut forward = self.forward.lock();
         let mut reverse = self.reverse.lock();
         if let Some(old_start_key) = reverse.remove(&old_block_id) {
             forward.remove(&old_start_key);
-            if old_start_key == SparseIndexDelimiter::Start {
-                forward.insert(SparseIndexDelimiter::Start, new_block_id);
-                reverse.insert(new_block_id, SparseIndexDelimiter::Start);
-            } else {
-                forward.insert(
-                    SparseIndexDelimiter::Key(new_start_key.clone()),
-                    new_block_id,
-                );
-                reverse.insert(new_block_id, SparseIndexDelimiter::Key(new_start_key));
-            }
+            forward.insert(old_start_key.clone(), new_block_id);
+            reverse.insert(new_block_id, old_start_key);
         }
     }
 
-    pub(super) fn replace_lone_block(&self, old_block_id: Uuid, new_block_id: Uuid) {
-        let mut forward = self.forward.lock();
-        let mut reverse = self.reverse.lock();
-        if let Some(old_start_key) = reverse.remove(&old_block_id) {
-            forward.remove(&old_start_key);
-            if old_start_key != SparseIndexDelimiter::Start {
-                panic!("Invariant violation. The lone block should have SparseIndexDelimiter::Start as start key");
-            }
-            forward.insert(SparseIndexDelimiter::Start, new_block_id);
-            reverse.insert(new_block_id, SparseIndexDelimiter::Start);
-        }
-    }
-
-    pub(super) fn correct_start_key(&self) {
+    fn correct_start_key(&self) {
         if self.len() == 0 {
             return;
         }
@@ -388,12 +362,31 @@ impl SparseIndex {
         }
     }
 
-    pub(super) fn remove_block(&self, block_id: &Uuid) {
-        let mut forward = self.forward.lock();
-        let mut reverse = self.reverse.lock();
-        if let Some(start_key) = reverse.remove(block_id) {
-            forward.remove(&start_key);
+    pub(super) fn remove_block(&self, block_id: &Uuid) -> bool {
+        // We commit and flush an empty dummy block if the blockfile is empty.
+        // It can happen that other indexes of the segment are not empty. In this case,
+        // our segment open() logic breaks down since we only handle either
+        // all indexes initialized or none at all but not other combinations.
+        // We could argue that we should fix the readers to handle these cases
+        // but this is simpler, easier and less error prone to do.
+        let mut removed = false;
+        if self.len() > 1 {
+            let mut forward = self.forward.lock();
+            let mut reverse = self.reverse.lock();
+            if let Some(start_key) = reverse.remove(block_id) {
+                forward.remove(&start_key);
+            }
+            removed = true;
         }
+        // It can happen that the sparse index does not contain
+        // the start key after this sequence of operations,
+        // for e.g. consider the following:
+        // sparse_index: {start_key: block_id1, some_key: block_id2, some_other_key: block_id3}
+        // If we delete block_id1 from the sparse index then it becomes
+        // {some_key: block_id2, some_other_key: block_id3}
+        // This should be changed to {start_key: block_id2, some_other_key: block_id3}
+        self.correct_start_key();
+        removed
     }
 
     pub(super) fn len(&self) -> usize {

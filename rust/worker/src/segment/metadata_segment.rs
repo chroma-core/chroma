@@ -600,6 +600,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     return Err(ApplyMaterializedLogError::FTSDocumentDeleteError);
                                 }
                             },
+                            // The record that is to be deleted might not have
+                            // a document, it is fine and should not be an error.
                             None => {}
                         };
                     }

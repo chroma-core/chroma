@@ -97,41 +97,18 @@ impl ArrowBlockfileWriter {
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut delta_ids = HashSet::new();
         for delta in self.block_deltas.lock().values() {
+            let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
                 tracing::info!("Delta with id {:?} is empty", delta.id);
-                self.sparse_index.remove_block(&delta.id);
-                continue;
+                removed = self.sparse_index.remove_block(&delta.id);
             }
-            // TODO: might these error?
-            self.block_manager.commit::<K, V>(delta);
-            delta_ids.insert(delta.id);
-        }
-        // We commit and flush an empty dummy block if the blockfile is empty.
-        // It can happen that other indexes of the segment are not empty. In this case,
-        // our segment open() logic breaks down since we only handle either
-        // all indexes initialized or none at all but not other combinations.
-        // We could argue that we should fix the readers to handle these cases
-        // but this is simpler, easier and less error prone to do.
-        if self.sparse_index.len() == 0 {
-            if !delta_ids.is_empty() {
-                panic!("Invariant violation. Expected delta ids to be empty");
+            if !removed {
+                // TODO: might these error?
+                self.block_manager.commit::<K, V>(delta);
+                delta_ids.insert(delta.id);
             }
-            // dummy block.
-            tracing::info!("Adding dummy block since index is empty");
-            let initial_block = self.block_manager.create::<K, V>();
-            self.sparse_index.add_initial_block(initial_block.id);
-            self.block_manager.commit::<K, V>(&initial_block);
-            delta_ids.insert(initial_block.id);
         }
-        // It can happen that the sparse index does not contain
-        // the start key after this sequence of operations,
-        // for e.g. consider the following:
-        // sparse_index: {start_key: block_id1, some_key: block_id2, some_other_key: block_id3}
-        // If we delete block_id1 from the sparse index then it becomes
-        // {some_key: block_id2, some_other_key: block_id3}
-        // This should be changed to {start_key: block_id2, some_other_key: block_id3}
-        self.sparse_index.correct_start_key();
         // Should be non-empty.
         self.sparse_index_manager.commit(self.sparse_index.clone());
 
@@ -182,18 +159,8 @@ impl ArrowBlockfileWriter {
                 let new_delta = self.block_manager.fork::<K, V>(&block.id);
                 let new_id = new_delta.id;
                 // Blocks can be empty.
-                if new_delta.len() == 0 {
-                    self.sparse_index
-                        .replace_lone_block(target_block_id, new_delta.id);
-                } else {
-                    self.sparse_index.replace_block(
-                        target_block_id,
-                        new_delta.id,
-                        new_delta
-                            .get_min_key()
-                            .expect("Block should never be empty when forked"),
-                    );
-                }
+                self.sparse_index
+                    .replace_block(target_block_id, new_delta.id);
                 {
                     let mut deltas = self.block_deltas.lock();
                     deltas.insert(new_id, new_delta.clone());
@@ -243,13 +210,8 @@ impl ArrowBlockfileWriter {
                 let block = self.block_manager.get(&target_block_id).await.unwrap();
                 let new_delta = self.block_manager.fork::<K, V>(&block.id);
                 let new_id = new_delta.id;
-                self.sparse_index.replace_block(
-                    target_block_id,
-                    new_delta.id,
-                    new_delta
-                        .get_min_key()
-                        .expect("Block should never be empty when forked"),
-                );
+                self.sparse_index
+                    .replace_block(target_block_id, new_delta.id);
                 {
                     let mut deltas = self.block_deltas.lock();
                     deltas.insert(new_id, new_delta.clone());
@@ -576,7 +538,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        blockstore::{
+            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+            BlockfileError,
+        },
+        log::config::{self, GrpcLogConfig},
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,
@@ -1220,6 +1186,88 @@ mod tests {
             assert_eq!(res.0, "key");
             assert_eq!(res.1, expected_key);
             assert_eq!(res.2, expected_value);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_first_block_removal() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id_1 = writer.id();
+
+        // Add the larger keys first then smaller.
+        let n = 1200;
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        writer.commit::<&str, &Int32Array>().unwrap();
+        // Create another writer.
+        let writer = blockfile_provider
+            .fork::<&str, &Int32Array>(&id_1)
+            .await
+            .expect("BlockfileWriter fork unsuccessful");
+        // Delete everything but the last 10 keys.
+        let delete_end = n * 2 - 10;
+        for i in 0..delete_end {
+            let key = format!("{:04}", i);
+            writer
+                .delete::<&str, &Int32Array>("key", key.as_str())
+                .await
+                .expect("Delete failed");
+        }
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        let id_2 = flusher.id();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_2)
+            .await
+            .unwrap();
+
+        for i in 0..delete_end {
+            let key = format!("{:04}", i);
+            assert_eq!(reader.contains("key", &key).await, false);
+        }
+
+        for i in delete_end..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value.values(), &[i]);
+        }
+
+        let writer = blockfile_provider
+            .fork::<&str, &Int32Array>(&id_1)
+            .await
+            .expect("BlockfileWriter fork unsuccessful");
+        // Add everything back.
+        for i in 0..delete_end {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer
+                .set::<&str, &Int32Array>("key", key.as_str(), &value)
+                .await
+                .expect("Delete failed");
+        }
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        let id_3 = flusher.id();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_3)
+            .await
+            .unwrap();
+
+        for i in 0..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value.values(), &[i]);
         }
     }
 }

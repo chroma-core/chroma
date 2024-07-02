@@ -68,6 +68,8 @@ impl HnswKnnOperator {
         let mut disallowed_ids = Vec::new();
         for item in logs.iter() {
             let log = item.0;
+            // This means that even if an embedding is not updated on the log,
+            // we brute force it. Can use the HNSW index also.
             if log.final_operation == Operation::Delete || log.final_operation == Operation::Update
             {
                 let offset_id = record_segment_reader

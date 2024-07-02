@@ -22,6 +22,7 @@ use memberlist::MemberlistProvider;
 
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
+use ::tracing::Span;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
