@@ -2,7 +2,7 @@
 set -e
 
 export IS_PERSISTENT=1
-export CHROMA_SERVER_NOFILE=65535
+export CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE:-65536}
 args="$@"
 
 if [[ $args =~ ^uvicorn.* ]]; then
