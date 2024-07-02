@@ -2025,7 +2025,10 @@ mod test {
     use uuid::Uuid;
 
     use crate::{
-        blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
+        blockstore::{
+            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+            provider::BlockfileProvider,
+        },
         execution::data::data_chunk::Chunk,
         segment::{
             metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
@@ -2042,7 +2045,8 @@ mod test {
     async fn empty_blocks() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {

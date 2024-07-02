@@ -1193,7 +1193,7 @@ mod tests {
     async fn test_first_block_removal() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
