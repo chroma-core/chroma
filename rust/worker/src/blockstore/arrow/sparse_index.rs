@@ -351,10 +351,47 @@ impl SparseIndex {
         }
     }
 
-    pub(super) fn remove_block(&self, block_id: Uuid) {
+    pub(super) fn replace_lone_block(&self, old_block_id: Uuid, new_block_id: Uuid) {
         let mut forward = self.forward.lock();
         let mut reverse = self.reverse.lock();
-        if let Some(start_key) = reverse.remove(&block_id) {
+        if let Some(old_start_key) = reverse.remove(&old_block_id) {
+            forward.remove(&old_start_key);
+            if old_start_key != SparseIndexDelimiter::Start {
+                panic!("Invariant violation. The lone block should have SparseIndexDelimiter::Start as start key");
+            }
+            forward.insert(SparseIndexDelimiter::Start, new_block_id);
+            reverse.insert(new_block_id, SparseIndexDelimiter::Start);
+        }
+    }
+
+    pub(super) fn correct_start_key(&self) {
+        if self.len() == 0 {
+            return;
+        }
+        let key_copy;
+        {
+            let lock_guard = self.forward.lock();
+            let mut curr_iter = lock_guard.iter();
+            let (key, _) = curr_iter.nth(0).unwrap();
+            if key == &SparseIndexDelimiter::Start {
+                return;
+            }
+            key_copy = key.clone();
+        }
+        tracing::info!("Correcting start key of sparse index {:?}", self.id);
+        let mut forward = self.forward.lock();
+        let mut reverse = self.reverse.lock();
+        if let Some(id) = forward.remove(&key_copy) {
+            reverse.remove(&id);
+            forward.insert(SparseIndexDelimiter::Start, id.clone());
+            reverse.insert(id, SparseIndexDelimiter::Start);
+        }
+    }
+
+    pub(super) fn remove_block(&self, block_id: &Uuid) {
+        let mut forward = self.forward.lock();
+        let mut reverse = self.reverse.lock();
+        if let Some(start_key) = reverse.remove(block_id) {
             forward.remove(&start_key);
         }
     }

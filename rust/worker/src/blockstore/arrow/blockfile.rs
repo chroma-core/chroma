@@ -10,6 +10,7 @@ use crate::blockstore::key::KeyWrapper;
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
+use core::panic;
 use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
@@ -96,31 +97,51 @@ impl ArrowBlockfileWriter {
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut delta_ids = HashSet::new();
         for delta in self.block_deltas.lock().values() {
-            // Commit only if non-empty.
+            // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
-                tracing::debug!("Delta with id {:?} is empty", delta.id);
-                self.sparse_index.remove_block(delta.id);
+                tracing::info!("Delta with id {:?} is empty", delta.id);
+                self.sparse_index.remove_block(&delta.id);
                 continue;
             }
             // TODO: might these error?
             self.block_manager.commit::<K, V>(delta);
             delta_ids.insert(delta.id);
         }
-        let mut sparse_index_option = None;
-        let mut id = None;
-        // Commit only if non-empty.
-        if self.sparse_index.len() > 0 {
-            self.sparse_index_manager.commit(self.sparse_index.clone());
-            sparse_index_option = Some(self.sparse_index);
-            id = Some(self.id);
+        // We commit and flush an empty dummy block if the blockfile is empty.
+        // This is a bit weird but necessary. It can happen that
+        // other indexes of the segment are not empty. In this case,
+        // our segment open() logic breaks down since we only handle either
+        // all indexes initialized or none at all but not other combinations.
+        // We could argue that we should fix the readers to handle these cases
+        // but this is simpler and easier to do so we do this for now.
+        if self.sparse_index.len() == 0 {
+            if !delta_ids.is_empty() {
+                panic!("Invariant violation. Expected delta ids to be empty");
+            }
+            // dummy block.
+            tracing::info!("Adding dummy block since index is empty");
+            let initial_block = self.block_manager.create::<K, V>();
+            self.sparse_index.add_initial_block(initial_block.id);
+            self.block_manager.commit::<K, V>(&initial_block);
+            delta_ids.insert(initial_block.id);
         }
+        // It can happen that the sparse index does not contain
+        // the start key after this sequence of operations,
+        // for e.g. consider the following:
+        // sparse_index: {start_key: block_id1, some_key: block_id2, some_other_key: block_id3}
+        // If we delete block_id1 from the sparse index then it becomes
+        // {some_key: block_id2, some_other_key: block_id3}
+        // This should be changed to {start_key: block_id2, some_other_key: block_id3}
+        self.sparse_index.correct_start_key();
+        // Should be non-empty.
+        self.sparse_index_manager.commit(self.sparse_index.clone());
 
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
             self.sparse_index_manager,
             delta_ids,
-            sparse_index_option,
-            id,
+            self.sparse_index,
+            self.id,
         );
 
         // TODO: we need to update the sparse index with the new min keys?
@@ -161,13 +182,19 @@ impl ArrowBlockfileWriter {
                 let block = self.block_manager.get(&target_block_id).await.unwrap();
                 let new_delta = self.block_manager.fork::<K, V>(&block.id);
                 let new_id = new_delta.id;
-                self.sparse_index.replace_block(
-                    target_block_id,
-                    new_delta.id,
-                    new_delta
-                        .get_min_key()
-                        .expect("Block should never be empty when forked"),
-                );
+                // Blocks can be empty.
+                if new_delta.len() == 0 {
+                    self.sparse_index
+                        .replace_lone_block(target_block_id, new_delta.id);
+                } else {
+                    self.sparse_index.replace_block(
+                        target_block_id,
+                        new_delta.id,
+                        new_delta
+                            .get_min_key()
+                            .expect("Block should never be empty when forked"),
+                    );
+                }
                 {
                     let mut deltas = self.block_deltas.lock();
                     deltas.insert(new_id, new_delta.clone());

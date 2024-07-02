@@ -297,6 +297,8 @@ pub enum ApplyMaterializedLogError {
     EmbeddingNotSet,
     #[error("Metadata update not valid")]
     MetadataUpdateNotValid,
+    #[error("Document delete error")]
+    DocumentDeleteError,
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -306,6 +308,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::MetadataUpdateNotValid => ErrorCodes::Internal,
+            ApplyMaterializedLogError::DocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
         }
     }
@@ -358,19 +361,6 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         Ok(()) => (),
                         Err(e) => {
                             return Err(e);
-                        }
-                    }
-                    // Set max offset id.
-                    match self
-                        .max_offset_id
-                        .as_ref()
-                        .unwrap()
-                        .set("", MAX_OFFSET_ID, log_record.offset_id)
-                        .await
-                    {
-                        Ok(()) => (),
-                        Err(_) => {
-                            return Err(ApplyMaterializedLogError::BlockfileSetError);
                         }
                     }
                 }
@@ -451,6 +441,19 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     }
                 }
             }
+            // Set max offset id.
+            match self
+                .max_offset_id
+                .as_ref()
+                .unwrap()
+                .set("", MAX_OFFSET_ID, log_record.offset_id)
+                .await
+            {
+                Ok(()) => (),
+                Err(_) => {
+                    return Err(ApplyMaterializedLogError::BlockfileSetError);
+                }
+            }
         }
         Ok(())
     }
@@ -529,13 +532,10 @@ impl SegmentFlusher for RecordSegmentFlusher {
 
         match res_user_id_to_id {
             Ok(_) => {
-                match user_id_to_id_bf_id {
-                    Some(id) => {
-                        flushed_files
-                            .insert(USER_ID_TO_OFFSET_ID.to_string(), vec![id.to_string()]);
-                    }
-                    None => {}
-                };
+                flushed_files.insert(
+                    USER_ID_TO_OFFSET_ID.to_string(),
+                    vec![user_id_to_id_bf_id.to_string()],
+                );
             }
             Err(e) => {
                 return Err(e);
@@ -544,13 +544,10 @@ impl SegmentFlusher for RecordSegmentFlusher {
 
         match res_id_to_user_id {
             Ok(_) => {
-                match id_to_user_id_bf_id {
-                    Some(id) => {
-                        flushed_files
-                            .insert(OFFSET_ID_TO_USER_ID.to_string(), vec![id.to_string()]);
-                    }
-                    None => {}
-                };
+                flushed_files.insert(
+                    OFFSET_ID_TO_USER_ID.to_string(),
+                    vec![id_to_user_id_bf_id.to_string()],
+                );
             }
             Err(e) => {
                 return Err(e);
@@ -559,12 +556,10 @@ impl SegmentFlusher for RecordSegmentFlusher {
 
         match res_id_to_data {
             Ok(_) => {
-                match id_to_data_bf_id {
-                    Some(id) => {
-                        flushed_files.insert(OFFSET_ID_TO_DATA.to_string(), vec![id.to_string()]);
-                    }
-                    None => {}
-                };
+                flushed_files.insert(
+                    OFFSET_ID_TO_DATA.to_string(),
+                    vec![id_to_data_bf_id.to_string()],
+                );
             }
             Err(e) => {
                 return Err(e);
@@ -573,12 +568,10 @@ impl SegmentFlusher for RecordSegmentFlusher {
 
         match res_max_offset_id {
             Ok(f) => {
-                match max_offset_id_bf_id {
-                    Some(id) => {
-                        flushed_files.insert(MAX_OFFSET_ID.to_string(), vec![id.to_string()]);
-                    }
-                    None => {}
-                };
+                flushed_files.insert(
+                    MAX_OFFSET_ID.to_string(),
+                    vec![max_offset_id_bf_id.to_string()],
+                );
             }
             Err(e) => {
                 return Err(e);
