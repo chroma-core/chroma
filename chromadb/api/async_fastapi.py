@@ -8,7 +8,7 @@ import httpx
 from overrides import override
 from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -226,7 +226,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -282,7 +282,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -348,7 +348,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return await self._get(
             collection_id,
             limit=n,
-            include=["embeddings", "documents", "metadatas"],
+            include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
         )
 
     @trace_method("AsyncFastAPI._get", OpenTelemetryGranularity.OPERATION)
@@ -364,7 +364,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
@@ -501,7 +501,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         n_results: int = 10,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         resp_json = await self._make_request(
             "post",
