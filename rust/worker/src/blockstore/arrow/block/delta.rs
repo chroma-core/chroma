@@ -203,10 +203,26 @@ mod test {
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
 
+    /// Saves a block to a random file under the given path, then loads the block
+    /// and validates that the loaded block has the same size as the original block.
+    /// ### Returns
+    /// - The loaded block
+    /// ### Notes
+    /// - Assumes that path will be cleaned up by the caller
+    fn test_save_load_size(path: &str, block: &Block) -> Block {
+        let save_path = format!("{}/{}", path, random::<u32>());
+        block.save(&save_path).unwrap();
+        let loaded = Block::load_with_validation(&save_path, block.id).unwrap();
+        assert_eq!(loaded.id, block.id);
+        assert_eq!(block.get_size(), loaded.get_size());
+        loaded
+    }
+
     #[tokio::test]
     async fn test_sizing_int_arr_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &Int32Array>();
 
@@ -227,12 +243,16 @@ mod test {
         // Semantically, that makes sense, since a delta is unsuable after commit
         block_manager.commit::<&str, &Int32Array>(&delta);
         let block = block_manager.get(&delta.id).await.unwrap();
+        // Ensure the deltas estimated size matches the actual size of the block
         assert_eq!(size, block.get_size());
+
+        test_save_load_size(path, &block);
     }
 
     #[tokio::test]
     async fn test_sizing_string_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &str>();
@@ -256,11 +276,7 @@ mod test {
         }
 
         // test save/load
-        block.save("test.arrow").unwrap();
-        let loaded = Block::load("test.arrow", delta_id).unwrap();
-        assert_eq!(loaded.id, delta_id);
-        // TODO: make this sizing work
-        // assert_eq!(block.get_size(), loaded.get_size());
+        let loaded = test_save_load_size(path, &block);
         for i in 0..n {
             let key = format!("key{}", i);
             let read = loaded.get::<&str, &str>("prefix", &key);
@@ -282,7 +298,8 @@ mod test {
     #[tokio::test]
     async fn test_sizing_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<f32, &str>();
 
@@ -298,12 +315,16 @@ mod test {
         block_manager.commit::<f32, &str>(&delta);
         let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
+
+        // test save/load
+        test_save_load_size(path, &block);
     }
 
     #[tokio::test]
     async fn test_sizing_roaring_bitmap_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
         let block_manager = BlockManager::new(storage);
         let delta = block_manager.create::<&str, &RoaringBitmap>();
 
@@ -326,12 +347,16 @@ mod test {
             let expected = RoaringBitmap::from_iter((0..i).map(|x| x as u32));
             assert_eq!(read, Some(expected));
         }
+
+        // test save/load
+        test_save_load_size(path, &block);
     }
 
     #[tokio::test]
     async fn test_data_record() {
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
         let block_manager = BlockManager::new(storage);
         let ids = vec!["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = vec![
@@ -383,23 +408,33 @@ mod test {
             assert_eq!(read.document, documents[i]);
         }
         assert_eq!(size, block.get_size());
+
+        // test save/load
+        test_save_load_size(path, &block);
     }
 
-    // #[test]
-    // fn test_sizing_uint_key_val() {
-    //     let block_provider = ArrowBlockProvider::new();
-    //     let block = block_provider.create_block(KeyType::Uint, ValueType::Uint);
-    //     let delta = BlockDelta::from(block.clone());
+    #[tokio::test]
+    async fn test_sizing_uint_key_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
+        let block_manager = BlockManager::new(storage);
+        let delta = block_manager.create::<u32, &str>();
 
-    //     let n = 2000;
-    //     for i in 0..n {
-    //         let key = BlockfileKey::new("prefix".to_string(), Key::Uint(i as u32));
-    //         let value = Value::UintValue(i as u32);
-    //         delta.add(key, value);
-    //     }
+        let n = 2000;
+        for i in 0..n {
+            let prefix = "prefix";
+            let key = i as u32;
+            let value = format!("value{}", i);
+            delta.add(prefix, key, value.as_str());
+        }
 
-    //     let size = delta.get_size();
-    //     let block_data = BlockData::try_from(&delta).unwrap();
-    //     assert_eq!(size, block_data.get_size());
-    // }
+        let size = delta.get_size::<u32, &str>();
+        block_manager.commit::<u32, &str>(&delta);
+        let block = block_manager.get(&delta.id).await.unwrap();
+        assert_eq!(size, block.get_size());
+
+        // test save/load
+        test_save_load_size(path, &block);
+    }
 }
