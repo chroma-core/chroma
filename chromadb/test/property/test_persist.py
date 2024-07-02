@@ -11,7 +11,6 @@ from chromadb.config import Settings, System
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
-    EmbeddingStateMachine,
     EmbeddingStateMachineStates,
     collection_st as embedding_collection_st,
     trace,
