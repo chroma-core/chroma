@@ -30,9 +30,9 @@ pub(crate) struct ArrowBlockfileProvider {
 }
 
 impl ArrowBlockfileProvider {
-    pub(crate) fn new(storage: Storage) -> Self {
+    pub(crate) fn new(storage: Storage, max_block_size_bytes: usize) -> Self {
         Self {
-            block_manager: BlockManager::new(storage.clone()),
+            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes),
             sparse_index_manager: SparseIndexManager::new(storage),
         }
     }
@@ -100,13 +100,15 @@ impl ArrowBlockfileProvider {
 pub(super) struct BlockManager {
     read_cache: Arc<RwLock<HashMap<Uuid, Block>>>,
     storage: Storage,
+    max_block_size_bytes: usize,
 }
 
 impl BlockManager {
-    pub(super) fn new(storage: Storage) -> Self {
+    pub(super) fn new(storage: Storage, max_block_size_bytes: usize) -> Self {
         Self {
             read_cache: Arc::new(RwLock::new(HashMap::new())),
             storage,
+            max_block_size_bytes,
         }
     }
 
@@ -224,6 +226,10 @@ impl BlockManager {
                 return Err(Box::new(BlockFlushError::NotFound));
             }
         }
+    }
+
+    pub(super) fn max_block_size_bytes(&self) -> usize {
+        self.max_block_size_bytes
     }
 }
 

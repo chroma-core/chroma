@@ -744,8 +744,6 @@ pub(crate) trait SegmentFlusher {
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
-
     use super::*;
     use crate::{
         blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
@@ -754,12 +752,16 @@ mod tests {
         types::{MetadataValue, Operation, OperationRecord, UpdateMetadataValue},
     };
     use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
+
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn test_materializer() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {

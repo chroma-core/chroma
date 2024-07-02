@@ -9,7 +9,7 @@ use crate::{
     segment::{
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
+        LogMaterializer, LogMaterializerError,
     },
     types::{
         LogRecord, MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
@@ -18,16 +18,8 @@ use crate::{
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use core::panic;
-use futures::stream::Count;
-use regex::Regex;
 use roaring::RoaringBitmap;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU16, AtomicU32},
-        Arc,
-    },
-};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tonic::async_trait;
 
@@ -730,14 +722,6 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::HashMap,
-        str::FromStr,
-        sync::{atomic::AtomicU32, Arc},
-    };
-
-    use uuid::Uuid;
-
     use crate::{
         blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
         execution::{
@@ -746,7 +730,7 @@ mod test {
             operators::metadata_filtering::{MetadataFilteringInput, MetadataFilteringOperator},
         },
         segment::{
-            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+            metadata_segment::MetadataSegmentWriter,
             record_segment::{
                 RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
             },
@@ -759,12 +743,17 @@ mod test {
             UpdateMetadataValue, Where, WhereComparison, WhereDocument,
         },
     };
+    use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
+
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn where_and_where_document_from_log() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -976,7 +965,8 @@ mod test {
     async fn where_from_metadata_segment() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -1159,7 +1149,8 @@ mod test {
     async fn query_ids_only() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {

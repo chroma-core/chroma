@@ -1,9 +1,6 @@
 use super::delta_storage::BlockStorage;
 use crate::blockstore::{
-    arrow::{
-        blockfile::MAX_BLOCK_SIZE,
-        types::{ArrowWriteableKey, ArrowWriteableValue},
-    },
+    arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::CompositeKey,
 };
 use arrow::{array::RecordBatch, util::bit_util};
@@ -28,6 +25,9 @@ pub struct BlockDelta {
 
 impl BlockDelta {
     /// Creates a new block delta from a block.
+    /// # Arguments
+    /// - id: the id of the block delta.
+    /// - max_block_size_bytes: the maximum size of the block in bytes.
     pub fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
         BlockDelta {
             builder: V::get_delta_builder(),
@@ -122,8 +122,9 @@ impl BlockDelta {
     /// split point.
     pub fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &'referred_data self,
+        max_block_size_bytes: usize,
     ) -> Vec<(CompositeKey, BlockDelta)> {
-        let half_size = MAX_BLOCK_SIZE / 2;
+        let half_size = max_block_size_bytes / 2;
 
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
@@ -165,16 +166,13 @@ impl BlockDelta {
             let new_delta = curr_block
                 .builder
                 .split(&split_key.prefix, split_key.key.clone());
-            let new_block = BlockDelta {
-                builder: new_delta,
-                id: Uuid::new_v4(),
-            };
+            let new_block = BlockDelta::new::<K, V>(Uuid::new_v4());
             if first_iter {
                 first_iter = false;
             } else {
                 output.push((curr_block.builder.get_key(0).clone(), curr_block));
             }
-            if new_block.get_size::<K, V>() > MAX_BLOCK_SIZE {
+            if new_block.get_size::<K, V>() > max_block_size_bytes {
                 blocks_to_split.push(new_block);
             } else {
                 output.push((split_key.clone(), new_block));
@@ -203,6 +201,9 @@ mod test {
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
 
+    // A small block size for testing, so that triggering splits etc is easier
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
+
     /// Saves a block to a random file under the given path, then loads the block
     /// and validates that the loaded block has the same size as the original block.
     /// ### Returns
@@ -223,7 +224,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage);
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let delta = block_manager.create::<&str, &Int32Array>();
 
         let n = 2000;
@@ -254,7 +255,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_manager = BlockManager::new(storage);
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let delta = block_manager.create::<&str, &str>();
         let delta_id = delta.id.clone();
 
@@ -300,7 +301,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage);
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let delta = block_manager.create::<f32, &str>();
 
         let n = 2000;
@@ -325,7 +326,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage);
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let delta = block_manager.create::<&str, &RoaringBitmap>();
 
         let n = 2000;
@@ -357,7 +358,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage);
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let ids = vec!["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = vec![
             vec![1.0, 2.0, 3.0],
@@ -418,7 +419,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage);
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let delta = block_manager.create::<u32, &str>();
 
         let n = 2000;
