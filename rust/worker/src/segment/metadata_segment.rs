@@ -515,6 +515,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                         .await;
                                                 }
                                                 None => {
+                                                    tracing::error!(
+                                                        "String metadata index writer not found"
+                                                    );
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                                                 }
                                             }
@@ -531,6 +534,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                         .await;
                                                 }
                                                 None => {
+                                                    tracing::error!(
+                                                        "f32 metadata index writer not found"
+                                                    );
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                                                 }
                                             }
@@ -547,6 +553,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                         .await;
                                                 }
                                                 None => {
+                                                    tracing::error!(
+                                                        "u32 metadata index writer not found"
+                                                    );
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                                                 }
                                             }
@@ -559,6 +568,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                         .await;
                                                 }
                                                 None => {
+                                                    tracing::error!(
+                                                        "bool metadata index writer not found"
+                                                    );
                                                     return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                                                 }
                                             }
@@ -578,18 +590,17 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         Err(e) => {
                                             tracing::error!("Error deleting document {:?}", e);
                                             return Err(
-                                                ApplyMaterializedLogError::DocumentDeleteError,
+                                                ApplyMaterializedLogError::FTSDocumentDeleteError,
                                             );
                                         }
                                     }
                                 }
                                 None => {
-                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                                    tracing::error!("FTS index writer not found");
+                                    return Err(ApplyMaterializedLogError::FTSDocumentDeleteError);
                                 }
                             },
-                            None => {
-                                return Err(ApplyMaterializedLogError::BlockfileDeleteError);
-                            }
+                            None => {}
                         };
                     }
                     None => {}
@@ -902,6 +913,66 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 }
                             }
                         }
+                    }
+                    // Update the document if present.
+                    match record.0.final_document {
+                        Some(doc) => match &self.full_text_index_writer {
+                            Some(writer) => match &record.0.data_record {
+                                Some(record) => match record.document {
+                                    Some(old_doc) => {
+                                        match writer
+                                            .update_document(&old_doc, doc, segment_offset_id)
+                                            .await
+                                        {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "FTS Update document failed {:?}",
+                                                    e
+                                                );
+                                                return Err(
+                                                    ApplyMaterializedLogError::FTSDocumentUpdateError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => match writer
+                                        .add_document(doc, segment_offset_id as i32)
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Add document for an update failed {:?}",
+                                                e
+                                            );
+                                            return Err(
+                                                ApplyMaterializedLogError::FTSDocumentAddError,
+                                            );
+                                        }
+                                    },
+                                },
+                                None => {
+                                    match writer.add_document(doc, segment_offset_id as i32).await {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Add document for an update failed {:?}",
+                                                e
+                                            );
+                                            return Err(
+                                                ApplyMaterializedLogError::FTSDocumentAddError,
+                                            );
+                                        }
+                                    }
+                                }
+                            },
+                            None => {
+                                tracing::error!("FTS Writer not found");
+                                return Err(ApplyMaterializedLogError::FTSDocumentUpdateError);
+                            }
+                        },
+                        None => {}
                     }
                 }
                 Operation::Upsert => {
