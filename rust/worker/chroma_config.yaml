@@ -28,6 +28,12 @@ query_service:
             credentials: "Minio"
             connect_timeout_ms: 5000
             request_timeout_ms: 1000
+    block_cache:
+        lru:
+            capacity: 1000
+    sparse_index_cache:
+        lru:
+            capacity: 1000
     log:
         Grpc:
             host: "logservice.chroma"
@@ -64,6 +70,12 @@ compaction_service:
             credentials: "Minio"
             connect_timeout_ms: 5000
             request_timeout_ms: 1000
+    block_cache:
+        lru:
+            capacity: 1000
+    sparse_index_cache:
+        lru:
+            capacity: 1000
     log:
         Grpc:
             host: "logservice.chroma"

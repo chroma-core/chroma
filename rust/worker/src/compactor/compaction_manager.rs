@@ -223,6 +223,8 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             assignment_policy,
         );
 
+        let block_cache = crate::cache::from_config(&config.block_cache).await?;
+        let sparse_index_cache = crate::cache::from_config(&config.sparse_index_cache).await?;
         // TODO: real path
         let path = PathBuf::from("~/tmp");
         // TODO: blockfile proivder should be injected somehow
@@ -232,7 +234,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
+            BlockfileProvider::new_arrow(storage.clone(), block_cache, sparse_index_cache),
             HnswIndexProvider::new(storage.clone(), path),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
@@ -295,6 +297,9 @@ mod tests {
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -485,12 +490,14 @@ mod tests {
         // Set memberlist
         scheduler.set_memberlist(vec![my_member_id.clone()]);
 
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let mut manager = CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
+            BlockfileProvider::new_arrow(storage.clone(), block_cache, sparse_index_cache),
             HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
             compaction_manager_queue_size,
             compaction_interval,

@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
@@ -24,6 +21,8 @@ use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace, trace_span, Instrument};
@@ -69,6 +68,22 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
                 return Err(err);
             }
         };
+
+        let block_cache = match crate::cache::from_config(&config.block_cache).await {
+            Ok(cache) => cache,
+            Err(err) => {
+                println!("Failed to create cache component: {:?}", err);
+                return Err(err);
+            }
+        };
+
+        let sparse_index_cache = match crate::cache::from_config(&config.sparse_index_cache).await {
+            Ok(cache) => cache,
+            Err(err) => {
+                println!("Failed to create cache component: {:?}", err);
+                return Err(err);
+            }
+        };
         // TODO: inject hnsw index provider somehow
         // TODO: inject blockfile provider somehow
         // TODO: real path
@@ -79,7 +94,11 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             sysdb,
             log,
             hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider: BlockfileProvider::new_arrow(
+                storage,
+                block_cache,
+                sparse_index_cache,
+            ),
             port: config.my_port,
         })
     }
@@ -571,6 +590,8 @@ mod tests {
     use crate::system;
 
     use super::*;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use chroma_proto::debug_client::DebugClient;
     use tempfile::tempdir;
 
@@ -580,7 +601,8 @@ mod tests {
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,
@@ -591,7 +613,11 @@ mod tests {
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider: BlockfileProvider::new_arrow(
+                storage,
+                block_cache,
+                sparse_index_cache,
+            ),
             port,
         };
 
