@@ -11,6 +11,7 @@ export { HuggingFaceEmbeddingServerFunction } from "./embeddings/HuggingFaceEmbe
 export { JinaEmbeddingFunction } from "./embeddings/JinaEmbeddingFunction";
 export { GoogleGenerativeAiEmbeddingFunction } from "./embeddings/GoogleGeminiEmbeddingFunction";
 export { OllamaEmbeddingFunction } from "./embeddings/OllamaEmbeddingFunction";
+export { CloudflareWorkersAIEmbeddingFunction } from "./embeddings/CloudflareWorkersAIEmbeddingFunction";
 
 export {
   IncludeEnum,
