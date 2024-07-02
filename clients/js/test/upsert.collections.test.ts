@@ -30,12 +30,12 @@ test("should error on non existing collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
-  expect(async () => {
-    await collection.upsert({
+  await expect(
+    collection.upsert({
       ids: ["test1"],
       embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
       metadatas: [{ test: "meta1" }],
       documents: ["doc1"],
-    });
-  }).rejects.toThrow(InvalidCollectionError);
+    }),
+  ).rejects.toThrow(InvalidCollectionError);
 });

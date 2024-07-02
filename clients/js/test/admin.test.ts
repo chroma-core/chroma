@@ -67,11 +67,9 @@ test("it should set the tenant and database", async () => {
 });
 
 test("it should throw well-formatted errors", async () => {
-  try {
-    await adminClient.createDatabase({ name: "test", tenantName: "foo" });
-    expect(false).toBe(true);
-  } catch (error) {
-    expect(error).toBeInstanceOf(Error);
-    expect(error).toBeInstanceOf(ChromaError);
-  }
+  await expect(
+    adminClient.createDatabase({ name: "test", tenantName: "foo" }),
+  ).rejects.toThrow(
+    new ChromaError("", "Database test already exists for tenant foo"),
+  );
 });
