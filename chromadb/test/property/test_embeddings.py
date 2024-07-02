@@ -114,7 +114,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             self.log_operation_count = 0
         else:
             new_version = wait_for_version_increase(
-                self.api, self.collection.name, current_version
+                self.api, self.collection.name, current_version, additional_time=240
             )
             # Everything got compacted.
             self.log_operation_count = 0
