@@ -2,6 +2,7 @@ from typing import Optional
 
 from typing_extensions import Annotated
 import typer
+from click.core import ParameterSource
 import uvicorn
 import os
 import webbrowser
@@ -28,9 +29,13 @@ _logo = """
 
 @app.command()  # type: ignore
 def run(
+    ctx: typer.Context,
     path: str = typer.Option(
         "./chroma_data", help="The path to the file or directory."
     ),
+    persistent: Annotated[
+        Optional[bool], typer.Option(help="If set, the server will run in persistent mode.")
+    ] = True,
     host: Annotated[
         Optional[str], typer.Option(help="The host to listen to. Default: localhost")
     ] = "localhost",
@@ -48,7 +53,15 @@ def run(
     print("Running Chroma")
     print("\033[0m")  # Reset
 
-    typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
+    if persistent:
+        typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
+    else:
+        if ctx.get_parameter_source("path")!=ParameterSource.DEFAULT:
+            typer.echo("You can't set the path parameter while using in-memory mode.")
+            raise typer.Abort()
+
+        typer.echo(f"\033[1mRunning in \033[32min-memory mode\033[0m\033[1m,\u001b[31m all changes to the database will be discarded after the application exits.\033[0m")
+
     typer.echo(
         f"\033[1mConnect to chroma at\033[0m: \033[32mhttp://{host}:{port}\033[0m"
     )
@@ -57,7 +70,7 @@ def run(
     )
 
     # set ENV variable for PERSIST_DIRECTORY to path
-    os.environ["IS_PERSISTENT"] = "True"
+    os.environ["IS_PERSISTENT"] = str(persistent)
     os.environ["PERSIST_DIRECTORY"] = path
     os.environ["CHROMA_SERVER_NOFILE"] = "65535"
     os.environ["CHROMA_CLI"] = "True"
