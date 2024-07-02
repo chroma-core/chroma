@@ -168,6 +168,7 @@ export class ChromaClient {
         this.database,
         {
           name,
+          configuration: null, //TODO: Configuration type in JavaScript
           metadata,
         },
         this.api.options,
@@ -226,6 +227,7 @@ export class ChromaClient {
         {
           name,
           metadata,
+          configuration: null,
           get_or_create: true,
         },
         this.api.options,
