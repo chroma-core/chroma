@@ -8,7 +8,6 @@ use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::execution::dispatcher::Dispatcher;
-use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
