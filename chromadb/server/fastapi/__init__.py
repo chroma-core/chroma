@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
-from chromadb.api.models.Collection import Collection
+
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzAction,
@@ -509,8 +509,8 @@ class FastAPI(Server):
         if maybe_database:
             database = maybe_database
 
-        api_collections = cast(
-            Sequence[Collection],
+        api_collection_models = cast(
+            Sequence[CollectionModel],
             await to_thread.run_sync(
                 self._api.list_collections,
                 limit,
@@ -521,7 +521,7 @@ class FastAPI(Server):
             ),
         )
 
-        return [c.get_model() for c in api_collections]
+        return api_collection_models
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     async def count_collections(
@@ -565,7 +565,7 @@ class FastAPI(Server):
     ) -> CollectionModel:
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
-        ) -> Collection:
+        ) -> CollectionModel:
             create = CreateCollection.model_validate(orjson.loads(raw_body))
 
             (
@@ -591,8 +591,8 @@ class FastAPI(Server):
                 database=database,
             )
 
-        api_collection = cast(
-            Collection,
+        api_collection_model = cast(
+            CollectionModel,
             await to_thread.run_sync(
                 process_create_collection,
                 request,
@@ -602,7 +602,7 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
-        return api_collection.get_model()
+        return api_collection_model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     async def get_collection(
@@ -627,20 +627,18 @@ class FastAPI(Server):
         if maybe_database:
             database = maybe_database
 
-        api_collection = cast(
-            Collection,
+        api_collection_model = cast(
+            CollectionModel,
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
-                None,
-                None,
-                None,
+                None,  # id
                 tenant,
                 database,
                 limiter=self._capacity_limiter,
             ),
         )
-        return api_collection.get_model()
+        return api_collection_model
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
     async def update_collection(
