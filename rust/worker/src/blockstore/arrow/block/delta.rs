@@ -27,7 +27,6 @@ impl BlockDelta {
     /// Creates a new block delta from a block.
     /// # Arguments
     /// - id: the id of the block delta.
-    /// - max_block_size_bytes: the maximum size of the block in bytes.
     pub fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
         BlockDelta {
             builder: V::get_delta_builder(),
@@ -166,7 +165,10 @@ impl BlockDelta {
             let new_delta = curr_block
                 .builder
                 .split(&split_key.prefix, split_key.key.clone());
-            let new_block = BlockDelta::new::<K, V>(Uuid::new_v4());
+            let new_block = BlockDelta {
+                builder: new_delta,
+                id: Uuid::new_v4(),
+            };
             if first_iter {
                 first_iter = false;
             } else {
@@ -191,7 +193,9 @@ impl BlockDelta {
 mod test {
     use super::*;
     use crate::{
-        blockstore::arrow::{block::Block, provider::BlockManager},
+        blockstore::arrow::{
+            block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager,
+        },
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,
@@ -200,9 +204,6 @@ mod test {
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
-
-    // A small block size for testing, so that triggering splits etc is easier
-    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     /// Saves a block to a random file under the given path, then loads the block
     /// and validates that the loaded block has the same size as the original block.

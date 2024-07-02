@@ -38,6 +38,9 @@ query_service:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
+    blockfile_provider:
+        Arrow:
+            max_block_size_bytes: 16384
 
 compaction_service:
     service_name: "compaction-service"
@@ -79,3 +82,6 @@ compaction_service:
         max_concurrent_jobs: 100
         compaction_interval_sec: 60
         min_compaction_size: 10
+    blockfile_provider:
+        Arrow:
+            max_block_size_bytes: 16384

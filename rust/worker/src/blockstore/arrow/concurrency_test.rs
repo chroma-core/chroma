@@ -1,13 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::arrow::provider::ArrowBlockfileProvider,
+        blockstore::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
         storage::{local::LocalStorage, Storage},
     };
     use rand::Rng;
     use shuttle::{future, thread};
-
-    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[test]
     fn test_blockfile_shuttle() {

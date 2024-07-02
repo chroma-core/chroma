@@ -529,7 +529,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::arrow::provider::ArrowBlockfileProvider,
+        blockstore::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,
@@ -540,8 +540,6 @@ mod tests {
     use rand::seq::IteratorRandom;
     use std::collections::HashMap;
     use tokio::runtime::Runtime;
-
-    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn test_count() {

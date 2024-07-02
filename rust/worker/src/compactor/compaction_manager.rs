@@ -296,6 +296,7 @@ mod tests {
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -309,8 +310,6 @@ mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
     use uuid::Uuid;
-
-    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn test_compaction_manager() {

@@ -358,7 +358,10 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 #[cfg(test)]
 mod test {
     use crate::{
-        blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
+        blockstore::{
+            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+            provider::BlockfileProvider,
+        },
         execution::{
             data::data_chunk::Chunk,
             operator::Operator,
@@ -378,8 +381,6 @@ mod test {
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
-
-    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn test_merge_and_hydrate() {

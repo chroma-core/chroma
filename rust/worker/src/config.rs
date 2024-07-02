@@ -148,8 +148,10 @@ pub(crate) trait Configurable<T> {
 mod tests {
     use super::*;
     use figment::Jail;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_config_from_default_path() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -190,6 +192,9 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -231,6 +236,9 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
                 "#,
             );
             let config = RootConfig::load();
@@ -247,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_config_from_specific_path() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -287,6 +296,9 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -328,6 +340,9 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -345,6 +360,7 @@ mod tests {
 
     #[test]
     #[should_panic]
+    #[serial]
     fn test_config_missing_required_field() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -402,6 +418,9 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -443,6 +462,9 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
                 "#,
             );
             let config = RootConfig::load();
@@ -456,6 +478,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_config_with_env_override() {
         Jail::expect_with(|jail| {
             let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
@@ -511,6 +534,9 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -544,6 +570,9 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                    blockfile_provider:
+                        Arrow:
+                            max_block_size_bytes: 16384
                 "#,
             );
             let config = RootConfig::load();
@@ -571,6 +600,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_default_config_path() {
         // Sanity check that root config loads from default path correctly
         let _ = RootConfig::load();

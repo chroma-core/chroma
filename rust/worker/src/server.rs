@@ -567,18 +567,16 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::storage::local::LocalStorage;
     use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
-
-    use super::*;
     use chroma_proto::debug_client::DebugClient;
     use tempfile::tempdir;
-
-    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn gracefully_handles_panics() {
