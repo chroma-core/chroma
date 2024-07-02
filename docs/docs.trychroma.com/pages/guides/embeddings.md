@@ -18,6 +18,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Instructor](/integrations/instructor) | ✅  | ➖ |
 | [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
 | [Jina AI](/integrations/jinaai) | ✅  | ✅ |
+| [FastEmbed](/integrations/fastembed) | ✅ | ➖ |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
