@@ -282,7 +282,7 @@ func (suite *LogServerTestSuite) modelGetAllCollectionInfoToCompact(ctx context.
 // State machine
 func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 	ctx := context.Background()
-	maxCollections := 1
+	maxCollections := 100
 	collections := make(map[int]types.UniqueID)
 
 	collectionGen := rapid.Custom(func(t *rapid.T) types.UniqueID {
