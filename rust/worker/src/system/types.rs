@@ -8,6 +8,9 @@ use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
 
+pub(super) trait Message: Debug + Send + 'static {}
+impl<M: Debug + Send + 'static> Message for M {}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 /// The state of a component
 /// A component can be running or stopped
@@ -67,7 +70,7 @@ where
 pub(crate) trait StreamHandler<M>
 where
     Self: Component + 'static + Handler<M>,
-    M: Send + Debug + 'static,
+    M: Message,
 {
     fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<Self>) -> ()
     where
@@ -126,7 +129,7 @@ impl<C: Component> ComponentSender<C> {
     ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender
             .send(WrappedMessage::new(message, None, tracing_context))
@@ -141,7 +144,7 @@ impl<C: Component> ComponentSender<C> {
     ) -> Result<C::Result, ChannelRequestError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sender
@@ -229,7 +232,7 @@ impl<C: Component> ComponentHandle<C> {
     pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         Box::new(self.sender.clone())
     }
@@ -241,7 +244,7 @@ impl<C: Component> ComponentHandle<C> {
     ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender.wrap_and_send(message, tracing_context).await
     }
@@ -253,7 +256,7 @@ impl<C: Component> ComponentHandle<C> {
     ) -> Result<C::Result, ChannelRequestError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender.wrap_and_request(message, tracing_context).await
     }
@@ -274,7 +277,7 @@ impl<C: Component> ComponentContext<C> {
     pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         Box::new(self.sender.clone())
     }
@@ -286,7 +289,7 @@ impl<C: Component> ComponentContext<C> {
     ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender.wrap_and_send(message, tracing_context).await
     }

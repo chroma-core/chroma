@@ -1,4 +1,4 @@
-use super::{Component, ComponentContext, Handler};
+use super::{Component, ComponentContext, Handler, Message};
 use async_trait::async_trait;
 use std::fmt::Debug;
 use tokio::sync::oneshot;
@@ -9,13 +9,13 @@ use tokio::sync::oneshot;
 // And declaring the message generic (M) at the method level is incompatible with dynamic dispatch.
 // (https://doc.rust-lang.org/error_codes/E0038.html#method-has-generic-type-parameters)
 #[derive(Debug)]
-pub(crate) struct HandleableMessageImpl<M: Debug + Send + 'static, Result: Send> {
+pub(crate) struct HandleableMessageImpl<M: Message, Result: Send> {
     message: M,
     // Optional because not all messages require a reply, .send() does not provide a reply channel but .request() does.
     reply_channel: Option<oneshot::Sender<Result>>,
 }
 
-impl<M: Debug + Send + 'static, Result: Send> HandleableMessageImpl<M, Result> {
+impl<M: Message, Result: Send> HandleableMessageImpl<M, Result> {
     pub(super) fn new(message: M, reply_channel: Option<oneshot::Sender<Result>>) -> Self {
         HandleableMessageImpl {
             message,
@@ -42,7 +42,7 @@ impl<C: Component> WrappedMessage<C> {
     ) -> Self
     where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         WrappedMessage {
             boxed_message: Box::new(Some(HandleableMessageImpl::new(message, reply_channel))),
@@ -71,13 +71,15 @@ where
 impl<C, M> HandleableMessage<C> for Option<HandleableMessageImpl<M, C::Result>>
 where
     C: Component + Handler<M>,
-    M: Debug + Send + 'static,
+    M: Message,
 {
     async fn handle_and_reply(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
         if let Some(message) = self.take() {
             let result = component.handle(message.message, ctx).await;
             if let Some(reply_channel) = message.reply_channel {
-                reply_channel.send(result).unwrap();
+                reply_channel
+                    .send(result)
+                    .expect("message reply channel was unexpectedly dropped by caller");
             }
         }
     }

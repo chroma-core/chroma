@@ -2,6 +2,7 @@ use super::scheduler::Scheduler;
 use super::ComponentContext;
 use super::ComponentRuntime;
 use super::ComponentSender;
+use super::Message;
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
 use futures::Stream;
 use futures::StreamExt;
@@ -69,7 +70,7 @@ impl System {
     pub(super) fn register_stream<C, S, M>(&self, stream: S, ctx: &ComponentContext<C>)
     where
         C: StreamHandler<M> + Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
         S: Stream + Send + Stream<Item = M> + 'static,
     {
         let ctx = ComponentContext {
@@ -93,7 +94,7 @@ impl System {
 async fn stream_loop<C, S, M>(stream: S, ctx: &ComponentContext<C>)
 where
     C: StreamHandler<M> + Handler<M>,
-    M: Send + Debug + 'static,
+    M: Message,
     S: Stream + Send + Stream<Item = M> + 'static,
 {
     pin!(stream);
