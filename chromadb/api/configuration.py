@@ -10,6 +10,7 @@ from typing import (
     Protocol,
     Union,
     TypeVar,
+    cast,
 )
 from typing_extensions import Self
 from multiprocessing import cpu_count
@@ -25,7 +26,7 @@ class StaticParameterError(Exception):
     pass
 
 
-ParameterValue = Union[str, int, float, bool, "Configuration"]
+ParameterValue = Union[str, int, float, bool, "ConfigurationInternal"]
 
 
 class ParameterValidator(Protocol):
@@ -77,11 +78,11 @@ class ConfigurationParameter:
         return self.name == __value.name and self.value == __value.value
 
 
-T = TypeVar("T", bound="Configuration")
+T = TypeVar("T", bound="ConfigurationInternal")
 
 
-class Configuration(JSONSerializable["Configuration"]):
-    """Represents an abstract configuration."""
+class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
+    """Represents an abstract configuration, used internally by Chroma."""
 
     # The internal data structure used to store the parameters
     # All expected parameters must be present with defaults or None values at initialization
@@ -124,7 +125,7 @@ class Configuration(JSONSerializable["Configuration"]):
         return f"Configuration({self.parameter_map.values()})"
 
     def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, Configuration):
+        if not isinstance(__value, ConfigurationInternal):
             return NotImplemented
         return self.parameter_map == __value.parameter_map
 
@@ -132,9 +133,14 @@ class Configuration(JSONSerializable["Configuration"]):
         """Returns the parameters of the configuration."""
         return list(self.parameter_map.values())
 
-    def get_parameter(self, name: str) -> Optional[ConfigurationParameter]:
-        """Returns the parameter with the given name or None if it does not exist."""
-        return self.parameter_map.get(name, None)
+    def get_parameter(self, name: str) -> ConfigurationParameter:
+        """Returns the parameter with the given name, or except if it doesn't exist."""
+        if name not in self.parameter_map:
+            raise ValueError(
+                f"Invalid parameter name: {name} for configuration {self.__class__.__name__}"
+            )
+        param_value = cast(ConfigurationParameter, self.parameter_map.get(name))
+        return param_value
 
     def set_parameter(self, name: str, value: Union[str, int, float, bool]) -> None:
         """Sets the parameter with the given name to the given value."""
@@ -170,7 +176,7 @@ class Configuration(JSONSerializable["Configuration"]):
         """Returns the JSON compatible dictionary representation of the configuration."""
         json_dict = {
             name: parameter.value.to_json()
-            if isinstance(parameter.value, Configuration)
+            if isinstance(parameter.value, ConfigurationInternal)
             else parameter.value
             for name, parameter in self.parameter_map.items()
         }
@@ -195,7 +201,10 @@ class Configuration(JSONSerializable["Configuration"]):
         return cls(parameters=parameters)
 
 
-class HNSWConfiguration(Configuration):
+class HNSWConfigurationInternal(ConfigurationInternal):
+    """Internal representation of the HNSW configuration.
+    Used for validation, defaults, serialization and deserialization."""
+
     definitions = {
         "space": ConfigurationDefinition(
             name="space",
@@ -252,7 +261,9 @@ class HNSWConfiguration(Configuration):
     def from_legacy_params(cls, params: Dict[str, Any]) -> Self:
         """Returns an HNSWConfiguration from a metadata dict containing legacy HNSW parameters. Used for migration."""
 
-        # We maintain this map to avoid a circular import with HnswParams, and because then names won't change
+        # We maintain this map to avoid a circular import with HnswParams, and
+        # because then names won't change since we intend to deprecate HNSWParams
+        # in favor of this type of configuration.
         old_to_new = {
             "hnsw:space": "space",
             "hnsw:construction_ef": "ef_construction",
@@ -268,19 +279,83 @@ class HNSWConfiguration(Configuration):
         for name, value in params.items():
             if name not in old_to_new:
                 raise ValueError(f"Invalid legacy HNSW parameter name: {name}")
-            new_name = old_to_new[name]
-            parameters.append(ConfigurationParameter(name=new_name, value=value))
-        return cls(parameters=parameters)
+            parameters.append(
+                ConfigurationParameter(name=old_to_new[name], value=value)
+            )
+        return cls(parameters)
 
 
-class CollectionConfiguration(Configuration):
-    """The configuration for a collection."""
+# This is the user-facing interface for HNSW index configuration parameters.
+# Internally, we pass around HNSWConfigurationInternal objects, which perform
+# validation, serialization and deserialization. Users don't need to know
+# about that and instead get a clean constructor with default arguments.
+class HNSWConfigurationInterface(HNSWConfigurationInternal):
+    """HNSW index configuration parameters.
+    See https://docs.trychroma.com/guides#changing-the-distance-function for more information.
+    """
+
+    def __init__(
+        self,
+        space: str = "l2",
+        ef_construction: int = 100,
+        ef_search: int = 10,
+        num_threads: int = cpu_count(),
+        M: int = 16,
+        resize_factor: float = 1.2,
+        batch_size: int = 1000,
+        sync_threshold: int = 100,
+    ):
+        parameters = [
+            ConfigurationParameter(name="space", value=space),
+            ConfigurationParameter(name="ef_construction", value=ef_construction),
+            ConfigurationParameter(name="ef_search", value=ef_search),
+            ConfigurationParameter(name="num_threads", value=num_threads),
+            ConfigurationParameter(name="M", value=M),
+            ConfigurationParameter(name="resize_factor", value=resize_factor),
+            ConfigurationParameter(name="batch_size", value=batch_size),
+            ConfigurationParameter(name="sync_threshold", value=sync_threshold),
+        ]
+
+        super().__init__(parameters=parameters)
+
+
+# Alias for user convenience - the user doesn't need to know this is an 'Interface'
+HNSWConfiguration = HNSWConfigurationInterface
+
+
+class CollectionConfigurationInternal(ConfigurationInternal):
+    """Internal representation of the collection configuration.
+    Used for validation, defaults, and serialization / deserialization."""
 
     definitions = {
         "hnsw_configuration": ConfigurationDefinition(
             name="hnsw_configuration",
-            validator=lambda value: isinstance(value, HNSWConfiguration),
-            is_static=False,
-            default_value=HNSWConfiguration(),
+            validator=lambda value: isinstance(value, HNSWConfigurationInternal),
+            is_static=True,
+            default_value=HNSWConfigurationInternal(),
         ),
     }
+
+
+# This is the user-facing interface for HNSW index configuration parameters.
+# Internally, we pass around HNSWConfigurationInternal objects, which perform
+# validation, serialization and deserialization. Users don't need to know
+# about that and instead get a clean constructor with default arguments.
+class CollectionConfigurationInterface(CollectionConfigurationInternal):
+    """Configuration parameters for creating a collection."""
+
+    def __init__(self, hnsw_configuration: Optional[HNSWConfigurationInternal]):
+        """Initializes a new instance of the CollectionConfiguration class.
+        Args:
+            hnsw_configuration: The HNSW configuration to use for the collection.
+        """
+        if hnsw_configuration is None:
+            hnsw_configuration = HNSWConfigurationInternal()
+        parameters = [
+            ConfigurationParameter(name="hnsw_configuration", value=hnsw_configuration)
+        ]
+        super().__init__(parameters=parameters)
+
+
+# Alias for user convenience - the user doesn't need to know this is an 'Interface'.
+CollectionConfiguration = CollectionConfigurationInterface

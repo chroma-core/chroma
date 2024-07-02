@@ -12,7 +12,7 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzAction,
@@ -568,9 +568,9 @@ class FastAPI(Server):
             create = CreateCollection.model_validate(orjson.loads(raw_body))
 
             configuration = (
-                CollectionConfiguration()
+                CollectionConfigurationInternal()
                 if not create.configuration
-                else CollectionConfiguration.from_json(create.configuration)
+                else CollectionConfigurationInternal.from_json(create.configuration)
             )
 
             (
