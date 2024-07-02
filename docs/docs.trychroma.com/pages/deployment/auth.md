@@ -54,7 +54,8 @@ chroma run --path /db_path
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-#### Client Setup
+#### Client Setup (Python)
+
 
 ```python
 import chromadb
@@ -72,13 +73,35 @@ client.list_collections()  # this is a protected endpoint and requires authentic
 {% /tab %}
 {% tab label="Javascript" %}
 
-#### Client Setup
+#### Client Setup (JavaScript/TypeScript)
 
-```js
-import { ChromaClient } from "chromadb";
-
+##### Basic authentication (username & password)
+```javascript
 const client = new ChromaClient({
+  path: "http://localhost:8000"
   auth: { provider: "basic", credentials: "admin:admin" },
+});
+```
+
+##### Token authentication
+In this method, we use the Bearer scheme. Namely, the token is sent as: `Authorization: Bearer test-token`
+```javascript
+const client = new ChromaClient({
+  path: "http://localhost:8000",
+  auth: { provider: "token", credentials: "test-token" },
+});
+```
+
+##### Token authentication (custom header)
+In this method, we send the token in a custom header. The header is `X-Chroma-Token`.
+```javascript
+const client = new ChromaClient({
+  path: URL,
+  auth: {
+    provider: "token",
+    credentials: "test-token",
+    tokenHeaderType: "X_CHROMA_TOKEN",
+  },
 });
 ```
 
