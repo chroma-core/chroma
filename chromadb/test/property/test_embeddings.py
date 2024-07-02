@@ -95,6 +95,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
         if self.__class__.__name__ == "EmbeddingStateMachine":
+            print("[test_embeddings] Reset")
             self.log_operation_count = 0
             self.collection_version = self.collection.get_model()["version"]
 
@@ -109,10 +110,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         # This means that there was a compaction from the last time this was
         # invoked. Ok to start all over again.
         if current_version != self.collection_version:
+            print(
+                "[test_embeddings][wait_for_compaction] collection version has changed, so reset to 0"
+            )
             self.collection_version = current_version
             # This is fine even if the log has some records right now
             self.log_operation_count = 0
         else:
+            print("[test_embeddings][wait_for_compaction] wait for version to increase")
             new_version = wait_for_version_increase(
                 self.api, self.collection.name, current_version, additional_time=240
             )
@@ -156,6 +161,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             }
             # TODO(Sanket): Why is this the full list and not only the non-overlapping ones
             self.collection.add(**normalized_record_set)
+            print(
+                "[test_embeddings][add] Intersection ids ",
+                normalized_record_set["ids"],
+                " len ",
+                len(normalized_record_set["ids"]),
+            )
             if self.__class__.__name__ == "EmbeddingStateMachine":
                 self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
@@ -163,6 +174,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
         else:
             self.collection.add(**normalized_record_set)
+            print(
+                "[test_embeddings][add] Non Intersection ids ",
+                normalized_record_set["ids"],
+                " len ",
+                len(normalized_record_set["ids"]),
+            )
             if self.__class__.__name__ == "EmbeddingStateMachine":
                 self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
@@ -175,6 +192,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
 
         self.collection.delete(ids=ids)
+        print("[test_embeddings][delete] ids ", ids, " len ", len(ids))
         if self.__class__.__name__ == "EmbeddingStateMachine":
             self.log_operation_count += len(ids)
         self._remove_embeddings(set(indices_to_remove))
@@ -195,6 +213,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
         self.collection.update(**record_set)
+        print(
+            "[test_embeddings][update] ids ",
+            record_set["ids"],
+            " len ",
+            len(invariants.wrap(record_set["ids"])),
+        )
         if self.__class__.__name__ == "EmbeddingStateMachine":
             self.log_operation_count += len(invariants.wrap(record_set["ids"]))
         self._upsert_embeddings(record_set)
@@ -214,6 +238,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
         self.collection.upsert(**record_set)
+        print(
+            "[test_embeddings][upsert] ids ",
+            record_set["ids"],
+            " len ",
+            len(invariants.wrap(record_set["ids"])),
+        )
         if self.__class__.__name__ == "EmbeddingStateMachine":
             self.log_operation_count += len(invariants.wrap(record_set["ids"]))
         self._upsert_embeddings(record_set)
