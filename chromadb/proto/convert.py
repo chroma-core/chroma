@@ -1,7 +1,7 @@
 import array
 from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import (
@@ -204,7 +204,7 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
-        configuration=CollectionConfiguration.from_json_str(
+        configuration=CollectionConfigurationInternal.from_json_str(
             collection.configuration_json_str
         ),
         metadata=from_proto_metadata(collection.metadata)

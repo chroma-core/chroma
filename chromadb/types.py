@@ -10,8 +10,8 @@ from enum import Enum
 from pydantic import BaseModel
 
 from chromadb.api.configuration import (
-    CollectionConfiguration,
-    Configuration,
+    CollectionConfigurationInternal,
+    ConfigurationInternal,
 )
 from chromadb.serde import BaseModelJSONSerializable
 
@@ -35,7 +35,7 @@ class SegmentScope(Enum):
     RECORD = "RECORD"
 
 
-C = TypeVar("C", bound=Configuration)
+C = TypeVar("C", bound=ConfigurationInternal)
 
 
 class Configurable(Generic[C], ABC):
@@ -52,7 +52,7 @@ class Configurable(Generic[C], ABC):
 
 class Collection(
     BaseModel,
-    Configurable[CollectionConfiguration],
+    Configurable[CollectionConfigurationInternal],
     BaseModelJSONSerializable["Collection"],
 ):
     """A model of a collection used for transport, serialization, and storage"""
@@ -72,7 +72,7 @@ class Collection(
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfiguration,
+        configuration: CollectionConfigurationInternal,
         metadata: Optional[Metadata],
         dimension: Optional[int],
         tenant: str,
@@ -120,11 +120,11 @@ class Collection(
                 return False
         return True
 
-    def get_configuration(self) -> CollectionConfiguration:
+    def get_configuration(self) -> CollectionConfigurationInternal:
         """Returns the configuration of the collection"""
-        return CollectionConfiguration.from_json(self.configuration_json)
+        return CollectionConfigurationInternal.from_json(self.configuration_json)
 
-    def set_configuration(self, configuration: CollectionConfiguration) -> None:
+    def set_configuration(self, configuration: CollectionConfigurationInternal) -> None:
         """Sets the configuration of the collection"""
         self.configuration_json = configuration.to_json()
 
@@ -136,7 +136,7 @@ class Collection(
         params_map = json_map.copy()
 
         # Get the CollectionConfiguration from the JSON map, and remove it from the map
-        configuration = CollectionConfiguration.from_json(
+        configuration = CollectionConfigurationInternal.from_json(
             params_map.pop("configuration_json", None)
         )
 

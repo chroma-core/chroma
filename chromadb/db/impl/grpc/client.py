@@ -2,7 +2,7 @@ import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from chromadb.db.system import SysDB
@@ -198,7 +198,7 @@ class GrpcSysDB(SysDB):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfiguration,
+        configuration: CollectionConfigurationInternal,
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,

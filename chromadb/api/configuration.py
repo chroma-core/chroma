@@ -25,7 +25,7 @@ class StaticParameterError(Exception):
     pass
 
 
-ParameterValue = Union[str, int, float, bool, "Configuration"]
+ParameterValue = Union[str, int, float, bool, "ConfigurationInternal"]
 
 
 class ParameterValidator(Protocol):
@@ -77,10 +77,10 @@ class ConfigurationParameter:
         return self.name == __value.name and self.value == __value.value
 
 
-T = TypeVar("T", bound="Configuration")
+T = TypeVar("T", bound="ConfigurationInternal")
 
 
-class Configuration(JSONSerializable["Configuration"]):
+class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
     """Represents an abstract configuration."""
 
     # The internal data structure used to store the parameters
@@ -124,7 +124,7 @@ class Configuration(JSONSerializable["Configuration"]):
         return f"Configuration({self.parameter_map.values()})"
 
     def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, Configuration):
+        if not isinstance(__value, ConfigurationInternal):
             return NotImplemented
         return self.parameter_map == __value.parameter_map
 
@@ -170,7 +170,7 @@ class Configuration(JSONSerializable["Configuration"]):
         """Returns the JSON compatible dictionary representation of the configuration."""
         json_dict = {
             name: parameter.value.to_json()
-            if isinstance(parameter.value, Configuration)
+            if isinstance(parameter.value, ConfigurationInternal)
             else parameter.value
             for name, parameter in self.parameter_map.items()
         }
@@ -195,7 +195,9 @@ class Configuration(JSONSerializable["Configuration"]):
         return cls(parameters=parameters)
 
 
-class HNSWConfiguration(Configuration):
+class HNSWConfigurationInternal(ConfigurationInternal):
+    """Internal representation of the HNSW configuration. Used for validation and defaults."""
+
     definitions = {
         "space": ConfigurationDefinition(
             name="space",
@@ -268,19 +270,70 @@ class HNSWConfiguration(Configuration):
         for name, value in params.items():
             if name not in old_to_new:
                 raise ValueError(f"Invalid legacy HNSW parameter name: {name}")
-            new_name = old_to_new[name]
-            parameters.append(ConfigurationParameter(name=new_name, value=value))
-        return cls(parameters=parameters)
+            parameters.append(
+                ConfigurationParameter(name=old_to_new[name], value=value)
+            )
+        return cls(parameters)
 
 
-class CollectionConfiguration(Configuration):
-    """The configuration for a collection."""
+class HNSWConfigurationInterface(HNSWConfigurationInternal):
+    def __init__(
+        self,
+        space: str = "l2",
+        ef_construction: int = 100,
+        ef_search: int = 10,
+        num_threads: int = cpu_count(),
+        M: int = 16,
+        resize_factor: float = 1.2,
+        batch_size: int = 1000,
+        sync_threshold: int = 100,
+    ):
+        parameters = [
+            ConfigurationParameter(name="space", value=space),
+            ConfigurationParameter(name="ef_construction", value=ef_construction),
+            ConfigurationParameter(name="ef_search", value=ef_search),
+            ConfigurationParameter(name="num_threads", value=num_threads),
+            ConfigurationParameter(name="M", value=M),
+            ConfigurationParameter(name="resize_factor", value=resize_factor),
+            ConfigurationParameter(name="batch_size", value=batch_size),
+            ConfigurationParameter(name="sync_threshold", value=sync_threshold),
+        ]
+
+        super().__init__(parameters=parameters)
+
+
+# Alias for user convenience
+HNSWConfiguration = HNSWConfigurationInterface
+
+
+class CollectionConfigurationInternal(ConfigurationInternal):
+    """Internal representation of the collection configuration. Used for validation and defaults."""
 
     definitions = {
         "hnsw_configuration": ConfigurationDefinition(
             name="hnsw_configuration",
-            validator=lambda value: isinstance(value, HNSWConfiguration),
+            validator=lambda value: isinstance(value, HNSWConfigurationInternal),
             is_static=False,
-            default_value=HNSWConfiguration(),
+            default_value=HNSWConfigurationInternal(),
         ),
     }
+
+
+class CollectionConfigurationInterface(CollectionConfigurationInternal):
+    """Configuration parameters for creating a collection."""
+
+    def __init__(self, hnsw_configuration: Optional[HNSWConfigurationInternal]):
+        """Initializes a new instance of the CollectionConfiguration class.
+        Args:
+            hnsw_configuration: The HNSW configuration to use for the collection.
+        """
+        if hnsw_configuration is None:
+            hnsw_configuration = HNSWConfigurationInternal()
+        parameters = [
+            ConfigurationParameter(name="hnsw_configuration", value=hnsw_configuration)
+        ]
+        super().__init__(parameters=parameters)
+
+
+# Alias for user convenience
+CollectionConfiguration = CollectionConfigurationInterface
