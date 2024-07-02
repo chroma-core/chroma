@@ -2,6 +2,7 @@ use super::scheduler::Scheduler;
 use super::ComponentContext;
 use super::ComponentRuntime;
 use super::ComponentSender;
+use super::Message;
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
 use futures::Stream;
 use futures::StreamExt;
@@ -69,7 +70,7 @@ impl System {
     pub(super) fn register_stream<C, S, M>(&self, stream: S, ctx: &ComponentContext<C>)
     where
         C: StreamHandler<M> + Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
         S: Stream + Send + Stream<Item = M> + 'static,
     {
         let ctx = ComponentContext {
@@ -93,7 +94,7 @@ impl System {
 async fn stream_loop<C, S, M>(stream: S, ctx: &ComponentContext<C>)
 where
     C: StreamHandler<M> + Handler<M>,
-    M: Send + Debug + 'static,
+    M: Message,
     S: Stream + Send + Stream<Item = M> + 'static,
 {
     pin!(stream);
@@ -122,5 +123,61 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    #[derive(Debug)]
+    struct TestComponent {
+        queue_size: usize,
+        counter: usize,
+    }
+
+    impl TestComponent {
+        fn new(queue_size: usize) -> Self {
+            TestComponent {
+                queue_size,
+                counter: 0,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Handler<usize> for TestComponent {
+        type Result = usize;
+
+        async fn handle(
+            &mut self,
+            message: usize,
+            _ctx: &ComponentContext<TestComponent>,
+        ) -> Self::Result {
+            self.counter += message;
+            return self.counter;
+        }
+    }
+
+    #[async_trait]
+    impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "Test component"
+        }
+
+        fn queue_size(&self) -> usize {
+            self.queue_size
+        }
+    }
+
+    #[tokio::test]
+    async fn response_types() {
+        let system = System::new();
+        let component = TestComponent::new(10);
+        let handle = system.start_component(component);
+
+        assert_eq!(1, handle.request(1, None).await.unwrap());
+        assert_eq!(2, handle.request(1, None).await.unwrap());
     }
 }

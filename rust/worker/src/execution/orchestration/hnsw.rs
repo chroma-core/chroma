@@ -588,6 +588,8 @@ impl Component for HnswQueryOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -632,6 +634,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
 impl Handler<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>>
     for HnswQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>,
@@ -675,6 +679,8 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>
 
 #[async_trait]
 impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>,
@@ -710,6 +716,8 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
 impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
     for HnswQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>,

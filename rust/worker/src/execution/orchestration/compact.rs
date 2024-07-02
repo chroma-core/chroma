@@ -503,6 +503,8 @@ impl Component for CompactOrchestrator {
 // ============== Handlers ==============
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CompactOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -542,6 +544,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CompactOrchestrator 
 
 #[async_trait]
 impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PartitionOutput, PartitionError>,
@@ -569,6 +573,8 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
 
 #[async_trait]
 impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for CompactOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>,
@@ -613,6 +619,8 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
 
 #[async_trait]
 impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<FlushS3Output, Box<dyn ChromaError>>,
@@ -638,6 +646,8 @@ impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchest
 
 #[async_trait]
 impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<RegisterOutput, RegisterError>,

@@ -53,6 +53,8 @@ impl Component for WorkerThread {
 
 #[async_trait]
 impl Handler<TaskMessage> for WorkerThread {
+    type Result = ();
+
     async fn handle(&mut self, task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
         task.run().await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.receiver());

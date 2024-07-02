@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::{Component, ComponentContext, Handler};
+use super::{Component, ComponentContext, Handler, Message};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
@@ -27,7 +27,7 @@ impl Scheduler {
     pub(crate) fn schedule<C, M>(&self, message: M, duration: Duration, ctx: &ComponentContext<C>)
     where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         let cancel = ctx.cancellation_token.clone();
         let sender = ctx.receiver().clone();
@@ -65,7 +65,7 @@ impl Scheduler {
         ctx: &ComponentContext<C>,
     ) where
         C: Component + Handler<M>,
-        M: Debug + Send + Clone + 'static,
+        M: Message + Clone,
     {
         let cancel = ctx.cancellation_token.clone();
 
@@ -161,6 +161,8 @@ mod tests {
     }
     #[async_trait]
     impl Handler<ScheduleMessage> for TestComponent {
+        type Result = ();
+
         async fn handle(
             &mut self,
             _message: ScheduleMessage,

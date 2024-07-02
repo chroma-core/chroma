@@ -268,6 +268,8 @@ impl Debug for CompactionManager {
 // ============== Handlers ==============
 #[async_trait]
 impl Handler<ScheduleMessage> for CompactionManager {
+    type Result = ();
+
     async fn handle(
         &mut self,
         _message: ScheduleMessage,
@@ -283,6 +285,8 @@ impl Handler<ScheduleMessage> for CompactionManager {
 
 #[async_trait]
 impl Handler<Memberlist> for CompactionManager {
+    type Result = ();
+
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
         self.scheduler.set_memberlist(message);
     }

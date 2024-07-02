@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::errors::{ChromaError, ErrorCodes};
 
-use super::{Component, ComponentSender, Handler};
+use super::{Component, ComponentSender, Handler, Message};
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -41,7 +41,7 @@ where
 impl<C, M> ReceiverForMessage<M> for ComponentSender<C>
 where
     C: Component + Handler<M>,
-    M: Send + Debug + 'static,
+    M: Message,
 {
     async fn send(
         &self,
@@ -60,6 +60,20 @@ pub enum ChannelError {
 }
 
 impl ChromaError for ChannelError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ChannelRequestError {
+    #[error("Failed to send request")]
+    RequestError,
+    #[error("Failed to receive response")]
+    ResponseError,
+}
+
+impl ChromaError for ChannelRequestError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }

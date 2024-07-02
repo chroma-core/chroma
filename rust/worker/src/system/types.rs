@@ -1,4 +1,4 @@
-use super::{scheduler::Scheduler, wrap, ChannelError, WrappedMessage};
+use super::{scheduler::Scheduler, ChannelError, ChannelRequestError, WrappedMessage};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
@@ -7,6 +7,9 @@ use std::{fmt::Debug, sync::Arc};
 use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
+
+pub(super) trait Message: Debug + Send + 'static {}
+impl<M: Debug + Send + 'static> Message for M {}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 /// The state of a component
@@ -51,7 +54,9 @@ pub(crate) trait Handler<M>
 where
     Self: Component + Sized + 'static,
 {
-    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ()
+    type Result: Send + Debug + 'static;
+
+    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> Self::Result
     // The need for this lifetime bound comes from the async_trait macro when we need generic lifetimes in our message type
     // https://stackoverflow.com/questions/69560112/how-to-use-rust-async-trait-generic-to-a-lifetime-parameter
     where
@@ -65,7 +70,7 @@ where
 pub(crate) trait StreamHandler<M>
 where
     Self: Component + 'static + Handler<M>,
-    M: Send + Debug + 'static,
+    M: Message,
 {
     fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<Self>) -> ()
     where
@@ -124,12 +129,31 @@ impl<C: Component> ComponentSender<C> {
     ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender
-            .send(wrap(message, tracing_context))
+            .send(WrappedMessage::new(message, None, tracing_context))
             .await
             .map_err(|_| ChannelError::SendError)
+    }
+
+    pub(super) async fn wrap_and_request<M>(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<C::Result, ChannelRequestError>
+    where
+        C: Handler<M>,
+        M: Message,
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.sender
+            .send(WrappedMessage::new(message, Some(tx), tracing_context))
+            .await
+            .map_err(|_| ChannelRequestError::RequestError)?;
+
+        let result = rx.await.map_err(|_| ChannelRequestError::ResponseError)?;
+        Ok(result)
     }
 }
 
@@ -208,7 +232,7 @@ impl<C: Component> ComponentHandle<C> {
     pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         Box::new(self.sender.clone())
     }
@@ -220,9 +244,21 @@ impl<C: Component> ComponentHandle<C> {
     ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender.wrap_and_send(message, tracing_context).await
+    }
+
+    pub(crate) async fn request<M>(
+        &self,
+        message: M,
+        tracing_context: Option<tracing::Span>,
+    ) -> Result<C::Result, ChannelRequestError>
+    where
+        C: Handler<M>,
+        M: Message,
+    {
+        self.sender.wrap_and_request(message, tracing_context).await
     }
 }
 
@@ -241,7 +277,7 @@ impl<C: Component> ComponentContext<C> {
     pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         Box::new(self.sender.clone())
     }
@@ -253,7 +289,7 @@ impl<C: Component> ComponentContext<C> {
     ) -> Result<(), ChannelError>
     where
         C: Handler<M>,
-        M: Send + Debug + 'static,
+        M: Message,
     {
         self.sender.wrap_and_send(message, tracing_context).await
     }
@@ -284,6 +320,8 @@ mod tests {
 
     #[async_trait]
     impl Handler<usize> for TestComponent {
+        type Result = ();
+
         async fn handle(&mut self, message: usize, _ctx: &ComponentContext<TestComponent>) -> () {
             self.counter.fetch_add(message, Ordering::SeqCst);
         }
