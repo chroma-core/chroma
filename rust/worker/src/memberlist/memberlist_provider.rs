@@ -197,6 +197,8 @@ impl Component for CustomResourceMemberlistProvider {
 
 #[async_trait]
 impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvider {
+    type Result = ();
+
     async fn handle(
         &mut self,
         event: Option<MemberListKubeResource>,

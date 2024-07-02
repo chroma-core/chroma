@@ -269,6 +269,8 @@ impl Component for GetVectorsOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -291,6 +293,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrat
 impl Handler<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>
     for GetVectorsOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>,
