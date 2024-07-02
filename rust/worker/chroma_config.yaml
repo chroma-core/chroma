@@ -77,5 +77,5 @@ compaction_service:
     compactor:
         compaction_manager_queue_size: 1000
         max_concurrent_jobs: 100
-        compaction_interval_sec: 60
+        compaction_interval_sec: 1
         min_compaction_size: 10
