@@ -352,7 +352,7 @@ impl CompactOrchestrator {
             .get_segments(None, None, None, Some(self.collection_id))
             .await;
 
-        tracing::debug!("Retrived segments: {:?}", segments);
+        tracing::info!("Retrived segments: {:?}", segments);
 
         let segments = match segments {
             Ok(segments) => {
@@ -383,7 +383,7 @@ impl CompactOrchestrator {
             {
                 Ok(writer) => writer,
                 Err(e) => {
-                    println!("Error creating Record Segment Writer: {:?}", e);
+                    tracing::error!("Error creating Record Segment Writer: {:?}", e);
                     return Err(Box::new(GetSegmentWritersError::RecordSegmentWriterError));
                 }
             };

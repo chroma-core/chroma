@@ -4,7 +4,7 @@ import pytest
 import logging
 import hypothesis
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
@@ -26,9 +26,13 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import reset
+from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
+from chromadb.test.utils.wait_for_version_increase import (
+    wait_for_version_increase,
+    get_collection_version,
+)
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
@@ -90,8 +94,41 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.record_set_state = strategies.StateMachineRecordSet(
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            print("[test_embeddings] Reset")
+            self.log_operation_count = 0
+            self.collection_version = self.collection.get_model()["version"]
 
-    @rule(target=embedding_ids, record_set=strategies.recordsets(collection_st))
+    @precondition(
+        lambda self: not NOT_CLUSTER_ONLY
+        and self.log_operation_count > 10
+        and self.__class__.__name__ == "EmbeddingStateMachine"
+    )
+    @rule()
+    def wait_for_compaction(self) -> None:
+        current_version = get_collection_version(self.api, self.collection.name)
+        # This means that there was a compaction from the last time this was
+        # invoked. Ok to start all over again.
+        if current_version != self.collection_version:
+            print(
+                "[test_embeddings][wait_for_compaction] collection version has changed, so reset to 0"
+            )
+            self.collection_version = current_version
+            # This is fine even if the log has some records right now
+            self.log_operation_count = 0
+        else:
+            print("[test_embeddings][wait_for_compaction] wait for version to increase")
+            new_version = wait_for_version_increase(
+                self.api, self.collection.name, current_version, additional_time=240
+            )
+            # Everything got compacted.
+            self.log_operation_count = 0
+            self.collection_version = new_version
+
+    @rule(
+        target=embedding_ids,
+        record_set=strategies.recordsets(collection_st),
+    )
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
@@ -122,12 +159,29 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 if normalized_record_set["embeddings"]
                 else None,
             }
+            # TODO(Sanket): Why is this the full list and not only the non-overlapping ones
             self.collection.add(**normalized_record_set)
+            print(
+                "[test_embeddings][add] Intersection ids ",
+                normalized_record_set["ids"],
+                " len ",
+                len(normalized_record_set["ids"]),
+            )
+            if self.__class__.__name__ == "EmbeddingStateMachine":
+                self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
             return multiple(*filtered_record_set["ids"])
 
         else:
             self.collection.add(**normalized_record_set)
+            print(
+                "[test_embeddings][add] Non Intersection ids ",
+                normalized_record_set["ids"],
+                " len ",
+                len(normalized_record_set["ids"]),
+            )
+            if self.__class__.__name__ == "EmbeddingStateMachine":
+                self.log_operation_count += len(normalized_record_set["ids"])
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
@@ -138,6 +192,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
 
         self.collection.delete(ids=ids)
+        print("[test_embeddings][delete] ids ", ids, " len ", len(ids))
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count += len(ids)
         self._remove_embeddings(set(indices_to_remove))
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
@@ -149,13 +206,21 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             id_strategy=embedding_ids,
             min_size=1,
             max_size=5,
-        )
+        ),
     )
     def update_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
         self.collection.update(**record_set)
+        print(
+            "[test_embeddings][update] ids ",
+            record_set["ids"],
+            " len ",
+            len(invariants.wrap(record_set["ids"])),
+        )
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count += len(invariants.wrap(record_set["ids"]))
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
@@ -173,6 +238,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
         self.collection.upsert(**record_set)
+        print(
+            "[test_embeddings][upsert] ids ",
+            record_set["ids"],
+            " len ",
+            len(invariants.wrap(record_set["ids"])),
+        )
+        if self.__class__.__name__ == "EmbeddingStateMachine":
+            self.log_operation_count += len(invariants.wrap(record_set["ids"]))
         self._upsert_embeddings(record_set)
 
     @invariant()
@@ -292,6 +365,9 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(api),
+        settings=settings(
+            deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
+        ),
     )  # type: ignore
     print_traces()
 
