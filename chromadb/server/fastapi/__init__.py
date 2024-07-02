@@ -77,7 +77,9 @@ async def catch_exceptions_middleware(
         return fastapi_json_response(e)
     except Exception as e:
         logger.exception(e)
-        return JSONResponse(content={"error": repr(e)}, status_code=500)
+        return JSONResponse(
+            content={"error": type(e).__name__, "message": f"{str(e)}"}, status_code=500
+        )
 
 
 async def check_http_version_middleware(

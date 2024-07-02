@@ -20,11 +20,23 @@ function isOfflineError(error: any): boolean {
   );
 }
 
-function parseServerError(error: string | undefined): Error {
+function parseServerError(
+  error: string | undefined,
+  message: string | undefined,
+): Error {
   const regex = /(\w+)\('(.+)'\)/;
   const match = error?.match(regex);
+  if (error && message) {
+    switch (error) {
+      case "ValueError":
+        return new ChromaValueError(message);
+      default:
+        return new ChromaError(error, message);
+    }
+  }
   if (match) {
     const [, name, message] = match;
+
     switch (name) {
       case "ValueError":
         return new ChromaValueError(message);
@@ -72,7 +84,7 @@ export const chromaFetch: FetchAPI = async (
             `The requested resource could not be found: ${input}`,
           );
         case 500:
-          throw parseServerError(respBody?.error);
+          throw parseServerError(respBody?.error, respBody?.message);
         case 502:
         case 503:
         case 504:
@@ -86,7 +98,7 @@ export const chromaFetch: FetchAPI = async (
     }
 
     if (respBody?.error) {
-      throw parseServerError(respBody.error);
+      throw parseServerError(respBody.error, respBody?.message);
     }
 
     return resp;

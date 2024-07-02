@@ -428,9 +428,11 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
 def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
     reset(api)
     coll = api.create_collection(name="foo")
-    with pytest.raises(Exception) as e:
+    with pytest.raises(
+        Exception,
+        match="You must provide either ids, where, or where_document to delete.",
+    ):
         coll.delete(**kwargs)
-    assert "You must provide either ids, where, or where_document to delete." in str(e)
 
 
 @pytest.mark.parametrize(
