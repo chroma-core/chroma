@@ -51,6 +51,7 @@ message Segment {
 message Collection {
   string id = 1;
   string name = 2;
+  string configuration_json_str = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
   string tenant = 6;
