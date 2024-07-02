@@ -14,11 +14,11 @@ use crate::blockstore::{
 /// # Note
 /// This is not intended for production use.
 #[derive(Clone)]
-pub(crate) struct HashMapBlockfileProvider {
+pub(crate) struct MemoryBlockfileProvider {
     storage_manager: StorageManager,
 }
 
-impl HashMapBlockfileProvider {
+impl MemoryBlockfileProvider {
     pub(crate) fn new() -> Self {
         Self {
             storage_manager: StorageManager::new(),
@@ -115,7 +115,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let provider = HashMapBlockfileProvider::new();
+        let provider = MemoryBlockfileProvider::new();
         // let mut writer = provider.create::<&str, DataRecord>().unwrap();
         // let id = writer.id();
         // for record in data_records {

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::arrow::provider::ArrowBlockfileProvider,
+        blockstore::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
         storage::{local::LocalStorage, Storage},
     };
     use rand::Rng;
@@ -13,7 +13,8 @@ mod tests {
             || {
                 let tmp_dir = tempfile::tempdir().unwrap();
                 let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-                let blockfile_provider = ArrowBlockfileProvider::new(storage);
+                let blockfile_provider =
+                    ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
                 let writer = blockfile_provider.create::<&str, u32>().unwrap();
                 let id = writer.id();
 

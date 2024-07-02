@@ -8,7 +8,6 @@ use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
 use crate::execution::dispatcher::Dispatcher;
-use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
@@ -225,14 +224,18 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
 
         // TODO: real path
         let path = PathBuf::from("~/tmp");
-        // TODO: blockfile proivder should be injected somehow
         // TODO: hnsw index provider should be injected somehow
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
         Ok(CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
+            blockfile_provider,
             HnswIndexProvider::new(storage.clone(), path),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
@@ -294,11 +297,10 @@ impl Handler<Memberlist> for CompactionManager {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -309,6 +311,7 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use crate::types::Segment;
+    use std::collections::HashMap;
     use std::str::FromStr;
     use uuid::Uuid;
 
@@ -494,7 +497,7 @@ mod tests {
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
+            BlockfileProvider::new_arrow(storage.clone(), TEST_MAX_BLOCK_SIZE_BYTES),
             HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
             compaction_manager_queue_size,
             compaction_interval,

@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
@@ -11,7 +8,6 @@ use crate::chroma_proto::{
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::dispatcher::Dispatcher;
-use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
@@ -24,6 +20,8 @@ use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace, trace_span, Instrument};
@@ -50,7 +48,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
-                println!("Failed to create sysdb component: {:?}", err);
+                tracing::error!("Failed to create sysdb component: {:?}", err);
                 return Err(err);
             }
         };
@@ -58,19 +56,25 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
-                println!("Failed to create log component: {:?}", err);
+                tracing::error!("Failed to create log component: {:?}", err);
                 return Err(err);
             }
         };
         let storage = match crate::storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
-                println!("Failed to create storage component: {:?}", err);
+                tracing::error!("Failed to create storage component: {:?}", err);
                 return Err(err);
             }
         };
+
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
+
         // TODO: inject hnsw index provider somehow
-        // TODO: inject blockfile provider somehow
         // TODO: real path
         let path = PathBuf::from("~/tmp");
         Ok(WorkerServer {
@@ -79,7 +83,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             sysdb,
             log,
             hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider,
             port: config.my_port,
         })
     }
@@ -563,14 +567,14 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::storage::local::LocalStorage;
     use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
-
-    use super::*;
     use chroma_proto::debug_client::DebugClient;
     use tempfile::tempdir;
 
@@ -591,7 +595,7 @@ mod tests {
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider: BlockfileProvider::new_arrow(storage, TEST_MAX_BLOCK_SIZE_BYTES),
             port,
         };
 

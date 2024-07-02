@@ -2,20 +2,24 @@ use super::arrow::provider::ArrowBlockfileProvider;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
+use super::config::BlockfileProviderConfig;
 use super::key::KeyWrapper;
-use super::memory::provider::HashMapBlockfileProvider;
+use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
+use crate::config::Configurable;
 use crate::errors::ChromaError;
+use crate::storage::config::StorageConfig;
 use crate::storage::Storage;
+use async_trait::async_trait;
 use core::fmt::{self, Debug};
 use std::fmt::Formatter;
 use thiserror::Error;
 
 #[derive(Clone)]
 pub(crate) enum BlockfileProvider {
-    HashMapBlockfileProvider(HashMapBlockfileProvider),
+    HashMapBlockfileProvider(MemoryBlockfileProvider),
     ArrowBlockfileProvider(ArrowBlockfileProvider),
 }
 
@@ -34,11 +38,14 @@ impl Debug for BlockfileProvider {
 
 impl BlockfileProvider {
     pub(crate) fn new_memory() -> Self {
-        BlockfileProvider::HashMapBlockfileProvider(HashMapBlockfileProvider::new())
+        BlockfileProvider::HashMapBlockfileProvider(MemoryBlockfileProvider::new())
     }
 
-    pub(crate) fn new_arrow(storage: Storage) -> Self {
-        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(storage))
+    pub(crate) fn new_arrow(storage: Storage, max_block_size_bytes: usize) -> Self {
+        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
+            storage,
+            max_block_size_bytes,
+        ))
     }
 
     pub(crate) async fn open<
@@ -75,6 +82,31 @@ impl BlockfileProvider {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork::<K, V>(id),
             BlockfileProvider::ArrowBlockfileProvider(provider) => provider.fork::<K, V>(id).await,
+        }
+    }
+}
+
+// =================== Configurable ===================
+
+#[async_trait]
+impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
+    async fn try_from_config(
+        config: &(BlockfileProviderConfig, Storage),
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let (blockfile_config, storage) = config;
+        match blockfile_config {
+            BlockfileProviderConfig::Arrow(blockfile_config) => {
+                Ok(BlockfileProvider::ArrowBlockfileProvider(
+                    ArrowBlockfileProvider::try_from_config(&(
+                        blockfile_config.clone(),
+                        storage.clone(),
+                    ))
+                    .await?,
+                ))
+            }
+            BlockfileProviderConfig::Memory => Ok(BlockfileProvider::HashMapBlockfileProvider(
+                MemoryBlockfileProvider::new(),
+            )),
         }
     }
 }

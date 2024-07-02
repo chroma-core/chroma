@@ -1,6 +1,7 @@
 use super::{
     block::{delta::BlockDelta, Block},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
+    config::ArrowBlockfileProviderConfig,
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
@@ -11,9 +12,11 @@ use crate::{
         provider::{CreateError, OpenError},
         BlockfileReader, BlockfileWriter, Key, Value,
     },
+    config::Configurable,
     errors::{ChromaError, ErrorCodes},
-    storage::Storage,
+    storage::{config::StorageConfig, Storage},
 };
+use async_trait::async_trait;
 use core::panic;
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
@@ -30,9 +33,9 @@ pub(crate) struct ArrowBlockfileProvider {
 }
 
 impl ArrowBlockfileProvider {
-    pub(crate) fn new(storage: Storage) -> Self {
+    pub(crate) fn new(storage: Storage, max_block_size_bytes: usize) -> Self {
         Self {
-            block_manager: BlockManager::new(storage.clone()),
+            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes),
             sparse_index_manager: SparseIndexManager::new(storage),
         }
     }
@@ -77,7 +80,7 @@ impl ArrowBlockfileProvider {
         &self,
         id: &uuid::Uuid,
     ) -> Result<crate::blockstore::BlockfileWriter, Box<CreateError>> {
-        println!("Forking blockfile from {:?}", id);
+        tracing::info!("Forking blockfile from {:?}", id);
         let new_id = Uuid::new_v4();
         let new_sparse_index = self.sparse_index_manager.fork::<K>(id, new_id).await;
         let file = ArrowBlockfileWriter::from_sparse_index(
@@ -87,6 +90,19 @@ impl ArrowBlockfileProvider {
             new_sparse_index,
         );
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+    }
+}
+
+#[async_trait]
+impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
+    async fn try_from_config(
+        config: &(ArrowBlockfileProviderConfig, Storage),
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let (blockfile_config, storage) = config;
+        Ok(ArrowBlockfileProvider::new(
+            storage.clone(),
+            blockfile_config.max_block_size_bytes,
+        ))
     }
 }
 
@@ -100,13 +116,15 @@ impl ArrowBlockfileProvider {
 pub(super) struct BlockManager {
     read_cache: Arc<RwLock<HashMap<Uuid, Block>>>,
     storage: Storage,
+    max_block_size_bytes: usize,
 }
 
 impl BlockManager {
-    pub(super) fn new(storage: Storage) -> Self {
+    pub(super) fn new(storage: Storage, max_block_size_bytes: usize) -> Self {
         Self {
             read_cache: Arc::new(RwLock::new(HashMap::new())),
             storage,
+            max_block_size_bytes,
         }
     }
 
@@ -224,6 +242,10 @@ impl BlockManager {
                 return Err(Box::new(BlockFlushError::NotFound));
             }
         }
+    }
+
+    pub(super) fn max_block_size_bytes(&self) -> usize {
+        self.max_block_size_bytes
     }
 }
 
