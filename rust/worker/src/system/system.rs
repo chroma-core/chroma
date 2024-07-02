@@ -128,6 +128,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::system::RequestError;
+
     use super::*;
     use async_trait::async_trait;
 
@@ -155,6 +157,10 @@ mod tests {
             message: usize,
             _ctx: &ComponentContext<TestComponent>,
         ) -> Self::Result {
+            if message == 0 {
+                panic!("Invalid input");
+            }
+
             self.counter += message;
             return self.counter;
         }
@@ -179,5 +185,21 @@ mod tests {
 
         assert_eq!(1, handle.request(1, None).await.unwrap());
         assert_eq!(2, handle.request(1, None).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn catches_panic() {
+        let system = System::new();
+        let component = TestComponent::new(10);
+        let handle = system.start_component(component);
+
+        let err = handle.request(0, None).await.unwrap_err();
+        assert_eq!(
+            RequestError::HandlerPanic(Some("Invalid input".to_string())),
+            err
+        );
+
+        // Component is still alive
+        assert_eq!(1, handle.request(1, None).await.unwrap());
     }
 }

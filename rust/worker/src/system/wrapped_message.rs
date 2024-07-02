@@ -1,6 +1,8 @@
 use super::{Component, ComponentContext, Handler, Message};
 use async_trait::async_trait;
-use std::fmt::Debug;
+use futures::FutureExt;
+use std::{fmt::Debug, panic::AssertUnwindSafe};
+use thiserror::Error;
 use tokio::sync::oneshot;
 
 // Why is this separate from the WrappedMessage struct? WrappedMessage is only generic
@@ -24,6 +26,14 @@ impl<M: Message, Result: Send> HandleableMessageImpl<M, Result> {
     }
 }
 
+#[derive(Debug, Error)]
+pub(super) enum MessageHandlerError {
+    #[error("Panic occurred while handling message: {0:?}")]
+    Panic(Option<String>),
+}
+
+type MessageHandlerWrappedResult<R> = Result<R, MessageHandlerError>;
+
 /// Erases the type of the message so it can be sent over a channel and optionally bundles a tracing context.
 #[derive(Debug)]
 pub(crate) struct WrappedMessage<C>
@@ -37,7 +47,7 @@ where
 impl<C: Component> WrappedMessage<C> {
     pub(super) fn new<M>(
         message: M,
-        reply_channel: Option<oneshot::Sender<C::Result>>,
+        reply_channel: Option<oneshot::Sender<MessageHandlerWrappedResult<C::Result>>>,
         tracing_context: Option<tracing::Span>,
     ) -> Self
     where
@@ -68,19 +78,45 @@ where
 }
 
 #[async_trait]
-impl<C, M> HandleableMessage<C> for Option<HandleableMessageImpl<M, C::Result>>
+impl<C, M> HandleableMessage<C>
+    for Option<HandleableMessageImpl<M, MessageHandlerWrappedResult<C::Result>>>
 where
     C: Component + Handler<M>,
     M: Message,
 {
     async fn handle_and_reply(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
         if let Some(message) = self.take() {
-            let result = component.handle(message.message, ctx).await;
-            if let Some(reply_channel) = message.reply_channel {
-                reply_channel
-                    .send(result)
-                    .expect("message reply channel was unexpectedly dropped by caller");
-            }
+            let result = AssertUnwindSafe(component.handle(message.message, ctx))
+                .catch_unwind()
+                .await;
+
+            match result {
+                Ok(result) => {
+                    if let Some(reply_channel) = message.reply_channel {
+                        reply_channel
+                            .send(Ok(result))
+                            .expect("message reply channel was unexpectedly dropped by caller");
+                    }
+                }
+                Err(panic_value) => {
+                    #[allow(clippy::manual_map)]
+                    let panic_value = if let Some(s) = panic_value.downcast_ref::<&str>() {
+                        Some(&**s)
+                    } else if let Some(s) = panic_value.downcast_ref::<String>() {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    };
+
+                    if let Some(reply_channel) = message.reply_channel {
+                        reply_channel
+                            .send(Err(MessageHandlerError::Panic(
+                                panic_value.map(ToString::to_string),
+                            )))
+                            .expect("message reply channel was unexpectedly dropped by caller");
+                    }
+                }
+            };
         }
     }
 }

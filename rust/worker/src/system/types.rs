@@ -1,4 +1,6 @@
-use super::{scheduler::Scheduler, ChannelError, ChannelRequestError, WrappedMessage};
+use super::{
+    scheduler::Scheduler, ChannelError, MessageHandlerError, RequestError, WrappedMessage,
+};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
@@ -141,7 +143,7 @@ impl<C: Component> ComponentSender<C> {
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<C::Result, ChannelRequestError>
+    ) -> Result<C::Result, RequestError>
     where
         C: Handler<M>,
         M: Message,
@@ -150,10 +152,16 @@ impl<C: Component> ComponentSender<C> {
         self.sender
             .send(WrappedMessage::new(message, Some(tx), tracing_context))
             .await
-            .map_err(|_| ChannelRequestError::RequestError)?;
+            .map_err(|_| RequestError::SendError)?;
 
-        let result = rx.await.map_err(|_| ChannelRequestError::ResponseError)?;
-        Ok(result)
+        let result = rx.await.map_err(|_| RequestError::ReceiveError)?;
+
+        match result {
+            Ok(result) => Ok(result),
+            Err(err) => match err {
+                MessageHandlerError::Panic(p) => Err(RequestError::HandlerPanic(p)),
+            },
+        }
     }
 }
 
@@ -253,7 +261,7 @@ impl<C: Component> ComponentHandle<C> {
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
-    ) -> Result<C::Result, ChannelRequestError>
+    ) -> Result<C::Result, RequestError>
     where
         C: Handler<M>,
         M: Message,
