@@ -48,7 +48,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
-                println!("Failed to create sysdb component: {:?}", err);
+                tracing::error!("Failed to create sysdb component: {:?}", err);
                 return Err(err);
             }
         };
@@ -56,19 +56,25 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
-                println!("Failed to create log component: {:?}", err);
+                tracing::error!("Failed to create log component: {:?}", err);
                 return Err(err);
             }
         };
         let storage = match crate::storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
-                println!("Failed to create storage component: {:?}", err);
+                tracing::error!("Failed to create storage component: {:?}", err);
                 return Err(err);
             }
         };
+
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
+
         // TODO: inject hnsw index provider somehow
-        // TODO: inject blockfile provider somehow
         // TODO: real path
         let path = PathBuf::from("~/tmp");
         Ok(WorkerServer {
@@ -77,7 +83,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             sysdb,
             log,
             hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider,
             port: config.my_port,
         })
     }
@@ -572,6 +578,8 @@ mod tests {
     use chroma_proto::debug_client::DebugClient;
     use tempfile::tempdir;
 
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
+
     #[tokio::test]
     async fn gracefully_handles_panics() {
         let sysdb = TestSysDb::new();
@@ -589,7 +597,7 @@ mod tests {
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider: BlockfileProvider::new_arrow(storage, TEST_MAX_BLOCK_SIZE_BYTES),
             port,
         };
 

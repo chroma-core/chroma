@@ -103,6 +103,7 @@ pub(crate) struct QueryServiceConfig {
     pub(crate) storage: crate::storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub(crate) blockfile_provider: crate::blockstore::config::BlockfileProviderConfig,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +129,7 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
+    pub(crate) blockfile_provider: crate::blockstore::config::BlockfileProviderConfig,
 }
 
 /// # Description

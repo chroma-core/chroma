@@ -224,14 +224,18 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
 
         // TODO: real path
         let path = PathBuf::from("~/tmp");
-        // TODO: blockfile proivder should be injected somehow
         // TODO: hnsw index provider should be injected somehow
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
         Ok(CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
+            blockfile_provider,
             HnswIndexProvider::new(storage.clone(), path),
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),

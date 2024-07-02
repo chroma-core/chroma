@@ -1,6 +1,7 @@
 use super::{
     block::{delta::BlockDelta, Block},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
+    config::ArrowBlockfileProviderConfig,
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
@@ -11,9 +12,11 @@ use crate::{
         provider::{CreateError, OpenError},
         BlockfileReader, BlockfileWriter, Key, Value,
     },
+    config::Configurable,
     errors::{ChromaError, ErrorCodes},
-    storage::Storage,
+    storage::{config::StorageConfig, Storage},
 };
+use async_trait::async_trait;
 use core::panic;
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
@@ -77,7 +80,7 @@ impl ArrowBlockfileProvider {
         &self,
         id: &uuid::Uuid,
     ) -> Result<crate::blockstore::BlockfileWriter, Box<CreateError>> {
-        println!("Forking blockfile from {:?}", id);
+        tracing::info!("Forking blockfile from {:?}", id);
         let new_id = Uuid::new_v4();
         let new_sparse_index = self.sparse_index_manager.fork::<K>(id, new_id).await;
         let file = ArrowBlockfileWriter::from_sparse_index(
@@ -87,6 +90,19 @@ impl ArrowBlockfileProvider {
             new_sparse_index,
         );
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+    }
+}
+
+#[async_trait]
+impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
+    async fn try_from_config(
+        config: &(ArrowBlockfileProviderConfig, Storage),
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let (blockfile_config, storage) = config;
+        Ok(ArrowBlockfileProvider::new(
+            storage.clone(),
+            blockfile_config.max_block_size_bytes,
+        ))
     }
 }
 
