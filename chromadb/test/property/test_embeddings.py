@@ -296,6 +296,8 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
 
 class EmbeddingStateMachine(EmbeddingStateMachineBase):
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
+
     def __init__(self, api: ServerAPI):
         super().__init__(api)
 
