@@ -219,9 +219,9 @@ impl BlockfileFlusher {
         }
     }
 
-    pub(crate) fn id(&self) -> Option<uuid::Uuid> {
+    pub(crate) fn id(&self) -> uuid::Uuid {
         match self {
-            BlockfileFlusher::MemoryBlockfileFlusher(flusher) => Some(flusher.id()),
+            BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.id(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
         }
     }

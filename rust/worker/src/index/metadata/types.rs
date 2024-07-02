@@ -761,7 +761,7 @@ impl MetadataIndexFlusher {
         }
     }
 
-    pub fn id(&self) -> Option<Uuid> {
+    pub fn id(&self) -> Uuid {
         match self {
             MetadataIndexFlusher::StringMetadataIndexFlusher(flusher) => flusher.id(),
             MetadataIndexFlusher::U32MetadataIndexFlusher(flusher) => flusher.id(),
