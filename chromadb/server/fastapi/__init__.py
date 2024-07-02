@@ -1,4 +1,15 @@
-from typing import Any, Callable, cast, Dict, List, Sequence, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Sequence,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
 import fastapi
 import orjson
 from anyio import (
@@ -11,6 +22,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
+
+from pydantic import BaseModel
+
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
@@ -89,7 +103,17 @@ async def check_http_version_middleware(
     return await call_next(request)
 
 
-class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
+D = TypeVar("D", bound=BaseModel, contravariant=True)
+
+
+def validate_model(model: Type[D], data: Any) -> D:
+    try:
+        return model.model_validate(data)
+    except AttributeError:
+        return model.parse_obj(data)
+
+
+class ChromaAPIRouter(fastapi.APIRouter):
     # A simple subclass of fastapi's APIRouter which treats URLs with a
     # trailing "/" the same as URLs without. Docs will only contain URLs
     # without trailing "/"s.
@@ -375,7 +399,7 @@ class FastAPI(Server):
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
         ) -> None:
-            db = CreateDatabase.model_validate(orjson.loads(raw_body))
+            db = validate_model(CreateDatabase, orjson.loads(raw_body))
 
             (
                 maybe_tenant,
@@ -439,7 +463,7 @@ class FastAPI(Server):
         self, request: Request, body: CreateTenant = Body(...)
     ) -> None:
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
-            tenant = CreateTenant.model_validate(orjson.loads(raw_body))
+            tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
             maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -566,7 +590,7 @@ class FastAPI(Server):
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> Collection:
-            create = CreateCollection.model_validate(orjson.loads(raw_body))
+            create = validate_model(CreateCollection, orjson.loads(raw_body))
 
             (
                 maybe_tenant,
@@ -649,7 +673,7 @@ class FastAPI(Server):
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
-            update = UpdateCollection.model_validate(orjson.loads(raw_body))
+            update = validate_model(UpdateCollection, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
@@ -709,7 +733,7 @@ class FastAPI(Server):
         try:
 
             def process_add(request: Request, raw_body: bytes) -> bool:
-                add = AddEmbedding.model_validate(orjson.loads(raw_body))
+                add = validate_model(AddEmbedding, orjson.loads(raw_body))
                 self.auth_and_get_tenant_and_database_for_request(
                     request.headers,
                     AuthzAction.ADD,
@@ -743,7 +767,7 @@ class FastAPI(Server):
         self, request: Request, collection_id: str, body: UpdateEmbedding = Body(...)
     ) -> None:
         def process_update(request: Request, raw_body: bytes) -> bool:
-            update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
+            update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -774,7 +798,7 @@ class FastAPI(Server):
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
     ) -> None:
         def process_upsert(request: Request, raw_body: bytes) -> bool:
-            upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
+            upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -805,7 +829,7 @@ class FastAPI(Server):
         self, collection_id: str, request: Request, body: GetEmbedding = Body(...)
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
-            get = GetEmbedding.model_validate(orjson.loads(raw_body))
+            get = validate_model(GetEmbedding, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
@@ -839,7 +863,7 @@ class FastAPI(Server):
         self, collection_id: str, request: Request, body: DeleteEmbedding = Body(...)
     ) -> List[UUID]:
         def process_delete(request: Request, raw_body: bytes) -> List[str]:
-            delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
+            delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
@@ -916,7 +940,7 @@ class FastAPI(Server):
         body: QueryEmbedding = Body(...),
     ) -> QueryResult:
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
-            query = QueryEmbedding.model_validate(orjson.loads(raw_body))
+            query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
