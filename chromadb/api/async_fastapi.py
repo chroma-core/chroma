@@ -1,7 +1,7 @@
 import asyncio
 from uuid import UUID
 import urllib.parse
-import orjson as json
+import orjson
 from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
@@ -115,13 +115,20 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def _make_request(
         self, method: str, path: str, **kwargs: Dict[str, Any]
     ) -> Any:
+        # If the request has json in kwargs, use orjson to serialize it,
+        # remove it from kwargs, and add it to the data parameter
+        # This is because httpx uses a slower json serializer
+        if "json" in kwargs:
+            data = orjson.dumps(kwargs.pop("json"))
+            kwargs["data"] = data
+
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
         response = await self._get_client().request(method, url, **cast(Any, kwargs))
         BaseHTTPClient._raise_chroma_error(response)
-        return json.loads(response.text)
+        return orjson.loads(response.text)
 
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override

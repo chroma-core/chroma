@@ -1,4 +1,4 @@
-import orjson as json
+import orjson
 import logging
 from typing import Any, Dict, Optional, cast, Tuple
 from typing import Sequence
@@ -76,13 +76,20 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 self._session.headers[header] = value.get_secret_value()
 
     def _make_request(self, method: str, path: str, **kwargs: Dict[str, Any]) -> Any:
+        # If the request has json in kwargs, use orjson to serialize it,
+        # remove it from kwargs, and add it to the data parameter
+        # This is because httpx uses a slower json serializer
+        if "json" in kwargs:
+            data = orjson.dumps(kwargs.pop("json"))
+            kwargs["data"] = data
+
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
         response = self._session.request(method, url, **cast(Any, kwargs))
         BaseHTTPClient._raise_chroma_error(response)
-        return json.loads(response.text)
+        return orjson.loads(response.text)
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
