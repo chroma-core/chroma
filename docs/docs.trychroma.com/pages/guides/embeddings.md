@@ -1,5 +1,5 @@
 ---
-title: '🧬 Embeddings'
+title: "🧬 Embeddings"
 ---
 
 Embeddings are the A.I-native way to represent any kind of data, making them the perfect fit for working with all kinds of A.I-powered tools and algorithms. They can represent text, images, and soon audio and video. There are many options for creating embeddings, whether locally using an installed library, or by calling an API.
@@ -9,19 +9,20 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 {% special_table %}
 {% /special_table %}
 
-|              | Python | JS |
-|--------------|-----------|---------------|
-| [OpenAI](/integrations/openai) | ✅  | ✅ |
-| [Google Generative AI](/integrations/google-gemini) | ✅  | ✅ |
-| [Cohere](/integrations/cohere) | ✅  | ✅ |
-| [Hugging Face](/integrations/hugging-face) | ✅  | ➖ |
-| [Instructor](/integrations/instructor) | ✅  | ➖ |
-| [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
-| [Jina AI](/integrations/jinaai) | ✅  | ✅ |
+|                                                                    | Python | JS  |
+| ------------------------------------------------------------------ | ------ | --- |
+| [OpenAI](/integrations/openai)                                     | ✅     | ✅  |
+| [Google Generative AI](/integrations/google-gemini)                | ✅     | ✅  |
+| [Cohere](/integrations/cohere)                                     | ✅     | ✅  |
+| [Hugging Face](/integrations/hugging-face)                         | ✅     | ➖  |
+| [Instructor](/integrations/instructor)                             | ✅     | ➖  |
+| [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅     | ✅  |
+| [Jina AI](/integrations/jinaai)                                    | ✅     | ✅  |
+| [Llama CPP](/integrations/llamacpp)                                | ✅     | ➖  |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
-***
+---
 
 ## Default: all-MiniLM-L6-v2
 
@@ -34,12 +35,13 @@ default_ef = embedding_functions.DefaultEmbeddingFunction()
 
 {% note type="default" %}
 Embedding functions can be linked to a collection and used whenever you call `add`, `update`, `upsert` or `query`. You can also use them directly which can be handy for debugging.
+
 ```py
 val = default_ef(["foo"])
 ```
+
 -> [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
 {% /note %}
-
 
 <!--
 ## Transformers.js
@@ -90,9 +92,7 @@ You can pass in an optional `model_name` argument, which lets you choose which S
 {% /tab %}
 {% /tabs %}
 
-
-***
-
+---
 
 ## Custom Embedding Functions
 
@@ -121,7 +121,6 @@ class MyEmbeddingFunction(EmbeddingFunction):
 ```
 
 We welcome contributions! If you create an embedding function that you think would be useful to others, please consider [submitting a pull request](https://github.com/chroma-core/chroma) to add it to Chroma's `embedding_functions` module.
-
 
 {% /tab %}
 {% tab label="Javascript" %}
