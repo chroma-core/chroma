@@ -10,10 +10,7 @@ use crate::{
     utils::merge_sorted_vecs_conjunction,
 };
 use async_trait::async_trait;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU32, Arc},
-};
+use std::collections::HashSet;
 use thiserror::Error;
 use tracing::{error, trace};
 
@@ -360,14 +357,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::HashMap,
-        str::FromStr,
-        sync::{atomic::AtomicU32, Arc},
-    };
-
-    use uuid::Uuid;
-
     use crate::{
         blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
         execution::{
@@ -387,12 +376,17 @@ mod test {
         storage::{local::LocalStorage, Storage},
         types::{LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue},
     };
+    use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
+
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn test_merge_and_hydrate() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -680,7 +674,8 @@ mod test {
     async fn test_merge_and_hydrate_full_scan() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {

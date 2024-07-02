@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
@@ -11,7 +8,6 @@ use crate::chroma_proto::{
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
 use crate::execution::dispatcher::Dispatcher;
-use crate::execution::operator::TaskMessage;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
@@ -24,6 +20,8 @@ use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace, trace_span, Instrument};

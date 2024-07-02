@@ -7,13 +7,16 @@ mod tests {
     use rand::Rng;
     use shuttle::{future, thread};
 
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
+
     #[test]
     fn test_blockfile_shuttle() {
         shuttle::check_random(
             || {
                 let tmp_dir = tempfile::tempdir().unwrap();
                 let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-                let blockfile_provider = ArrowBlockfileProvider::new(storage);
+                let blockfile_provider =
+                    ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
                 let writer = blockfile_provider.create::<&str, u32>().unwrap();
                 let id = writer.id();
 

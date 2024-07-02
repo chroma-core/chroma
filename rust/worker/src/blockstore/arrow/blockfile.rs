@@ -16,8 +16,6 @@ use std::{collections::HashSet, mem::transmute};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(super) const MAX_BLOCK_SIZE: usize = 16384;
-
 #[derive(Clone)]
 pub(crate) struct ArrowBlockfileWriter {
     block_manager: BlockManager,
@@ -161,8 +159,8 @@ impl ArrowBlockfileWriter {
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
-        if delta.get_size::<K, V>() > MAX_BLOCK_SIZE {
-            let new_blocks = delta.split::<K, V>();
+        if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+            let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
                 self.sparse_index.add_block(split_key, new_delta.id);
                 let mut deltas = self.block_deltas.lock();
@@ -531,8 +529,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 #[cfg(test)]
 mod tests {
     use crate::{
-        blockstore::arrow::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockfileProvider},
-        log::config::{self, GrpcLogConfig},
+        blockstore::arrow::provider::ArrowBlockfileProvider,
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,
@@ -541,17 +538,16 @@ mod tests {
     use proptest::prelude::*;
     use proptest::test_runner::Config;
     use rand::seq::IteratorRandom;
-    use std::{
-        collections::HashMap,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::HashMap;
     use tokio::runtime::Runtime;
+
+    const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
     #[tokio::test]
     async fn test_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
 
@@ -583,7 +579,8 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-            let blockfile_provider = ArrowBlockfileProvider::new(storage);
+            let blockfile_provider =
+                ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
             let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
 
@@ -640,7 +637,8 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-            let blockfile_provider = ArrowBlockfileProvider::new(storage);
+            let blockfile_provider =
+                ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
             let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
             println!("Number of keys {}", num_keys);
@@ -747,7 +745,7 @@ mod tests {
     async fn test_blockfile() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
 
@@ -779,7 +777,7 @@ mod tests {
     async fn test_splitting() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
@@ -881,7 +879,7 @@ mod tests {
     async fn test_splitting_boundary() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
@@ -915,7 +913,7 @@ mod tests {
     async fn test_string_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
@@ -944,7 +942,7 @@ mod tests {
     async fn test_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let provider = ArrowBlockfileProvider::new(storage);
+        let provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
 
         let writer = provider.create::<f32, &str>().unwrap();
         let id = writer.id();
@@ -970,7 +968,7 @@ mod tests {
     async fn test_roaring_bitmap_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
 
         let writer = blockfile_provider
             .create::<&str, &roaring::RoaringBitmap>()
@@ -1005,7 +1003,7 @@ mod tests {
     async fn test_uint_key_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
 
         let writer = blockfile_provider.create::<u32, u32>().unwrap();
         let id = writer.id();
@@ -1031,7 +1029,7 @@ mod tests {
     async fn test_data_record_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
 
         let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
         let id = writer.id();
@@ -1075,13 +1073,13 @@ mod tests {
         // Tests the case where a value is larger than half the block size
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
 
         let val_1_small = "a";
-        let val_2_large = "a".repeat(MAX_BLOCK_SIZE / 2 + 1);
+        let val_2_large = "a".repeat(TEST_MAX_BLOCK_SIZE_BYTES / 2 + 1);
 
         writer.set("key", "1", val_1_small).await.unwrap();
         writer.set("key", "2", val_2_large.as_str()).await.unwrap();
@@ -1099,7 +1097,7 @@ mod tests {
     async fn test_delete() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
 
@@ -1153,7 +1151,7 @@ mod tests {
     async fn test_get_at_index() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let blockfile_provider = ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 

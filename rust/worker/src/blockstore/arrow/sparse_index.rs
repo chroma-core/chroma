@@ -8,8 +8,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::block::delta::BlockDelta;
-use super::block::{self, Block};
-use super::provider::BlockManager;
+use super::block::Block;
 use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range

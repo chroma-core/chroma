@@ -3,7 +3,7 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::key::KeyWrapper;
-use super::memory::provider::HashMapBlockfileProvider;
+use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
@@ -15,7 +15,7 @@ use thiserror::Error;
 
 #[derive(Clone)]
 pub(crate) enum BlockfileProvider {
-    HashMapBlockfileProvider(HashMapBlockfileProvider),
+    HashMapBlockfileProvider(MemoryBlockfileProvider),
     ArrowBlockfileProvider(ArrowBlockfileProvider),
 }
 
@@ -34,11 +34,14 @@ impl Debug for BlockfileProvider {
 
 impl BlockfileProvider {
     pub(crate) fn new_memory() -> Self {
-        BlockfileProvider::HashMapBlockfileProvider(HashMapBlockfileProvider::new())
+        BlockfileProvider::HashMapBlockfileProvider(MemoryBlockfileProvider::new())
     }
 
-    pub(crate) fn new_arrow(storage: Storage) -> Self {
-        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(storage))
+    pub(crate) fn new_arrow(storage: Storage, max_block_size_bytes: usize) -> Self {
+        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
+            storage,
+            max_block_size_bytes,
+        ))
     }
 
     pub(crate) async fn open<
