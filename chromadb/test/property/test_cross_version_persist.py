@@ -261,6 +261,8 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     embeddings_strategy=strategies.recordsets(collection_st),
 )
 @settings(deadline=None)
+# Forces the variations of this test to run sequentially (otherwise this test has race conditions)
+@pytest.mark.xdist_group(name="cycle_versions")
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
