@@ -188,6 +188,7 @@ impl BlockManager {
                         match res {
                             Ok(_) => {}
                             Err(e) => {
+                                // TODO: Return an error to callsite instead of None.
                                 tracing::error!("Error reading block {:?} from s3 {:?}", key, e);
                                 return None;
                             }
@@ -199,6 +200,7 @@ impl BlockManager {
                                 Some(block)
                             }
                             Err(e) => {
+                                // TODO: Return an error to callsite instead of None.
                                 tracing::error!(
                                     "Error converting bytes to Block {:?}/{:?}",
                                     key,
@@ -209,6 +211,7 @@ impl BlockManager {
                         }
                     }
                     Err(e) => {
+                        // TODO: Return an error to callsite instead of None.
                         tracing::error!("Error reading block {:?} from s3 {:?}", key, e);
                         None
                     }

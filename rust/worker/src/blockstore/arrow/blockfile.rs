@@ -108,12 +108,11 @@ impl ArrowBlockfileWriter {
             delta_ids.insert(delta.id);
         }
         // We commit and flush an empty dummy block if the blockfile is empty.
-        // This is a bit weird but necessary. It can happen that
-        // other indexes of the segment are not empty. In this case,
+        // It can happen that other indexes of the segment are not empty. In this case,
         // our segment open() logic breaks down since we only handle either
         // all indexes initialized or none at all but not other combinations.
         // We could argue that we should fix the readers to handle these cases
-        // but this is simpler and easier to do so we do this for now.
+        // but this is simpler, easier and less error prone to do.
         if self.sparse_index.len() == 0 {
             if !delta_ids.is_empty() {
                 panic!("Invariant violation. Expected delta ids to be empty");

@@ -107,9 +107,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @rule()
     def wait_for_compaction(self) -> None:
         current_version = get_collection_version(self.api, self.collection.name)
+        assert current_version >= self.collection_version
         # This means that there was a compaction from the last time this was
         # invoked. Ok to start all over again.
-        if current_version != self.collection_version:
+        if current_version > self.collection_version:
             print(
                 "[test_embeddings][wait_for_compaction] collection version has changed, so reset to 0"
             )
