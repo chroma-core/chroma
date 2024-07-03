@@ -204,6 +204,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         collection_name = self.collection.name
         conn1, conn2 = multiprocessing.Pipe()
         ctx = get_multiprocessing_context()
+        ctx.log_to_stderr(logging.INFO)
         p = ctx.Process(
             target=load_and_check,
             args=(self.settings, collection_name, self.record_set_state, conn2),
@@ -216,6 +217,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
             raise e
 
         p.close()
+        assert p.exitcode == 0
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:

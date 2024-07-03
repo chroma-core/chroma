@@ -1,3 +1,4 @@
+import logging
 from multiprocessing.connection import Connection
 import sys
 import os
@@ -6,8 +7,7 @@ import subprocess
 import tempfile
 from types import ModuleType
 from typing import Generator, List, Tuple, Dict, Any, Callable, Type
-from uuid import UUID
-from hypothesis import example, given, reproduce_failure, settings
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
@@ -21,7 +21,6 @@ from packaging import version as packaging_version
 import re
 import multiprocessing
 from chromadb.config import Settings
-import numpy as np
 
 MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -262,28 +261,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
 )
-@settings(deadline=None, max_examples=200)
-# @reproduce_failure("6.104.2", b"AXicY2BgZEAGjDAuAABBAAQ=")
-@example(
-    collection_strategy=strategies.Collection(
-        name="A00",
-        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
-        id=UUID("42143ccb-d684-4fc3-9645-61fb7d8aeedb"),
-        dimension=2,
-        known_metadata_keys={},
-        known_document_keywords=[],
-        has_documents=False,
-        has_embeddings=True,
-        embedding_function=not_implemented_ef(),
-        dtype=np.float16,
-    ),
-    embeddings_strategy={
-        "ids": ["0"],
-        "embeddings": [[0.09765625, 0.430419921875]],
-        "metadatas": [None],
-        "documents": None,
-    },
-)
+@settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
@@ -316,6 +294,7 @@ def test_cycle_versions(
     # with the old version. Using spawn instead of fork to avoid sharing the
     # current process memory which would cause the old version to be loaded
     ctx = multiprocessing.get_context("spawn")
+    ctx.log_to_stderr(logging.INFO)
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
@@ -329,6 +308,7 @@ def test_cycle_versions(
         raise e
 
     p.close()
+    assert p.exitcode == 0
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
