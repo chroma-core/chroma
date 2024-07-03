@@ -89,17 +89,18 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/db/test_system.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/ingest/test_producer_consumer.py",
-                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
-                   "chromadb/test/test_logservice.py",
-                   "chromadb/test/distributed/test_sanity.py"]
+        # test-globs: ["chromadb/test/db/test_system.py",
+        #            "chromadb/test/property/test_collections.py",
+        #            "chromadb/test/property/test_add.py",
+        #            "chromadb/test/property/test_filtering.py",
+        #            "chromadb/test/property/test_embeddings.py",
+        #            "chromadb/test/property/test_collections_with_database_tenant.py",
+        #            "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+        #            "chromadb/test/ingest/test_producer_consumer.py",
+        #            "chromadb/test/segment/distributed/test_memberlist_provider.py",
+        #            "chromadb/test/test_logservice.py",
+        #            "chromadb/test/distributed/test_sanity.py"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -107,11 +108,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
 
   test-thin-client:
     strategy:

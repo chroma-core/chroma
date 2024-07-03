@@ -20,4 +20,4 @@ runs:
       run: ctlptl create cluster kind --registry=ctlptl-registry
     - name: Start Tilt
       shell: bash
-      run: tilt ci
+      run: tilt up
