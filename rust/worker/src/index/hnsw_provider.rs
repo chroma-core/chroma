@@ -4,12 +4,16 @@ use super::{
 };
 use crate::errors::ErrorCodes;
 use crate::index::types::PersistentIndex;
+use crate::storage::stream::ByteStreamItem;
 use crate::{errors::ChromaError, storage::Storage, types::Segment};
+use futures::stream;
+use futures::stream::StreamExt;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
@@ -130,8 +134,9 @@ impl HnswIndexProvider {
         // Fetch the files from storage and put them in the index storage path
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
-            let res = self.storage.get(&key).await;
-            let mut reader = match res {
+            tracing::info!("Loading hnsw index file: {}", key);
+            let stream = self.storage.get(&key).await;
+            let reader = match stream {
                 Ok(reader) => reader,
                 Err(e) => {
                     tracing::error!("Failed to load hnsw index file from storage: {}", e);
@@ -142,27 +147,58 @@ impl HnswIndexProvider {
             let file_path = index_storage_path.join(file);
             // For now, we never evict from the cache, so if the index is being loaded, the file does not exist
             let file_handle = tokio::fs::File::create(&file_path).await;
-            let mut file_handle = match file_handle {
+            let file_handle = match file_handle {
                 Ok(file) => file,
                 Err(e) => {
                     tracing::error!("Failed to create file: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
-            let copy_res = tokio::io::copy(&mut reader, &mut file_handle)
-                .instrument(tracing::info_span!(parent: Span::current(), "hnsw provider file read", file = file))
-                .await;
-            match copy_res {
-                Ok(bytes_read) => {
-                    tracing::info!("Copied {} bytes to file {:?}", bytes_read, file_path);
+            let total_bytes_written = self.copy_stream_to_local_file(reader, file_handle).await?;
+            tracing::info!(
+                "Copied {} bytes from storage key: {} to file: {}",
+                total_bytes_written,
+                key,
+                file_path.to_str().unwrap()
+            );
+            // bytes is an AsyncBufRead, so we fil and consume it to a file
+            tracing::info!("Loaded hnsw index file: {}", file);
+        }
+        Ok(())
+    }
+
+    async fn copy_stream_to_local_file(
+        &self,
+        stream: Box<dyn stream::Stream<Item = ByteStreamItem> + Unpin + Send>,
+        file_handle: tokio::fs::File,
+    ) -> Result<u64, Box<HnswIndexProviderFileError>> {
+        let mut total_bytes_written = 0;
+        let mut file_handle = file_handle;
+        let mut stream = stream;
+        while let Some(res) = stream.next().await {
+            let chunk = match res {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
+                }
+            };
+
+            let res = file_handle.write_all(&chunk).await;
+            match res {
+                Ok(_) => {
+                    total_bytes_written += chunk.len() as u64;
                 }
                 Err(e) => {
-                    tracing::error!("Failed to copy file: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             }
         }
-        Ok(())
+        match file_handle.flush().await {
+            Ok(_) => Ok(total_bytes_written),
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+            }
+        }
     }
 
     pub(crate) async fn open(

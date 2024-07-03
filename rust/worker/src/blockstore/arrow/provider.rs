@@ -1,5 +1,5 @@
 use super::{
-    block::{self, delta::BlockDelta, Block},
+    block::{delta::BlockDelta, Block},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
     sparse_index::SparseIndex,
@@ -15,12 +15,12 @@ use crate::{
     },
     config::Configurable,
     errors::{ChromaError, ErrorCodes},
-    storage::{config::StorageConfig, Storage},
+    storage::Storage,
 };
 use async_trait::async_trait;
 use core::panic;
+use futures::StreamExt;
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
 
@@ -213,28 +213,37 @@ impl BlockManager {
             None => {
                 async {
                     let key = format!("block/{}", id);
-                    let bytes = self.storage.get(&key).instrument(
+                    let stream = self.storage.get(&key).instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
                     ).await;
-                    let mut buf: Vec<u8> = Vec::new();
-                    match bytes {
+                    match stream {
                         Ok(mut bytes) => {
-                            let res = bytes.read_to_end(&mut buf).instrument(
-                                tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end"),
+                            let read_block_span = tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end");
+                            let buf = read_block_span.in_scope(|| async {
+                                let mut buf: Vec<u8> = Vec::new();
+                                while let Some(res) = bytes.next().await {
+                                    match res {
+                                        Ok(chunk) => {
+                                            buf.extend(chunk);
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Error reading block from storage: {}", e);
+                                            return None;
+                                        }
+                                    }
+                                }
+                                Some(buf)
+                            }
                             ).await;
-                            tracing::info!("Read {:?} bytes from s3", buf.len());
-                            match res {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    // TODO: Return an error to callsite instead of None.
-                                    tracing::error!(
-                                        "Error reading block {:?} from s3 {:?}",
-                                        key,
-                                        e
-                                    );
+                            let buf =  match buf {
+                                Some(buf) => {
+                                    buf
+                                }
+                                None => {
                                     return None;
                                 }
-                            }
+                            };
+                            tracing::info!("Read {:?} bytes from s3", buf.len());
                             let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
                             let block = deserialization_span.in_scope(|| Block::from_bytes(&buf, *id));
                             match block {
@@ -252,10 +261,9 @@ impl BlockManager {
                                     None
                                 }
                             }
-                        }
+                        },
                         Err(e) => {
-                            // TODO: Return an error to callsite instead of None.
-                            tracing::error!("Error reading block {:?} from s3 {:?}", key, e);
+                            tracing::error!("Error reading block from storage: {}", e);
                             None
                         }
                     }
@@ -330,17 +338,22 @@ impl SparseIndexManager {
                 tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
                 tracing::debug!("Reading sparse index from storage with key: {}", key);
-                let bytes = self.storage.get(&key).await;
+                let stream = self.storage.get(&key).await;
                 let mut buf: Vec<u8> = Vec::new();
-                match bytes {
+                match stream {
                     Ok(mut bytes) => {
-                        let res = bytes.read_to_end(&mut buf).await;
-                        match res {
-                            Ok(_) => {}
-                            Err(e) => {
-                                // TODO: return error
-                                tracing::error!("Error reading sparse index from storage: {}", e);
-                                return None;
+                        while let Some(res) = bytes.next().await {
+                            match res {
+                                Ok(chunk) => {
+                                    buf.extend(chunk);
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Error reading sparse index from storage: {}",
+                                        e
+                                    );
+                                    return None;
+                                }
                             }
                         }
                         let block = Block::from_bytes(&buf, *id);

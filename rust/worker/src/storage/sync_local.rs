@@ -1,19 +1,18 @@
-use super::stream::ByteStream;
-use super::stream::ByteStreamItem;
+use super::stream::{ByteStream, ByteStreamItem};
 use super::{config::StorageConfig, s3::StorageConfigError};
 use crate::{config::Configurable, errors::ChromaError};
 use async_trait::async_trait;
 use futures::Stream;
 
 #[derive(Clone)]
-pub(crate) struct LocalStorage {
+pub(crate) struct SyncLocalStorage {
     root: String,
 }
 
-impl LocalStorage {
-    pub(crate) fn new(root: &str) -> LocalStorage {
+impl SyncLocalStorage {
+    pub(crate) fn new(root: &str) -> SyncLocalStorage {
         // Create the local storage with the root path.
-        return LocalStorage {
+        return SyncLocalStorage {
             root: root.to_string(),
         };
     }
@@ -24,7 +23,7 @@ impl LocalStorage {
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, String> {
         let file_path = format!("{}/{}", self.root, key);
         tracing::debug!("Reading from path: {}", file_path);
-        match tokio::fs::File::open(file_path).await {
+        match std::fs::File::open(file_path) {
             Ok(file) => {
                 let stream = file.byte_stream();
                 return Ok(Box::new(stream));
@@ -41,8 +40,8 @@ impl LocalStorage {
         // Create the path if it doesn't exist, we unwrap since this should only be used in tests
         let as_path = std::path::Path::new(&path);
         let parent = as_path.parent().unwrap();
-        tokio::fs::create_dir_all(parent).await.unwrap();
-        let res = tokio::fs::write(&path, bytes).await;
+        std::fs::create_dir_all(parent).unwrap();
+        let res = std::fs::write(&path, bytes);
         match res {
             Ok(_) => {
                 return Ok(());
@@ -54,7 +53,7 @@ impl LocalStorage {
     }
 
     pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
-        let file = tokio::fs::read(path).await;
+        let file = std::fs::read(path);
         match file {
             Ok(bytes_u8) => {
                 return self.put_bytes(key, &bytes_u8).await;
@@ -67,11 +66,11 @@ impl LocalStorage {
 }
 
 #[async_trait]
-impl Configurable<StorageConfig> for LocalStorage {
+impl Configurable<StorageConfig> for SyncLocalStorage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::Local(local_config) => {
-                let storage = LocalStorage::new(&local_config.root);
+                let storage = SyncLocalStorage::new(&local_config.root);
                 return Ok(storage);
             }
             _ => {
