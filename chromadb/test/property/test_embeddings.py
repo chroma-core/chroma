@@ -468,7 +468,8 @@ def test_add_then_delete_n_minus_1(api: ServerAPI) -> None:
     state.fields_match()
     state.no_duplicates()
     state.delete_by_ids(ids=[v1, v2, v3, v4, v5])
-    state.wait_for_compaction()
+    if not NOT_CLUSTER_ONLY:
+        state.wait_for_compaction()
     state.ann_accuracy()
     state.count()
     state.fields_match()
