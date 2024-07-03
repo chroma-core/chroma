@@ -214,10 +214,10 @@ func (suite *LogServerTestSuite) modelPullLogs(ctx context.Context, t *rapid.T, 
 
 	// Pull logs from the model
 	modelLogs := suite.model.CollectionData[c]
-	// Find start offset in the model
+	// Find start offset in the model, which is the first offset that is greater than or equal to the start offset
 	startIndex := -1
 	for i, record := range modelLogs {
-		if record.offset == startOffset {
+		if record.offset >= startOffset {
 			startIndex = i
 			break
 		}
@@ -243,10 +243,8 @@ func (suite *LogServerTestSuite) modelPurgeLogs(ctx context.Context, t *rapid.T)
 
 		new_log := []ModelLogRecord{}
 		for _, record := range log {
-			// TODO: It is odd that the SUT purge behavior keeps the record
-			// with the compaction offset. Shouldn't we be able to purge this
-			// record?
-			if record.offset >= compactionOffset {
+			// Purge by adding everything after the compaction offset
+			if record.offset > compactionOffset {
 				new_log = append(new_log, record)
 			}
 		}
@@ -449,7 +447,7 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 						records, err = suite.lr.PullRecords(ctx, id.String(), 0, 1, time.Now().UnixNano())
 						suite.NoError(err)
 						if len(records) > 0 {
-							suite.Equal(int64(offset), records[0].Offset)
+							suite.Equal(int64(offset)+1, records[0].Offset)
 						}
 					}
 				}
