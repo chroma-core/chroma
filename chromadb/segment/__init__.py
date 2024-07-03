@@ -27,6 +27,15 @@ class SegmentType(Enum):
     BLOCKFILE_METADATA = "urn:chroma:segment/metadata/blockfile"
 
 
+class SegmentTypeDeleteOrder(Enum):
+    SQLITE = 1
+    HNSW_DISTRIBUTED = 1
+    HNSW_LOCAL_MEMORY = 2
+    HNSW_LOCAL_PERSISTED = 2
+    BLOCKFILE_RECORD = 2
+    BLOCKFILE_METADATA = 2
+
+
 class SegmentImplementation(Component):
     @abstractmethod
     def __init__(self, sytstem: System, segment: Segment):

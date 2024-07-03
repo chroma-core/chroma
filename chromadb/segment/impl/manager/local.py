@@ -6,6 +6,7 @@ from chromadb.segment import (
     SegmentType,
     VectorReader,
     S,
+    SegmentTypeDeleteOrder,
 )
 import logging
 from chromadb.segment.impl.manager.cache.cache import (
@@ -152,7 +153,18 @@ class LocalSegmentManager(SegmentManager):
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
-        for segment in segments:
+        segments_sorted = sorted(
+            segments,
+            key=lambda s: next(
+                (
+                    SegmentTypeDeleteOrder[key].value
+                    for key, val in SegmentType.__members__.items()
+                    if val.value == s["type"]
+                ),
+                None,
+            ),
+        )
+        for segment in segments_sorted:
             if segment["id"] in self._instances:
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
                     instance = self.get_segment(collection_id, VectorReader)
