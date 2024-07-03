@@ -419,7 +419,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
-            included=resp_json["included"],
+            included=resp_json.get("included", include),
         )
 
     @trace_method("AsyncFastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -551,7 +551,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,
-            included=resp_json["included"],
+            included=resp_json.get("included", include),
         )
 
     @trace_method("AsyncFastAPI.reset", OpenTelemetryGranularity.ALL)

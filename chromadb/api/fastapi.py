@@ -376,7 +376,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
-            included=resp_json["included"],
+            included=resp_json.get("included", include),
         )
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -519,7 +519,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,
-            included=resp_json["included"],
+            included=resp_json.get("included", include),
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
