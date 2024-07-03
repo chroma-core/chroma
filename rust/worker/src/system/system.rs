@@ -2,6 +2,7 @@ use super::scheduler::Scheduler;
 use super::ComponentContext;
 use super::ComponentRuntime;
 use super::ComponentSender;
+use super::ConsumableJoinHandle;
 use super::Message;
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
 use futures::Stream;
@@ -52,7 +53,11 @@ impl System {
                     trace_span!(parent: Span::current(), "component spawn", "name" = C::get_name());
                 let task_future = async move { executor.run(rx).await };
                 let join_handle = tokio::spawn(task_future.instrument(child_span));
-                return ComponentHandle::new(cancel_token, Some(join_handle), sender);
+                return ComponentHandle::new(
+                    cancel_token,
+                    Some(ConsumableJoinHandle::new(join_handle)),
+                    sender,
+                );
             }
             ComponentRuntime::Dedicated => {
                 println!("Spawning on dedicated thread");
