@@ -6,7 +6,8 @@ import subprocess
 import tempfile
 from types import ModuleType
 from typing import Generator, List, Tuple, Dict, Any, Callable, Type
-from hypothesis import given, reproduce_failure, settings
+from uuid import UUID
+from hypothesis import example, given, reproduce_failure, settings
 import hypothesis.strategies as st
 import pytest
 import json
@@ -20,6 +21,7 @@ from packaging import version as packaging_version
 import re
 import multiprocessing
 from chromadb.config import Settings
+import numpy as np
 
 MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -262,6 +264,26 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 )
 @settings(deadline=None, max_examples=200)
 # @reproduce_failure("6.104.2", b"AXicY2BgZEAGjDAuAABBAAQ=")
+@example(
+    collection_strategy=strategies.Collection(
+        name="A00",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+        id=UUID("42143ccb-d684-4fc3-9645-61fb7d8aeedb"),
+        dimension=2,
+        known_metadata_keys={},
+        known_document_keywords=[],
+        has_documents=False,
+        has_embeddings=True,
+        embedding_function=not_implemented_ef(),
+        dtype=np.float16,
+    ),
+    embeddings_strategy={
+        "ids": ["0"],
+        "embeddings": [[0.09765625, 0.430419921875]],
+        "metadatas": [None],
+        "documents": None,
+    },
+)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
@@ -293,7 +315,7 @@ def test_cycle_versions(
     # Run the task in a separate process to avoid polluting the current process
     # with the old version. Using spawn instead of fork to avoid sharing the
     # current process memory which would cause the old version to be loaded
-    ctx = multiprocessing.get_context("forkserver")
+    ctx = multiprocessing.get_context("spawn")
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
