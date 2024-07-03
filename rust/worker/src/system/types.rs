@@ -82,12 +82,12 @@ where
 
 /// A thin wrapper over a join handle that will panic if it is consumed more than once.
 #[derive(Debug, Clone)]
-struct ConsumableJoinHandle {
+pub(super) struct ConsumableJoinHandle {
     handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl ConsumableJoinHandle {
-    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+    pub(super) fn new(handle: tokio::task::JoinHandle<()>) -> Self {
         ConsumableJoinHandle {
             handle: Arc::new(Mutex::new(Some(handle))),
         }
@@ -197,13 +197,13 @@ impl<C: Component> ComponentHandle<C> {
         // Components with a dedicated runtime do not have a join handle
         // and instead use a one shot channel to signal completion
         // TODO: implement this
-        join_handle: Option<tokio::task::JoinHandle<()>>,
+        join_handle: Option<ConsumableJoinHandle>,
         sender: ComponentSender<C>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: Arc::new(Mutex::new(ComponentState::Running)),
-            join_handle: join_handle.map(|handle| ConsumableJoinHandle::new(handle)),
+            join_handle,
             sender: sender,
         }
     }
