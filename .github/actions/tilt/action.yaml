@@ -1,5 +1,10 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
+inputs:
+  tilt-snapshot-path:
+    description: "Path to the Tilt snapshot file"
+    required: false
+    default: "output/tilt_snapshot.json"
 runs:
   using: "composite"
   steps:
@@ -20,4 +25,4 @@ runs:
       run: ctlptl create cluster kind --registry=ctlptl-registry
     - name: Start Tilt
       shell: bash
-      run: tilt ci
+      run: tilt ci --output-snapshot-on-exit ${{ inputs.tilt-snapshot-path }}

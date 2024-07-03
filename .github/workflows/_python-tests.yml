@@ -112,6 +112,12 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+      - name: Upload tilt snapshot # Ideally we could run this automatically as part of the tilt action
+        uses: actions/upload-artifact@v4
+        with:
+          name: tilt-snapshot
+          path: output/tilt_snapshot.json
+
 
   test-thin-client:
     strategy:
