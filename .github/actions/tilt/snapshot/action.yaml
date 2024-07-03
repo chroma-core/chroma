@@ -1,0 +1,13 @@
+name: Snapshot Tilt services # Assumes tilt is already installed and running
+description: "This action snapshot Tilt services"
+runs:
+  using: "composite"
+  steps:
+    - name: Take a tilt snapshot
+      shell: bash
+      run: tilt snapshot --output-file output/tilt-snapshot.json
+    - name: Upload snapshot
+      uses: actions/upload-artifact@v2
+      with:
+        name: tilt-snapshot
+        path: output/tilt-snapshot.json
