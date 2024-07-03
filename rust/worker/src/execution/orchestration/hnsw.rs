@@ -109,8 +109,6 @@ pub(crate) struct HnswQueryOrchestrator {
     query_vectors: Vec<Vec<f32>>,
     k: i32,
     allowed_ids: Arc<[String]>,
-    allowed_ids_hnsw_segment: Arc<[String]>,
-    allowed_ids_brute_force: Arc<[String]>,
     include_embeddings: bool,
     hnsw_segment_id: Uuid,
     // State fetched or created for query execution
@@ -182,8 +180,6 @@ impl HnswQueryOrchestrator {
             query_vectors,
             k,
             allowed_ids: allowed_ids.into(),
-            allowed_ids_brute_force: Arc::new([]),
-            allowed_ids_hnsw_segment: Arc::new([]),
             include_embeddings,
             hnsw_segment_id: segment_id,
             hnsw_segment: None,
@@ -272,7 +268,6 @@ impl HnswQueryOrchestrator {
                 k: self.k as usize,
                 distance_metric: distance_function.clone(),
                 allowed_ids: self.allowed_ids.clone(),
-                allowed_ids_brute_force: self.allowed_ids_brute_force.clone(),
                 record_segment_definition: self
                     .record_segment
                     .as_ref()
@@ -355,7 +350,6 @@ impl HnswQueryOrchestrator {
                 record_segment: record_segment.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 allowed_ids: self.allowed_ids.clone(),
-                allowed_ids_hnsw: self.allowed_ids_hnsw_segment.clone(),
                 logs: logs.clone(),
             };
             let task = wrap(operator, input, ctx.receiver());
@@ -601,25 +595,6 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
-                // Divide the allowed_ids into two mutually exclusive lists
-                // one for the brute force and another for the hnsw segment query.
-                let mut allowed_ids_hnsw = vec![];
-                let mut allowed_ids_brute_force = vec![];
-                for id in self.allowed_ids.iter() {
-                    let mut found_in_log = false;
-                    for (log, _) in logs.iter() {
-                        if id == &log.record.id {
-                            found_in_log = true;
-                            allowed_ids_brute_force.push(id.clone());
-                            break;
-                        }
-                    }
-                    if !found_in_log {
-                        allowed_ids_hnsw.push(id.clone());
-                    }
-                }
-                self.allowed_ids_brute_force = allowed_ids_brute_force.into();
-                self.allowed_ids_hnsw_segment = allowed_ids_hnsw.into();
                 self.brute_force_query(logs.clone(), ctx.receiver()).await;
                 self.hnsw_segment_query(logs, ctx).await;
             }

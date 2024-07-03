@@ -60,7 +60,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        tracing::info!("Record Segment Flushed");
+                        tracing::info!("Record Segment Flushed. File paths {:?}", res);
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,
@@ -85,7 +85,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        println!("HNSW Segment Flushed");
+                        tracing::info!("HNSW Segment Flushed. File paths {:?}", res);
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,
@@ -110,7 +110,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        tracing::info!("Metadata Segment Flushed");
+                        tracing::info!("Metadata Segment Flushed. File paths {:?}", res);
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,

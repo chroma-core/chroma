@@ -23,7 +23,6 @@ impl ArrowBlockfileFlusher {
         sparse_index: SparseIndex,
         id: Uuid,
     ) -> Self {
-        // let sparse_index = sparse_index_manager.get(&id).unwrap();
         Self {
             block_manager,
             sparse_index_manager,
@@ -36,6 +35,9 @@ impl ArrowBlockfileFlusher {
     pub(crate) async fn flush<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<(), Box<dyn ChromaError>> {
+        if self.sparse_index.len() == 0 {
+            panic!("Invariant violation. Sparse index should be not empty during flush.");
+        }
         // TODO: We could flush in parallel
         for delta_id in self.modified_delta_ids {
             self.block_manager.flush(&delta_id).await?

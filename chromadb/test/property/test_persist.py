@@ -11,10 +11,10 @@ from chromadb.config import Settings, System
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
-    EmbeddingStateMachine,
     EmbeddingStateMachineStates,
     collection_st as embedding_collection_st,
     trace,
+    EmbeddingStateMachineBase,
 )
 from hypothesis.stateful import (
     run_state_machine_as_test,
@@ -168,7 +168,7 @@ class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
 MIN_STATE_CHANGES_BEFORE_PERSIST = 5
 
 
-class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
+class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
     def __init__(self, api: ClientAPI, settings: Settings):
         self.api = api
         self.settings = settings

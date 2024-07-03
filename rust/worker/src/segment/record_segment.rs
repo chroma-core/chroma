@@ -297,6 +297,14 @@ pub enum ApplyMaterializedLogError {
     EmbeddingNotSet,
     #[error("Metadata update not valid")]
     MetadataUpdateNotValid,
+    #[error("Document delete error")]
+    DocumentDeleteError,
+    #[error("FTS Document add error")]
+    FTSDocumentAddError,
+    #[error("FTS Document delete error")]
+    FTSDocumentDeleteError,
+    #[error("FTS Document update error")]
+    FTSDocumentUpdateError,
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -306,6 +314,10 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::MetadataUpdateNotValid => ErrorCodes::Internal,
+            ApplyMaterializedLogError::DocumentDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FTSDocumentAddError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
         }
     }
@@ -386,7 +398,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from user_id_to_id {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     }
@@ -419,7 +432,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from user_id_to_id {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     };
@@ -432,7 +446,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from id_to_user_id {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     };
@@ -445,7 +460,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from id_to_data {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     }
@@ -528,7 +544,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         let mut flushed_files = HashMap::new();
 
         match res_user_id_to_id {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     USER_ID_TO_OFFSET_ID.to_string(),
                     vec![user_id_to_id_bf_id.to_string()],
@@ -540,7 +556,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_user_id {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_USER_ID.to_string(),
                     vec![id_to_user_id_bf_id.to_string()],
@@ -552,7 +568,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_data {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_DATA.to_string(),
                     vec![id_to_data_bf_id.to_string()],
@@ -579,6 +595,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,

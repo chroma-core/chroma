@@ -99,19 +99,20 @@ def _test_add(
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
+    initial_version = coll.get_model()["version"]
+
     normalized_record_set = invariants.wrap_all(record_set)
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
     coll.add(**record_set)  # type: ignore
+    # Only wait for compaction if the size of the collection is
+    # some minimal size
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
         and len(normalized_record_set["ids"]) > 10
     ):
-        # Only wait for compaction if the size of the collection is
-        # some minimal size
-        initial_version = coll.get_model()["version"]
         # Wait for the model to be updated
         wait_for_version_increase(api, collection.name, initial_version)
 
@@ -178,6 +179,7 @@ def test_add_large(
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
+    initial_version = coll.get_model()["version"]
 
     for batch in create_batches(
         api=api,
@@ -193,7 +195,6 @@ def test_add_large(
         and should_compact
         and len(normalized_record_set["ids"]) > 10
     ):
-        initial_version = coll.get_model()["version"]
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
             api, collection.name, initial_version, additional_time=240
