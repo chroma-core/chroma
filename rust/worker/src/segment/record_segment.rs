@@ -372,6 +372,19 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                             return Err(e);
                         }
                     }
+                    // Set max offset id.
+                    match self
+                        .max_offset_id
+                        .as_ref()
+                        .unwrap()
+                        .set("", MAX_OFFSET_ID, log_record.offset_id)
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileSetError);
+                        }
+                    }
                 }
                 Operation::Update => {
                     // Offset id and user id do not need to change. Only data
@@ -452,19 +465,6 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     }
-                }
-            }
-            // Set max offset id.
-            match self
-                .max_offset_id
-                .as_ref()
-                .unwrap()
-                .set("", MAX_OFFSET_ID, log_record.offset_id)
-                .await
-            {
-                Ok(()) => (),
-                Err(_) => {
-                    return Err(ApplyMaterializedLogError::BlockfileSetError);
                 }
             }
         }

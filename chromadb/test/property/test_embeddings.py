@@ -306,9 +306,14 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         super().initialize(collection)
         print("[test_embeddings] Reset")
         self.log_operation_count = 0
+        self.unique_ids_in_log = set()
         self.collection_version = self.collection.get_model()["version"]
 
-    @precondition(lambda self: not NOT_CLUSTER_ONLY and self.log_operation_count > 10)
+    @precondition(
+        lambda self: not NOT_CLUSTER_ONLY
+        and self.log_operation_count > 10
+        and len(self.unique_ids_in_log) > 3
+    )
     @rule()
     def wait_for_compaction(self) -> None:
         current_version = get_collection_version(self.api, self.collection.name)
@@ -322,6 +327,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             self.collection_version = current_version
             # This is fine even if the log has some records right now
             self.log_operation_count = 0
+            self.unique_ids_in_log = set()
         else:
             print("[test_embeddings][wait_for_compaction] wait for version to increase")
             new_version = wait_for_version_increase(
@@ -329,6 +335,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             )
             # Everything got compacted.
             self.log_operation_count = 0
+            self.unique_ids_in_log = set()
             self.collection_version = new_version
 
     @rule(
@@ -347,6 +354,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             len(normalized_record_set["ids"]),
         )
         self.log_operation_count += len(normalized_record_set["ids"])
+        for id in normalized_record_set["ids"]:
+            self.unique_ids_in_log.add(id)
         return res
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
@@ -354,6 +363,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         super().delete_by_ids(ids)
         print("[test_embeddings][delete] ids ", ids, " len ", len(ids))
         self.log_operation_count += len(ids)
+        for id in ids:
+            self.unique_ids_in_log.add(id)
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
@@ -375,6 +386,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             len(invariants.wrap(record_set["ids"])),
         )
         self.log_operation_count += len(invariants.wrap(record_set["ids"]))
+        for id in invariants.wrap(record_set["ids"]):
+            self.unique_ids_in_log.add(id)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
     @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
@@ -395,6 +408,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             len(invariants.wrap(record_set["ids"])),
         )
         self.log_operation_count += len(invariants.wrap(record_set["ids"]))
+        for id in invariants.wrap(record_set["ids"]):
+            self.unique_ids_in_log.add(id)
 
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
