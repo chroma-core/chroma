@@ -260,8 +260,8 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
 )
-@settings(deadline=None)
-@reproduce_failure("6.104.2", b"AXicY2BgZEAGjDAuAABBAAQ=")
+@settings(deadline=None, max_examples=200)
+# @reproduce_failure("6.104.2", b"AXicY2BgZEAGjDAuAABBAAQ=")
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
@@ -293,7 +293,7 @@ def test_cycle_versions(
     # Run the task in a separate process to avoid polluting the current process
     # with the old version. Using spawn instead of fork to avoid sharing the
     # current process memory which would cause the old version to be loaded
-    ctx = multiprocessing.get_context("spawn")
+    ctx = multiprocessing.get_context("forkserver")
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
