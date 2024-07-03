@@ -5,7 +5,7 @@ runs:
   steps:
     - name: Take a tilt snapshot
       shell: bash
-      run: tilt snapshot --output-file output/tilt-snapshot.json
+      run: tilt snapshot create output/tilt-snapshot.json
     - name: Upload snapshot
       uses: actions/upload-artifact@v2
       with:
