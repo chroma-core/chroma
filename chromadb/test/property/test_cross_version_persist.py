@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from types import ModuleType
 from typing import Generator, List, Tuple, Dict, Any, Callable, Type
-from hypothesis import given, settings
+from hypothesis import given, reproduce_failure, settings
 import hypothesis.strategies as st
 import pytest
 import json
@@ -261,6 +261,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     embeddings_strategy=strategies.recordsets(collection_st),
 )
 @settings(deadline=None)
+@reproduce_failure("6.104.2", b"AXicY2BgZEAGjDAuAABBAAQ=")
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
