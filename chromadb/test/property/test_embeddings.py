@@ -308,10 +308,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         self.log_operation_count = 0
         self.collection_version = self.collection.get_model()["version"]
 
-    @precondition(
-        lambda self: not NOT_CLUSTER_ONLY
-        and self.log_operation_count > 10
-    )
+    @precondition(lambda self: not NOT_CLUSTER_ONLY and self.log_operation_count > 10)
     @rule()
     def wait_for_compaction(self) -> None:
         current_version = get_collection_version(self.api, self.collection.name)
@@ -398,6 +395,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             len(invariants.wrap(record_set["ids"])),
         )
         self.log_operation_count += len(invariants.wrap(record_set["ids"]))
+
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     caplog.set_level(logging.ERROR)
