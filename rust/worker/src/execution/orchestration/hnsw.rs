@@ -700,7 +700,7 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
                     .insert(query_index, output.distances);
             }
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                self.terminate_with_error(e.boxed(), ctx);
             }
         }
 
@@ -735,7 +735,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
         let (mut output_ids, mut output_distances, output_vectors) = match message {
             Ok(output) => (output.user_ids, output.distances, output.vectors),
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                self.terminate_with_error(e.boxed(), ctx);
                 return;
             }
         };
