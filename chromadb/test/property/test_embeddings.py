@@ -364,7 +364,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         print("[test_embeddings][delete] ids ", ids, " len ", len(ids))
         self.log_operation_count += len(ids)
         for id in ids:
-            self.unique_ids_in_log.add(id)
+            self.unique_ids_in_log.remove(id)
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
