@@ -261,7 +261,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
 )
-@settings(deadline=None)
+@settings(deadline=None, max_examples=100)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
@@ -307,8 +307,8 @@ def test_cycle_versions(
         e = conn1.recv()
         raise e
 
-    p.close()
     assert p.exitcode == 0
+    p.close()
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection

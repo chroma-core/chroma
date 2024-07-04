@@ -216,8 +216,8 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
             e = conn1.recv()
             raise e
 
-        p.close()
         assert p.exitcode == 0
+        p.close()
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
