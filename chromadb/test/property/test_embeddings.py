@@ -424,6 +424,59 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
     print_traces()
 
 
+def test_add_then_delete_n_minus_1(api: ServerAPI) -> None:
+    state = EmbeddingStateMachine(api)
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+            },
+            embedding_function=None,
+            id=uuid.uuid4(),
+            dimension=2,
+            dtype=np.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    v1, v2, v3, v4, v5, v6 = state.add_embeddings(
+        record_set={
+            "ids": ["0", "1", "2", "3", "4", "5"],
+            "embeddings": [
+                [0.09765625, 0.430419921875],
+                [0.20556640625, 0.08978271484375],
+                [-0.1527099609375, 0.291748046875],
+                [-0.12481689453125, 0.78369140625],
+                [0.92724609375, -0.233154296875],
+                [0.92724609375, -0.233154296875],
+            ],
+            "metadatas": [None, None, None, None, None, None],
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.delete_by_ids(ids=[v1, v2, v3, v4, v5])
+    if not NOT_CLUSTER_ONLY:
+        state.wait_for_compaction()
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.teardown()
+
+
 def test_update_none(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     state = EmbeddingStateMachine(api)
     state.initialize(
