@@ -1,7 +1,8 @@
-use super::super::operator::{wrap, TaskMessage};
+use super::super::operator::wrap;
 use super::super::operators::pull_log::{PullLogsInput, PullLogsOperator};
 use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
+    terminate_with_error,
 };
 use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
@@ -29,7 +30,7 @@ use crate::segment::distributed_hnsw_segment::{
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
-use crate::types::{Collection, LogRecord, Segment, SegmentType, VectorQueryResult};
+use crate::types::{Collection, LogRecord, Segment, VectorQueryResult};
 use crate::{
     log::log::Log,
     system::{Component, Handler, ReceiverForMessage},
@@ -40,7 +41,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tracing::{trace, trace_span, Instrument, Span};
+use tracing::{trace, Span};
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -327,7 +328,7 @@ impl HnswQueryOrchestrator {
                     }
                     _ => {
                         tracing::error!("[HnswQueryOperation]: Error creating distributed hnsw segment reader {:?}", *e);
-                        self.terminate_with_error(e, ctx);
+                        terminate_with_error(self.result_channel.take(), e, ctx);
                         return;
                     }
                 }
@@ -454,22 +455,6 @@ impl HnswQueryOrchestrator {
         ctx.cancellation_token.cancel();
     }
 
-    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-        match result_channel.send(Err(error)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[HnswQueryOrchestrator] Result channel dropped before sending error");
-            }
-        }
-        // Cancel the orchestrator so it stops processing
-        ctx.cancellation_token.cancel();
-    }
-
     ///  Run the orchestrator and return the result.
     ///  # Note
     ///  Use this over spawning the component directly. This method will start the component and
@@ -502,7 +487,7 @@ impl Component for HnswQueryOrchestrator {
             match get_hnsw_segment_by_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
                 Ok(segment) => segment,
                 Err(e) => {
-                    self.terminate_with_error(e, ctx);
+                    terminate_with_error(self.result_channel.take(), e, ctx);
                     return;
                 }
             };
@@ -510,7 +495,8 @@ impl Component for HnswQueryOrchestrator {
         let collection_id = match &hnsw_segment.collection {
             Some(collection_id) => collection_id,
             None => {
-                self.terminate_with_error(
+                terminate_with_error(
+                    self.result_channel.take(),
                     Box::new(HnswSegmentQueryError::HnswSegmentHasNoCollection),
                     ctx,
                 );
@@ -521,7 +507,7 @@ impl Component for HnswQueryOrchestrator {
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -536,7 +522,8 @@ impl Component for HnswQueryOrchestrator {
         // Validate that the collection has a dimension set. Downstream steps will rely on this
         // so that they can unwrap the dimension without checking for None
         if collection.dimension.is_none() {
-            self.terminate_with_error(
+            terminate_with_error(
+                self.result_channel.take(),
                 Box::new(HnswSegmentQueryError::CollectionHasNoDimension),
                 ctx,
             );
@@ -547,7 +534,7 @@ impl Component for HnswQueryOrchestrator {
             match get_record_segment_by_collection_id(self.sysdb.clone(), collection_id).await {
                 Ok(segment) => segment,
                 Err(e) => {
-                    self.terminate_with_error(e, ctx);
+                    terminate_with_error(self.result_channel.take(), e, ctx);
                     return;
                 }
             };
@@ -565,7 +552,7 @@ impl Component for HnswQueryOrchestrator {
                 }
             }
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         }
@@ -599,7 +586,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
                 self.hnsw_segment_query(logs, ctx).await;
             }
             Err(e) => {
-                self.terminate_with_error(Box::new(e), ctx);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }
@@ -675,7 +662,7 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
                     .insert(query_index, output.distances);
             }
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
             }
         }
 
@@ -710,7 +697,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
         let (mut output_ids, mut output_distances, output_vectors) = match message {
             Ok(output) => (output.user_ids, output.distances, output.vectors),
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
