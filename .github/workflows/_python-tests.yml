@@ -6,7 +6,7 @@ on:
       python_versions:
         description: 'Python versions to test (as json array)'
         required: false
-        default: '["3.8"]'
+        default: '["3.12"]'
         type: string
       property_testing_preset:
         description: 'Property testing preset'
