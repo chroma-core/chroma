@@ -12,6 +12,8 @@ use super::config::StorageConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
+use aws_config::retry::RetryConfig;
+use aws_config::retry::RetryConfigBuilder;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
 use aws_sdk_s3::error::ProvideErrorMetadata;
@@ -232,6 +234,7 @@ impl Configurable<StorageConfig> for S3Storage {
                         let timeout_config_builder = TimeoutConfigBuilder::default()
                             .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
                             .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
+                        let retry_config = RetryConfig::standard();
 
                         // Set up s3 client
                         let config = aws_sdk_s3::config::Builder::new()
@@ -241,6 +244,7 @@ impl Configurable<StorageConfig> for S3Storage {
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))
                             .force_path_style(true)
                             .timeout_config(timeout_config_builder.build())
+                            .retry_config(retry_config)
                             .build();
                         aws_sdk_s3::Client::from_conf(config)
                     }
