@@ -2165,7 +2165,6 @@ mod test {
             .expect("Error getting all data from record segment");
         assert_eq!(res.len(), 2);
     }
-<<<<<<< HEAD
 
     #[tokio::test]
     async fn metadata_update_same_key_different_type() {
@@ -2841,6 +2840,4 @@ mod test {
             Some(String::from("bye").as_str())
         );
     }
-=======
->>>>>>> 67696279 ([ENH] Fix issues + add sync point to test embeddings (#2397))
 }
