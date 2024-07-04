@@ -108,8 +108,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
 
   test-thin-client:
     strategy:

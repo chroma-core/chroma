@@ -18,6 +18,6 @@ runs:
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
-    # - name: Start Tilt
-    #   shell: bash
-    #   run: tilt up
+    - name: Start Tilt
+      shell: bash
+      run: tilt ci
