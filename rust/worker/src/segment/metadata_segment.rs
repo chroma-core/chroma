@@ -1791,6 +1791,7 @@ mod test {
             arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
             provider::BlockfileProvider,
         },
+        chroma_proto::r#where,
         execution::data::data_chunk::Chunk,
         segment::{
             metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
@@ -1801,8 +1802,8 @@ mod test {
         },
         storage::{local::LocalStorage, Storage},
         types::{
-            DirectComparison, LogRecord, MetadataValue, Operation, OperationRecord,
-            UpdateMetadataValue, Where, WhereComparison,
+            DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
+            OperationRecord, UpdateMetadataValue, Where, WhereComparison, WhereDocument,
         },
     };
 
@@ -2340,5 +2341,429 @@ mod test {
         let mut id2_mt = HashMap::new();
         id2_mt.insert(String::from("hello"), MetadataValue::Float(1.0));
         assert_eq!(res.get(1).as_ref().unwrap().metadata, Some(id2_mt));
+    }
+
+    #[tokio::test]
+    async fn metadata_deletes() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("This is a document about cats.")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let mut update_metadata_id1 = HashMap::new();
+        update_metadata_id1.insert(String::from("hello"), UpdateMetadataValue::None);
+        let data = vec![LogRecord {
+            log_offset: 2,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: Some(update_metadata_id1.clone()),
+                document: None,
+                operation: Operation::Update,
+            },
+        }];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // Only one key should be present.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        // Record segment should also have the updated values.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let mut res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Record segment get all data failed");
+        assert_eq!(res.len(), 1);
+        res.sort_by(|x, y| x.id.cmp(y.id));
+        let mut id1_mt = HashMap::new();
+        id1_mt.insert(
+            String::from("bye"),
+            MetadataValue::Str(String::from("world")),
+        );
+        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+    }
+
+    #[tokio::test]
+    async fn document_updates() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("hello")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let data = vec![LogRecord {
+            log_offset: 2,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: Some(String::from("bye")),
+                operation: Operation::Update,
+            },
+        }];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // FTS for hello should return empty.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("hello"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        // FTS for bye should return the lone document.
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("bye"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        // Record segment should also have the updated values.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let mut res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Record segment get all data failed");
+        assert_eq!(res.len(), 1);
+        res.sort_by(|x, y| x.id.cmp(y.id));
+        assert_eq!(
+            res.get(0).as_ref().unwrap().document,
+            Some(String::from("bye").as_str())
+        );
     }
 }
