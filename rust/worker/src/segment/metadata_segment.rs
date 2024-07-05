@@ -601,8 +601,11 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     .add_document(document, segment_offset_id as i32)
                                     .await;
                             }
-                            None => {}
+                            None => panic!(
+                                "Invariant violation. Expected full text index writer to be set"
+                            ),
                         },
+                        // It is ok for the user to not pass in any document.
                         None => {}
                     };
                 }
@@ -622,6 +625,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                 }
                             }
+                            // Ok to not have any metadata to delete.
                             None => {}
                         };
                         match &data_record.document {
@@ -640,8 +644,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                 }
                                 None => {
-                                    tracing::error!("FTS index writer not found");
-                                    return Err(ApplyMaterializedLogError::FTSDocumentDeleteError);
+                                    panic!("Invariant violation. FTS index writer should be set")
                                 }
                             },
                             // The record that is to be deleted might not have
@@ -649,11 +652,11 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             None => {}
                         };
                     }
-                    None => {}
+                    None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                 },
                 Operation::Update => {
                     let metadata_delta = record.0.metadata_delta();
-                    // Updates.
+                    // Metadata updates.
                     for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
                         match self
                             .update_metadata(update_key, old_value, new_value, segment_offset_id)
@@ -665,7 +668,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             }
                         }
                     }
-                    // Inserts.
+                    // Metadata inserts.
                     for (insert_key, new_value) in metadata_delta.metadata_to_insert {
                         match self
                             .set_metadata(insert_key, new_value, segment_offset_id)
@@ -677,7 +680,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             }
                         }
                     }
-                    // Deletes.
+                    // Metadata deletes.
                     for (delete_key, old_value) in metadata_delta.metadata_to_delete {
                         match self
                             .delete_metadata(delete_key, old_value, segment_offset_id)
@@ -711,6 +714,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             }
                                         }
                                     }
+                                    // Previous version of record does not contain document string.
                                     None => match writer
                                         .add_document(doc, segment_offset_id as i32)
                                         .await
@@ -727,26 +731,11 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         }
                                     },
                                 },
-                                None => {
-                                    match writer.add_document(doc, segment_offset_id as i32).await {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "Add document for an update failed {:?}",
-                                                e
-                                            );
-                                            return Err(
-                                                ApplyMaterializedLogError::FTSDocumentAddError,
-                                            );
-                                        }
-                                    }
-                                }
+                                None => panic!("Invariant violation. Record should be set by materializer for an update")
                             },
-                            None => {
-                                tracing::error!("FTS Writer not found");
-                                return Err(ApplyMaterializedLogError::FTSDocumentUpdateError);
-                            }
+                            None => panic!("Invariant violation. FTS index writer should be set"),
                         },
+                        // Ok to not have any update for the document. Do not error.
                         None => {}
                     }
                 }
