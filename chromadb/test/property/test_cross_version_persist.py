@@ -217,6 +217,7 @@ def persist_generated_data_with_old_version(
     conn: Connection,
 ) -> None:
     try:
+        print("SWITCHING TO VERSION", version)
         old_module = switch_to_version(version)
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
@@ -246,6 +247,7 @@ def persist_generated_data_with_old_version(
         # Shutdown system
         system.stop()
     except Exception as e:
+        print("EXCEPTION IN OLD VERSION", e)
         conn.send(e)
         raise e
 
@@ -256,11 +258,11 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 )
 
 
-@given(
-    collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_st),
-)
-@settings(deadline=None)
+# @given(
+#     collection_strategy=collection_st,
+#     embeddings_strategy=strategies.recordsets(collection_st),
+# )
+# @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
@@ -324,3 +326,14 @@ def test_cycle_versions(
 
     # Shutdown system
     system.stop()
+
+
+
+import uuid
+import numpy as np
+def test_repro():
+    test_cycle_versions(
+                version_settings=('0.5.3', Settings(environment='', chroma_api_impl='chromadb.api.segment.SegmentAPI', chroma_server_nofile=None, chroma_server_thread_pool_size=40, tenant_id='default', topic_namespace='default', chroma_server_host=None, chroma_server_headers=None, chroma_server_http_port=None, chroma_server_ssl_enabled=False, chroma_server_ssl_verify=None, chroma_server_api_default_path='/api/v1', chroma_server_cors_allow_origins=[], is_persistent=True, persist_directory='/tmp/persistence_test_chromadb', chroma_memory_limit_bytes=0, chroma_segment_cache_policy=None, allow_reset=True, chroma_auth_token_transport_header=None, chroma_client_auth_provider=None, chroma_client_auth_credentials=None, chroma_server_auth_ignore_paths={'/api/v1': ['GET'], '/api/v1/heartbeat': ['GET'], '/api/v1/version': ['GET']}, chroma_overwrite_singleton_tenant_database_access_from_auth=False, chroma_server_authn_provider=None, chroma_server_authn_credentials=None, chroma_server_authn_credentials_file=None, chroma_server_authz_provider=None, chroma_server_authz_config=None, chroma_server_authz_config_file=None, chroma_product_telemetry_impl='chromadb.telemetry.product.posthog.Posthog', chroma_telemetry_impl='chromadb.telemetry.product.posthog.Posthog', anonymized_telemetry=True, chroma_otel_collection_endpoint='', chroma_otel_service_name='chromadb', chroma_otel_collection_headers={}, chroma_otel_granularity=None, migrations='apply', migrations_hash_algorithm='md5', chroma_segment_directory_impl='chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory', chroma_memberlist_provider_impl='chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider', worker_memberlist_name='query-service-memberlist', chroma_server_grpc_port=None, chroma_sysdb_impl='chromadb.db.impl.sqlite.SqliteDB', chroma_producer_impl='chromadb.db.impl.sqlite.SqliteDB', chroma_consumer_impl='chromadb.db.impl.sqlite.SqliteDB', chroma_segment_manager_impl='chromadb.segment.impl.manager.local.LocalSegmentManager', chroma_quota_provider_impl=None, chroma_rate_limiting_provider_impl=None, chroma_db_impl=None, chroma_collection_assignment_policy_impl='chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy', chroma_coordinator_host='localhost', chroma_logservice_host='localhost', chroma_logservice_port=50052)),
+                collection_strategy=strategies.Collection(name='A00', metadata={'hnsw:construction_ef': 128, 'hnsw:search_ef': 128, 'hnsw:M': 128}, embedding_function=None, id=uuid.uuid4(), dimension=2, dtype=np.float16, known_metadata_keys={}, known_document_keywords=[], has_documents=False, has_embeddings=True),
+                embeddings_strategy={'ids': ['0'], 'embeddings': [[0.09765625, 0.430419921875]], 'metadatas': [None], 'documents': None},
+    )

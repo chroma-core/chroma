@@ -111,7 +111,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             trace("add_more_embeddings")
 
         intersection = set(normalized_record_set["ids"]).intersection(
-            self.record_set_state["ids"]
+            self.record_set_state["ids"] 
         )
         if len(intersection) > 0:
             # Partially apply the non-duplicative records to the state
