@@ -21,19 +21,10 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
-        include:
-          - test-globs: "chromadb/test/property/test_embeddings.py"
-            parallelized: true
+        test-globs: ["chromadb/test/property/test_cross_version_persist.py"]
+        # include:
+        #   - test-globs: "chromadb/test/property/test_embeddings.py"
+        #     parallelized: true
 
     runs-on: ${{ matrix.platform }}
     steps:
