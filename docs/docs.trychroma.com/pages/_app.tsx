@@ -139,6 +139,8 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
 
   const pageTitle = `${title}${title !== "Chroma" ? " | Chroma Docs": " Docs" }`
 
+  console.log('process.env.NEXT_PUBLIC_ALGOLIA_APP_ID', process.env.NEXT_PUBLIC_ALGOLIA_APP_ID)
+  console.log('process.env.NEXT_PUBLIC_POSTHOG_KEY', process.env.NEXT_PUBLIC_POSTHOG_KEY)
 
   // generate the github edit link
   let filePath = router.asPath.split('/').slice(1).join('/')
