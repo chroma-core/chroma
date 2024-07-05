@@ -258,10 +258,10 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 )
 
 
-# @given(
-#     collection_strategy=collection_st,
-#     embeddings_strategy=strategies.recordsets(collection_st),
-# )
+@given(
+    collection_strategy=collection_st,
+    embeddings_strategy=strategies.recordsets(collection_st),
+)
 # @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
