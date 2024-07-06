@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: jaeger
-        image: jaegertracing/all-in-one:latest
+        image: jaegertracing/all-in-one:1.56
         env:
         - name: COLLECTOR_OTLP_ENABLED
           value: "true"
