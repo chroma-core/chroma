@@ -32,7 +32,7 @@ done
 zip -r "${TEST_NAME}_logs.zip" "$LOGS_DIR"
 
 # Print confirmation message
-echo "Logs have been zipped."
+echo "Logs have been zipped to ${TEST_NAME}_logs.zip"
 
-# Output the zip file path for GitHub Actions to upload as an artifact
-echo "::set-output name=logs_zip_path::$(pwd)/${TEST_NAME}_logs.zip"
+# Output the path to the zip file
+echo "$(pwd)/${TEST_NAME}_logs.zip"
