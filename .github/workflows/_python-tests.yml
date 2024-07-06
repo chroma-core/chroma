@@ -113,15 +113,18 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
       - name: Make get logs script executable
+        if: success() || failure()
         run: chmod +x bin/get-logs.sh
       - name: Get logs of all services
         id: get-logs
+        if: success() || failure()
         run: |
           bin/get-logs.sh "${{ matrix.test-globs }}"
           # Output the logs zip file path as a job output
           echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
+        if: success() || failure()
         uses: actions/upload-artifact@v2
         with:
           name: logs
