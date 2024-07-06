@@ -5,10 +5,13 @@ import string
 import time
 import traceback
 from enum import Enum
-from starlette.datastructures import Headers
-from typing import cast, Dict, List, Optional, TypedDict, TypeVar
+from typing import cast, Dict, List, Optional, TypedDict, TypeVar, TYPE_CHECKING
 
-from fastapi import HTTPException
+if TYPE_CHECKING:
+    from starlette.datastructures import Headers
+    from fastapi import HTTPException
+
+
 from overrides import override
 from pydantic import SecretStr
 import yaml
@@ -191,7 +194,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         "TokenAuthenticationServerProvider.authenticate", OpenTelemetryGranularity.ALL
     )
     @override
-    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
+    def authenticate_or_raise(self, headers: "Headers") -> UserIdentity:
         try:
             if self._token_transport_header.value not in headers:
                 raise AuthError(
