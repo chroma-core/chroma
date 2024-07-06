@@ -117,9 +117,9 @@ jobs:
       - name: Get logs of all services
         id: get-logs
         run: |
-          logs_zip_path=bin/get-logs.sh "${{ matrix.test-globs }}"
+          bin/get-logs.sh "${{ matrix.test-globs }}"
           # Output the logs zip file path as a job output
-          echo "logs_zip_path=$logs_zip_path" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         uses: actions/upload-artifact@v2
