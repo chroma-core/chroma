@@ -112,6 +112,20 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+      - name: Make get logs script executable
+        run: chmod +x bin/get-logs.sh
+      - name: Get logs of all services
+        id: get-logs
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}"
+          # Output the logs zip file path as a job output
+          echo "::set-output name=logs_zip_path::$(pwd)/$(basename "${{ matrix.test-globs }}" .py).zip"
+        shell: bash
+      - name: Upload logs as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: logs
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
 
   test-thin-client:
     strategy:
