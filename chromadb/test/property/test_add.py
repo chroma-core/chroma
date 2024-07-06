@@ -166,6 +166,7 @@ def create_large_recordset(
 def test_add_large(
     api: ServerAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:
+    assert False
     reset(api)
 
     record_set = create_large_recordset(
