@@ -25,10 +25,8 @@ from chromadb.telemetry.opentelemetry import (
 )
 
 
-from typing import Dict, TYPE_CHECKING
+from typing import Dict
 
-if TYPE_CHECKING:
-    from starlette.datastructures import Headers
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +102,11 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
         "BasicAuthenticationServerProvider.authenticate", OpenTelemetryGranularity.ALL
     )
     @override
-    def authenticate_or_raise(self, headers: "Headers") -> UserIdentity:
+    def authenticate_or_raise(self, headers: Dict[str, str]) -> UserIdentity:
         try:
-            if AUTHORIZATION_HEADER not in headers:
+            if AUTHORIZATION_HEADER.lower() not in headers.keys():
                 raise AuthError(AUTHORIZATION_HEADER + " header not found")
-            _auth_header = headers[AUTHORIZATION_HEADER]
+            _auth_header = headers[AUTHORIZATION_HEADER.lower()]
             _auth_header = re.sub(r"^Basic ", "", _auth_header)
             _auth_header = _auth_header.strip()
 

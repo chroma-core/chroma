@@ -6,10 +6,7 @@ import string
 import time
 import traceback
 from enum import Enum
-from typing import cast, Dict, List, Optional, TypedDict, TypeVar, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from starlette.datastructures import Headers
+from typing import cast, Dict, List, Optional, TypedDict, TypeVar
 
 
 from overrides import override
@@ -196,13 +193,13 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         "TokenAuthenticationServerProvider.authenticate", OpenTelemetryGranularity.ALL
     )
     @override
-    def authenticate_or_raise(self, headers: "Headers") -> UserIdentity:
+    def authenticate_or_raise(self, headers: Dict[str, str]) -> UserIdentity:
         try:
-            if self._token_transport_header.value not in headers:
+            if self._token_transport_header.value.lower() not in headers.keys():
                 raise AuthError(
                     f"Authorization header '{self._token_transport_header.value}' not found"
                 )
-            token = headers[self._token_transport_header.value]
+            token = headers[self._token_transport_header.value.lower()]
             if self._token_transport_header == TokenTransportHeader.AUTHORIZATION:
                 if not token.startswith("Bearer "):
                     raise AuthError("Bearer not found in Authorization header")

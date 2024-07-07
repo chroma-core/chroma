@@ -18,13 +18,9 @@ from chromadb.config import (
     Component,
     System,
 )
-from typing import TYPE_CHECKING
 
 T = TypeVar("T")
 S = TypeVar("S")
-
-if TYPE_CHECKING:
-    from starlette.datastructures import Headers
 
 
 class AuthError(Exception):
@@ -91,7 +87,7 @@ class ServerAuthenticationProvider(Component):
         )
 
     @abstractmethod
-    def authenticate_or_raise(self, headers: "Headers") -> UserIdentity:
+    def authenticate_or_raise(self, headers: Dict[str, str]) -> UserIdentity:
         pass
 
     def ignore_operation(self, verb: str, path: str) -> bool:
