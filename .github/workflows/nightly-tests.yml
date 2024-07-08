@@ -22,6 +22,8 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
+      - run: exit 1
+        shell: bash
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
