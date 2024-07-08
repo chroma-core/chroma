@@ -60,7 +60,7 @@ compaction_service:
             host: "sysdb.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
     storage:
         S3:
             bucket: "chroma-storage"
