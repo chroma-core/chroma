@@ -1,6 +1,7 @@
 from typing import cast
 from overrides import overrides
 from chromadb.api import ServerAPI
+from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.ingest import Producer
@@ -28,11 +29,17 @@ def count_embedding_queue_rows(sqlite: SqliteDB) -> int:
 
 class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
     has_collection_mutated = False
+    system: System
+
+    def __init__(self, system: System) -> None:
+        api = system.require(ServerAPI)
+        self.system = system
+        super().__init__(api)
 
     @invariant()
     def log_empty_after_cleaning(self) -> None:
-        producer = self.api._system.instance(Producer)
-        sqlite = self.api._system.instance(SqliteDB)
+        producer = self.system.instance(Producer)
+        sqlite = self.system.instance(SqliteDB)
 
         producer.clean_log(self.collection.id)
         num_rows = count_embedding_queue_rows(sqlite)
@@ -49,7 +56,7 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.has_collection_mutated = True
 
 
-def test_clean_log(api: ServerAPI) -> None:
+def test_clean_log(system: System) -> None:
     run_state_machine_as_test(
-        lambda: LogCleanEmbeddingStateMachine(api=api),
+        lambda: LogCleanEmbeddingStateMachine(system),
     )  # type: ignore

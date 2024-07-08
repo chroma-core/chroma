@@ -36,7 +36,7 @@ class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
     _collection: Optional[UUID]
-    _subscription: UUID
+    _subscription: Optional[UUID]
     _settings: Settings
     _params: HnswParams
 
@@ -60,6 +60,7 @@ class LocalHnswSegment(VectorReader):
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
         self._collection = segment["collection"]
+        self._subscription = None
         self._settings = system.settings
         self._params = HnswParams(segment["metadata"] or {})
 

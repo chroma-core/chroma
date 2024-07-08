@@ -124,7 +124,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         )
         subscriptions = self._subscriptions[topic_name]
 
-        min_seq_id = min(sub.start for sub in subscriptions)
+        min_seq_id = -1
+        if len(subscriptions) > 0:
+            min_seq_id = min(sub.start for sub in subscriptions)
+
         t = Table("embeddings_queue")
         q = (
             self.querybuilder()
