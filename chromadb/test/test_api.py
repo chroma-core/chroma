@@ -38,7 +38,15 @@ def local_persist_api():
     yield client
     client.clear_system_cache()
     if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(persist_dir, ignore_errors=True)
+        # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+        # (when we drop support for Python < 3.10, we should use ignore_cleanup_errors=True with the context manager instead)
+        except (PermissionError, NotADirectoryError) as e:
+            if os.name == "nt":
+                pass
+            else:
+                raise e
 
 
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
@@ -58,8 +66,16 @@ def local_persist_api_cache_bust():
     )
     yield client
     client.clear_system_cache()
-    if os.path.exists(persist_dir):
+
+    try:
         shutil.rmtree(persist_dir, ignore_errors=True)
+    # (Older versions of Python throw NotADirectoryError sometimes instead of PermissionError)
+    # (when we drop support for Python < 3.10, we should use ignore_cleanup_errors=True with the context manager instead)
+    except (PermissionError, NotADirectoryError) as e:
+        if os.name == "nt":
+            pass
+        else:
+            raise e
 
 
 def approx_equal(a, b, tolerance=1e-6) -> bool:

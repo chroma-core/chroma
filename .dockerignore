@@ -8,3 +8,8 @@ __pycache__
 .vscode
 *.egg-info
 .pytest_cache
+target
+dist
+docs
+.mypy_cache
+chroma.log
