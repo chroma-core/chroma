@@ -112,7 +112,7 @@ class Consumer(Component):
     @abstractmethod
     def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
         """Acknowledge that all records up to and including the given SeqID have been
-        processed. (This allows the producer to delete old records from the log.)"""
+        processed. (This allows the stream to delete old records.)"""
         pass
 
     @abstractmethod

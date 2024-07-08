@@ -280,6 +280,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()
 
+        if self._subscription:
+            self._consumer.ack(self._subscription, self._max_seq_id)
+
     @override
     def count(self) -> int:
         return (

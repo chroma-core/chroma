@@ -49,7 +49,7 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.has_collection_mutated = True
 
 
-def test_wal_clean(api: ServerAPI) -> None:
+def test_clean_log(api: ServerAPI) -> None:
     run_state_machine_as_test(
         lambda: LogCleanEmbeddingStateMachine(api=api),
-    ) # type: ignore
+    )  # type: ignore
