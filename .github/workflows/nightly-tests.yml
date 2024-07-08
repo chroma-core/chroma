@@ -42,3 +42,9 @@ jobs:
         with:
           name: logs
           path: ${{ steps.get-logs.outputs.logs_zip_path }}
+      - name: Send PagerDuty alert on failure
+        if: ${{ failure() }}
+        uses: Entle/action-pagerduty-alert@0.2.0
+        with:
+          pagerduty-integration-key: '${{ secrets.PAGERDUTY_INTEGRATION_KEY }}'
+          pagerduty-dedup-key: distributed-test-failed-${{ matrix.test-globs}}
