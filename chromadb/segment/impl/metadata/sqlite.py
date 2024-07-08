@@ -508,6 +508,9 @@ class SqliteMetadataSegment(MetadataReader):
                 elif record["operation_record"]["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
+        if self._subscription:
+            self._consumer.ack(self._subscription, records[-1]["log_offset"])
+
     @trace_method(
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
     )

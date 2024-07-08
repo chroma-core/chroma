@@ -30,9 +30,12 @@ jobs:
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
+                   "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_clean_log.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
+            parallelized: true
+          - test-globs: "chromadb/test/property/test_clean_log.py"
             parallelized: true
 
     runs-on: ${{ matrix.platform }}

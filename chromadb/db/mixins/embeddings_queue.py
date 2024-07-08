@@ -52,7 +52,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     Note that this class is only suitable for use cases where the producer and consumer
     are in the same process.
 
-    This is because notifiaction of new embeddings happens solely in-process: this
+    This is because notification of new embeddings happens solely in-process: this
     implementation does not actively listen to the the database for new records added by
     other processes.
     """
@@ -112,6 +112,28 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .where(t.topic == ParameterValue(topic_name))
             .delete()
         )
+        with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+    @trace_method("SqlEmbeddingsQueue.clean_log", OpenTelemetryGranularity.ALL)
+    @override
+    def clean_log(self, collection_id: UUID) -> None:
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
+        subscriptions = self._subscriptions[topic_name]
+
+        min_seq_id = min(sub.start for sub in subscriptions)
+        t = Table("embeddings_queue")
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .where(t.topic == ParameterValue(topic_name))
+            .where(t.seq_id < ParameterValue(min_seq_id))
+            .delete()
+        )
+
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
             cur.execute(sql, params)
@@ -241,6 +263,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     subscriptions.remove(subscription)
                     if len(subscriptions) == 0:
                         del self._subscriptions[topic_name]
+                    return
+
+    @trace_method("SqlEmbeddingsQueue.ack", OpenTelemetryGranularity.ALL)
+    @override
+    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
+        for _, subscriptions in self._subscriptions.items():
+            for subscription in subscriptions:
+                if subscription.id == subscription_id:
+                    subscription.start = up_to_seq_id
                     return
 
     @override

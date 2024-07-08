@@ -320,6 +320,9 @@ class LocalHnswSegment(VectorReader):
 
             self._apply_batch(batch)
 
+        if self._subscription:
+            self._consumer.ack(self._subscription, self._max_seq_id)
+
     @override
     def delete(self) -> None:
         raise NotImplementedError()
