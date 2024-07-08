@@ -1,4 +1,3 @@
-import importlib
 import logging
 import random
 import re
@@ -155,8 +154,6 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         self._token_user_mapping: Dict[str, User] = {}
         creds = self.read_creds_or_creds_file()
 
-        self.HTTPException = importlib.import_module("fastapi").HTTPException
-
         # If we only get one cred, assume it's just a valid token.
         if len(creds) == 1:
             self._token_user_mapping[creds[0]] = User(
@@ -234,4 +231,6 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         time.sleep(
             random.uniform(0.001, 0.005)
         )  # add some jitter to avoid timing attacks
-        raise self.HTTPException(status_code=403, detail="Forbidden")
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=403, detail="Forbidden")
