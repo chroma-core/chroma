@@ -629,7 +629,9 @@ def test_add_delete_add(api: ServerAPI) -> None:
     state.count()
     state.fields_match()
     state.no_duplicates()
-    # state.delete_by_ids(ids=[emb_list[2], emb_list[1], emb_list[5], emb_list[4], emb_list[3]])
+    state.delete_by_ids(
+        ids=[emb_list[2], emb_list[1], emb_list[5], emb_list[4], emb_list[3]]
+    )
     state.ann_accuracy()
     state.count()
     state.fields_match()
