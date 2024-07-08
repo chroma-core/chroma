@@ -306,7 +306,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         super().initialize(collection)
         print(
             "[test_embeddings][initialize] Initialize collection id ",
-            self.collection._model.id,
+            self.collection._model["id"],
         )
         self.log_operation_count = 0
         self.unique_ids_in_log = set()
