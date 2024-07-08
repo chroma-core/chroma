@@ -1,9 +1,11 @@
 name: Run (intensive) tests nightly
 on:
+  # todo: remove
+  push:
   schedule:
-      # 1:15 AM PDT, offseted by a few minutes because:
+      # 2:15 AM PDT, offseted by a few minutes because:
       # "The schedule event can be delayed during periods of high loads of GitHub Actions workflow runs. High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped."
-      - cron: '15 8 * * *'
+      - cron: '15 9 * * *'
 
 jobs:
   test-distributed:
