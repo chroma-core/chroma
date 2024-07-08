@@ -72,8 +72,6 @@ hypothesis.settings.load_profile(CURRENT_PRESET)
 
 def reset(api: ServerAPI) -> None:
     api.reset()
-    if not NOT_CLUSTER_ONLY:
-        time.sleep(MEMBERLIST_SLEEP)
 
 
 def override_hypothesis_profile(
@@ -120,7 +118,6 @@ def override_hypothesis_profile(
 
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
-MEMBERLIST_SLEEP = 5
 COMPACTION_SLEEP = 120
 
 

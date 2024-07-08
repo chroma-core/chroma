@@ -59,6 +59,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     _curr_memberlist_mutex: threading.Lock
     _watch_thread: Optional[threading.Thread]
     _kill_watch_thread: threading.Event
+    _done_waiting_for_reset: threading.Event
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -69,12 +70,14 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
         self._curr_memberlist = None
         self._curr_memberlist_mutex = threading.Lock()
         self._kill_watch_thread = threading.Event()
+        self._done_waiting_for_reset = threading.Event()
 
     @override
     def start(self) -> None:
         if self._memberlist_name is None:
             raise ValueError("Memberlist name must be set before starting")
         self.get_memberlist()
+        self._done_waiting_for_reset.clear()
         self._watch_worker_memberlist()
         return super().start()
 
@@ -89,15 +92,20 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
             self._watch_thread.join()
         self._watch_thread = None
         self._kill_watch_thread.clear()
+        self._done_waiting_for_reset.clear()
         return super().stop()
 
     @override
     def reset_state(self) -> None:
+        # Reset the memberlist in kubernetes, and wait for it to
+        # get propagated back again
+        # Note that the component must be running in order to reset the state
         if not self._system.settings.require("allow_reset"):
             raise ValueError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
         if self._memberlist_name:
+            self._done_waiting_for_reset.clear()
             self._kubernetes_api.patch_namespaced_custom_object(
                 group=KUBERNETES_GROUP,
                 version="v1",
@@ -109,6 +117,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
                     "spec": {"members": []},
                 },
             )
+            self._done_waiting_for_reset.wait(5.0)
 
     @override
     def get_memberlist(self) -> Memberlist:
@@ -158,6 +167,12 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
                             response_spec
                         )
                     self._notify(self._curr_memberlist)
+                    if (
+                        self._system.settings.require("allow_reset")
+                        and not self._done_waiting_for_reset.is_set()
+                        and len(self._curr_memberlist) > 0
+                    ):
+                        self._done_waiting_for_reset.set()
 
             # Watch the custom resource for changes
             # Watch with a timeout and retry so we can gracefully stop this if needed
