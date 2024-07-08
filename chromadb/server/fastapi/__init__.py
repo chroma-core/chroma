@@ -341,7 +341,7 @@ class FastAPI(Server):
         if not self.authn_provider:
             return (tenant, database)
 
-        user_identity = self.authn_provider.authenticate_or_raise(headers)
+        user_identity = self.authn_provider.authenticate_or_raise(dict(headers))
 
         (
             new_tenant,
