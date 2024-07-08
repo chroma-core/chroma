@@ -1,5 +1,8 @@
 from typing import Optional, Sequence, TypeVar, Type
 from abc import abstractmethod
+
+from overrides import override
+
 from chromadb.types import (
     Collection,
     MetadataEmbeddingRecord,
@@ -54,6 +57,12 @@ class SegmentImplementation(Component):
         """Delete the segment and all its data"""
         ...
 
+    @classmethod
+    @abstractmethod
+    def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
+        """Delete the segment and all its data without instantiating the segment"""
+        pass
+
 
 S = TypeVar("S", bound=SegmentImplementation)
 
@@ -71,6 +80,12 @@ class MetadataReader(SegmentImplementation):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
+        pass
+
+    @classmethod
+    @override
+    def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
+        """Delete the segment and all its data without instantiating the segment"""
         pass
 
 
@@ -91,6 +106,17 @@ class VectorReader(SegmentImplementation):
     ) -> Sequence[Sequence[VectorQueryResult]]:
         """Given a vector query, return the top-k nearest neighbors for vector in the
         query."""
+        pass
+
+    @classmethod
+    @override
+    def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
+        """Delete the segment and all its data without instantiating the segment"""
+        pass
+
+    @override
+    def delete(self) -> None:
+        """Delete the segment and all its data"""
         pass
 
 

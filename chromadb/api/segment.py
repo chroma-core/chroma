@@ -333,7 +333,6 @@ class SegmentAPI(ServerAPI):
         existing = self._sysdb.get_collections(
             name=name, tenant=tenant, database=database
         )
-
         if existing:
             self._sysdb.delete_collection(
                 existing[0]["id"], tenant=tenant, database=database
