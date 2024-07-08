@@ -1,0 +1,44 @@
+name: Run (intensive) tests nightly
+on:
+  # todo: remove
+  push:
+  schedule:
+      # 2:15 AM PDT, offseted by a few minutes because:
+      # "The schedule event can be delayed during periods of high loads of GitHub Actions workflow runs. High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped."
+      - cron: '15 9 * * *'
+
+jobs:
+  test-distributed:
+    strategy:
+      fail-fast: false
+      matrix:
+        test-globs: ["chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_embeddings.py"]
+    runs-on: "depot-ubuntu-22.04-8"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/python
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: slow
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}"
+          # Output the logs zip file path as a job output
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v2
+        with:
+          name: logs
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
