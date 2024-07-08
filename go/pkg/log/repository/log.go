@@ -35,7 +35,6 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	}()
 	collection, err = queriesWithTx.GetCollectionForUpdate(ctx, collectionId)
 	if err != nil {
-		trace_log.Error("Error in fetching collection from collection table", zap.Error(err))
 		// If no row found, insert one.
 		if errors.Is(err, pgx.ErrNoRows) {
 			trace_log.Info("No rows found in the collection table for collection", zap.String("collectionId", collectionId))

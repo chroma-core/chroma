@@ -9,7 +9,6 @@ import time
 from chromadb.api.types import QueryResult
 from chromadb.test.conftest import (
     COMPACTION_SLEEP,
-    MEMBERLIST_SLEEP,
     skip_if_not_cluster,
 )
 
@@ -21,11 +20,6 @@ def test_add(
     api: ServerAPI,
 ) -> None:
     api.reset()
-
-    # Once we reset, we have to wait for sometime to let the memberlist on the frontends
-    # propagate, there isn't a clean way to do this so we sleep for a configured amount of time
-    # to ensure that the memberlist has propagated
-    time.sleep(MEMBERLIST_SLEEP)
 
     collection = api.create_collection(
         name="test",
@@ -71,8 +65,6 @@ def test_add(
 @skip_if_not_cluster()
 def test_add_include_all_with_compaction_delay(api: ServerAPI) -> None:
     api.reset()
-
-    time.sleep(MEMBERLIST_SLEEP)
 
     collection = api.create_collection(
         name="test_add_include_all_with_compaction_delay"
