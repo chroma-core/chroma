@@ -530,6 +530,7 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     state.ann_accuracy()
     state.teardown()  # type: ignore[no-untyped-call]
 
+
 def test_add_delete_add(api: ServerAPI) -> None:
     from chromadb.test.property.strategies import hashing_embedding_function
     import numpy as np
@@ -658,7 +659,6 @@ def test_add_delete_add(api: ServerAPI) -> None:
     state.ann_accuracy()
     state.count()
     state.fields_match()
-
 
 
 def test_multi_add(client: ClientAPI) -> None:
