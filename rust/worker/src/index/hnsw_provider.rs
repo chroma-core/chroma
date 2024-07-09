@@ -1,17 +1,21 @@
+use super::config::HnswProviderConfig;
 use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
+use crate::cache::cache::Cache;
+use crate::config::Configurable;
 use crate::errors::ErrorCodes;
 use crate::index::types::PersistentIndex;
 use crate::storage::stream::ByteStreamItem;
 use crate::{errors::ChromaError, storage::Storage, types::Segment};
+use async_trait::async_trait;
 use futures::stream;
 use futures::stream::StreamExt;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tracing::{instrument, Instrument, Span};
@@ -29,7 +33,7 @@ const FILES: [&'static str; 4] = [
 
 #[derive(Clone)]
 pub(crate) struct HnswIndexProvider {
-    cache: Arc<RwLock<HashMap<Uuid, Arc<RwLock<HnswIndex>>>>>,
+    cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
     pub(crate) temporary_storage_path: PathBuf,
     storage: Storage,
 }
@@ -38,25 +42,45 @@ impl Debug for HnswIndexProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "HnswIndexProvider {{ temporary_storage_path: {:?}, cache: {} }}",
+            "HnswIndexProvider {{ temporary_storage_path: {:?} }}",
             self.temporary_storage_path,
-            self.cache.read().len(),
         )
     }
 }
 
+#[async_trait]
+impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
+    async fn try_from_config(
+        config: &(HnswProviderConfig, Storage),
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let (hnsw_config, storage) = config;
+        let cache = Cache::new(&hnsw_config.hnsw_cache_config);
+        Ok(Self {
+            cache,
+            storage: storage.clone(),
+            temporary_storage_path: PathBuf::from(&hnsw_config.hnsw_temporary_path),
+        })
+    }
+}
+
 impl HnswIndexProvider {
-    pub(crate) fn new(storage: Storage, storage_path: PathBuf) -> Self {
+    pub(crate) fn new(
+        storage: Storage,
+        storage_path: PathBuf,
+        cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
+    ) -> Self {
         Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache,
             storage,
             temporary_storage_path: storage_path,
         }
     }
 
     pub(crate) fn get(&self, id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
-        let cache = self.cache.read();
-        cache.get(id).cloned()
+        match self.cache.get(id) {
+            Some(index) => Some(index.clone()),
+            None => None,
+        }
     }
 
     fn format_key(&self, id: &Uuid, file: &str) -> String {
@@ -98,7 +122,7 @@ impl HnswIndexProvider {
         };
 
         let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path);
-        let hnsw_config = match hnsw_config {
+        match hnsw_config {
             Ok(hnsw_config) => hnsw_config,
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderForkError::HnswConfigError(*e)));
@@ -117,8 +141,7 @@ impl HnswIndexProvider {
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
-                let mut cache = self.cache.write();
-                cache.insert(new_id, index.clone());
+                self.cache.insert(new_id, index.clone());
                 Ok(index)
             }
             Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
@@ -246,8 +269,7 @@ impl HnswIndexProvider {
         match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
-                let mut cache = self.cache.write();
-                cache.insert(*id, index.clone());
+                self.cache.insert(*id, index.clone());
                 Ok(index)
             }
             Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
@@ -264,7 +286,6 @@ impl HnswIndexProvider {
     // Cases
     // A query comes in and the index is in the cache -> we can query the index based on segment files id (Same as compactor case 3 where we have the index)
     // A query comes in and the index is not in the cache -> we need to load the index from s3 based on the segment files id
-
     pub(crate) fn create(
         &self,
         // TODO: This should not take Segment. The index layer should not know about the segment concept
@@ -295,7 +316,6 @@ impl HnswIndexProvider {
             }
         };
 
-        let mut cache = self.cache.write();
         let index = match HnswIndex::init(&index_config, Some(&hnsw_config), id) {
             Ok(index) => index,
             Err(e) => {
@@ -303,13 +323,12 @@ impl HnswIndexProvider {
             }
         };
         let index = Arc::new(RwLock::new(index));
-        cache.insert(id, index.clone());
+        self.cache.insert(id, index.clone());
         Ok(index)
     }
 
     pub(crate) fn commit(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderCommitError>> {
-        let cache = self.cache.read();
-        let index = match cache.get(id) {
+        let index = match self.cache.get(id) {
             Some(index) => index,
             None => {
                 return Err(Box::new(HnswIndexProviderCommitError::NoIndexFound(*id)));
@@ -330,8 +349,8 @@ impl HnswIndexProvider {
         // Scope to drop the cache lock before we await to write to s3
         // TODO: since we commit(), we don't need to save the index here
         {
-            let cache = self.cache.read();
-            let index = match cache.get(id) {
+            // let cache = self.cache.read();
+            let index = match self.cache.get(id) {
                 Some(index) => index,
                 None => {
                     return Err(Box::new(HnswIndexProviderFlushError::NoIndexFound(*id)));
@@ -496,9 +515,11 @@ pub(crate) enum HnswIndexProviderFileError {
 mod tests {
     use super::*;
     use crate::{
+        cache::config::{CacheConfig, UnboundedCacheConfig},
         storage::{local::LocalStorage, Storage},
         types::SegmentType,
     };
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_fork() {
@@ -509,8 +530,8 @@ mod tests {
         std::fs::create_dir_all(&hnsw_tmp_path).unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
-
-        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache);
         let segment = Segment {
             id: Uuid::new_v4(),
             r#type: SegmentType::HnswDistributed,

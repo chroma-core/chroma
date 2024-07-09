@@ -222,21 +222,23 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             assignment_policy,
         );
 
-        // TODO: real path
-        let path = PathBuf::from("~/tmp");
         // TODO: hnsw index provider should be injected somehow
         let blockfile_provider = BlockfileProvider::try_from_config(&(
             config.blockfile_provider.clone(),
             storage.clone(),
         ))
         .await?;
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
+                .await?;
+
         Ok(CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
             blockfile_provider,
-            HnswIndexProvider::new(storage.clone(), path),
+            hnsw_index_provider,
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
             min_compaction_size,
@@ -497,6 +499,7 @@ mod tests {
 
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let hnsw_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let mut manager = CompactionManager::new(
             scheduler,
             log,
@@ -508,7 +511,11 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             ),
-            HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
+            HnswIndexProvider::new(
+                storage,
+                PathBuf::from(tmpdir.path().to_str().unwrap()),
+                hnsw_cache,
+            ),
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,
