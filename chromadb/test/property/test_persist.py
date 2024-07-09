@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 from multiprocessing.connection import Connection
+import multiprocessing.context
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
@@ -25,6 +26,7 @@ from hypothesis.stateful import (
 import os
 import shutil
 import tempfile
+from chromadb.api.client import Client as ClientCreator
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
@@ -71,13 +73,13 @@ def test_persist(
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
     system_1 = System(settings)
-    api_1 = system_1.instance(ServerAPI)
     system_1.start()
+    client_1 = ClientCreator.from_system(system_1)
 
-    api_1.reset()
-    coll = api_1.create_collection(
+    client_1.reset()
+    coll = client_1.create_collection(
         name=collection_strategy.name,
-        metadata=collection_strategy.metadata,
+        metadata=collection_strategy.metadata,  # type: ignore[arg-type]
         embedding_function=collection_strategy.embedding_function,
     )
 
@@ -94,14 +96,14 @@ def test_persist(
     )
 
     system_1.stop()
-    del api_1
+    del client_1
     del system_1
 
     system_2 = System(settings)
-    api_2 = system_2.instance(ServerAPI)
     system_2.start()
+    client_2 = ClientCreator.from_system(system_2)
 
-    coll = api_2.get_collection(
+    coll = client_2.get_collection(
         name=collection_strategy.name,
         embedding_function=collection_strategy.embedding_function,
     )
@@ -116,7 +118,7 @@ def test_persist(
     )
 
     system_2.stop()
-    del api_2
+    del client_2
     del system_2
 
 
@@ -128,12 +130,12 @@ def load_and_check(
 ) -> None:
     try:
         system = System(settings)
-        api = system.instance(ServerAPI)
         system.start()
+        client = ClientCreator.from_system(system)
 
-        coll = api.get_collection(
+        coll = client.get_collection(
             name=collection_name,
-            embedding_function=strategies.not_implemented_embedding_function(),
+            embedding_function=strategies.not_implemented_embedding_function(),  # type: ignore[arg-type]
         )
         invariants.count(coll, record_set)
         invariants.metadatas_match(coll, record_set)
@@ -147,7 +149,7 @@ def load_and_check(
         raise e
 
 
-def get_multiprocessing_context():
+def get_multiprocessing_context():  # type: ignore[no-untyped-def]
     try:
         # Run the invariants in a new process to bypass any shared state/caching (which would defeat the purpose of the test)
         # (forkserver is used because it's much faster than spawn—it will spawn a new, minimal singleton process and then fork that singleton)
@@ -169,21 +171,21 @@ MIN_STATE_CHANGES_BEFORE_PERSIST = 5
 
 
 class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
-    def __init__(self, api: ClientAPI, settings: Settings):
-        self.api = api
+    def __init__(self, client: ClientAPI, settings: Settings):
+        self.client = client
         self.settings = settings
         self.min_state_changes_left_before_persisting = MIN_STATE_CHANGES_BEFORE_PERSIST
-        self.api.reset()
-        super().__init__(self.api)
+        self.client.reset()
+        super().__init__(self.client)
 
     @initialize(collection=embedding_collection_st, batch_size=st.integers(min_value=3, max_value=2000), sync_threshold=st.integers(min_value=3, max_value=2000))  # type: ignore
     def initialize(
         self, collection: strategies.Collection, batch_size: int, sync_threshold: int
     ):
-        self.api.reset()
-        self.collection = self.api.create_collection(
+        self.client.reset()
+        self.collection = self.client.create_collection(
             name=collection.name,
-            metadata=collection.metadata,
+            metadata=collection.metadata,  # type: ignore[arg-type]
             embedding_function=collection.embedding_function,
         )
         self.embedding_function = collection.embedding_function
@@ -203,7 +205,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         collection_name = self.collection.name
         conn1, conn2 = multiprocessing.Pipe()
-        ctx = get_multiprocessing_context()
+        ctx = get_multiprocessing_context()  # type: ignore[no-untyped-call]
         p = ctx.Process(
             target=load_and_check,
             args=(self.settings, collection_name, self.record_set_state, conn2),
@@ -226,14 +228,14 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
             self.min_state_changes_left_before_persisting -= 1
 
     def teardown(self) -> None:
-        self.api.reset()
+        self.client.reset()
 
 
 def test_persist_embeddings_state(
     caplog: pytest.LogCaptureFixture, settings: Settings
 ) -> None:
     caplog.set_level(logging.ERROR)
-    api = chromadb.Client(settings)
+    client = chromadb.Client(settings)
     run_state_machine_as_test(
-        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api),
+        lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
     )  # type: ignore

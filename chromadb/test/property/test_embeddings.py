@@ -7,9 +7,9 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import ID, Include, IDs, validate_embeddings
+from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings
 import chromadb.errors as errors
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -49,11 +49,11 @@ def print_traces() -> None:
         print(f"{key}: {value}")
 
 
-dtype_shared_st: st.SearchStrategy[
+dtype_shared_st: st.SearchStrategy[  # type: ignore[type-arg]
     Union[np.float16, np.float32, np.float64]
 ] = st.shared(st.sampled_from(strategies.float_types), key="dtype")
 
-dimension_shared_st: st.SearchStrategy[int] = st.shared(
+dimension_shared_st: st.SearchStrategy[int] = st.shared(  # type: ignore[type-arg]
     st.integers(min_value=2, max_value=2048), key="dimension"
 )
 
@@ -72,19 +72,19 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 
 class EmbeddingStateMachineBase(RuleBasedStateMachine):
     collection: Collection
-    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")  # type: ignore[type-arg]
 
-    def __init__(self, api: ServerAPI):
+    def __init__(self, client: ClientAPI):
         super().__init__()
-        self.api = api
+        self.client = client
         self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
-        reset(self.api)
-        self.collection = self.api.create_collection(
+        reset(self.client)
+        self.collection = self.client.create_collection(
             name=collection.name,
-            metadata=collection.metadata,
+            metadata=collection.metadata,  # type: ignore[arg-type]
             embedding_function=collection.embedding_function,
         )
         self.embedding_function = collection.embedding_function
@@ -99,7 +99,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         target=embedding_ids,
         record_set=strategies.recordsets(collection_st),
     )
-    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
+    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:  # type: ignore[type-arg]
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
 
@@ -129,12 +129,12 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 if normalized_record_set["embeddings"]
                 else None,
             }
-            self.collection.add(**normalized_record_set)
+            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
             return multiple(*filtered_record_set["ids"])
 
         else:
-            self.collection.add(**normalized_record_set)
+            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
@@ -162,7 +162,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
 
-        self.collection.update(**record_set)
+        self.collection.update(**record_set)  # type: ignore[arg-type]
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
@@ -179,7 +179,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
 
-        self.collection.upsert(**record_set)
+        self.collection.upsert(**record_set)  # type: ignore[arg-type]
         self._upsert_embeddings(record_set)
 
     @invariant()
@@ -203,10 +203,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def fields_match(self) -> None:
-        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)
-        invariants.embeddings_match(self.collection, self.record_set_state)
-        invariants.metadatas_match(self.collection, self.record_set_state)
-        invariants.documents_match(self.collection, self.record_set_state)
+        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)  # type: ignore[assignment]
+        invariants.embeddings_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
+        invariants.metadatas_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
+        invariants.documents_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
 
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
@@ -240,7 +240,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                         )
                         if normalized_record_set["metadatas"][idx] is not None:
                             record_set_state.update(
-                                normalized_record_set["metadatas"][idx]
+                                normalized_record_set["metadatas"][idx]  # type: ignore[arg-type]
                             )
                         else:
                             # None in the update metadata is a no-op
@@ -296,17 +296,17 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
 
 class EmbeddingStateMachine(EmbeddingStateMachineBase):
-    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")  # type: ignore[type-arg]
 
-    def __init__(self, api: ServerAPI):
-        super().__init__(api)
+    def __init__(self, client: ClientAPI):
+        super().__init__(client)
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
         super().initialize(collection)
         print("[test_embeddings] Reset")
         self.log_operation_count = 0
-        self.unique_ids_in_log = set()
+        self.unique_ids_in_log: Set[ID] = set()
         self.collection_version = self.collection.get_model()["version"]
 
     @precondition(
@@ -316,7 +316,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     )
     @rule()
     def wait_for_compaction(self) -> None:
-        current_version = get_collection_version(self.api, self.collection.name)
+        current_version = get_collection_version(self.client, self.collection.name)
         assert current_version >= self.collection_version
         # This means that there was a compaction from the last time this was
         # invoked. Ok to start all over again.
@@ -331,7 +331,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         else:
             print("[test_embeddings][wait_for_compaction] wait for version to increase")
             new_version = wait_for_version_increase(
-                self.api, self.collection.name, current_version, additional_time=240
+                self.client, self.collection.name, current_version, additional_time=240
             )
             # Everything got compacted.
             self.log_operation_count = 0
@@ -342,7 +342,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         target=embedding_ids,
         record_set=strategies.recordsets(collection_st),
     )
-    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
+    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:  # type: ignore[type-arg]
         res = super().add_embeddings(record_set)
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -413,10 +413,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
                 self.unique_ids_in_log.add(id)
 
 
-def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
+def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
-        lambda: EmbeddingStateMachine(api),
+        lambda: EmbeddingStateMachine(client),
         settings=settings(
             deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
         ),
@@ -424,8 +424,8 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> N
     print_traces()
 
 
-def test_add_then_delete_n_minus_1(api: ServerAPI) -> None:
-    state = EmbeddingStateMachine(api)
+def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
+    state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
             name="A00",
@@ -474,11 +474,11 @@ def test_add_then_delete_n_minus_1(api: ServerAPI) -> None:
     state.count()
     state.fields_match()
     state.no_duplicates()
-    state.teardown()
+    state.teardown()  # type: ignore[no-untyped-call]
 
 
-def test_update_none(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
-    state = EmbeddingStateMachine(api)
+def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
             name="A00",
@@ -528,18 +528,18 @@ def test_update_none(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
         }
     )
     state.ann_accuracy()
-    state.teardown()
+    state.teardown()  # type: ignore[no-untyped-call]
 
 
-def test_multi_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
-    coll.add(ids=["a"], embeddings=[[0.0]])
+def test_multi_add(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="foo")
+    coll.add(ids=["a"], embeddings=[[0.0]])  # type: ignore[arg-type]
     assert coll.count() == 1
 
     # after the sqlite refactor - add silently ignores duplicates, no exception is raised
     # partial adds are supported - i.e we will add whatever we can in the request
-    coll.add(ids=["a"], embeddings=[[0.0]])
+    coll.add(ids=["a"], embeddings=[[0.0]])  # type: ignore[arg-type]
 
     assert coll.count() == 1
 
@@ -550,47 +550,47 @@ def test_multi_add(api: ServerAPI) -> None:
     assert coll.count() == 0
 
 
-def test_dup_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_dup_add(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
-        coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
+        coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])  # type: ignore[arg-type]
     with pytest.raises(errors.DuplicateIDError):
-        coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
+        coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])  # type: ignore[arg-type]
 
 
-def test_query_without_add(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
-    fields: Include = ["documents", "metadatas", "embeddings", "distances"]
+def test_query_without_add(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="foo")
+    fields: Include = ["documents", "metadatas", "embeddings", "distances"]  # type: ignore[list-item]
     N = np.random.randint(1, 2000)
     K = np.random.randint(1, 100)
     results = coll.query(
         query_embeddings=np.random.random((N, K)).tolist(), include=fields
     )
     for field in fields:
-        field_results = results[field]
+        field_results = results[field]  # type: ignore[literal-required]
         assert field_results is not None
         assert all([len(result) == 0 for result in field_results])
 
 
-def test_get_non_existent(api: ServerAPI) -> None:
-    reset(api)
-    coll = api.create_collection(name="foo")
-    result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
+def test_get_non_existent(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="foo")
+    result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])  # type: ignore[list-item]
     assert len(result["ids"]) == 0
-    assert len(result["metadatas"]) == 0
-    assert len(result["documents"]) == 0
-    assert len(result["embeddings"]) == 0
+    assert len(result["metadatas"]) == 0  # type: ignore[arg-type]
+    assert len(result["documents"]) == 0  # type: ignore[arg-type]
+    assert len(result["embeddings"]) == 0  # type: ignore[arg-type]
 
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api: ServerAPI) -> None:
-    reset(api)
+def test_escape_chars_in_ids(client: ClientAPI) -> None:
+    reset(client)
     id = "\x1f"
-    coll = api.create_collection(name="foo")
-    coll.add(ids=[id], embeddings=[[0.0]])
+    coll = client.create_collection(name="foo")
+    coll.add(ids=[id], embeddings=[[0.0]])  # type: ignore[arg-type]
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
@@ -606,9 +606,9 @@ def test_escape_chars_in_ids(api: ServerAPI) -> None:
         {"where_document": {}, "where": {}},
     ],
 )
-def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_empty_fails(client: ClientAPI, kwargs: Any) -> None:
+    reset(client)
+    coll = client.create_collection(name="foo")
     with pytest.raises(Exception) as e:
         coll.delete(**kwargs)
     assert "You must provide either ids, where, or where_document to delete." in str(e)
@@ -629,9 +629,9 @@ def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
         },
     ],
 )
-def test_delete_success(api: ServerAPI, kwargs: dict):
-    reset(api)
-    coll = api.create_collection(name="foo")
+def test_delete_success(client: ClientAPI, kwargs: Any) -> None:
+    reset(client)
+    coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
 
@@ -688,7 +688,7 @@ def test_autocasting_validate_embeddings_incompatible_types(
 
 
 def test_0dim_embedding_validation() -> None:
-    embds = [[]]
+    embds: Embeddings = [[]]
     with pytest.raises(ValueError) as e:
         validate_embeddings(embds)
     assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)
