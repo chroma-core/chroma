@@ -178,8 +178,6 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
-        print(f"Called with get_or_create: {get_or_create}, created: {created}")
-
         # TODO: wrap sysdb call in try except and log error if it fails
         if created:
             segments = self._manager.create_segments(coll)
