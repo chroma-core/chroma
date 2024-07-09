@@ -210,9 +210,10 @@ func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*mo
 	return result, nil
 }
 
-func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, error) {
+func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
 	var result *model.Collection
 
+	created := false
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// insert collection
 		databaseName := createCollection.DatabaseName
@@ -254,6 +255,8 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			} else {
 				return common.ErrCollectionUniqueConstraintViolation
 			}
+		} else {
+			created = true
 		}
 
 		dbCollection := &dbmodel.Collection{
@@ -300,10 +303,10 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	})
 	if err != nil {
 		log.Error("error creating collection", zap.Error(err))
-		return nil, err
+		return nil, false, err
 	}
 	log.Info("collection created", zap.Any("collection", result))
-	return result, nil
+	return result, created, nil
 }
 
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {

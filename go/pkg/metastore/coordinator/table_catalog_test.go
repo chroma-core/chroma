@@ -64,7 +64,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	}).Return(nil)
 
 	// call the CreateCollection method
-	_, err := catalog.CreateCollection(context.Background(), collection, ts)
+	_, _, err := catalog.CreateCollection(context.Background(), collection, ts)
 
 	// assert that the method returned no error
 	assert.NoError(t, err)

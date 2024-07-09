@@ -56,7 +56,7 @@ func (suite *APIsTestSuite) SetupTest() {
 	}
 	suite.coordinator = c
 	for _, collection := range suite.sampleCollections {
-		_, errCollectionCreation := c.CreateCollection(ctx, &model.CreateCollection{
+		_, _, errCollectionCreation := c.CreateCollection(ctx, &model.CreateCollection{
 			ID:           collection.ID,
 			Name:         collection.Name,
 			Metadata:     collection.Metadata,
@@ -104,7 +104,7 @@ func testCollection(t *rapid.T) {
 				}
 			}).Draw(t, "collection")
 
-			_, err := c.CreateCollection(ctx, collection)
+			_, _, err := c.CreateCollection(ctx, collection)
 			if err != nil {
 				if err == common.ErrCollectionNameEmpty && collection.Name == "" {
 					t.Logf("expected error for empty collection name")
@@ -265,7 +265,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.Equal(suite.sampleCollections, results)
 
 	// Duplicate create fails
-	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[0].ID,
 		Name:         suite.sampleCollections[0].Name,
 		TenantID:     suite.tenantName,
@@ -363,6 +363,23 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	suite.Equal([]*model.Collection{coll}, resultList)
 }
 
+func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
+	// GetOrCreateCollection already existing collection returns false for created
+	ctx := context.Background()
+	coll := suite.sampleCollections[0]
+	_, created, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           coll.ID,
+		Name:         coll.Name,
+		Metadata:     coll.Metadata,
+		Dimension:    coll.Dimension,
+		GetOrCreate:  true,
+		TenantID:     coll.TenantID,
+		DatabaseName: coll.DatabaseName,
+	})
+	suite.NoError(err)
+	suite.False(created)
+}
+
 func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	ctx := context.Background()
 	newDatabaseName := "test_apis_CreateUpdateWithDatabase"
@@ -376,7 +393,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 
 	suite.sampleCollections[0].ID = types.NewUniqueID()
 	suite.sampleCollections[0].Name = suite.sampleCollections[0].Name + "1"
-	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[0].ID,
 		Name:         suite.sampleCollections[0].Name,
 		Metadata:     suite.sampleCollections[0].Metadata,
@@ -430,7 +447,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		collection.Name = collection.Name + "1"
 		collection.TenantID = suite.tenantName
 		collection.DatabaseName = newDatabaseName
-		_, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 			ID:           collection.ID,
 			Name:         collection.Name,
 			Metadata:     collection.Metadata,
@@ -499,7 +516,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	// Create a new collection in the new tenant
 	suite.sampleCollections[0].ID = types.NewUniqueID()
 	suite.sampleCollections[0].Name = suite.sampleCollections[0].Name + "1"
-	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[0].ID,
 		Name:         suite.sampleCollections[0].Name,
 		Metadata:     suite.sampleCollections[0].Metadata,
@@ -512,7 +529,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	// Create a new collection in the default tenant
 	suite.sampleCollections[1].ID = types.NewUniqueID()
 	suite.sampleCollections[1].Name = suite.sampleCollections[1].Name + "2"
-	_, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
 		ID:           suite.sampleCollections[1].ID,
 		Name:         suite.sampleCollections[1].Name,
 		Metadata:     suite.sampleCollections[1].Metadata,

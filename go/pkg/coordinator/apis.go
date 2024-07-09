@@ -17,7 +17,7 @@ import (
 type ICoordinator interface {
 	common.Component
 	ResetState(ctx context.Context) error
-	CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error)
+	CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, bool, error)
 	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, dataName string, limit *int32, offset *int32) ([]*model.Collection, error)
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
 	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
@@ -70,13 +70,13 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 	return tenant, nil
 }
 
-func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error) {
+func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, bool, error) {
 	log.Info("create collection", zap.Any("createCollection", createCollection))
-	collection, err := s.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)
+	collection, created, err := s.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return collection, nil
+	return collection, created, nil
 }
 
 func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
