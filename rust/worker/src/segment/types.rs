@@ -449,6 +449,12 @@ impl<'me> LogMaterializer<'me> {
     pub(crate) async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
+        // Trace the total_len since len() iterates over the entire chunk
+        // and we don't want to do that just to trace the length.
+        tracing::info!(
+            "Total length of logs in materializer: {}",
+            self.logs.total_len()
+        );
         let next_offset_id;
         match self.curr_offset_id.as_ref() {
             Some(curr_offset_id) => {
