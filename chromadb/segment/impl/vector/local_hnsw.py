@@ -318,6 +318,7 @@ class LocalHnswSegment(VectorReader):
                         batch.apply(record, False)
                     else:
                         logger.warning(f"Add of existing embedding ID: {id}")
+                        batch.max_seq_id = max(batch.max_seq_id, record["log_offset"])
                 elif op == Operation.UPSERT:
                     batch.apply(record, label is not None)
 
