@@ -20,6 +20,7 @@ from chromadb.auth import (
     AuthError,
 )
 from chromadb.config import System
+from chromadb.errors import ChromaAuthError
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -231,6 +232,4 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         time.sleep(
             random.uniform(0.001, 0.005)
         )  # add some jitter to avoid timing attacks
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise ChromaAuthError()

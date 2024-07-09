@@ -7,7 +7,6 @@ import traceback
 import bcrypt
 import logging
 
-from fastapi import HTTPException
 from overrides import override
 from pydantic import SecretStr
 
@@ -19,6 +18,7 @@ from chromadb.auth import (
     AuthError,
 )
 from chromadb.config import System
+from chromadb.errors import ChromaAuthError
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -143,4 +143,4 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
         time.sleep(
             random.uniform(0.001, 0.005)
         )  # add some jitter to avoid timing attacks
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise ChromaAuthError()
