@@ -272,8 +272,8 @@ Existing collections can be retrieved by name with `.getCollection`, and deleted
 
 ```javascript
 const collection = await client.getCollection({ name: "test" }); // Get a collection object from an existing collection, by name. Will raise an exception of it's not found.
-const collection = await client.getOrCreateCollection({ name: "test" }); // Get a collection object from an existing collection, by name. If it doesn't exist, create it.
-await client.deleteCollection({ name: "my_collection" }); // Delete a collection and all associated embeddings, documents, and metadata. ⚠️ This is destructive and not reversible
+collection = await client.getOrCreateCollection({ name: "test" }); // Get a collection object from an existing collection, by name. If it doesn't exist, create it.
+await client.deleteCollection(collection); // Delete a collection and all associated embeddings, documents, and metadata. ⚠️ This is destructive and not reversible
 ```
 
 {% /tab %}
