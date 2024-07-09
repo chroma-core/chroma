@@ -137,6 +137,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
         }
+        tracing::info!("[PullLogsOperator]: Read {} records", result.len());
         // Convert to DataChunk
         let data_chunk = Chunk::new(result.into());
         Ok(PullLogsOutput::new(data_chunk))
