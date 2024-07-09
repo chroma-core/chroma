@@ -65,15 +65,17 @@ impl ChromaError for ChannelError {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum ChannelRequestError {
+#[derive(Error, Debug, PartialEq)]
+pub enum RequestError {
     #[error("Failed to send request")]
-    RequestError,
+    SendError,
     #[error("Failed to receive response")]
-    ResponseError,
+    ReceiveError,
+    #[error("Message handler panicked")]
+    HandlerPanic(Option<String>),
 }
 
-impl ChromaError for ChannelRequestError {
+impl ChromaError for RequestError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }
