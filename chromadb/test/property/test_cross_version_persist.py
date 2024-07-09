@@ -167,6 +167,15 @@ def install(pkg: str, path: str) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
     print(f"Installing chromadb version {pkg} to {path}")
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "cache",
+            "purge",
+        ]
+    )
     return subprocess.check_call(
         [
             sys.executable,
@@ -176,6 +185,7 @@ def install(pkg: str, path: str) -> int:
             "-q",
             "install",
             pkg,
+            "--no-binary=chroma-hnswlib",
             "--target={}".format(path),
         ]
     )
