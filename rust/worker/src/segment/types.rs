@@ -834,6 +834,524 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
+    async fn test_materializer_add_delete_upsert() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("doc1")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log failed");
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let mut update_metadata = HashMap::new();
+        update_metadata.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new_world")),
+        );
+        let data = vec![
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata),
+                    document: Some(String::from("new_doc1")),
+                    operation: Operation::Upsert,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            .await
+            .expect("Error creating segment reader");
+        let materializer = LogMaterializer {
+            record_segment_reader: Some(reader),
+            logs: data,
+            curr_offset_id: None,
+        };
+        let res = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        let mut res_vec = vec![];
+        for (record, _) in res.iter() {
+            res_vec.push(record);
+        }
+        res_vec.sort_by(|x, y| x.merged_user_id_ref().cmp(y.merged_user_id_ref()));
+        assert_eq!(1, res_vec.len());
+        let emb_1 = res_vec[0];
+        assert_eq!(1, emb_1.offset_id);
+        assert_eq!("new_doc1", emb_1.merged_document_ref().unwrap());
+        assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
+        assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
+        let mut res_metadata = HashMap::new();
+        res_metadata.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new_world")),
+        );
+        assert_eq!(res_metadata, emb_1.merged_metadata());
+        assert_eq!(
+            MaterializedLogOperation::OverwriteExisting,
+            emb_1.final_operation
+        );
+        // Now write this, read again and validate.
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        segment_writer
+            .apply_materialized_log_chunk(res)
+            .await
+            .expect("Error applying materialized log chunk");
+        let flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        // Read.
+        let segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment reader");
+        let all_data = segment_reader
+            .get_all_data()
+            .await
+            .expect("Get all data failed");
+        assert_eq!(all_data.len(), 1);
+        let record = &all_data[0];
+        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.document, Some("new_doc1"));
+        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.metadata, Some(res_metadata));
+    }
+
+    #[tokio::test]
+    async fn test_materializer_add_upsert() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("doc1")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log failed");
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let mut update_metadata = HashMap::new();
+        update_metadata.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new_world")),
+        );
+        let data = vec![LogRecord {
+            log_offset: 2,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: Some(vec![7.0, 8.0, 9.0]),
+                encoding: None,
+                metadata: Some(update_metadata),
+                document: None,
+                operation: Operation::Upsert,
+            },
+        }];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            .await
+            .expect("Error creating segment reader");
+        let materializer = LogMaterializer {
+            record_segment_reader: Some(reader),
+            logs: data,
+            curr_offset_id: None,
+        };
+        let res = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        let mut res_vec = vec![];
+        for (record, _) in res.iter() {
+            res_vec.push(record);
+        }
+        res_vec.sort_by(|x, y| x.merged_user_id_ref().cmp(y.merged_user_id_ref()));
+        assert_eq!(1, res_vec.len());
+        let emb_1 = res_vec[0];
+        assert_eq!(1, emb_1.offset_id);
+        assert_eq!("doc1", emb_1.merged_document_ref().unwrap());
+        assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
+        assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
+        let mut res_metadata = HashMap::new();
+        res_metadata.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new_world")),
+        );
+        res_metadata.insert(
+            String::from("bye"),
+            MetadataValue::Str(String::from("world")),
+        );
+        assert_eq!(res_metadata, emb_1.merged_metadata());
+        assert_eq!(
+            MaterializedLogOperation::UpdateExisting,
+            emb_1.final_operation
+        );
+        // Now write this, read again and validate.
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        segment_writer
+            .apply_materialized_log_chunk(res)
+            .await
+            .expect("Error applying materialized log chunk");
+        let flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        // Read.
+        let segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment reader");
+        let all_data = segment_reader
+            .get_all_data()
+            .await
+            .expect("Get all data failed");
+        assert_eq!(all_data.len(), 1);
+        let record = &all_data[0];
+        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.document, Some("doc1"));
+        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.metadata, Some(res_metadata));
+    }
+
+    #[tokio::test]
+    async fn test_materializer_add_delete_upsert_update() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let arrow_blockfile_provider =
+            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("doc1")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log failed");
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let mut update_metadata = HashMap::new();
+        update_metadata.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new_world")),
+        );
+        let data = vec![
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata),
+                    document: None,
+                    operation: Operation::Upsert,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("new_doc1")),
+                    operation: Operation::Update,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            .await
+            .expect("Error creating segment reader");
+        let materializer = LogMaterializer {
+            record_segment_reader: Some(reader),
+            logs: data,
+            curr_offset_id: None,
+        };
+        let res = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        let mut res_vec = vec![];
+        for (record, _) in res.iter() {
+            res_vec.push(record);
+        }
+        res_vec.sort_by(|x, y| x.merged_user_id_ref().cmp(y.merged_user_id_ref()));
+        assert_eq!(1, res_vec.len());
+        let emb_1 = res_vec[0];
+        assert_eq!(1, emb_1.offset_id);
+        assert_eq!("new_doc1", emb_1.merged_document_ref().unwrap());
+        assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
+        assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
+        let mut res_metadata = HashMap::new();
+        res_metadata.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new_world")),
+        );
+        assert_eq!(res_metadata, emb_1.merged_metadata());
+        assert_eq!(
+            MaterializedLogOperation::OverwriteExisting,
+            emb_1.final_operation
+        );
+        // Now write this, read again and validate.
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        segment_writer
+            .apply_materialized_log_chunk(res)
+            .await
+            .expect("Error applying materialized log chunk");
+        let flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        // Read.
+        let segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment reader");
+        let all_data = segment_reader
+            .get_all_data()
+            .await
+            .expect("Get all data failed");
+        assert_eq!(all_data.len(), 1);
+        let record = &all_data[0];
+        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.document, Some("new_doc1"));
+        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.metadata, Some(res_metadata));
+    }
+
+    #[tokio::test]
     async fn test_materializer() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
