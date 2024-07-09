@@ -129,11 +129,6 @@ class LogService(Producer, Consumer):
     def unsubscribe(self, subscription_id: UUID) -> None:
         logger.info(f"Unsubscribing from {subscription_id}, noop for logservice")
 
-    @trace_method("LogService.ack", OpenTelemetryGranularity.ALL)
-    @override
-    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
-        logger.info(f"Acking {up_to_seq_id} for {subscription_id}, noop for logservice")
-
     @override
     def min_seqid(self) -> SeqId:
         return 0
