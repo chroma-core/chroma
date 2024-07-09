@@ -132,10 +132,12 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         for (log_record, _) in mat_records.iter() {
             // Log is the source of truth for these so don't consider these for
             // reading from the segment.
+            let mut removed = false;
             if remaining_search_user_ids.contains(log_record.merged_user_id_ref()) {
+                removed = true;
                 remaining_search_user_ids.remove(log_record.merged_user_id_ref());
             }
-            if log_record.final_operation != Operation::Delete {
+            if removed && log_record.final_operation != Operation::Delete {
                 output_vectors.insert(
                     log_record.merged_user_id(),
                     log_record.merged_embeddings().to_vec(),

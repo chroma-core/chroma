@@ -472,7 +472,6 @@ impl<'me> LogMaterializer<'me> {
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-        let mut invalid_adds: HashSet<&str> = HashSet::new();
         match &self.record_segment_reader {
             Some(reader) => {
                 for (log_record, _) in self.logs.iter() {
@@ -486,11 +485,6 @@ impl<'me> LogMaterializer<'me> {
                             return Err(LogMaterializerError::RecordSegmentError(e));
                         }
                     };
-                    // Ignore loading Adds.
-                    if exists && log_record.record.operation == Operation::Add {
-                        invalid_adds.insert(log_record.record.id.as_str());
-                        continue;
-                    }
                     if exists {
                         match reader
                             .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
@@ -518,11 +512,30 @@ impl<'me> LogMaterializer<'me> {
         for (log_record, _) in self.logs.iter() {
             match log_record.record.operation {
                 Operation::Add => {
-                    // If user is trying to insert a key that is invalid then ignore.
-                    // Also if it already existed in the log before then ignore.
-                    if !new_id_to_materialized.contains_key(log_record.record.id.as_str())
-                        && !invalid_adds.contains(log_record.record.id.as_str())
-                    {
+                    // If this is an add of a record present in the segment then add
+                    // only if it has been previously deleted in the log.
+                    if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                        // safe to unwrap
+                        let curr_val = existing_id_to_materialized
+                            .get(log_record.record.id.as_str())
+                            .unwrap();
+                        if curr_val.final_operation == Operation::Delete {
+                            // Overwrite.
+                            let mut materialized_record = match MaterializedLogRecord::try_from((
+                                &log_record.record,
+                                curr_val.offset_id,
+                                log_record.record.id.as_str(),
+                            )) {
+                                Ok(record) => record,
+                                Err(e) => {
+                                    return Err(e);
+                                }
+                            };
+                            materialized_record.final_operation = Operation::Update;
+                            existing_id_to_materialized
+                                .insert(log_record.record.id.as_str(), materialized_record);
+                        }
+                    } else if !new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
                         let next_offset_id =
                             next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
@@ -551,8 +564,6 @@ impl<'me> LogMaterializer<'me> {
                         .contains_key(log_record.record.id.as_str())
                     {
                         // Mark state as deleted. Other fields become noop after such a delete.
-                        // We should still clear them out since there can be a subsequent insert
-                        // for the same id after the delete.
                         let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
@@ -570,6 +581,10 @@ impl<'me> LogMaterializer<'me> {
                         .get_mut(log_record.record.id.as_str())
                     {
                         Some(res) => {
+                            // Ignore if deleted.
+                            if res.final_operation == Operation::Delete {
+                                continue;
+                            }
                             created_in_log = false;
                             res
                         }
@@ -613,7 +628,13 @@ impl<'me> LogMaterializer<'me> {
                     }
                 }
                 Operation::Upsert => {
-                    if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                    if existing_id_to_materialized.contains_key(log_record.record.id.as_str())
+                        && existing_id_to_materialized
+                            .get(&log_record.record.id.as_str())
+                            .unwrap()
+                            .final_operation
+                            != Operation::Delete
+                    {
                         // Just another update.
                         let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
@@ -677,11 +698,25 @@ impl<'me> LogMaterializer<'me> {
                         record_from_map.final_operation = Operation::Add;
                     } else {
                         // Insert.
-                        let next_offset_id =
-                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let mut curr_offset_id: Option<u32> = None;
+                        if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                            let record = existing_id_to_materialized
+                                .get(&log_record.record.id.as_str())
+                                .unwrap();
+                            if record.final_operation == Operation::Delete {
+                                curr_offset_id = Some(record.offset_id);
+                            }
+                        }
+                        let next_offset;
+                        if curr_offset_id.is_none() {
+                            next_offset =
+                                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        } else {
+                            next_offset = curr_offset_id.unwrap();
+                        }
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
-                            next_offset_id,
+                            next_offset,
                             log_record.record.id.as_str(),
                         )) {
                             Ok(record) => record,
@@ -697,6 +732,10 @@ impl<'me> LogMaterializer<'me> {
         }
         let mut res = vec![];
         for (_key, value) in existing_id_to_materialized {
+            // Ignore records that only had invalid ADDS on the log.
+            if value.final_operation == Operation::Add {
+                continue;
+            }
             res.push(value);
         }
         for (_key, value) in new_id_to_materialized {

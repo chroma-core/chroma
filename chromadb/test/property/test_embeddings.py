@@ -612,7 +612,8 @@ def test_add_delete_add(api: ServerAPI) -> None:
     state.count()
     state.fields_match()
     state.no_duplicates()
-    state.wait_for_compaction()
+    if not NOT_CLUSTER_ONLY:
+        state.wait_for_compaction()
     state.ann_accuracy()
     state.count()
     state.fields_match()
