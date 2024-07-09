@@ -166,6 +166,16 @@ def install_version(version: str) -> None:
 def install(pkg: str, path: str) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
+    print("Purging pip cache")
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "cache",
+            "purge",
+        ]
+    )
     print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(
         [
@@ -176,6 +186,7 @@ def install(pkg: str, path: str) -> int:
             "-q",
             "install",
             pkg,
+            "--no-binary=chroma-hnswlib",
             "--target={}".format(path),
         ]
     )
@@ -279,7 +290,7 @@ def test_cycle_versions(
         embeddings_strategy["metadatas"], list
     ):
         embeddings_strategy["metadatas"] = [
-            m if m is None or len(m) > 0 else None  # type: ignore
+            m if m is None or len(m) > 0 else None
             for m in embeddings_strategy["metadatas"]
         ]
 
