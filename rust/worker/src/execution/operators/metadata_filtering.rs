@@ -22,6 +22,7 @@ use roaring::RoaringBitmap;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tonic::async_trait;
+use tracing::Instrument;
 
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringOperator {}
@@ -110,6 +111,11 @@ impl ChromaError for MetadataFilteringError {
 #[async_trait]
 impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilteringOperator {
     type Error = MetadataFilteringError;
+
+    fn get_name(&self) -> &'static str {
+        "MetadataFilteringOperator"
+    }
+
     async fn run(
         &self,
         input: &MetadataFilteringInput,
@@ -147,7 +153,11 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         // Step 1: Materialize the logs.
         let materializer =
             LogMaterializer::new(record_segment_reader, input.log_record.clone(), None);
-        let mat_records = match materializer.materialize().await {
+        let mat_records = match materializer
+            .materialize()
+            .instrument(tracing::info_span!("Materialize logs"))
+            .await
+        {
             Ok(records) => records,
             Err(e) => {
                 return Err(MetadataFilteringError::MetadataFilteringLogMaterializationError(e));

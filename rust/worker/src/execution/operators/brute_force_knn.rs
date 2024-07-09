@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::trace;
+use tracing::Instrument;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -115,6 +116,10 @@ impl ChromaError for BruteForceKnnOperatorError {
 impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for BruteForceKnnOperator {
     type Error = BruteForceKnnOperatorError;
 
+    fn get_name(&self) -> &'static str {
+        "BruteForceKnnOperator"
+    }
+
     async fn run(
         &self,
         input: &BruteForceKnnOperatorInput,
@@ -134,7 +139,11 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             }
         };
         let log_materializer = LogMaterializer::new(record_segment_reader, input.log.clone(), None);
-        let logs = match log_materializer.materialize().await {
+        let logs = match log_materializer
+            .materialize()
+            .instrument(tracing::info_span!("Materialize logs"))
+            .await
+        {
             Ok(logs) => logs,
             Err(e) => {
                 return Err(BruteForceKnnOperatorError::LogMaterializationError(e));

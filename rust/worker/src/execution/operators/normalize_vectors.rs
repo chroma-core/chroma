@@ -29,6 +29,10 @@ impl Operator<NormalizeVectorOperatorInput, NormalizeVectorOperatorOutput>
 {
     type Error = ();
 
+    fn get_name(&self) -> &'static str {
+        "NormalizeVectorOperator"
+    }
+
     async fn run(
         &self,
         input: &NormalizeVectorOperatorInput,

@@ -88,6 +88,10 @@ impl PullLogsOutput {
 impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
     type Error = PullLogsError;
 
+    fn get_name(&self) -> &'static str {
+        "PullLogsOperator"
+    }
+
     async fn run(&self, input: &PullLogsInput) -> Result<PullLogsOutput, PullLogsError> {
         // We expect the log to be cheaply cloneable, we need to clone it since we need
         // a mutable reference to it. Not necessarily the best, but it works for our needs.
@@ -133,6 +137,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
         }
+        tracing::info!("[PullLogsOperator]: Read {} records", result.len());
         // Convert to DataChunk
         let data_chunk = Chunk::new(result.into());
         Ok(PullLogsOutput::new(data_chunk))

@@ -21,6 +21,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use thiserror::Error;
+use tracing::Instrument;
 
 #[derive(Error, Debug)]
 pub enum WriteSegmentsOperatorError {
@@ -98,6 +99,10 @@ pub struct WriteSegmentsOutput {
 impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator {
     type Error = WriteSegmentsOperatorError;
 
+    fn get_name(&self) -> &'static str {
+        "WriteSegmentsOperator"
+    }
+
     async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
         tracing::debug!("Materializing N Records: {:?}", input.chunk.len());
         // Prepare for log materialization.
@@ -138,7 +143,11 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
             Some(input.offset_id.clone()),
         );
         // Materialize the logs.
-        let res = match materializer.materialize().await {
+        let res = match materializer
+            .materialize()
+            .instrument(tracing::info_span!("Materialize logs"))
+            .await
+        {
             Ok(records) => records,
             Err(e) => {
                 tracing::error!("Error materializing records {}", e);
