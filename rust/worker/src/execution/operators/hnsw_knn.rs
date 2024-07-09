@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::Instrument;
 
 #[derive(Debug)]
 pub struct HnswKnnOperator {}
@@ -107,6 +108,10 @@ impl HnswKnnOperator {
 impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
     type Error = Box<dyn ChromaError>;
 
+    fn get_name(&self) -> &'static str {
+        "HnswKnnOperator"
+    }
+
     async fn run(
         &self,
         input: &HnswKnnOperatorInput,
@@ -140,7 +145,11 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
             input.logs.clone(),
             None,
         );
-        let logs = match log_materializer.materialize().await {
+        let logs = match log_materializer
+            .materialize()
+            .instrument(tracing::info_span!("Materialize logs"))
+            .await
+        {
             Ok(logs) => logs,
             Err(e) => {
                 tracing::error!("[HnswKnnOperation]: Error materializing logs {:?}", e);

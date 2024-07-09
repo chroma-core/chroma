@@ -52,6 +52,10 @@ pub struct FlushS3Output {
 impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
     type Error = Box<dyn ChromaError>;
 
+    fn get_name(&self) -> &'static str {
+        "FlushS3Operator"
+    }
+
     async fn run(&self, input: &FlushS3Input) -> Result<FlushS3Output, Self::Error> {
         let record_segment_flusher = input.record_segment_writer.clone().commit();
         let record_segment_flush_info = match record_segment_flusher {

@@ -143,21 +143,16 @@ impl WorkerServer {
 
         let mut proto_results_for_all = Vec::new();
 
-        let parse_vectors_span = trace_span!("Input vectors parsing");
         let mut query_vectors = Vec::new();
-        let _ = parse_vectors_span.in_scope(|| {
-            for proto_query_vector in request.vectors {
-                let (query_vector, _encoding) = match proto_query_vector.try_into() {
-                    Ok((vector, encoding)) => (vector, encoding),
-                    Err(e) => {
-                        return Err(Status::internal(format!("Error converting vector: {}", e)));
-                    }
-                };
-                query_vectors.push(query_vector);
-            }
-            trace!("Parsed vectors {:?}", query_vectors);
-            Ok(())
-        });
+        for proto_query_vector in request.vectors {
+            let (query_vector, _encoding) = match proto_query_vector.try_into() {
+                Ok((vector, encoding)) => (vector, encoding),
+                Err(e) => {
+                    return Err(Status::internal(format!("Error converting vector: {}", e)));
+                }
+            };
+            query_vectors.push(query_vector);
+        }
 
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),

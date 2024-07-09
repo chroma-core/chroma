@@ -72,6 +72,10 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
 {
     type Error = Box<dyn ChromaError>;
 
+    fn get_name(&self) -> &'static str {
+        "MergeKnnResultsOperator"
+    }
+
     async fn run(
         &self,
         input: &MergeKnnResultsOperatorInput,

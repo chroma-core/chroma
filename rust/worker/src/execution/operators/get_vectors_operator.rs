@@ -80,6 +80,10 @@ impl ChromaError for GetVectorsOperatorError {
 impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsOperator {
     type Error = GetVectorsOperatorError;
 
+    fn get_name(&self) -> &'static str {
+        "GetVectorsOperator"
+    }
+
     async fn run(
         &self,
         input: &GetVectorsOperatorInput,

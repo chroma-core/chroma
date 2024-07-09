@@ -316,7 +316,7 @@ impl HnswQueryOrchestrator {
             Err(e) => {
                 match *e {
                     DistributedHNSWSegmentFromSegmentError::Uninitialized => {
-                        tracing::error!("[HnswQueryOperation]: Error creating distributed hnsw segment reader {:?}", *e);
+                        tracing::info!("[HnswQueryOperation]: Uninitialied reader {:?}", *e);
                         // no task, decrement the merge dependency count and return
                         // with an empty result
                         for (i, _) in self.query_vectors.iter().enumerate() {
