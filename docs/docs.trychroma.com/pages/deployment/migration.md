@@ -20,6 +20,94 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.6.0
+
+#### JavaScript Client Refactor
+
+##### Flat Chroma Client Client
+
+We've moved to a flat client on the JS/TS client. Whereas previously, you would construct a Collection object that you would then call methods on, Collections are now data objects which are passed into methods on the ChromaClient object.
+
+For example, if you currently have the following code:
+
+```javascript
+const collection = await client.getOrCreateCollection({
+  name: "my_collection",
+});
+const records = await collection.get({ ids: ["id1"] });
+```
+
+That will now become:
+
+```javascript
+const collection = await client.getOrCreateCollection({
+  name: "my_collection",
+});
+const records = await client.getRecords(collection, { ids: ["id1"] });
+```
+
+Finally, the `modify()` method on Collection has been moved to Chroma Client as `updateCollection(collection: Collection)`
+
+##### Plurals
+
+We've improved the handling of single element requests vs array requests. Here are a few examples:
+
+```javascript
+// Adding a single document
+await client.addRecords(collection, {
+  id: "id1",
+  embedding: [1, 2, 3],
+  metadata: {
+    foo: "bar",
+  },
+  document: "This is a document.",
+});
+
+// Getting a single document
+const resp = client.getRecords(collection, {
+  id: "id1",
+});
+console.log(resp); // "{id: "id1", embedding: [1, 2, 3], ...}"
+```
+
+##### Simplified Querying
+
+Previously, the request to `query()` had two separate fields `queryTexts` and `queryEmbeddings`. The client had to supply at least one of them but `queryTexts` would be ignored if both were supplied.
+
+Now, there's just a single field `query` on the request params. Clients can provide a string, an array of strings, an embedding or an array of embeddings.
+
+As with the plurals section above, if clients supply a single value, the return type will be a single query result. If clients supply an array query, the return type will be an array of query results.
+
+```javascript
+const resp = client.queryRecords(collection, {
+  query: "query text",
+  nResults: 2,
+});
+
+// Resp equals:
+//   {
+//     ids: ["id1", "id2"],
+//     embeddings: [[1,2,3], [4,5,6]],
+//     documents: ["document 1", "document 2"],
+//     metadatas: [null, null],
+//     distances: [1,2],
+//   }
+
+const resp = client.queryRecords(collection, {
+  query: ["query text", "query text 2"],
+  nResults: 2,
+});
+
+// Resp equals:
+//   {
+//     ids: [["id1", "id2"], ["id3", "id4"]],
+//     embeddings: [[[1,2,3], [4,5,6]], [[7,8,9],[10,11,12]]],
+//     documents: [["document 1", "document 2"], ["document 3", "document 4"]],
+//     metadatas: [[null, null], [null, null]],
+//     distances: [[.7,.8], [.2,.6]],
+//   }
+```
+
 ### v0.5.1
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
@@ -59,7 +147,7 @@ We have consolidated these into three classes:
 
 `ServerAuthorizationProvider`s are responsible for turning information about the request and the `UserIdentity` which issued the request into an authorization decision. Configured via the `chroma_server_authz_config` and `chroma_server_authz_config_file` settings.
 
-*Either `_authn_credentials` or `authn_credentials_file` can be set, never both. Same for `authz_config` and `authz_config_file`. The value of the config (or data in the config file) will depend on your authn and authz providers. See [here](https://github.com/chroma-core/chroma/tree/main/examples/basic_functionality/authz) for more information.*
+_Either `_authn_credentials` or `authn_credentials_file` can be set, never both. Same for `authz_config` and `authz_config_file`. The value of the config (or data in the config file) will depend on your authn and authz providers. See [here](https://github.com/chroma-core/chroma/tree/main/examples/basic_functionality/authz) for more information._
 
 The two auth systems Chroma ships with are `Basic` and `Token`. We have a small migration guide for each.
 
@@ -74,7 +162,7 @@ CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdConfigu
 CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
 ```
 
-*Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both.*
+_Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
 And your corresponding client configation:
 
@@ -110,7 +198,7 @@ CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
 CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 ```
 
-*Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both.*
+_Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
 And your corresponding client configation:
 
@@ -186,14 +274,14 @@ class EmbeddingFunction(Protocol[D]):
 ```
 
 The key differences are:
+
 - `EmbeddingFunction` is now generic, and takes a type parameter `D` which is a subtype of `Embeddable`. This allows us to define `EmbeddingFunction`s which can embed multiple modalities.
 - `__call__` now takes a single argument, `input`, to support data of any type `D`. The `texts` argument has been removed.
-
-
 
 ### Migration from >0.4.0 to 0.4.0 - July 17, 2023
 
 What's new in this version?
+
 - New easy way to create clients
 - Changed storage method
 - `.persist()` removed, `.reset()` no longer on by default
@@ -258,7 +346,6 @@ client = chromadb.PersistentClient(
 This version of Chroma drops `duckdb` and `clickhouse` in favor of `sqlite` for metadata storage. This means migrating data over. We have created a migration CLI utility to do this.
 
 If you upgrade to `0.4.0` and try to access data stored in the old way, you will see this error message
-
 
 > You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!
 
