@@ -16,7 +16,7 @@ from typing import (
     Sequence,
     Tuple,
 )
-from chromadb.ingest import Producer, Consumer
+from chromadb.ingest import Producer, Consumer, Subscription
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
@@ -104,7 +104,9 @@ class CapturingConsumeFn:
         self.waiters = []
         self._loop = asyncio.get_event_loop()
 
-    def __call__(self, embeddings: Sequence[LogRecord]) -> None:
+    def __call__(
+        self, embeddings: Sequence[LogRecord], subscription: Subscription
+    ) -> None:
         self.embeddings.extend(embeddings)
         for n, event in self.waiters:
             if len(self.embeddings) >= n:
