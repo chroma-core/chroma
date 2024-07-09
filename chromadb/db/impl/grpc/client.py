@@ -222,7 +222,7 @@ class GrpcSysDB(SysDB):
         if response.status.code == 409:
             raise UniqueConstraintError()
         collection = from_proto_collection(response.collection)
-        return collection, response.status.code == 200
+        return collection, response.created
 
     @overrides
     def delete_collection(

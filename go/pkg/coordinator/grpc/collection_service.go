@@ -72,7 +72,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		res.Status = failResponseWithError(err, successCode)
 		return res, nil
 	}
-	collection, err := s.coordinator.CreateCollection(ctx, createCollection)
+	collection, created, err := s.coordinator.CreateCollection(ctx, createCollection)
 	if err != nil {
 		log.Error("error creating collection", zap.Error(err))
 		res.Collection = &coordinatorpb.Collection{
@@ -94,6 +94,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 	res.Collection = convertCollectionToProto(collection)
 	res.Status = setResponseStatus(successCode)
+	res.Created = created
 	return res, nil
 }
 
