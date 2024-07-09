@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 import pytest
 import chromadb
 from chromadb.api.types import URI, DataLoader, Documents, IDs, Image, URIs
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.test.ef.test_multimodal_ef import hashing_multimodal_ef
 
 
@@ -29,27 +29,27 @@ def record_set_with_uris(n: int = 3) -> Dict[str, Union[IDs, Documents, URIs]]:
 
 @pytest.fixture()
 def collection_with_data_loader(
-    api: ServerAPI,
+    client: ClientAPI,
 ) -> Generator[chromadb.Collection, None, None]:
-    collection = api.create_collection(
+    collection = client.create_collection(
         name="collection_with_data_loader",
         data_loader=DefaultDataLoader(),
         embedding_function=hashing_multimodal_ef(),
     )
     yield collection
-    api.delete_collection(collection.name)
+    client.delete_collection(collection.name)
 
 
 @pytest.fixture
 def collection_without_data_loader(
-    api: ServerAPI,
+    client: ClientAPI,
 ) -> Generator[chromadb.Collection, None, None]:
-    collection = api.create_collection(
+    collection = client.create_collection(
         name="collection_without_data_loader",
         embedding_function=hashing_multimodal_ef(),
     )
     yield collection
-    api.delete_collection(collection.name)
+    client.delete_collection(collection.name)
 
 
 def test_without_data_loader(

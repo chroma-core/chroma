@@ -64,7 +64,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	}).Return(nil)
 
 	// call the CreateCollection method
-	_, err := catalog.CreateCollection(context.Background(), collection, ts)
+	_, _, err := catalog.CreateCollection(context.Background(), collection, ts)
 
 	// assert that the method returned no error
 	assert.NoError(t, err)
@@ -90,12 +90,14 @@ func TestCatalog_GetCollections(t *testing.T) {
 	name := "test_collection"
 	testKey := "test_key"
 	testValue := "test_value"
+	collectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionAndMetadataList := []*dbmodel.CollectionAndMetadata{
 		{
 			Collection: &dbmodel.Collection{
-				ID:   "00000000-0000-0000-0000-000000000001",
-				Name: &name,
-				Ts:   types.Timestamp(1234567890),
+				ID:                   "00000000-0000-0000-0000-000000000001",
+				Name:                 &name,
+				ConfigurationJsonStr: &collectionConfigurationJsonStr,
+				Ts:                   types.Timestamp(1234567890),
 			},
 			CollectionMetadata: []*dbmodel.CollectionMetadata{
 				{
@@ -124,10 +126,11 @@ func TestCatalog_GetCollections(t *testing.T) {
 	metadata.Add("test_key", &model.CollectionMetadataValueStringType{Value: "test_value"})
 	assert.Equal(t, []*model.Collection{
 		{
-			ID:       types.MustParse("00000000-0000-0000-0000-000000000001"),
-			Name:     "test_collection",
-			Ts:       types.Timestamp(1234567890),
-			Metadata: metadata,
+			ID:                   types.MustParse("00000000-0000-0000-0000-000000000001"),
+			Name:                 "test_collection",
+			ConfigurationJsonStr: collectionConfigurationJsonStr,
+			Ts:                   types.Timestamp(1234567890),
+			Metadata:             metadata,
 		},
 	}, collections)
 

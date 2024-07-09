@@ -1,7 +1,7 @@
 from typing import Generator, cast
 from overrides import overrides
 import pytest
-from chromadb.api import ServerAPI
+from chromadb.api.client import Client
 from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
@@ -34,9 +34,9 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
     system: System
 
     def __init__(self, system: System) -> None:
-        api = system.instance(ServerAPI)
         self.system = system
-        super().__init__(api)
+        client = Client.from_system(system)
+        super().__init__(client)
 
     @invariant()
     def log_empty_after_cleaning(self) -> None:
@@ -71,9 +71,9 @@ def test_clean_log(any_sqlite: System) -> None:
 
 def test_cleanup_after_shutdown(sqlite_persistent: System) -> None:
     system = sqlite_persistent
-    api = system.instance(ServerAPI)
+    client = Client.from_system(system)
 
-    collection = api.create_collection("test")
+    collection = client.create_collection("test")
     collection.add(["1", "2"], [[1.0], [1.0]])
     collection.add(["3", "4"], [[1.0], [1.0]])
 

@@ -13,7 +13,6 @@ use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
-use aws_config::retry::RetryConfigBuilder;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
 use aws_sdk_s3::error::ProvideErrorMetadata;
@@ -35,6 +34,8 @@ pub(crate) struct S3Storage {
 pub enum S3PutError {
     #[error("S3 PUT error: {0}")]
     S3PutError(String),
+    #[error("S3 Dispatch failure error")]
+    S3DispatchFailure,
 }
 
 impl ChromaError for S3PutError {
@@ -77,26 +78,26 @@ impl S3Storage {
             .await;
         match res {
             Ok(_) => {
-                println!("created bucket {}", self.bucket);
+                tracing::info!("created bucket {}", self.bucket);
                 return Ok(());
             }
             Err(e) => match e {
                 SdkError::ServiceError(err) => match err.into_err() {
                     CreateBucketError::BucketAlreadyExists(msg) => {
-                        println!("bucket already exists: {}", msg);
+                        tracing::error!("bucket already exists: {}", msg);
                         return Ok(());
                     }
                     CreateBucketError::BucketAlreadyOwnedByYou(msg) => {
-                        println!("bucket already owned by you: {}", msg);
+                        tracing::error!("bucket already owned by you: {}", msg);
                         return Ok(());
                     }
                     e => {
-                        println!("Error creating bucket: {}", e.to_string());
+                        tracing::error!("Error creating bucket: {}", e.to_string());
                         return Err::<(), String>(e.to_string());
                     }
                 },
                 _ => {
-                    println!("Error creating bucket: {}", e);
+                    tracing::error!("Error creating bucket: {}", e);
                     return Err::<(), String>(e.to_string());
                 }
             },
@@ -119,25 +120,25 @@ impl S3Storage {
                 return Ok(Box::new(res.body.into_async_read()));
             }
             Err(e) => {
-                println!("error: {}", e);
+                tracing::error!("error: {}", e);
                 match e {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
                         match inner {
                             aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
-                                println!("no such key: {}", msg);
+                                 tracing::error!("no such key: {}", msg);
                                 return Err(S3GetError::NoSuchKey(msg.to_string()));
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                print!("invalid object state: {}", msg);
+                                 tracing::error!("invalid object state: {}", msg);
                                 return Err(S3GetError::S3GetError(msg.to_string()));
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) =>  {
-                                println!("unhandled error");
+                                 tracing::error!("unhandled error");
                                 return Err(S3GetError::S3GetError("unhandled error".to_string()));
                             }
                             _ => {
-                                println!("error: {}", inner.to_string());
+                                 tracing::error!("error: {}", inner.to_string());
                                 return Err(S3GetError::S3GetError(inner.to_string()));
                             }
                         };
@@ -175,7 +176,7 @@ impl S3Storage {
             .await;
         match res {
             Ok(_) => {
-                println!("put object {} to bucket {}", key, self.bucket);
+                tracing::info!("put object {} to bucket {}", key, self.bucket);
                 return Ok(());
             }
             Err(e) => match e {
@@ -186,11 +187,15 @@ impl S3Storage {
                         inner_err.code(),
                         inner_err.message()
                     );
-                    println!("{}", err_string);
+                    tracing::error!("{}", err_string);
                     return Err(S3PutError::S3PutError(err_string));
                 }
+                SdkError::DispatchFailure(e) => {
+                    tracing::error!("S3 Dispatch failure error {:?}", e);
+                    return Err(S3PutError::S3DispatchFailure);
+                }
                 _ => {
-                    println!("S3 Put Error: {}", e);
+                    tracing::error!("S3 Put Error: {}", e);
                     return Err(S3PutError::S3PutError(e.to_string()));
                 }
             },

@@ -115,9 +115,6 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-      - name: Make get logs script executable
-        if: success() || failure()
-        run: chmod +x bin/get-logs.sh
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()

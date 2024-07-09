@@ -2,7 +2,6 @@ import hypothesis.strategies as st
 
 from hypothesis import given, settings
 from overrides import override
-from starlette.datastructures import Headers
 from typing import Dict, List, Tuple
 
 from chromadb.api import ServerAPI
@@ -17,7 +16,7 @@ class DummyServerAuthenticationProvider(ServerAuthenticationProvider):
     """
 
     @override
-    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Dict[str, str]) -> UserIdentity:
         return UserIdentity(user_id="test_user")
 
 

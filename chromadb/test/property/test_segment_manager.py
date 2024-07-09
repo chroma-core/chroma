@@ -3,7 +3,6 @@ import uuid
 import pytest
 import chromadb.test.property.strategies as strategies
 from unittest.mock import patch
-from dataclasses import asdict
 import random
 from hypothesis.stateful import (
     Bundle,
@@ -16,7 +15,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from typing import Dict
+from typing import Dict, List
 from chromadb.segment import VectorReader
 from chromadb.segment import SegmentManager
 
@@ -30,11 +29,14 @@ memory_limit = 100
 
 # Helper class to keep tract of the last use id
 class LastUse:
+    n: int
+    store: List[uuid.UUID]
+
     def __init__(self, n: int):
         self.n = n
         self.store = []
 
-    def add(self, id: uuid.UUID):
+    def add(self, id: uuid.UUID) -> List[uuid.UUID]:
         if id in self.store:
             self.store.remove(id)
             self.store.append(id)
@@ -44,7 +46,7 @@ class LastUse:
                 self.store.pop(0)
         return self.store
 
-    def reset(self):
+    def reset(self) -> None:
         self.store = []
 
 
@@ -65,22 +67,22 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         self.system = system
 
     @invariant()
-    def last_queried_segments_should_be_in_cache(self):
+    def last_queried_segments_should_be_in_cache(self) -> None:
         cache_sum = 0
         index = 0
         for id in reversed(self.last_use.store):
             cache_sum += self.collection_size_store[id]
             if cache_sum >= memory_limit and index != 0:
                 break
-            assert id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache
+            assert id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache  # type: ignore[attr-defined]
             index += 1
 
     @invariant()
     @precondition(lambda self: self.system.settings.is_persistent is True)
-    def cache_should_not_be_bigger_than_settings(self):
+    def cache_should_not_be_bigger_than_settings(self) -> None:
         segment_sizes = {
             id: self.collection_size_store[id]
-            for id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache
+            for id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache  # type: ignore[attr-defined]
         }
         total_size = sum(segment_sizes.values())
         if len(segment_sizes) != 1:
@@ -98,7 +100,8 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     def create_segment(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
-        segments = self.segment_manager.create_segments(asdict(coll))
+        # TODO: Convert collection views used in tests into actual Collections / Collection models
+        segments = self.segment_manager.create_segments(coll)  # type: ignore[arg-type]
         for segment in segments:
             self.sysdb.create_segment(segment)
             self.segment_collection[segment["id"]] = coll.id
@@ -115,7 +118,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         assert segment is not None
 
     @staticmethod
-    def mock_directory_size(directory: str):
+    def mock_directory_size(directory: str) -> int:
         path_id = directory.split("/").pop()
         collection_id = SegmentManagerStateMachine.segment_collection[
             uuid.UUID(path_id)
@@ -131,4 +134,4 @@ def test_segment_manager(caplog: pytest.LogCaptureFixture, system: System) -> No
     system.settings.chroma_memory_limit_bytes = memory_limit
     system.settings.chroma_segment_cache_policy = "LRU"
 
-    run_state_machine_as_test(lambda: SegmentManagerStateMachine(system=system))
+    run_state_machine_as_test(lambda: SegmentManagerStateMachine(system=system))  # type: ignore[no-untyped-call]

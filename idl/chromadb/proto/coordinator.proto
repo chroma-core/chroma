@@ -92,11 +92,12 @@ message UpdateSegmentResponse {
 message CreateCollectionRequest {
   string id = 1;
   string name = 2;
-  optional UpdateMetadata metadata = 3;
-  optional int32 dimension = 4;
-  optional bool get_or_create = 5;
-  string tenant = 6;
-  string database = 7;
+  string configuration_json_str = 3;
+  optional UpdateMetadata metadata = 4;
+  optional int32 dimension = 5;
+  optional bool get_or_create = 6;
+  string tenant = 7;
+  string database = 8;
 }
 
 message CreateCollectionResponse {

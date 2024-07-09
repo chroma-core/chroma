@@ -12,7 +12,6 @@ import pytest
 import json
 from urllib import request
 from chromadb import config
-from chromadb.api import ServerAPI
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -20,6 +19,7 @@ from packaging import version as packaging_version
 import re
 import multiprocessing
 from chromadb.config import Settings
+from chromadb.api.client import Client as ClientCreator
 
 MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -310,9 +310,9 @@ def test_cycle_versions(
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
-    api = system.instance(ServerAPI)
     system.start()
-    coll = api.get_collection(
+    client = ClientCreator.from_system(system)
+    coll = client.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
     )
