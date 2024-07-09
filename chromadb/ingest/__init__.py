@@ -71,6 +71,15 @@ class Producer(Component):
         pass
 
 
+# The consumer callback receives the subscription object so that it can call .ack() on it.
+# Ideally this method would be on the Consumer interface instead—why is on the subscription object?
+# The log stream enforces this lifecycle:
+#   subscription created ->
+#   backfill -> (subscription callback using below definition) ->
+#   register subscription on stream
+#
+# So during backfill, if .ack() was instead on the Consumer interface, the provided
+# callback wouldn't have a way to call .ack() as the subscription isn't registered until after backfilling.
 ConsumerCallbackFn = Callable[[Sequence[LogRecord], "Subscription"], None]
 
 

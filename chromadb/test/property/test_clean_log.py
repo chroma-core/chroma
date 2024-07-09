@@ -1,5 +1,6 @@
-from typing import cast
+from typing import Generator, cast
 from overrides import overrides
+import pytest
 from chromadb.api import ServerAPI
 from chromadb.config import System
 from chromadb.db.base import get_sql
@@ -11,6 +12,7 @@ from hypothesis.stateful import (
     invariant,
 )
 
+from chromadb.test.conftest import sqlite_fixture, sqlite_persistent_fixture
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineBase,
     EmbeddingStateMachineStates,
@@ -56,9 +58,14 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.has_collection_mutated = True
 
 
-def test_clean_log(sqlite_persistent: System) -> None:
+@pytest.fixture(params=[sqlite_fixture, sqlite_persistent_fixture])
+def any_sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    yield from request.param()
+
+
+def test_clean_log(any_sqlite: System) -> None:
     run_state_machine_as_test(
-        lambda: LogCleanEmbeddingStateMachine(sqlite_persistent),
+        lambda: LogCleanEmbeddingStateMachine(any_sqlite),
     )  # type: ignore
 
 
