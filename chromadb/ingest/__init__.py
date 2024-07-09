@@ -71,7 +71,34 @@ class Producer(Component):
         pass
 
 
-ConsumerCallbackFn = Callable[[Sequence[LogRecord]], None]
+ConsumerCallbackFn = Callable[[Sequence[LogRecord], "Subscription"], None]
+
+
+class Subscription:
+    id: UUID
+    topic_name: str
+    start: int
+    end: int
+    callback: ConsumerCallbackFn
+
+    def __init__(
+        self,
+        id: UUID,
+        topic_name: str,
+        start: int,
+        end: int,
+        callback: ConsumerCallbackFn,
+    ):
+        self.id = id
+        self.topic_name = topic_name
+        self.start = start
+        self.end = end
+        self.callback = callback
+
+    def ack(self, up_to_seq_id: SeqId) -> None:
+        """Acknowledge that all records up to and including the given SeqID have been
+        processed. (This allows the stream to delete old records.)"""
+        self.start = up_to_seq_id
 
 
 class Consumer(Component):
@@ -107,12 +134,6 @@ class Consumer(Component):
     def unsubscribe(self, subscription_id: UUID) -> None:
         """Unregister a subscription. The consume function will no longer be invoked,
         and resources associated with the subscription will be released."""
-        pass
-
-    @abstractmethod
-    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
-        """Acknowledge that all records up to and including the given SeqID have been
-        processed. (This allows the stream to delete old records.)"""
         pass
 
     @abstractmethod

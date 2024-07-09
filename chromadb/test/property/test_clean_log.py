@@ -32,7 +32,7 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
     system: System
 
     def __init__(self, system: System) -> None:
-        api = system.require(ServerAPI)
+        api = system.instance(ServerAPI)
         self.system = system
         super().__init__(api)
 
@@ -56,7 +56,27 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.has_collection_mutated = True
 
 
-def test_clean_log(system: System) -> None:
+def test_clean_log(sqlite_persistent: System) -> None:
     run_state_machine_as_test(
-        lambda: LogCleanEmbeddingStateMachine(system),
+        lambda: LogCleanEmbeddingStateMachine(sqlite_persistent),
     )  # type: ignore
+
+
+def test_cleanup_after_shutdown(sqlite_persistent: System) -> None:
+    system = sqlite_persistent
+    api = system.instance(ServerAPI)
+
+    collection = api.create_collection("test")
+    collection.add(["1", "2"], [[1.0], [1.0]])
+    collection.add(["3", "4"], [[1.0], [1.0]])
+
+    # Create new system to simulate a restart
+    system.stop()
+
+    system2 = System(system.settings)
+    system2.start()
+
+    producer = system2.instance(Producer)
+    producer.clean_log(collection.id)
+
+    assert count_embedding_queue_rows(system2.instance(SqliteDB)) == 1

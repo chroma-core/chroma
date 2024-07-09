@@ -559,6 +559,7 @@ def sqlite() -> Generator[System, None, None]:
     system.stop()
 
 
+@pytest.fixture
 def sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()

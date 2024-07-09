@@ -1,6 +1,6 @@
 from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
 from chromadb.segment import MetadataReader
-from chromadb.ingest import Consumer
+from chromadb.ingest import Consumer, Subscription
 from chromadb.config import System
 from chromadb.types import Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
@@ -481,7 +481,9 @@ class SqliteMetadataSegment(MetadataReader):
                 self._update_metadata(cur, id, record["operation_record"]["metadata"])
 
     @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
-    def _write_metadata(self, records: Sequence[LogRecord]) -> None:
+    def _write_metadata(
+        self, records: Sequence[LogRecord], subscription: Subscription
+    ) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
         with self._db.tx() as cur:
@@ -508,8 +510,7 @@ class SqliteMetadataSegment(MetadataReader):
                 elif record["operation_record"]["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
-        if self._subscription:
-            self._consumer.ack(self._subscription, records[-1]["log_offset"])
+        subscription.ack(records[-1]["log_offset"])
 
     @trace_method(
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL

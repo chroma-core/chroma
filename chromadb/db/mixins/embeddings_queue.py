@@ -4,9 +4,11 @@ from chromadb.ingest import (
     Producer,
     Consumer,
     ConsumerCallbackFn,
+    Subscription,
     decode_vector,
     encode_vector,
 )
+from chromadb.segment import SegmentManager
 from chromadb.types import (
     OperationRecord,
     LogRecord,
@@ -57,27 +59,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     other processes.
     """
 
-    class Subscription:
-        id: UUID
-        topic_name: str
-        start: int
-        end: int
-        callback: ConsumerCallbackFn
-
-        def __init__(
-            self,
-            id: UUID,
-            topic_name: str,
-            start: int,
-            end: int,
-            callback: ConsumerCallbackFn,
-        ):
-            self.id = id
-            self.topic_name = topic_name
-            self.start = start
-            self.end = end
-            self.callback = callback
-
     _subscriptions: Dict[str, Set[Subscription]]
     _max_batch_size: Optional[int]
     _tenant: str
@@ -119,6 +100,11 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @trace_method("SqlEmbeddingsQueue.clean_log", OpenTelemetryGranularity.ALL)
     @override
     def clean_log(self, collection_id: UUID) -> None:
+        # If segments aren't loaded, we can't know the minimum sequence ID
+        segment_manager = self._system.instance(SegmentManager)
+        # (loads segments on a best-effort basis)
+        segment_manager.hint_use_collection(collection_id, Operation.DELETE)
+
         topic_name = create_topic_name(
             self._tenant, self._topic_namespace, collection_id
         )
@@ -247,9 +233,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         subscription_id = id or uuid.uuid4()
         start, end = self._validate_range(start, end)
 
-        subscription = self.Subscription(
-            subscription_id, topic_name, start, end, consume_fn
-        )
+        subscription = Subscription(subscription_id, topic_name, start, end, consume_fn)
 
         # Backfill first, so if it errors we do not add the subscription
         self._backfill(subscription)
@@ -266,15 +250,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     subscriptions.remove(subscription)
                     if len(subscriptions) == 0:
                         del self._subscriptions[topic_name]
-                    return
-
-    @trace_method("SqlEmbeddingsQueue.ack", OpenTelemetryGranularity.ALL)
-    @override
-    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
-        for _, subscriptions in self._subscriptions.items():
-            for subscription in subscriptions:
-                if subscription.id == subscription_id:
-                    subscription.start = up_to_seq_id
                     return
 
     @override
@@ -414,7 +389,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         # for consistency between local and distributed configurations
         try:
             if len(filtered_embeddings) > 0:
-                sub.callback(filtered_embeddings)
+                sub.callback(filtered_embeddings, sub)
             if should_unsubscribe:
                 self.unsubscribe(sub.id)
         except BaseException as e:

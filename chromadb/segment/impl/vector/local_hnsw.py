@@ -2,7 +2,7 @@ from overrides import override
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
-from chromadb.ingest import Consumer
+from chromadb.ingest import Consumer, Subscription
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import HnswParams
@@ -282,7 +282,9 @@ class LocalHnswSegment(VectorReader):
             self._max_seq_id = batch.max_seq_id
 
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
-    def _write_records(self, records: Sequence[LogRecord]) -> None:
+    def _write_records(
+        self, records: Sequence[LogRecord], subscription: Subscription
+    ) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
@@ -321,8 +323,7 @@ class LocalHnswSegment(VectorReader):
 
             self._apply_batch(batch)
 
-        if self._subscription:
-            self._consumer.ack(self._subscription, self._max_seq_id)
+        subscription.ack(self._max_seq_id)
 
     @override
     def delete(self) -> None:

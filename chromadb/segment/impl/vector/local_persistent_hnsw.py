@@ -4,6 +4,7 @@ from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
+from chromadb.ingest import Subscription
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
@@ -222,7 +223,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         "PersistentLocalHnswSegment._write_records", OpenTelemetryGranularity.ALL
     )
     @override
-    def _write_records(self, records: Sequence[LogRecord]) -> None:
+    def _write_records(
+        self, records: Sequence[LogRecord], subscription: Subscription
+    ) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
@@ -280,8 +283,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()
 
-        if self._subscription:
-            self._consumer.ack(self._subscription, self._max_seq_id)
+        subscription.ack(self._max_seq_id)
 
     @override
     def count(self) -> int:
