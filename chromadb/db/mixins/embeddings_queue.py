@@ -102,7 +102,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     def clean_log(self, collection_id: UUID) -> None:
         # If segments aren't loaded, we can't know the minimum sequence ID
         segment_manager = self._system.instance(SegmentManager)
-        # (loads segments on a best-effort basis)
+        # (loads segments on a best-effort basis, operation here doesn't matter)
         segment_manager.hint_use_collection(collection_id, Operation.DELETE)
 
         topic_name = create_topic_name(

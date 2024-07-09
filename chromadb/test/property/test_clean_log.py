@@ -8,6 +8,7 @@ from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.ingest import Producer
 from pypika import Table, functions
 from hypothesis.stateful import (
+    rule,
     run_state_machine_as_test,
     invariant,
 )
@@ -58,6 +59,19 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.has_collection_mutated = True
 
 
+class PersistentLogCleanEmbeddingStateMachine(LogCleanEmbeddingStateMachine):
+    @rule()
+    def restart_system(self) -> None:
+        # Simulates restarting chromadb
+        # (there's some edge cases around correctly tracking sequence IDs at client startup)
+        self.system.stop()
+        self.system = System(self.system.settings)
+        self.system.start()
+        self.client.clear_system_cache()
+        self.client = Client.from_system(self.system)
+        self.collection = self.client.get_collection(self.collection.name)
+
+
 @pytest.fixture(params=[sqlite_fixture, sqlite_persistent_fixture])
 def any_sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
@@ -69,21 +83,7 @@ def test_clean_log(any_sqlite: System) -> None:
     )  # type: ignore
 
 
-def test_cleanup_after_shutdown(sqlite_persistent: System) -> None:
-    system = sqlite_persistent
-    client = Client.from_system(system)
-
-    collection = client.create_collection("test")
-    collection.add(["1", "2"], [[1.0], [1.0]])
-    collection.add(["3", "4"], [[1.0], [1.0]])
-
-    # Create new system to simulate a restart
-    system.stop()
-
-    system2 = System(system.settings)
-    system2.start()
-
-    producer = system2.instance(Producer)
-    producer.clean_log(collection.id)
-
-    assert count_embedding_queue_rows(system2.instance(SqliteDB)) == 1
+def test_cleanup_after_system_restart(sqlite_persistent: System) -> None:
+    run_state_machine_as_test(
+        lambda: PersistentLogCleanEmbeddingStateMachine(sqlite_persistent),
+    )
