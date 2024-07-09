@@ -60,27 +60,29 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	if err != nil {
 		log.Error("error converting to create collection model", zap.Error(err))
 		res.Collection = &coordinatorpb.Collection{
-			Id:        req.Id,
-			Name:      req.Name,
-			Dimension: req.Dimension,
-			Metadata:  req.Metadata,
-			Tenant:    req.Tenant,
-			Database:  req.Database,
+			Id:                   req.Id,
+			Name:                 req.Name,
+			ConfigurationJsonStr: req.ConfigurationJsonStr,
+			Dimension:            req.Dimension,
+			Metadata:             req.Metadata,
+			Tenant:               req.Tenant,
+			Database:             req.Database,
 		}
 		res.Created = false
 		res.Status = failResponseWithError(err, successCode)
 		return res, nil
 	}
-	collection, err := s.coordinator.CreateCollection(ctx, createCollection)
+	collection, created, err := s.coordinator.CreateCollection(ctx, createCollection)
 	if err != nil {
 		log.Error("error creating collection", zap.Error(err))
 		res.Collection = &coordinatorpb.Collection{
-			Id:        req.Id,
-			Name:      req.Name,
-			Dimension: req.Dimension,
-			Metadata:  req.Metadata,
-			Tenant:    req.Tenant,
-			Database:  req.Database,
+			Id:                   req.Id,
+			Name:                 req.Name,
+			ConfigurationJsonStr: req.ConfigurationJsonStr,
+			Dimension:            req.Dimension,
+			Metadata:             req.Metadata,
+			Tenant:               req.Tenant,
+			Database:             req.Database,
 		}
 		res.Created = false
 		if err == common.ErrCollectionUniqueConstraintViolation {
@@ -92,6 +94,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 	res.Collection = convertCollectionToProto(collection)
 	res.Status = setResponseStatus(successCode)
+	res.Created = created
 	return res, nil
 }
 

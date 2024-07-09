@@ -44,6 +44,7 @@ use crate::types::Segment;
 use crate::types::SegmentFlushInfo;
 use crate::types::SegmentType;
 use async_trait::async_trait;
+use core::panic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -227,7 +228,11 @@ impl CompactOrchestrator {
         match self.dispatcher.send(task, None).await {
             Ok(_) => (),
             Err(e) => {
-                // TODO: log an error and reply to caller
+                tracing::error!("Error dispatching pull logs for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                );
             }
         }
     }
@@ -247,7 +252,11 @@ impl CompactOrchestrator {
         match self.dispatcher.send(task, None).await {
             Ok(_) => (),
             Err(e) => {
-                // TODO: log an error and reply to caller
+                tracing::error!("Error dispatching partition for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                )
             }
         }
     }
@@ -258,6 +267,7 @@ impl CompactOrchestrator {
         self_address: Box<
             dyn ReceiverForMessage<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
         >,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Write;
 
@@ -267,6 +277,7 @@ impl CompactOrchestrator {
             Ok(writers) => writers,
             Err(e) => {
                 tracing::error!("Error creating writers for compaction {:?}", e);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -291,7 +302,9 @@ impl CompactOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     tracing::error!("Error dispatching writers for compaction {:?}", e);
-                    // Reply to caller
+                    panic!(
+                        "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                        e)
                 }
             }
         }
@@ -317,7 +330,11 @@ impl CompactOrchestrator {
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
-                // Log an error and reply to caller
+                tracing::error!("Error dispatching flush to S3 for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                );
             }
         }
     }
@@ -344,7 +361,11 @@ impl CompactOrchestrator {
         match self.dispatcher.send(task, None).await {
             Ok(_) => (),
             Err(e) => {
-                // TODO: log an error and reply to caller
+                tracing::error!("Error dispatching register for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                );
             }
         }
     }
@@ -375,7 +396,6 @@ impl CompactOrchestrator {
         let segments = match segments {
             Ok(segments) => {
                 if segments.is_empty() {
-                    // Log an error and return
                     return Err(Box::new(GetSegmentWritersError::NoSegmentsFound));
                 }
                 segments
@@ -545,8 +565,10 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CompactOrchestrator 
                 self.partition(records, ctx.receiver()).await;
             }
             None => {
-                // TODO: Log an error and return
-                return;
+                tracing::error!(
+                    "No records pulled by compaction, this is a system invariant violation"
+                );
+                panic!("No records pulled by compaction, this is a system invariant violation");
             }
         }
     }
@@ -570,7 +592,7 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
                 return;
             }
         };
-        self.write(records, ctx.receiver()).await;
+        self.write(records, ctx.receiver(), ctx).await;
     }
 }
 

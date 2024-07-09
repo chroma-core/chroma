@@ -133,12 +133,14 @@ func TestConvertCollectionToModel(t *testing.T) {
 	// Test case 3: collectionAndMetadataList contains one collection with all fields set
 	collectionID := types.MustParse("d9a75e2e-2929-45c4-af06-75b15630edd0")
 	collectionName := "collection_name"
+	colllectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionDimension := int32(3)
 	collectionAndMetadata := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
-			ID:        collectionID.String(),
-			Name:      &collectionName,
-			Dimension: &collectionDimension,
+			ID:                   collectionID.String(),
+			Name:                 &collectionName,
+			ConfigurationJsonStr: &colllectionConfigurationJsonStr,
+			Dimension:            &collectionDimension,
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 	}
@@ -147,6 +149,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Len(t, modelCollections, 1)
 	assert.Equal(t, collectionID, modelCollections[0].ID)
 	assert.Equal(t, collectionName, modelCollections[0].Name)
+	assert.Equal(t, colllectionConfigurationJsonStr, modelCollections[0].ConfigurationJsonStr)
 	assert.Equal(t, collectionDimension, *modelCollections[0].Dimension)
 	assert.Nil(t, modelCollections[0].Metadata)
 }

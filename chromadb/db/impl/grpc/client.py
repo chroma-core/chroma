@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from chromadb.db.system import SysDB
@@ -197,6 +198,7 @@ class GrpcSysDB(SysDB):
         self,
         id: UUID,
         name: str,
+        configuration: CollectionConfigurationInternal,
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -206,6 +208,7 @@ class GrpcSysDB(SysDB):
         request = CreateCollectionRequest(
             id=id.hex,
             name=name,
+            configuration_json_str=configuration.to_json_str(),
             metadata=to_proto_update_metadata(metadata) if metadata else None,
             dimension=dimension,
             get_or_create=get_or_create,
@@ -219,7 +222,7 @@ class GrpcSysDB(SysDB):
         if response.status.code == 409:
             raise UniqueConstraintError()
         collection = from_proto_collection(response.collection)
-        return collection, response.status.code == 200
+        return collection, response.created
 
     @overrides
     def delete_collection(

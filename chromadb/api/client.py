@@ -4,6 +4,7 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -88,9 +89,12 @@ class Client(SharedSystemClient, ClientAPI):
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[Collection]:
-        return self._server.list_collections(
-            limit, offset, tenant=self.tenant, database=self.database
-        )
+        return [
+            Collection(client=self._server, model=model)
+            for model in self._server.list_collections(
+                limit, offset, tenant=self.tenant, database=self.database
+            )
+        ]
 
     @override
     def count_collections(self) -> int:
@@ -102,6 +106,7 @@ class Client(SharedSystemClient, ClientAPI):
     def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -109,14 +114,19 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        return self._server.create_collection(
+        model = self._server.create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
+            configuration=configuration,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -129,32 +139,42 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_collection(
+        model = self._server.get_collection(
             id=id,
             name=name,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
     def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_or_create_collection(
+        model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+            configuration=configuration,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -267,7 +287,7 @@ class Client(SharedSystemClient, ClientAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
@@ -304,7 +324,7 @@ class Client(SharedSystemClient, ClientAPI):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,

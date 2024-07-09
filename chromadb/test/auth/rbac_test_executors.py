@@ -7,6 +7,30 @@ from chromadb.test.property.strategies import (
     collection_name,
     tenant_database_name,
 )
+from chromadb.api.models.Collection import Collection
+from chromadb.types import Collection as CollectionModel
+
+
+def wrap_model(api: ServerAPI, model: CollectionModel) -> Collection:
+    return Collection(client=api, model=model)
+
+
+def add_to_root_and_get_collection(
+    api: ServerAPI, root_api: ServerAPI, draw: st.DrawFn
+) -> Collection:
+    collection = draw(collection_name())
+    root_col = None
+    try:
+        root_col = root_api.create_collection(collection)
+    except Exception:
+        root_col = root_api.get_collection(collection)
+    if not root_col:
+        raise Exception("Failed to create collection")
+    root_col = wrap_model(api=root_api, model=root_col)
+    root_col.add(ids=["1"], documents=["test document"])
+    col = wrap_model(api=api, model=api.get_collection(collection))
+    return col
+
 
 # Each of these accepts two clients:
 # 1. A data plane client with credentials of the user under test.
@@ -118,12 +142,7 @@ def _delete_collection_executor(
 def _update_collection_executor(
     api: ServerAPI, root_api: ServerAPI, draw: st.DrawFn
 ) -> None:
-    collection = draw(collection_name())
-    try:
-        root_api.create_collection(collection)
-    except Exception:
-        pass
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.modify(metadata={"foo": "bar"})
 
 
@@ -132,12 +151,7 @@ def _add_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    try:
-        root_api.create_collection(collection)
-    except Exception:
-        pass
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.add(ids=["1"], documents=["test document"])
 
 
@@ -146,16 +160,7 @@ def _delete_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.delete(ids=["1"])
 
 
@@ -164,16 +169,7 @@ def _get_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.get(ids=["1"])
 
 
@@ -182,16 +178,7 @@ def _query_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.query(query_texts=["test query text"])
 
 
@@ -200,16 +187,7 @@ def _peek_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.peek()
 
 
@@ -218,16 +196,7 @@ def _count_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.count()
 
 
@@ -236,16 +205,7 @@ def _update_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.update(ids=["1"], documents=["different test document"])
 
 
@@ -254,16 +214,7 @@ def _upsert_executor(
     root_api: ServerAPI,
     draw: st.DrawFn,
 ) -> None:
-    collection = draw(collection_name())
-    root_col = None
-    try:
-        root_col = root_api.create_collection(collection)
-    except Exception:
-        root_col = root_api.get_collection(collection)
-    if not root_col:
-        raise Exception("Failed to create collection")
-    root_col.add(ids=["1"], documents=["test document"])
-    col = api.get_collection(collection)
+    col = add_to_root_and_get_collection(api, root_api, draw)
     col.upsert(ids=["1"], documents=["different test document"])
 
 

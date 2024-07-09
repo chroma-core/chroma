@@ -26,7 +26,7 @@ from typing_extensions import Protocol
 from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.fastapi import FastAPI
 import chromadb.server.fastapi
-from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api import ClientAPI, ServerAPI, BaseAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
@@ -64,16 +64,17 @@ hypothesis.settings.register_profile(
     "normal", hypothesis.settings.get_profile("base"), max_examples=100
 )
 hypothesis.settings.register_profile(
-    "slow", hypothesis.settings.get_profile("base"), max_examples=200
+    "slow",
+    hypothesis.settings.get_profile("base"),
+    max_examples=1000,
+    stateful_step_count=100,
 )
 
 hypothesis.settings.load_profile(CURRENT_PRESET)
 
 
-def reset(api: ServerAPI) -> None:
+def reset(api: BaseAPI) -> None:
     api.reset()
-    if not NOT_CLUSTER_ONLY:
-        time.sleep(MEMBERLIST_SLEEP)
 
 
 def override_hypothesis_profile(
@@ -116,11 +117,10 @@ def override_hypothesis_profile(
 
         return hypothesis.settings(hypothesis.settings.default, **overridden_settings)
 
-    return hypothesis.settings.default
+    return cast(hypothesis.settings, hypothesis.settings.default)
 
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
-MEMBERLIST_SLEEP = 5
 COMPACTION_SLEEP = 120
 
 
@@ -288,7 +288,7 @@ def _fastapi_fixture(
         chroma_overwrite_singleton_tenant_database_access_from_auth,
     )
 
-    def run(args):
+    def run(args: Any) -> Generator[System, None, None]:
         proc = ctx.Process(target=_run_server, args=args, daemon=True)
         proc.start()
         settings = Settings(

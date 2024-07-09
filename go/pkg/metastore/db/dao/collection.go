@@ -28,7 +28,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.dimension, collections.database_id, databases.name, databases.tenant_id").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, databases.name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -59,29 +59,31 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	collectionWithMetdata = make([]*dbmodel.CollectionAndMetadata, 0, len(collections))
 	for rows.Next() {
 		var (
-			collectionID         string
-			logPosition          int64
-			version              int32
-			collectionName       string
-			collectionDimension  sql.NullInt32
-			collectionDatabaseID string
-			collectionCreatedAt  sql.NullTime
-			databaseName         string
-			databaseTenantID     string
+			collectionID                   string
+			logPosition                    int64
+			version                        int32
+			collectionName                 string
+			collectionConfigurationJsonStr string
+			collectionDimension            sql.NullInt32
+			collectionDatabaseID           string
+			collectionCreatedAt            sql.NullTime
+			databaseName                   string
+			databaseTenantID               string
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
 		}
 
 		collection := &dbmodel.Collection{
-			ID:          collectionID,
-			Name:        &collectionName,
-			DatabaseID:  collectionDatabaseID,
-			LogPosition: logPosition,
-			Version:     version,
+			ID:                   collectionID,
+			Name:                 &collectionName,
+			ConfigurationJsonStr: &collectionConfigurationJsonStr,
+			DatabaseID:           collectionDatabaseID,
+			LogPosition:          logPosition,
+			Version:              version,
 		}
 		if collectionDimension.Valid {
 			collection.Dimension = &collectionDimension.Int32

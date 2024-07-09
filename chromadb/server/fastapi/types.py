@@ -56,6 +56,8 @@ class DeleteEmbedding(BaseModel):
 
 class CreateCollection(BaseModel):
     name: str
+    # TODO: Make CollectionConfiguration a Pydantic model
+    configuration: Optional[Dict[str, Any]]
     metadata: Optional[CollectionMetadata] = None
     get_or_create: bool = False
 
