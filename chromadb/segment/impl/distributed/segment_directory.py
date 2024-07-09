@@ -15,6 +15,7 @@ from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     trace_method,
 )
+import time
 
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 
@@ -118,6 +119,10 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
                 },
             )
             self._done_waiting_for_reset.wait(5.0)
+            # TODO: For some reason the above can flake and the memberlist won't be populated
+            # Given that this is a test harness, just sleep for an additional 500ms for now
+            # We should understand why this flaps
+            time.sleep(0.5)
 
     @override
     def get_memberlist(self) -> Memberlist:
