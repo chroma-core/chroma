@@ -826,9 +826,15 @@ mod tests {
             arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
             provider::BlockfileProvider,
         },
-        segment::record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+        segment::{
+            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+            record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+        },
         storage::{local::LocalStorage, Storage},
-        types::{MetadataValue, Operation, OperationRecord, UpdateMetadataValue},
+        types::{
+            DirectComparison, DirectDocumentComparison, MetadataValue, Operation, OperationRecord,
+            UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+        },
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -851,9 +857,23 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
         {
             let segment_writer =
                 RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                     .await
                     .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -903,13 +923,28 @@ mod tests {
                 .materialize()
                 .await
                 .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
             segment_writer
                 .apply_materialized_log_chunk(mat_records)
                 .await
                 .expect("Apply materialized log failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
             let flusher = segment_writer
                 .commit()
                 .expect("Commit for segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
             record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         }
         let mut update_metadata = HashMap::new();
@@ -936,7 +971,7 @@ mod tests {
                     embedding: Some(vec![7.0, 8.0, 9.0]),
                     encoding: None,
                     metadata: Some(update_metadata),
-                    document: Some(String::from("new_doc1")),
+                    document: Some(String::from("number")),
                     operation: Operation::Upsert,
                 },
             },
@@ -962,7 +997,7 @@ mod tests {
         assert_eq!(1, res_vec.len());
         let emb_1 = res_vec[0];
         assert_eq!(1, emb_1.offset_id);
-        assert_eq!("new_doc1", emb_1.merged_document_ref().unwrap());
+        assert_eq!("number", emb_1.merged_document_ref().unwrap());
         assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
         assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
         let mut res_metadata = HashMap::new();
@@ -980,14 +1015,33 @@ mod tests {
             RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(res)
+            .apply_materialized_log_chunk(res.clone())
             .await
             .expect("Error applying materialized log chunk");
+        metadata_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
             .commit()
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
         // Read.
         let segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -1000,9 +1054,77 @@ mod tests {
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
         assert_eq!(record.id, "embedding_id_1");
-        assert_eq!(record.document, Some("new_doc1"));
+        assert_eq!(record.document, Some("number"));
         assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.metadata, Some(res_metadata));
+        // Search by metadata filter.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new_world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("number"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("doc"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
     }
 
     #[tokio::test]
@@ -1023,9 +1145,23 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
         {
             let segment_writer =
                 RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                     .await
                     .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -1075,13 +1211,28 @@ mod tests {
                 .materialize()
                 .await
                 .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
             segment_writer
                 .apply_materialized_log_chunk(mat_records)
                 .await
                 .expect("Apply materialized log failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
             let flusher = segment_writer
                 .commit()
                 .expect("Commit for segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
             record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         }
         let mut update_metadata = HashMap::new();
@@ -1143,14 +1294,33 @@ mod tests {
             RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(res)
+            .apply_materialized_log_chunk(res.clone())
             .await
             .expect("Error applying materialized log chunk");
+        metadata_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
             .commit()
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
         // Read.
         let segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -1166,6 +1336,75 @@ mod tests {
         assert_eq!(record.document, Some("doc1"));
         assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.metadata, Some(res_metadata));
+        // Search by metadata filter.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new_world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("doc1"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("number"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
     }
 
     #[tokio::test]
@@ -1186,9 +1425,23 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
         {
             let segment_writer =
                 RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                     .await
                     .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -1238,13 +1491,28 @@ mod tests {
                 .materialize()
                 .await
                 .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
             segment_writer
                 .apply_materialized_log_chunk(mat_records)
                 .await
                 .expect("Apply materialized log failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
             let flusher = segment_writer
                 .commit()
                 .expect("Commit for segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
             record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         }
         let mut update_metadata = HashMap::new();
@@ -1282,7 +1550,7 @@ mod tests {
                     embedding: None,
                     encoding: None,
                     metadata: None,
-                    document: Some(String::from("new_doc1")),
+                    document: Some(String::from("number")),
                     operation: Operation::Update,
                 },
             },
@@ -1308,7 +1576,7 @@ mod tests {
         assert_eq!(1, res_vec.len());
         let emb_1 = res_vec[0];
         assert_eq!(1, emb_1.offset_id);
-        assert_eq!("new_doc1", emb_1.merged_document_ref().unwrap());
+        assert_eq!("number", emb_1.merged_document_ref().unwrap());
         assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
         assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
         let mut res_metadata = HashMap::new();
@@ -1326,14 +1594,33 @@ mod tests {
             RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(res)
+            .apply_materialized_log_chunk(res.clone())
             .await
             .expect("Error applying materialized log chunk");
+        metadata_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
             .commit()
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
         // Read.
         let segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -1346,13 +1633,81 @@ mod tests {
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
         assert_eq!(record.id, "embedding_id_1");
-        assert_eq!(record.document, Some("new_doc1"));
+        assert_eq!(record.document, Some("number"));
         assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.metadata, Some(res_metadata));
+        // Search by metadata filter.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new_world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("number"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("doc1"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
     }
 
     #[tokio::test]
-    async fn test_materializer() {
+    async fn test_materializer_basic() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let arrow_blockfile_provider =
