@@ -531,14 +531,11 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     state.teardown()  # type: ignore[no-untyped-call]
 
 
-def test_add_delete_add(api: ClientAPI) -> None:
-    from chromadb.test.property.strategies import hashing_embedding_function
-    import numpy as np
-
-    state = EmbeddingStateMachine(api)
+def test_add_delete_add(client: ClientAPI) -> None:
+    state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
-            name="KR3cf\n",
+            name="KR3cf",
             metadata={
                 "Ufmxsi3": 999999.0,
                 "bMMvvrqM4MKmp5CJB8A": 62921,
@@ -557,7 +554,7 @@ def test_add_delete_add(api: ClientAPI) -> None:
                 "hnsw:search_ef": 128,
                 "hnsw:M": 128,
             },
-            embedding_function=hashing_embedding_function(3, np.float32),
+            embedding_function=None,
             id=uuid.UUID("284b6e99-b19e-49b2-96a4-a2a93a95447d"),
             dimension=3,
             dtype=np.float32,
@@ -591,6 +588,8 @@ def test_add_delete_add(api: ClientAPI) -> None:
     for embedding in embeddings:
         emb_list[i] = embedding
         i += 1
+    # if not NOT_CLUSTER_ONLY:
+    #     state.wait_for_compaction()
     state.ann_accuracy()
     state.count()
     state.fields_match()

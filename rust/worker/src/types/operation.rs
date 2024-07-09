@@ -13,6 +13,15 @@ pub(crate) enum Operation {
     Delete,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MaterializedLogOperation {
+    Initial,
+    AddNew,
+    OverwriteExisting,
+    UpdateExisting,
+    DeleteExisting,
+}
+
 #[derive(Error, Debug)]
 pub(crate) enum OperationConversionError {
     #[error("Invalid operation, valid operations are: Add, Upsert, Update, Delete")]

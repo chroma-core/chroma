@@ -6,7 +6,7 @@ use crate::{
         record_segment::{self, RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    types::{LogRecord, Operation, Segment},
+    types::{LogRecord, MaterializedLogOperation, Operation, Segment},
 };
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -137,7 +137,7 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                 removed = true;
                 remaining_search_user_ids.remove(log_record.merged_user_id_ref());
             }
-            if removed && log_record.final_operation != Operation::Delete {
+            if removed && log_record.final_operation != MaterializedLogOperation::DeleteExisting {
                 output_vectors.insert(
                     log_record.merged_user_id(),
                     log_record.merged_embeddings().to_vec(),

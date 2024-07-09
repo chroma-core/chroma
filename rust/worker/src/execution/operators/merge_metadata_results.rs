@@ -6,7 +6,7 @@ use crate::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    types::{LogRecord, Metadata, MetadataValueConversionError, Operation, Segment},
+    types::{LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Operation, Segment},
     utils::merge_sorted_vecs_conjunction,
 };
 use async_trait::async_trait;
@@ -183,7 +183,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         // deleted also here so that we can subsequently ignore
                         // them when reading the record segment.
                         visited_ids.insert(log.offset_id);
-                        if log.final_operation != Operation::Delete {
+                        if log.final_operation != MaterializedLogOperation::DeleteExisting {
                             documents.push(log.merged_document());
                             let final_metadata = log.merged_metadata();
                             if !final_metadata.is_empty() {
@@ -277,7 +277,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     // It's important to insert even the deleted records here
                     // so that they can be ignored when reading from the segment.
                     ids_in_log.insert(log.merged_user_id());
-                    if log.final_operation != Operation::Delete {
+                    if log.final_operation != MaterializedLogOperation::DeleteExisting {
                         documents.push(log.merged_document());
                         let final_metadata = log.merged_metadata();
                         if !final_metadata.is_empty() {

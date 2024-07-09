@@ -1,7 +1,7 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
-    DeletedMetadata, LogRecord, Metadata, MetadataDelta, MetadataValue,
+    DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue,
     MetadataValueConversionError, Operation, OperationRecord, UpdateMetadata, UpdateMetadataValue,
 };
 use async_trait::async_trait;
@@ -147,7 +147,7 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     // For e.g. if log has [Insert, Upsert] then final operation is insert.
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
-    pub(crate) final_operation: Operation,
+    pub(crate) final_operation: MaterializedLogOperation,
     // This is the metadata obtained by combining all the operations
     // present in the log for this id.
     // E.g. if has log has [Insert(a: h), Update(a: b, c: d), Update(a: e, f: g)] then this
@@ -173,6 +173,14 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // needed. If you only need a reference then use merged_document_ref
     // defined below.
     pub(crate) fn merged_document(&self) -> Option<String> {
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            return match self.final_document {
+                Some(doc) => Some(doc.to_string()),
+                None => None,
+            };
+        }
         return match self.final_document {
             Some(doc) => Some(doc.to_string()),
             None => match self.data_record.as_ref() {
@@ -186,6 +194,14 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     }
 
     pub(crate) fn merged_document_ref(&self) -> Option<&str> {
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            return match self.final_document {
+                Some(doc) => Some(doc),
+                None => None,
+            };
+        }
         return match self.final_document {
             Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
@@ -223,13 +239,20 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // Performs a deep copy of the metadata so only use it if really
     // needed. If you only need reference then use merged_metadata_ref below.
     pub(crate) fn merged_metadata(&self) -> HashMap<String, MetadataValue> {
-        let mut final_metadata = match self.data_record.as_ref() {
-            Some(data_record) => match data_record.metadata {
-                Some(ref map) => map.clone(), // auto deref here.
+        let mut final_metadata;
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            final_metadata = HashMap::new();
+        } else {
+            final_metadata = match self.data_record.as_ref() {
+                Some(data_record) => match data_record.metadata {
+                    Some(ref map) => map.clone(), // auto deref here.
+                    None => HashMap::new(),
+                },
                 None => HashMap::new(),
-            },
-            None => HashMap::new(),
-        };
+            };
+        }
         match self.metadata_to_be_merged.as_ref() {
             Some(metadata) => {
                 for (key, value) in metadata {
@@ -305,17 +328,21 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // Returns references to metadata present in the materialized log record.
     pub(crate) fn merged_metadata_ref(&self) -> HashMap<&str, &MetadataValue> {
         let mut final_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
-        match &self.data_record {
-            Some(data_record) => match &data_record.metadata {
-                Some(meta) => {
-                    for (meta_key, meta_val) in meta {
-                        final_metadata.insert(meta_key, meta_val);
+        if self.final_operation != MaterializedLogOperation::OverwriteExisting
+            && self.final_operation != MaterializedLogOperation::AddNew
+        {
+            match &self.data_record {
+                Some(data_record) => match &data_record.metadata {
+                    Some(meta) => {
+                        for (meta_key, meta_val) in meta {
+                            final_metadata.insert(meta_key, meta_val);
+                        }
                     }
-                }
+                    None => (),
+                },
                 None => (),
-            },
-            None => (),
-        };
+            };
+        }
         match &self.metadata_to_be_merged {
             Some(meta) => {
                 for (meta_key, meta_val) in meta {
@@ -337,6 +364,14 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     }
 
     pub(crate) fn merged_embeddings(&self) -> &[f32] {
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            return match self.final_embedding {
+                Some(embed) => embed,
+                None => panic!("Expected source of embedding"),
+            };
+        }
         return match self.final_embedding {
             Some(embed) => embed,
             None => match self.data_record.as_ref() {
@@ -357,7 +392,7 @@ impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
             data_record: Some(data_record),
             offset_id,
             user_id: None,
-            final_operation: Operation::Add,
+            final_operation: MaterializedLogOperation::Initial,
             metadata_to_be_merged: None,
             metadata_to_be_deleted: None,
             final_document: None,
@@ -414,7 +449,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
             data_record: None,
             offset_id,
             user_id: Some(user_id),
-            final_operation: Operation::Add,
+            final_operation: MaterializedLogOperation::AddNew,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
             final_document: document,
@@ -519,7 +554,7 @@ impl<'me> LogMaterializer<'me> {
                         let curr_val = existing_id_to_materialized
                             .get(log_record.record.id.as_str())
                             .unwrap();
-                        if curr_val.final_operation == Operation::Delete {
+                        if curr_val.final_operation == MaterializedLogOperation::DeleteExisting {
                             // Overwrite.
                             let mut materialized_record = match MaterializedLogRecord::try_from((
                                 &log_record.record,
@@ -531,7 +566,9 @@ impl<'me> LogMaterializer<'me> {
                                     return Err(e);
                                 }
                             };
-                            materialized_record.final_operation = Operation::Update;
+                            materialized_record.data_record = curr_val.data_record.clone();
+                            materialized_record.final_operation =
+                                MaterializedLogOperation::OverwriteExisting;
                             existing_id_to_materialized
                                 .insert(log_record.record.id.as_str(), materialized_record);
                         }
@@ -567,7 +604,7 @@ impl<'me> LogMaterializer<'me> {
                         let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
-                        record_from_map.final_operation = Operation::Delete;
+                        record_from_map.final_operation = MaterializedLogOperation::DeleteExisting;
                         record_from_map.final_document = None;
                         record_from_map.final_embedding = None;
                         record_from_map.metadata_to_be_merged = None;
@@ -576,16 +613,14 @@ impl<'me> LogMaterializer<'me> {
                     }
                 }
                 Operation::Update => {
-                    let mut created_in_log = true;
                     let record_from_map = match existing_id_to_materialized
                         .get_mut(log_record.record.id.as_str())
                     {
                         Some(res) => {
                             // Ignore if deleted.
-                            if res.final_operation == Operation::Delete {
+                            if res.final_operation == MaterializedLogOperation::DeleteExisting {
                                 continue;
                             }
-                            created_in_log = false;
                             res
                         }
                         None => match new_id_to_materialized.get_mut(log_record.record.id.as_str())
@@ -621,50 +656,66 @@ impl<'me> LogMaterializer<'me> {
                         record_from_map.final_embedding =
                             Some(log_record.record.embedding.as_ref().unwrap().as_slice());
                     }
-                    // Only update the operation state for records that were not created
-                    // from the log.
-                    if !created_in_log {
-                        record_from_map.final_operation = Operation::Update;
+                    if record_from_map.final_operation == MaterializedLogOperation::Initial {
+                        record_from_map.final_operation = MaterializedLogOperation::UpdateExisting;
                     }
                 }
                 Operation::Upsert => {
-                    if existing_id_to_materialized.contains_key(log_record.record.id.as_str())
-                        && existing_id_to_materialized
-                            .get(&log_record.record.id.as_str())
-                            .unwrap()
-                            .final_operation
-                            != Operation::Delete
-                    {
-                        // Just another update.
-                        let record_from_map = existing_id_to_materialized
+                    if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                        // safe to unwrap here.
+                        let existing_record = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
-                        match merge_update_metadata(
-                            (
-                                &record_from_map.metadata_to_be_merged,
-                                &record_from_map.metadata_to_be_deleted,
-                            ),
-                            &log_record.record.metadata,
-                        ) {
-                            Ok(meta) => {
-                                record_from_map.metadata_to_be_merged = meta.0;
-                                record_from_map.metadata_to_be_deleted = meta.1;
+                        if existing_record.final_operation
+                            == MaterializedLogOperation::DeleteExisting
+                        {
+                            let mut materialized_record = match MaterializedLogRecord::try_from((
+                                &log_record.record,
+                                existing_record.offset_id,
+                                log_record.record.id.as_str(),
+                            )) {
+                                Ok(record) => record,
+                                Err(e) => {
+                                    return Err(e);
+                                }
+                            };
+                            materialized_record.data_record = existing_record.data_record.clone();
+                            materialized_record.final_operation =
+                                MaterializedLogOperation::OverwriteExisting;
+                            existing_id_to_materialized
+                                .insert(log_record.record.id.as_str(), materialized_record);
+                        } else {
+                            match merge_update_metadata(
+                                (
+                                    &existing_record.metadata_to_be_merged,
+                                    &existing_record.metadata_to_be_deleted,
+                                ),
+                                &log_record.record.metadata,
+                            ) {
+                                Ok(meta) => {
+                                    existing_record.metadata_to_be_merged = meta.0;
+                                    existing_record.metadata_to_be_deleted = meta.1;
+                                }
+                                Err(e) => {
+                                    return Err(
+                                        LogMaterializerError::MetadataMaterializationError(e),
+                                    );
+                                }
+                            };
+                            if log_record.record.document.is_some() {
+                                existing_record.final_document =
+                                    Some(log_record.record.document.as_ref().unwrap().as_str());
                             }
-                            Err(e) => {
-                                return Err(LogMaterializerError::MetadataMaterializationError(e));
+                            if log_record.record.embedding.is_some() {
+                                existing_record.final_embedding =
+                                    Some(log_record.record.embedding.as_ref().unwrap().as_slice());
                             }
-                        };
-                        if log_record.record.document.is_some() {
-                            record_from_map.final_document =
-                                Some(log_record.record.document.as_ref().unwrap().as_str());
+                            if existing_record.final_operation == MaterializedLogOperation::Initial
+                            {
+                                existing_record.final_operation =
+                                    MaterializedLogOperation::UpdateExisting;
+                            }
                         }
-                        if log_record.record.embedding.is_some() {
-                            record_from_map.final_embedding =
-                                Some(log_record.record.embedding.as_ref().unwrap().as_slice());
-                        }
-                        // We implicitly convert all upsert operations to either update
-                        // or insert depending on whether it already existed in storage or not.
-                        record_from_map.final_operation = Operation::Update;
                     } else if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
                         // Just another update.
                         let record_from_map = new_id_to_materialized
@@ -695,25 +746,11 @@ impl<'me> LogMaterializer<'me> {
                         }
                         // This record is not present on storage yet hence final operation is
                         // Add.
-                        record_from_map.final_operation = Operation::Add;
+                        record_from_map.final_operation = MaterializedLogOperation::AddNew;
                     } else {
                         // Insert.
-                        let mut curr_offset_id: Option<u32> = None;
-                        if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                            let record = existing_id_to_materialized
-                                .get(&log_record.record.id.as_str())
-                                .unwrap();
-                            if record.final_operation == Operation::Delete {
-                                curr_offset_id = Some(record.offset_id);
-                            }
-                        }
-                        let next_offset;
-                        if curr_offset_id.is_none() {
-                            next_offset =
-                                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        } else {
-                            next_offset = curr_offset_id.unwrap();
-                        }
+                        let next_offset =
+                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::try_from((
                             &log_record.record,
                             next_offset,
@@ -733,7 +770,7 @@ impl<'me> LogMaterializer<'me> {
         let mut res = vec![];
         for (_key, value) in existing_id_to_materialized {
             // Ignore records that only had invalid ADDS on the log.
-            if value.final_operation == Operation::Add {
+            if value.final_operation == MaterializedLogOperation::Initial {
                 continue;
             }
             res.push(value);
@@ -958,7 +995,7 @@ mod tests {
                 assert_eq!("doc3", log.final_document.unwrap());
                 assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.unwrap());
                 assert_eq!(3, log.offset_id);
-                assert_eq!(Operation::Add, log.final_operation);
+                assert_eq!(MaterializedLogOperation::AddNew, log.final_operation);
                 let mut hello_found = 0;
                 let mut hello_again_found = 0;
                 for (key, value) in log.metadata_to_be_merged.as_ref().unwrap() {
@@ -976,7 +1013,10 @@ mod tests {
                 assert_eq!(hello_again_found, 1);
             } else if log.data_record.as_ref().unwrap().id == "embedding_id_2" {
                 id2_found += 1;
-                assert_eq!(Operation::Delete, log.final_operation);
+                assert_eq!(
+                    MaterializedLogOperation::DeleteExisting,
+                    log.final_operation
+                );
                 assert_eq!(2, log.offset_id);
                 assert_eq!(None, log.final_document);
                 assert_eq!(None, log.final_embedding);
@@ -985,7 +1025,10 @@ mod tests {
                 assert_eq!(true, log.data_record.is_some());
             } else if log.data_record.as_ref().unwrap().id == "embedding_id_1" {
                 id1_found += 1;
-                assert_eq!(Operation::Update, log.final_operation);
+                assert_eq!(
+                    MaterializedLogOperation::UpdateExisting,
+                    log.final_operation
+                );
                 assert_eq!(1, log.offset_id);
                 assert_eq!(None, log.final_document);
                 assert_eq!(None, log.final_embedding);
