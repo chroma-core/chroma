@@ -294,7 +294,9 @@ def test_cycle_versions(
     # Run the task in a separate process to avoid polluting the current process
     # with the old version. Using spawn instead of fork to avoid sharing the
     # current process memory which would cause the old version to be loaded
-    persist_generated_data_with_old_version(version, settings, collection_strategy, embeddings_strategy, None)
+    persist_generated_data_with_old_version(
+        version, settings, collection_strategy, embeddings_strategy, None
+    )
     # ctx = multiprocessing.get_context("spawn")
     # conn1, conn2 = multiprocessing.Pipe()
     # p = ctx.Process(
