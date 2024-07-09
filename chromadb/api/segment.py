@@ -1,4 +1,5 @@
 from chromadb.api import ServerAPI
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer, Resource
@@ -146,6 +147,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -159,11 +161,24 @@ class SegmentAPI(ServerAPI):
 
         id = uuid4()
 
-        coll, created = self._sysdb.create_collection(
+        model = CollectionModel(
             id=id,
             name=name,
             metadata=metadata,
+            configuration=configuration
+            if configuration is not None
+            else CollectionConfigurationInternal(),  # Use default configuration if none is provided
+            tenant=tenant,
+            database=database,
             dimension=None,
+        )
+        # TODO: Let sysdb create the collection directly from the model
+        coll, created = self._sysdb.create_collection(
+            id=model.id,
+            name=model.name,
+            configuration=model.get_configuration(),
+            metadata=model.metadata,
+            dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
             tenant=tenant,
             database=database,
@@ -198,13 +213,15 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.create_collection(  # type: ignore
+        return self.create_collection(
             name=name,
             metadata=metadata,
+            configuration=configuration,
             get_or_create=True,
             tenant=tenant,
             database=database,
@@ -299,12 +316,12 @@ class SegmentAPI(ServerAPI):
 
         if existing:
             self._sysdb.delete_collection(
-                existing[0]["id"], tenant=tenant, database=database
+                existing[0].id, tenant=tenant, database=database
             )
-            for s in self._manager.delete_segments(existing[0]["id"]):
+            for s in self._manager.delete_segments(existing[0].id):
                 self._sysdb.delete_segment(s)
-            if existing and existing[0]["id"] in self._collection_cache:
-                del self._collection_cache[existing[0]["id"]]
+            if existing and existing[0].id in self._collection_cache:
+                del self._collection_cache[existing[0].id]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -442,7 +459,7 @@ class SegmentAPI(ServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         add_attributes_to_current_span(
             {
@@ -621,7 +638,7 @@ class SegmentAPI(ServerAPI):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["documents", "metadatas", "distances"],
+        include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         add_attributes_to_current_span(
             {
@@ -796,7 +813,7 @@ class SegmentAPI(ServerAPI):
         dimension."""
         if collection["dimension"] is None:
             if update:
-                id = collection["id"]
+                id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
                 self._collection_cache[id]["dimension"] = dim
         elif collection["dimension"] != dim:

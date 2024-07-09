@@ -3,6 +3,10 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
+from chromadb.api.configuration import (
+    CollectionConfiguration,
+    CollectionConfigurationInternal,
+)
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
@@ -213,7 +217,7 @@ class AsyncBaseAPI(ABC):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
@@ -263,7 +267,7 @@ class AsyncBaseAPI(ABC):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
@@ -346,6 +350,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -416,6 +421,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -541,6 +547,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -562,6 +569,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

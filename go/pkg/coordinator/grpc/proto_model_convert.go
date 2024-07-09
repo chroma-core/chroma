@@ -40,13 +40,14 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 	}
 
 	collectionpb := &coordinatorpb.Collection{
-		Id:          collection.ID.String(),
-		Name:        collection.Name,
-		Dimension:   collection.Dimension,
-		Tenant:      collection.TenantID,
-		Database:    collection.DatabaseName,
-		LogPosition: collection.LogPosition,
-		Version:     collection.Version,
+		Id:                   collection.ID.String(),
+		Name:                 collection.Name,
+		ConfigurationJsonStr: collection.ConfigurationJsonStr,
+		Dimension:            collection.Dimension,
+		Tenant:               collection.TenantID,
+		Database:             collection.DatabaseName,
+		LogPosition:          collection.LogPosition,
+		Version:              collection.Version,
 	}
 	if collection.Metadata == nil {
 		return collectionpb
@@ -111,13 +112,14 @@ func convertToCreateCollectionModel(req *coordinatorpb.CreateCollectionRequest) 
 	}
 
 	return &model.CreateCollection{
-		ID:           collectionID,
-		Name:         req.Name,
-		Dimension:    req.Dimension,
-		Metadata:     metadata,
-		GetOrCreate:  req.GetGetOrCreate(),
-		TenantID:     req.GetTenant(),
-		DatabaseName: req.GetDatabase(),
+		ID:                   collectionID,
+		Name:                 req.Name,
+		ConfigurationJsonStr: req.ConfigurationJsonStr,
+		Dimension:            req.Dimension,
+		Metadata:             metadata,
+		GetOrCreate:          req.GetGetOrCreate(),
+		TenantID:             req.GetTenant(),
+		DatabaseName:         req.GetDatabase(),
 	}, nil
 }
 

@@ -3,6 +3,7 @@ from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -157,6 +158,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -166,6 +168,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         model = await self._server.create_collection(
             name=name,
+            configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
@@ -205,6 +208,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -213,6 +217,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         model = await self._server.get_or_create_collection(
             name=name,
+            configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
@@ -334,7 +339,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         return await self._server._get(
             collection_id=collection_id,
@@ -371,7 +376,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         return await self._server._query(
             collection_id=collection_id,
