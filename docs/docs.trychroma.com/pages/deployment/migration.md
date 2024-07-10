@@ -24,8 +24,6 @@ We will aim to provide:
 
 #### JavaScript Client Refactor
 
-##### Flat Chroma Client Client
-
 We've moved to a flat client on the JS/TS client. Whereas previously, you would construct a Collection object that you would then call methods on, Collections are now data objects which are passed into methods on the ChromaClient object.
 
 For example, if you currently have the following code:
