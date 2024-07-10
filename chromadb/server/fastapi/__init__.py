@@ -566,7 +566,6 @@ class FastAPI(Server):
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
             create = CreateCollection.model_validate(orjson.loads(raw_body))
-
             configuration = (
                 CollectionConfigurationInternal()
                 if not create.configuration
