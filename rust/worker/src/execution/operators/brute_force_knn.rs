@@ -19,6 +19,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::trace;
 use tracing::Instrument;
+use tracing::Span;
 
 /// The brute force k-nearest neighbors operator is responsible for computing the k-nearest neighbors
 /// of a given query vector against a set of vectors using brute force calculation.
@@ -141,7 +142,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         let log_materializer = LogMaterializer::new(record_segment_reader, input.log.clone(), None);
         let logs = match log_materializer
             .materialize()
-            .instrument(tracing::info_span!("Materialize logs"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
             Ok(logs) => logs,

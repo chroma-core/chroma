@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 
 #[derive(Debug)]
 pub struct HnswKnnOperator {}
@@ -147,7 +147,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         );
         let logs = match log_materializer
             .materialize()
-            .instrument(tracing::info_span!("Materialize logs"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
             Ok(logs) => logs,

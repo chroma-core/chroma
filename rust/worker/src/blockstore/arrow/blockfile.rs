@@ -15,7 +15,7 @@ use parking_lot::Mutex;
 use std::{collections::HashMap, sync::Arc};
 use std::{collections::HashSet, mem::transmute};
 use thiserror::Error;
-use tracing::{trace_span, Instrument};
+use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -283,11 +283,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
         let block = self
             .get_block(target_block_id)
-            .instrument(tracing::info_span!("Get Block", block_id = %target_block_id))
+            .instrument(tracing::trace_span!(parent: Span::current(), "Get Block", block_id = %target_block_id))
             .await;
         let res = match block {
             Some(block) => {
-                let block_get_span = tracing::info_span!("Block Get", block_id = %target_block_id);
+                let block_get_span = tracing::trace_span!(parent: Span::current(), "Block Get", block_id = %target_block_id);
                 block_get_span.in_scope(|| block.get(prefix, key.clone()))
             }
             None => {

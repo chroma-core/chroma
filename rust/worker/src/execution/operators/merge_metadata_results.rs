@@ -12,7 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use std::collections::HashSet;
 use thiserror::Error;
-use tracing::{error, trace, Instrument};
+use tracing::{error, trace, Instrument, Span};
 
 #[derive(Debug)]
 pub struct MergeMetadataResultsOperator {}
@@ -166,7 +166,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             LogMaterializer::new(record_segment_reader, input.filtered_log.clone(), None);
         let mat_records = match materializer
             .materialize()
-            .instrument(tracing::info_span!("Materialize logs"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
             Ok(records) => records,

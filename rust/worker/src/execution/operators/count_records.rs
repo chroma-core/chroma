@@ -209,7 +209,7 @@ mod tests {
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
     use std::{collections::HashMap, str::FromStr};
-    use tracing::Instrument;
+    use tracing::{Instrument, Span};
     use uuid::Uuid;
 
     #[tokio::test]
@@ -292,7 +292,7 @@ mod tests {
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
-                .instrument(tracing::info_span!("Materialize logs"))
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
                 .expect("Log materialization failed");
             segment_writer

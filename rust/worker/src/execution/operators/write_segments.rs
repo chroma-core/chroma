@@ -22,6 +22,7 @@ use crate::{
 use async_trait::async_trait;
 use thiserror::Error;
 use tracing::Instrument;
+use tracing::Span;
 
 #[derive(Error, Debug)]
 pub enum WriteSegmentsOperatorError {
@@ -145,7 +146,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         // Materialize the logs.
         let res = match materializer
             .materialize()
-            .instrument(tracing::info_span!("Materialize logs"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
             Ok(records) => records,

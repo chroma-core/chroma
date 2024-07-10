@@ -22,7 +22,7 @@ use roaring::RoaringBitmap;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tonic::async_trait;
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringOperator {}
@@ -155,7 +155,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             LogMaterializer::new(record_segment_reader, input.log_record.clone(), None);
         let mat_records = match materializer
             .materialize()
-            .instrument(tracing::info_span!("Materialize logs"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
             Ok(records) => records,
