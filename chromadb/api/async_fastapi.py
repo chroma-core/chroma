@@ -121,6 +121,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None, headers=self._headers, verify=self._verify
             )
+        else:
+            self._clients[loop_hash].headers.update(self._headers)
 
         return self._clients[loop_hash]
 
