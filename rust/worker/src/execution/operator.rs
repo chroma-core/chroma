@@ -118,9 +118,9 @@ where
 
         match result {
             Ok(result) => {
-                // If this (or similarily, the .send() below) errors, it means the receiver was dropped.
+                // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
                 // There are valid reasons for this to happen (e.g. the component was stopped) so we ignore the error.
-                let _ = self
+                match self
                     .reply_channel
                     .send(
                         TaskResult {
@@ -129,12 +129,22 @@ where
                         },
                         None,
                     )
-                    .await;
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::error!(
+                            "Failed to send task result for task {} to reply channel: {}",
+                            self.task_id,
+                            err
+                        );
+                    }
+                }
             }
             Err(panic_value) => {
                 let panic_message = get_panic_message(panic_value);
 
-                let _ = self
+                match self
                     .reply_channel
                     .send(
                         TaskResult {
@@ -143,7 +153,17 @@ where
                         },
                         None,
                     )
-                    .await;
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::error!(
+                            "Failed to send task result for task {} to reply channel: {}",
+                            self.task_id,
+                            err
+                        );
+                    }
+                };
 
                 // Re-panic so the message handler can catch it
                 panic!(
