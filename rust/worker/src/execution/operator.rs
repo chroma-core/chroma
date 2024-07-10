@@ -1,6 +1,7 @@
 use crate::{
     errors::{ChromaError, ErrorCodes},
     system::ReceiverForMessage,
+    utils::get_panic_message,
 };
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -131,20 +132,13 @@ where
                     .await;
             }
             Err(panic_value) => {
-                #[allow(clippy::manual_map)]
-                let panic_value = if let Some(s) = panic_value.downcast_ref::<&str>() {
-                    Some(&**s)
-                } else if let Some(s) = panic_value.downcast_ref::<String>() {
-                    Some(s.as_str())
-                } else {
-                    None
-                };
+                let panic_message = get_panic_message(panic_value);
 
                 let _ = self
                     .reply_channel
                     .send(
                         TaskResult {
-                            result: Err(TaskError::Panic(panic_value.map(|s| s.to_string()))),
+                            result: Err(TaskError::Panic(panic_message.clone())),
                             task_id: self.task_id,
                         },
                         None,
@@ -154,7 +148,7 @@ where
                 // Re-panic so the message handler can catch it
                 panic!(
                     "{}",
-                    panic_value.unwrap_or("Unknown panic occurred in task")
+                    panic_message.unwrap_or("Unknown panic occurred in task".to_string())
                 );
             }
         };

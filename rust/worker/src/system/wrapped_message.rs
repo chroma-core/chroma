@@ -1,3 +1,5 @@
+use crate::utils::get_panic_message;
+
 use super::{Component, ComponentContext, Handler, Message};
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -99,20 +101,11 @@ where
                     }
                 }
                 Err(panic_value) => {
-                    #[allow(clippy::manual_map)]
-                    let panic_value = if let Some(s) = panic_value.downcast_ref::<&str>() {
-                        Some(&**s)
-                    } else if let Some(s) = panic_value.downcast_ref::<String>() {
-                        Some(s.as_str())
-                    } else {
-                        None
-                    };
+                    let panic_message = get_panic_message(panic_value);
 
                     if let Some(reply_channel) = message.reply_channel {
                         reply_channel
-                            .send(Err(MessageHandlerError::Panic(
-                                panic_value.map(ToString::to_string),
-                            )))
+                            .send(Err(MessageHandlerError::Panic(panic_message)))
                             .expect("message reply channel was unexpectedly dropped by caller");
                     }
                 }
