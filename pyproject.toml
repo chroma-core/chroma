@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
   'build >= 1.0.3',
   'pydantic >= 1.9',
-  'chroma-hnswlib==0.7.5',
+  'chroma-hnswlib==0.7.3',
   'fastapi >= 0.95.2',
   'uvicorn[standard] >= 0.18.3',
   'numpy >= 1.22.5, < 2.0.0',
