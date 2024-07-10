@@ -17,7 +17,7 @@ This CIP addresses both issues.
 
 ## Proposed Changes
 
-A new configuration parameter will be added, `log:vacuum_threshold`. It defaults to 1GB. This helps avoid excessive fragmentation—without this parameter, or if it's set to `0`, it is effectively the same as SQLite's full vacuum mode.
+A new configuration parameter will be added, `log:vacuum_threshold`. It defaults to 1GB. Following Postgres' convention, the unit is megabytes. This helps avoid excessive fragmentation—without this parameter, or if it's set to `0`, it is effectively the same as SQLite's full vacuum mode.
 
 Two additional things will be done after write transactions:
 
