@@ -202,11 +202,12 @@ def test_filterable_metadata_get(
     reset(client)
     coll = client.create_collection(
         name=collection.name,
+        configuration=collection.configuration,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
 
-    initial_version = coll.get_model()["version"]
+    initial_version: int = cast(int, coll.get_model()["version"])
 
     coll.add(**record_set)
 
@@ -259,6 +260,7 @@ def test_filterable_metadata_get_limit_offset(
     reset(client)
     coll = client.create_collection(
         name=collection.name,
+        configuration=collection.configuration,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
@@ -313,10 +315,11 @@ def test_filterable_metadata_query(
     reset(client)
     coll = client.create_collection(
         name=collection.name,
+        configuration=collection.configuration,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    initial_version = coll.get_model()["version"]
+    initial_version: int = cast(int, coll.get_model()["version"])
     normalized_record_set = invariants.wrap_all(record_set)
 
     coll.add(**record_set)  # type: ignore[arg-type]

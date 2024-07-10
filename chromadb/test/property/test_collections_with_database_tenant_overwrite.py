@@ -12,6 +12,7 @@ import logging
 import pytest
 from chromadb.api import AdminAPI
 from chromadb.api.client import AdminClient, Client
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.config import Settings, System
 from chromadb.test.conftest import (
     ClientFactories,
@@ -198,6 +199,7 @@ def test_repeat_failure(
     state.create_coll(
         coll=strategies.Collection(
             name="A00",
+            configuration=CollectionConfiguration(),
             metadata=None,
             embedding_function=strategies.hashing_embedding_function(
                 dim=2, dtype=numpy.float16  # type: ignore

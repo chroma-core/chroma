@@ -5,13 +5,17 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Generator, List, Tuple, Dict, Any, Callable, Type
+from typing import Generator, List, Tuple, Dict, Any, Callable, Type, cast
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
 from chromadb import config
+from chromadb.api.configuration import (
+    ConfigurationDefinition,
+    HNSWConfigurationInternal,
+)
 from chromadb.api.configuration import (
     ConfigurationParameter,
     EmbeddingsQueueConfigurationInternal,
@@ -86,11 +90,47 @@ def _patch_telemetry_client(
     settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
 
 
+def _patch_hnsw_params_in_metadata(
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
+) -> None:
+    # chroma 0.5.5 moved HNSW parameters from the collection metadata into the collection configuration
+    # This patch goes the other way and moves the HNSW parameters from the collection
+    # configuration into the collection metadata for creating old versions
+    hnsw_configuration = cast(
+        HNSWConfigurationInternal,
+        collection.configuration.get_parameter("hnsw_configuration").value,
+    )
+
+    hnsw_params = {}
+    # We assume that no parameter set to a default value is configured explicitly
+    for key, parameter in hnsw_configuration.parameter_map.items():
+        default_value = cast(
+            ConfigurationDefinition, HNSWConfigurationInternal.definitions.get(key)
+        ).default_value
+        if parameter.value != default_value:
+            # names are reversed :(
+            if key == "ef_construction":
+                hnsw_params["hnsw:construction_ef"] = parameter.value
+            elif key == "ef_search":
+                hnsw_params["hnsw:search_ef"] = parameter.value
+            else:
+                hnsw_params[f"hnsw:{key}"] = parameter.value
+
+    if len(hnsw_params) > 0:
+        if collection.metadata is None:
+            collection.metadata = hnsw_params  # type: ignore[assignment]
+        else:
+            collection.metadata.update(hnsw_params)  # type: ignore[attr-defined]
+
+
 version_patches: List[
     Tuple[str, Callable[[strategies.Collection, strategies.RecordSet, Settings], None]]
 ] = [
     ("0.4.3", _patch_boolean_metadata),
     ("0.4.14", _patch_telemetry_client),
+    ("0.5.5", _patch_hnsw_params_in_metadata),
 ]
 
 
@@ -248,14 +288,22 @@ def persist_generated_data_with_old_version(
         # deal with collection models instead of collections
         # in order to work with this we need to wrap the api in a client
         # for versions greater than or equal to 0.5.4
+        # since 0.5.4 we also specify the configuration
         if packaging_version.Version(version) >= packaging_version.Version("0.5.4"):
             api = old_module.api.client.Client.from_system(system)
-        coll = api.create_collection(
-            name=collection_strategy.name,
-            metadata=collection_strategy.metadata,
-            # In order to test old versions, we can't rely on the not_implemented function
-            embedding_function=not_implemented_ef(),
-        )
+            coll = api.create_collection(
+                name=collection_strategy.name,
+                metadata=collection_strategy.metadata,
+                configuration=collection_strategy.configuration,
+                embedding_function=not_implemented_ef(),
+            )
+        else:
+            coll = api.create_collection(
+                name=collection_strategy.name,
+                metadata=collection_strategy.metadata,
+                # In order to test old versions, we can't rely on the not_implemented function
+                embedding_function=not_implemented_ef(),
+            )
         coll.add(**embeddings_strategy)
 
         # Just use some basic checks for sanity and manual testing where you break the new
