@@ -639,22 +639,34 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
 
 def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
-        pytest.param((
-            fastapi_server_basic_auth_valid_cred_single_user,
-            "chromadb.api.fastapi.FastAPI",
-        ),id="fastapi_server_basic_auth_valid_cred_single_user_sync"),
-        pytest.param((
-            fastapi_server_basic_auth_valid_cred_single_user,
-            "chromadb.api.async_fastapi.AsyncFastAPI",
-        ),id="fastapi_server_basic_auth_valid_cred_single_user_async"),
-        pytest.param((
-            fastapi_server_basic_auth_valid_cred_multiple_users,
-            "chromadb.api.async_fastapi.AsyncFastAPI",
-        ),id="fastapi_server_basic_auth_valid_cred_multiple_users_async"),
-        pytest.param((
-            fastapi_server_basic_auth_valid_cred_multiple_users,
-            "chromadb.api.fastapi.FastAPI",
-        ),id="fastapi_server_basic_auth_valid_cred_multiple_users_sync"),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_single_user,
+                "chromadb.api.fastapi.FastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_single_user_sync",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_single_user,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_single_user_async",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_multiple_users,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_multiple_users_async",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_multiple_users,
+                "chromadb.api.fastapi.FastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_multiple_users_sync",
+        ),
     ]
     return fixtures
 
@@ -670,34 +682,50 @@ def system_fixtures_root_and_singleton_tenant_db_user() -> (
     List[Callable[[], Generator[System, None, None]]]
 ):
     fixtures = [
-        pytest.param((
-            fastapi_fixture_admin_and_singleton_tenant_db_user,
-            "chromadb.api.fastapi.FastAPI",
-        ),id="fastapi_fixture_admin_and_singleton_tenant_db_user_sync"),
-        pytest.param((
-            fastapi_fixture_admin_and_singleton_tenant_db_user,
-            "chromadb.api.fastapi.AsyncFastAPI",
-        ),id="fastapi_fixture_admin_and_singleton_tenant_db_user_async"),
+        pytest.param(
+            (
+                fastapi_fixture_admin_and_singleton_tenant_db_user,
+                "chromadb.api.fastapi.FastAPI",
+            ),
+            id="fastapi_fixture_admin_and_singleton_tenant_db_user_sync",
+        ),
+        pytest.param(
+            (
+                fastapi_fixture_admin_and_singleton_tenant_db_user,
+                "chromadb.api.fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_fixture_admin_and_singleton_tenant_db_user_async",
+        ),
     ]
     return fixtures
 
 
 def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
-        pytest.param((fastapi_server_basic_auth_invalid_cred,
-                      "chromadb.api.fastapi.FastAPI"), id="fastapi_server_basic_auth_invalid_cred_sync"),
-        pytest.param((
-            fastapi_server_basic_auth_invalid_cred,
-            "chromadb.api.async_fastapi.AsyncFastAPI",
-        ), id="fastapi_server_basic_auth_invalid_cred_async"),
+        pytest.param(
+            (fastapi_server_basic_auth_invalid_cred, "chromadb.api.fastapi.FastAPI"),
+            id="fastapi_server_basic_auth_invalid_cred_sync",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_invalid_cred,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_server_basic_auth_invalid_cred_async",
+        ),
     ]
     return fixtures
 
 
 def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
-        pytest.param((fastapi_ssl, "chromadb.api.fastapi.FastAPI"), id="fastapi_ssl_sync"),
-        pytest.param((fastapi_ssl, "chromadb.api.async_fastapi.AsyncFastAPI"), id="fastapi_ssl_async"),
+        pytest.param(
+            (fastapi_ssl, "chromadb.api.fastapi.FastAPI"), id="fastapi_ssl_sync"
+        ),
+        pytest.param(
+            (fastapi_ssl, "chromadb.api.async_fastapi.AsyncFastAPI"),
+            id="fastapi_ssl_async",
+        ),
     ]
     return fixtures
 
