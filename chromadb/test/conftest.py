@@ -386,7 +386,9 @@ def basic_http_client() -> Generator[System, None, None]:
     system.stop()
 
 
-def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None, None]:
+def fastapi_server_basic_auth_valid_cred_single_user(
+    api_impl: str,
+) -> Generator[System, None, None]:
     # This (and similar usage below) should use the delete_on_close parameter
     # instead of delete=False, but it's only available in Python 3.12 and later.
     # We must explicitly close the file before spawning a subprocess to avoid
@@ -401,13 +403,14 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
             chroma_server_authn_credentials_file=f.name,
             chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
             chroma_client_auth_credentials="admin:admin",
+            chroma_api_impl=api_impl,
         ):
             yield item
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
-    Generator[System, None, None]
-):
+def fastapi_server_basic_auth_valid_cred_multiple_users(
+    api_impl: str,
+) -> Generator[System, None, None]:
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -424,6 +427,7 @@ def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
             chroma_server_authn_credentials_file=f.name,
             chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
             chroma_client_auth_credentials="admin:admin",
+            chroma_api_impl=api_impl,
         ):
             yield item
 
@@ -628,8 +632,22 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
 
 def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
-        fastapi_server_basic_auth_valid_cred_single_user,
-        fastapi_server_basic_auth_valid_cred_multiple_users,
+        (
+            fastapi_server_basic_auth_valid_cred_single_user,
+            "chromadb.api.async_fastapi.AsyncFastAPI",
+        ),
+        (
+            fastapi_server_basic_auth_valid_cred_single_user,
+            "chromadb.api.fastapi.FastAPI",
+        ),
+        (
+            fastapi_server_basic_auth_valid_cred_multiple_users,
+            "chromadb.api.async_fastapi.AsyncFastAPI",
+        ),
+        (
+            fastapi_server_basic_auth_valid_cred_multiple_users,
+            "chromadb.api.fastapi.FastAPI",
+        ),
     ]
     return fixtures
 
@@ -691,7 +709,7 @@ def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, Non
 
 @pytest.fixture(scope="module", params=system_fixtures_auth())
 def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    yield from request.param[0](request.param[1])
 
 
 @async_class_to_sync

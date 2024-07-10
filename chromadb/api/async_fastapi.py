@@ -2,13 +2,14 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Optional, cast, Tuple, Sequence, Dict
+from typing import Any, Optional, cast, Tuple, Sequence, Dict, Union
 import logging
 import httpx
 from overrides import override
 from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.auth import ClientAuthProvider
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -49,6 +50,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
     _clients: Dict[int, httpx.AsyncClient] = {}
+    _headers: Dict[str, str] = {}
+    _verify: Optional[Union[bool, str]] = True
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -66,6 +69,18 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
             default_api_path=system.settings.chroma_server_api_default_path,
         )
+        self._header = system.settings.chroma_server_headers
+        if self._header is not None:
+            self._headers.update(self._header)
+
+        if self._settings.chroma_server_ssl_verify is not None:
+            self._verify = self._settings.chroma_server_ssl_verify
+
+        if system.settings.chroma_client_auth_provider:
+            self._auth_provider = self.require(ClientAuthProvider)
+            _headers = self._auth_provider.authenticate()
+            for header, value in _headers.items():
+                self._headers[header] = value.get_secret_value()
 
     async def __aenter__(self) -> "AsyncFastAPI":
         self._get_client()
@@ -103,7 +118,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             loop_hash = 0
 
         if loop_hash not in self._clients:
-            self._clients[loop_hash] = httpx.AsyncClient(timeout=None)
+            self._clients[loop_hash] = httpx.AsyncClient(
+                timeout=None, headers=self._headers, verify=self._verify
+            )
 
         return self._clients[loop_hash]
 
