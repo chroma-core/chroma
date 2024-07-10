@@ -46,3 +46,9 @@ pub(crate) trait ChromaError: Error + Send {
 }
 
 impl Error for Box<dyn ChromaError> {}
+
+impl ChromaError for Box<dyn ChromaError> {
+    fn code(&self) -> ErrorCodes {
+        self.as_ref().code()
+    }
+}

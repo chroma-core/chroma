@@ -1,6 +1,12 @@
-use crate::system::ReceiverForMessage;
+use crate::{
+    errors::{ChromaError, ErrorCodes},
+    system::ReceiverForMessage,
+    utils::get_panic_message,
+};
 use async_trait::async_trait;
-use std::fmt::Debug;
+use futures::FutureExt;
+use std::{fmt::Debug, panic::AssertUnwindSafe};
+use thiserror::Error;
 use uuid::Uuid;
 
 /// An operator takes a generic input and returns a generic output.
@@ -18,16 +24,45 @@ where
     fn get_name(&self) -> &'static str;
 }
 
+#[derive(Debug, Error)]
+pub(super) enum TaskError<Err> {
+    #[error("Panic occurred while handling task: {0:?}")]
+    Panic(Option<String>),
+    #[error("Task failed with error: {0:?}")]
+    TaskFailed(#[from] Err),
+}
+
+impl<Err> ChromaError for TaskError<Err>
+where
+    Err: Debug + ChromaError + 'static,
+{
+    fn code(&self) -> ErrorCodes {
+        match self {
+            TaskError::Panic(_) => ErrorCodes::Internal,
+            TaskError::TaskFailed(e) => e.code(),
+        }
+    }
+}
+
+impl<Err> TaskError<Err>
+where
+    Err: Debug + ChromaError + 'static,
+{
+    pub(super) fn boxed(self) -> Box<dyn ChromaError> {
+        Box::new(self)
+    }
+}
+
 /// A task result is a wrapper around the result of a task.
 /// It contains the task id for tracking purposes.
 #[derive(Debug)]
 pub(super) struct TaskResult<Output, Error> {
-    result: Result<Output, Error>,
+    result: Result<Output, TaskError<Error>>,
     task_id: Uuid,
 }
 
 impl<Output, Error> TaskResult<Output, Error> {
-    pub(super) fn into_inner(self) -> Result<Output, Error> {
+    pub(super) fn into_inner(self) -> Result<Output, TaskError<Error>> {
         self.result
     }
 
@@ -68,7 +103,7 @@ pub(crate) trait TaskWrapper: Send + Debug {
 #[async_trait]
 impl<Input, Output, Error> TaskWrapper for Task<Input, Output, Error>
 where
-    Error: Debug,
+    Error: Debug + Send,
     Input: Send + Sync + Debug,
     Output: Send + Sync + Debug,
 {
@@ -77,13 +112,66 @@ where
     }
 
     async fn run(&self) {
-        let result = self.operator.run(&self.input).await;
-        let task_result = TaskResult {
-            result,
-            task_id: self.task_id,
+        let result = AssertUnwindSafe(self.operator.run(&self.input))
+            .catch_unwind()
+            .await;
+
+        match result {
+            Ok(result) => {
+                // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
+                // There are valid reasons for this to happen (e.g. the component was stopped) so we ignore the error.
+                match self
+                    .reply_channel
+                    .send(
+                        TaskResult {
+                            result: result.map_err(|e| TaskError::TaskFailed(e)),
+                            task_id: self.task_id,
+                        },
+                        None,
+                    )
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::error!(
+                            "Failed to send task result for task {} to reply channel: {}",
+                            self.task_id,
+                            err
+                        );
+                    }
+                }
+            }
+            Err(panic_value) => {
+                let panic_message = get_panic_message(panic_value);
+
+                match self
+                    .reply_channel
+                    .send(
+                        TaskResult {
+                            result: Err(TaskError::Panic(panic_message.clone())),
+                            task_id: self.task_id,
+                        },
+                        None,
+                    )
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::error!(
+                            "Failed to send task result for task {} to reply channel: {}",
+                            self.task_id,
+                            err
+                        );
+                    }
+                };
+
+                // Re-panic so the message handler can catch it
+                panic!(
+                    "{}",
+                    panic_message.unwrap_or("Unknown panic occurred in task".to_string())
+                );
+            }
         };
-        let res = self.reply_channel.send(task_result, None).await;
-        // TODO: if this errors, it means the caller was dropped
     }
 
     fn id(&self) -> Uuid {
@@ -98,7 +186,7 @@ pub(super) fn wrap<Input, Output, Error>(
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
 ) -> TaskMessage
 where
-    Error: Debug + 'static,
+    Error: Debug + Send + 'static,
     Input: Send + Sync + Debug + 'static,
     Output: Send + Sync + Debug + 'static,
 {
@@ -109,4 +197,94 @@ where
         reply_channel,
         task_id: id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use core::panic;
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+
+    use crate::{
+        execution::dispatcher::Dispatcher,
+        system::{Component, ComponentContext, ComponentHandle, Handler, System},
+    };
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct MockOperator {}
+    #[async_trait]
+    impl Operator<(), ()> for MockOperator {
+        type Error = ();
+
+        fn get_name(&self) -> &'static str {
+            "MockOperator"
+        }
+
+        async fn run(&self, _: &()) -> Result<(), Self::Error> {
+            println!("MockOperator running");
+            panic!("MockOperator panicking");
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockComponent {
+        pub received_results: Arc<Mutex<Vec<TaskResult<(), ()>>>>,
+        pub dispatcher: ComponentHandle<Dispatcher>,
+    }
+    #[async_trait]
+    impl Component for MockComponent {
+        fn get_name() -> &'static str {
+            "Mock component"
+        }
+
+        fn queue_size(&self) -> usize {
+            1000
+        }
+
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+            let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
+            self.dispatcher.send(task, None).await.unwrap();
+        }
+    }
+    #[async_trait]
+    impl Handler<TaskResult<(), ()>> for MockComponent {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            message: TaskResult<(), ()>,
+            ctx: &ComponentContext<MockComponent>,
+        ) {
+            self.received_results.lock().push(message);
+            ctx.cancellation_token.cancel();
+        }
+    }
+
+    #[tokio::test]
+    async fn task_catches_panic() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(1, 1000, 1000);
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let received_results = Arc::new(Mutex::new(Vec::new()));
+        let component = MockComponent {
+            received_results: received_results.clone(),
+            dispatcher: dispatcher_handle.clone(),
+        };
+
+        let mut handle = system.start_component(component);
+        // yield to allow the operator to run
+        tokio::task::yield_now().await;
+        // the component will stop itself after it receives the result
+        handle.join().await.unwrap();
+
+        let results_guard = received_results.lock();
+        let result = &results_guard.first().unwrap().result;
+
+        assert_eq!(result.is_err(), true);
+        matches!(result, Err(TaskError::Panic(Some(msg))) if *msg == "MockOperator panicking".to_string());
+    }
 }

@@ -666,7 +666,7 @@ impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchest
             }
             Err(e) => {
                 tracing::error!("Error flushing to S3: {:?}", e);
-                terminate_with_error(self.result_channel.take(), e, ctx);
+                terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
             }
         }
     }
