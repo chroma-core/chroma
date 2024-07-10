@@ -164,7 +164,7 @@ jobs:
       - name: Build Client
         run: ./clients/python/build_python_thin_client.sh
       - name: Test Client Package
-        run: bin/test-package.sh dist/*.tar.gz
+        run: bin/test-thin-client-package.sh dist/*.tar.gz
       - name: Install setuptools_scm
         run: python -m pip install setuptools_scm
       - name: Publish to Test PyPI
