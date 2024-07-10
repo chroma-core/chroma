@@ -1,6 +1,7 @@
 import pytest
 import logging
 import hypothesis.strategies as st
+from chromadb.api.configuration import CollectionConfiguration
 import chromadb.test.property.strategies as strategies
 from chromadb.api import ClientAPI
 import chromadb.api.types as types
@@ -46,6 +47,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             with pytest.raises(Exception):
                 c = self.client.create_collection(
                     name=coll.name,
+                    configuration=coll.configuration,
                     metadata=coll.metadata,  # type: ignore[arg-type]
                     embedding_function=coll.embedding_function,
                 )
@@ -151,6 +153,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             with pytest.raises(Exception):
                 c = self.client.get_or_create_collection(
                     name=coll.name,
+                    configuration=coll.configuration,
                     metadata=new_metadata,  # type: ignore[arg-type]
                     embedding_function=coll.embedding_function,
                 )
@@ -170,6 +173,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         # Update API
         c = self.client.get_or_create_collection(
             name=coll.name,
+            configuration=coll.configuration,
             metadata=new_metadata,  # type: ignore[arg-type]
             embedding_function=coll.embedding_function,
         )
@@ -253,6 +257,17 @@ def test_collections(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     run_state_machine_as_test(lambda: CollectionStateMachine(client))  # type: ignore
 
 
+def test_invalid_metadata(client: ClientAPI) -> None:
+    # Test that we except of the user tries to create a collection with an empty metadata dict
+    client.reset()
+    with pytest.raises(Exception):
+        client.create_collection(
+            name="test",
+            configuration=CollectionConfiguration(),
+            metadata={},
+        )
+
+
 # Below are tests that have failed in the past. If your test fails, please add
 # it to protect against regressions in the test harness itself. If you need
 # help doing so, talk to anton.
@@ -266,6 +281,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
     (v1,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
             name="jjn2yjLW1zp2T\n",
+            configuration=CollectionConfiguration(),
             metadata=None,
             embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
         ),
@@ -274,6 +290,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
     (v6,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
             name="jjn2yjLW1zp2T\n",
+            configuration=CollectionConfiguration(),
             metadata=None,
             embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
         ),
@@ -292,6 +309,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
     (v13,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
             name="C1030",
+            configuration=CollectionConfiguration(),
             metadata={},
             embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32),  # type: ignore[arg-type]
         ),
@@ -311,6 +329,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
     state.get_or_create_coll(
         coll=strategies.ExternalCollection(
             name="VS0QGh",
+            configuration=CollectionConfiguration(),
             metadata={
                 "h": 5.681951615025145e-227,
                 "A1": 61126,
@@ -338,6 +357,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
     state.get_or_create_coll(
         coll=strategies.ExternalCollection(
             name="VS0QGh",
+            configuration=CollectionConfiguration(),
             metadata=None,
             embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16),  # type: ignore[arg-type]
         ),

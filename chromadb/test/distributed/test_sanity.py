@@ -8,6 +8,7 @@ import numpy as np
 from chromadb.api import ClientAPI
 import time
 
+from chromadb.api.configuration import CollectionConfiguration, HNSWConfiguration
 from chromadb.api.types import QueryResult
 from chromadb.test.conftest import (
     COMPACTION_SLEEP,
@@ -29,7 +30,11 @@ def test_add(
     reset(client)
     collection = client.create_collection(
         name="test",
-        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(
+                ef_construction=128, ef_search=128, M=128
+            )
+        ),
     )
 
     # Add 1000 records, where each embedding has 3 dimensions randomly generated
@@ -77,7 +82,11 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
     reset(client)
     collection = client.create_collection(
         name="test_add_include_all_with_compaction_delay",
-        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(
+                ef_construction=128, ef_search=128, M=128
+            )
+        ),
     )
 
     ids = []

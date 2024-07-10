@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
+from chromadb.api.configuration import CollectionConfiguration, HNSWConfiguration
 
 persist_dir = tempfile.mkdtemp()
 
@@ -431,15 +432,6 @@ def test_modify_error_on_existing_name(client):
 
     with pytest.raises(Exception):
         c2.modify(name="testspace")
-
-
-def test_modify_warn_on_DF_change(client, caplog):
-    client.reset()
-
-    collection = client.create_collection("testspace")
-
-    with pytest.raises(Exception, match="not supported"):
-        collection.modify(metadata={"hnsw:space": "cosine"})
 
 
 def test_metadata_cru(client):
@@ -1234,7 +1226,11 @@ def test_index_params(client):
     client.reset()
     collection = client.create_collection(
         name="test_index_params",
-        metadata={"hnsw:space": "cosine", "hnsw:construction_ef": 20, "hnsw:M": 5},
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(
+                space="cosine", ef_construction=20, M=5
+            )
+        ),
     )
     collection.add(**records)
     items = collection.query(
@@ -1247,7 +1243,10 @@ def test_index_params(client):
     # ip
     client.reset()
     collection = client.create_collection(
-        name="test_index_params", metadata={"hnsw:space": "ip"}
+        name="test_index_params",
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(space="ip")
+        ),
     )
     collection.add(**records)
     items = collection.query(
@@ -1255,52 +1254,6 @@ def test_index_params(client):
         n_results=1,
     )
     assert items["distances"][0][0] < -5
-
-
-def test_invalid_index_params(client):
-    client.reset()
-
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:space": "foobar"}
-        )
-        collection.add(**records)
-
-
-def test_persist_index_loading_params(client, request):
-    client = request.getfixturevalue("local_persist_api")
-    client.reset()
-    collection = client.create_collection(
-        "test",
-        metadata={"hnsw:space": "ip"},
-    )
-    collection.add(ids="id1", documents="hello")
-
-    api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection(
-        "test",
-    )
-
-    assert collection.metadata["hnsw:space"] == "ip"
-    includes = ["embeddings", "documents", "metadatas", "distances"]
-    nn = collection.query(
-        query_texts="hello",
-        n_results=1,
-        include=includes,
-    )
-    for key in nn.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(nn[key]) == 1
-        elif key == "included":
-            assert set(nn[key]) == set(includes)
-        else:
-            assert nn[key] is None
 
 
 def test_add_large(client):
