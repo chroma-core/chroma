@@ -168,6 +168,7 @@ class Segment(TypedDict):
     id: UUID
     type: NamespacedName
     scope: SegmentScope
+    configuration: Optional[ConfigurationInternal]
     # If a segment has a collection, it implies that this segment implements the full
     # collection and can be used to service queries (for it's given scope.)
     collection: Optional[UUID]

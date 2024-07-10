@@ -46,6 +46,7 @@ message Segment {
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
     map<string,FilePaths> file_paths = 7;
+    optional string configuration_json_str = 8;
 }
 
 message Collection {

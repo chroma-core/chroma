@@ -8,6 +8,7 @@ from typing import (
     List,
     Optional,
     Protocol,
+    Type,
     Union,
     TypeVar,
     cast,
@@ -216,6 +217,32 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
             parameters.append(ConfigurationParameter(name=name, value=value))
         return cls(parameters=parameters)
 
+    @staticmethod
+    def configuration_type_from_json(
+        json_map: Dict[str, Any]
+    ) -> Type["ConfigurationInternal"]:
+        """Returns the type of configuration from the given JSON map."""
+        type_name = json_map.get("_type", None)
+        if type_name is None:
+            raise ValueError("Missing configuration type in JSON map")
+        type = globals().get(type_name)
+        if (type is None) or not issubclass(type, ConfigurationInternal):
+            raise ValueError(f"Invalid configuration type: {type_name}")
+        return type  # type: ignore[no-any-return]
+
+    @staticmethod
+    def configuration_type_from_json_str(
+        json_str: str,
+    ) -> Type["ConfigurationInternal"]:
+        """Returns the type of configuration from the given JSON string."""
+        try:
+            json_map = json.loads(json_str)
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"Unable to decode configuration from JSON string: {json_str}"
+            )
+        return ConfigurationInternal.configuration_type_from_json(json_map)
+
 
 class HNSWConfigurationInternal(ConfigurationInternal):
     """Internal representation of the HNSW configuration.
@@ -319,34 +346,32 @@ class HNSWConfigurationInternal(ConfigurationInternal):
 # Internally, we pass around HNSWConfigurationInternal objects, which perform
 # validation, serialization and deserialization. Users don't need to know
 # about that and instead get a clean constructor with default arguments.
-class HNSWConfigurationInterface(HNSWConfigurationInternal):
+def HNSWConfigurationInterface(
+    space: str = "l2",
+    ef_construction: int = 100,
+    ef_search: int = 10,
+    num_threads: int = cpu_count(),
+    M: int = 16,
+    resize_factor: float = 1.2,
+    batch_size: int = 100,
+    sync_threshold: int = 1000,
+) -> HNSWConfigurationInternal:
     """HNSW index configuration parameters.
     See https://docs.trychroma.com/guides#changing-the-distance-function for more information.
     """
 
-    def __init__(
-        self,
-        space: str = "l2",
-        ef_construction: int = 100,
-        ef_search: int = 10,
-        num_threads: int = cpu_count(),
-        M: int = 16,
-        resize_factor: float = 1.2,
-        batch_size: int = 100,
-        sync_threshold: int = 1000,
-    ):
-        parameters = [
-            ConfigurationParameter(name="space", value=space),
-            ConfigurationParameter(name="ef_construction", value=ef_construction),
-            ConfigurationParameter(name="ef_search", value=ef_search),
-            ConfigurationParameter(name="num_threads", value=num_threads),
-            ConfigurationParameter(name="M", value=M),
-            ConfigurationParameter(name="resize_factor", value=resize_factor),
-            ConfigurationParameter(name="batch_size", value=batch_size),
-            ConfigurationParameter(name="sync_threshold", value=sync_threshold),
-        ]
+    parameters = [
+        ConfigurationParameter(name="space", value=space),
+        ConfigurationParameter(name="ef_construction", value=ef_construction),
+        ConfigurationParameter(name="ef_search", value=ef_search),
+        ConfigurationParameter(name="num_threads", value=num_threads),
+        ConfigurationParameter(name="M", value=M),
+        ConfigurationParameter(name="resize_factor", value=resize_factor),
+        ConfigurationParameter(name="batch_size", value=batch_size),
+        ConfigurationParameter(name="sync_threshold", value=sync_threshold),
+    ]
 
-        super().__init__(parameters=parameters)
+    return HNSWConfigurationInternal(parameters=parameters)
 
 
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'
@@ -375,20 +400,16 @@ class CollectionConfigurationInternal(ConfigurationInternal):
 # Internally, we pass around HNSWConfigurationInternal objects, which perform
 # validation, serialization and deserialization. Users don't need to know
 # about that and instead get a clean constructor with default arguments.
-class CollectionConfigurationInterface(CollectionConfigurationInternal):
+def CollectionConfigurationInterface(
+    hnsw_configuration: Optional[HNSWConfigurationInternal] = None,
+) -> CollectionConfigurationInternal:
     """Configuration parameters for creating a collection."""
-
-    def __init__(self, hnsw_configuration: Optional[HNSWConfigurationInternal]):
-        """Initializes a new instance of the CollectionConfiguration class.
-        Args:
-            hnsw_configuration: The HNSW configuration to use for the collection.
-        """
-        if hnsw_configuration is None:
-            hnsw_configuration = HNSWConfigurationInternal()
-        parameters = [
-            ConfigurationParameter(name="hnsw_configuration", value=hnsw_configuration)
-        ]
-        super().__init__(parameters=parameters)
+    if hnsw_configuration is None:
+        hnsw_configuration = HNSWConfigurationInternal()
+    parameters = [
+        ConfigurationParameter(name="hnsw_configuration", value=hnsw_configuration)
+    ]
+    return CollectionConfigurationInternal(parameters=parameters)
 
 
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'.
