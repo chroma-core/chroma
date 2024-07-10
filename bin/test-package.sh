@@ -21,4 +21,8 @@ source venv/bin/activate
 
 pip install $tarball
 
-python -c "import chromadb; api = chromadb.Client(); print(api.heartbeat())"
+if [[ $tarball == *"client"* ]]; then
+    python -c "import chromadb; print(chromadb.__version__)" # TODO - spin a docker container to test connection?
+else
+  python -c "import chromadb; api = chromadb.Client(); print(api.heartbeat())"
+fi
