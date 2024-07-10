@@ -588,8 +588,6 @@ def test_add_delete_add(client: ClientAPI) -> None:
     for embedding in embeddings:
         emb_list[i] = embedding
         i += 1
-    # if not NOT_CLUSTER_ONLY:
-    #     state.wait_for_compaction()
     state.ann_accuracy()
     state.count()
     state.fields_match()
@@ -658,6 +656,8 @@ def test_add_delete_add(client: ClientAPI) -> None:
     state.ann_accuracy()
     state.count()
     state.fields_match()
+    if not NOT_CLUSTER_ONLY:
+        state.wait_for_compaction()
 
 
 def test_multi_add(client: ClientAPI) -> None:

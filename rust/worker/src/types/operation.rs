@@ -15,10 +15,22 @@ pub(crate) enum Operation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MaterializedLogOperation {
+    // Set when the record is initially read from the segment
+    // before it is processed based on state of the log.
     Initial,
+    // Set for records that don't exist in the segment and
+    // have been encountered for the first time in the log.
     AddNew,
+    // Assume there is a record in the segment and in the log
+    // there is a DEL followed by an ADD for the same id.
+    // In this case, the overwriteexisting state is set for
+    // the record. Easy to construct other cases.
     OverwriteExisting,
+    // Set for entries that are present in the segment and
+    // have been updated/upserted in the log.
     UpdateExisting,
+    // Set for entries that are present in the segment and
+    // have been deleted in the log.
     DeleteExisting,
 }
 

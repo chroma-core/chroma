@@ -39,7 +39,7 @@ from chromadb.api.async_client import (
 from chromadb.utils.async_to_sync import async_class_to_sync
 
 VALID_PRESETS = ["fast", "normal", "slow"]
-CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
+CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "normal")
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
