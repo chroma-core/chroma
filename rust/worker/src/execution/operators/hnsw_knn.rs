@@ -1,7 +1,7 @@
 use crate::execution::data::data_chunk::Chunk;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::{LogMaterializer, LogMaterializerError, MaterializedLogRecord};
-use crate::types::{LogRecord, Operation};
+use crate::types::{LogRecord, MaterializedLogOperation, Operation};
 use crate::{
     blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
@@ -71,7 +71,9 @@ impl HnswKnnOperator {
             let log = item.0;
             // This means that even if an embedding is not updated on the log,
             // we brute force it. Can use the HNSW index also.
-            if log.final_operation == Operation::Delete || log.final_operation == Operation::Update
+            if log.final_operation == MaterializedLogOperation::DeleteExisting
+                || log.final_operation == MaterializedLogOperation::UpdateExisting
+                || log.final_operation == MaterializedLogOperation::OverwriteExisting
             {
                 let offset_id = record_segment_reader
                     .get_offset_id_for_user_id(log.merged_user_id_ref())

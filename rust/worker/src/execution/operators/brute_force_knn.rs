@@ -8,6 +8,7 @@ use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
 use crate::segment::MaterializedLogRecord;
 use crate::types::LogRecord;
+use crate::types::MaterializedLogOperation;
 use crate::types::Operation;
 use crate::types::Segment;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
@@ -166,7 +167,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         for data in data_chunk.iter() {
             let log_record = data.0;
 
-            if log_record.final_operation == Operation::Delete {
+            if log_record.final_operation == MaterializedLogOperation::DeleteExisting {
                 // Explicitly skip deleted records.
                 continue;
             }

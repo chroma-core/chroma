@@ -12,8 +12,8 @@ use crate::{
         LogMaterializer, LogMaterializerError,
     },
     types::{
-        LogRecord, MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
-        WhereDocumentOperator,
+        LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+        WhereClauseComparator, WhereDocument, WhereDocumentOperator,
     },
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
@@ -171,7 +171,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             // so that they can be ignored when reading from the segment later.
             ids_in_mat_log.insert(records.offset_id);
             // Skip deleted records.
-            if records.final_operation == Operation::Delete {
+            if records.final_operation == MaterializedLogOperation::DeleteExisting {
                 continue;
             }
             ids_to_metadata.insert(records.offset_id, records.merged_metadata_ref());
@@ -518,7 +518,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     // let normalized_query = query.replace("_", ".").replace("%", ".");
                     // let re = Regex::new(normalized_query.as_str()).unwrap();
                     for (record, _) in mat_records.iter() {
-                        if record.final_operation == Operation::Delete {
+                        if record.final_operation == MaterializedLogOperation::DeleteExisting {
                             continue;
                         }
                         match record.merged_document_ref() {
@@ -649,7 +649,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     let user_id = log_records.merged_user_id_ref();
                     if query_ids_set.contains(user_id) {
                         remaining_id_set.remove(user_id);
-                        if log_records.final_operation != Operation::Delete {
+                        if log_records.final_operation != MaterializedLogOperation::DeleteExisting {
                             user_supplied_offset_ids.push(log_records.offset_id);
                         }
                     }

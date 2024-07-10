@@ -4,7 +4,7 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::types::{Operation, Segment, SegmentType};
+use crate::types::{MaterializedLogOperation, Operation, Segment, SegmentType};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -330,7 +330,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
     ) -> Result<(), ApplyMaterializedLogError> {
         for (log_record, _) in records.iter() {
             match log_record.final_operation {
-                Operation::Add => {
+                MaterializedLogOperation::AddNew => {
                     // Set all four.
                     // Set user id to offset id.
                     match self
@@ -386,7 +386,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
-                Operation::Update => {
+                MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
                     // needs to change. Blockfile does not have Read then write
                     // semantics so we'll delete and insert.
@@ -417,12 +417,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
-                Operation::Upsert => {
-                    // MaterializedLogRecord already converts upserts into either updates or inserts
-                    // so here we expect to not have any records of this type.
-                    panic!("Invariant violation. After log materialization there shouldn't be any upserts.");
-                }
-                Operation::Delete => {
+                MaterializedLogOperation::DeleteExisting => {
                     // Delete user id to offset id.
                     match self
                         .user_id_to_id
@@ -466,6 +461,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
+                MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
         }
         Ok(())

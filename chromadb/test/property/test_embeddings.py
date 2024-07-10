@@ -531,6 +531,135 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     state.teardown()  # type: ignore[no-untyped-call]
 
 
+def test_add_delete_add(client: ClientAPI) -> None:
+    state = EmbeddingStateMachine(client)
+    state.initialize(
+        collection=strategies.Collection(
+            name="KR3cf",
+            metadata={
+                "Ufmxsi3": 999999.0,
+                "bMMvvrqM4MKmp5CJB8A": 62921,
+                "-": True,
+                "37PNi": "Vkn",
+                "5KZfkpod3ND5soL_": True,
+                "KA4zcZL9lRN9": 142,
+                "Oc8G7ysXmE8lp4Hos_": "POQe8Unz1uJ",
+                "BI930U": 31,
+                "te": False,
+                "tyM": -0.5,
+                "R0ZiZ": True,
+                "m": True,
+                "IOw": -25725,
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+            },
+            embedding_function=None,
+            id=uuid.UUID("284b6e99-b19e-49b2-96a4-a2a93a95447d"),
+            dimension=3,
+            dtype=np.float32,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    embeddings = state.add_embeddings(
+        record_set={
+            "ids": ["255", "l", "3-", "i", "Nk", "9yPvT"],
+            "embeddings": [
+                [1.2, 2.3, 1.5],
+                [4.5, 6.0, 2],
+                [1, 2, 3],
+                [4, 5, 6],
+                [8.9, 9.0, 7],
+                [4.5, 6.0, 5.6],
+            ],
+            "metadatas": None,
+            "documents": None,
+        }
+    )
+    i = 0
+    emb_list = {}
+    for embedding in embeddings:
+        emb_list[i] = embedding
+        i += 1
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.upsert_embeddings(
+        record_set={
+            "ids": [
+                emb_list[0],
+                emb_list[4],
+                "KWcDaHUVD6MxEiJ",
+                emb_list[5],
+                "PdlP1d6w",
+            ],
+            "embeddings": [[1, 23, 4], [3, 5, 9], [9, 3, 5], [3, 9, 8], [1, 5, 4]],
+            "documents": None,
+            "metadatas": None,
+        }
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    if not NOT_CLUSTER_ONLY:
+        state.wait_for_compaction()
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.upsert_embeddings(
+        record_set={
+            "ids": ["TpjiboLSuYWBJDbRW1zeNmC", emb_list[0], emb_list[4]],
+            "embeddings": [[4, 6, 7], [7, 9, 3], [1, 3, 6]],
+            "metadatas": None,
+            "documents": None,
+        }
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    state.delete_by_ids(
+        ids=[emb_list[2], emb_list[1], emb_list[5], emb_list[4], emb_list[3]]
+    )
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    state.no_duplicates()
+    embeddings = state.add_embeddings(
+        record_set={
+            "ids": ["o", "D3V84", "Rt", "TDwlc9C8_evn", emb_list[1]],
+            "embeddings": [
+                [9, 5.4, 3.22],
+                [1.33, 3.44, 5.66],
+                [9.90, 9.8, 1.3],
+                [9.7, 5.6, 4.5],
+                [3.4, 5.6, 9.65],
+            ],
+            "documents": None,
+            "metadatas": None,
+        }
+    )
+    i = 6
+    for embedding in embeddings:
+        emb_list[i] = embedding
+        i += 1
+    state.ann_accuracy()
+    state.count()
+    state.fields_match()
+    if not NOT_CLUSTER_ONLY:
+        state.wait_for_compaction()
+
+
 def test_multi_add(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="foo")

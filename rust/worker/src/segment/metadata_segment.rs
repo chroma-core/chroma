@@ -27,8 +27,8 @@ use crate::index::metadata::types::{
     MetadataIndexReader, MetadataIndexWriter,
 };
 use crate::types::{
-    BooleanOperator, MetadataValue, Operation, Segment, Where, WhereClauseComparator,
-    WhereDocument, WhereDocumentOperator,
+    BooleanOperator, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use crate::types::{SegmentType, WhereComparison};
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
@@ -578,7 +578,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         for record in records.iter() {
             let segment_offset_id = record.0.offset_id;
             match record.0.final_operation {
-                Operation::Add => {
+                MaterializedLogOperation::AddNew => {
                     // We can ignore record.0.metadata_to_be_deleted
                     // for fresh adds. TODO on whether to propagate error.
                     match &record.0.metadata_to_be_merged {
@@ -609,7 +609,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         None => {}
                     };
                 }
-                Operation::Delete => match &record.0.data_record {
+                MaterializedLogOperation::DeleteExisting => match &record.0.data_record {
                     Some(data_record) => {
                         match &data_record.metadata {
                             Some(metadata) => {
@@ -654,7 +654,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                     }
                     None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                 },
-                Operation::Update => {
+                MaterializedLogOperation::UpdateExisting => {
                     let metadata_delta = record.0.metadata_delta();
                     // Metadata updates.
                     for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
@@ -739,9 +739,83 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         None => {}
                     }
                 }
-                Operation::Upsert => {
-                    panic!("Invariant violation. There should be no upserts in materialized log");
-                }
+                MaterializedLogOperation::OverwriteExisting => {
+                    // Delete existing.
+                    match &record.0.data_record {
+                        Some(data_record) => {
+                            match &data_record.metadata {
+                                Some(metadata) => {
+                                    for (key, value) in metadata.iter() {
+                                        match self.delete_metadata(key, value, segment_offset_id).await
+                                        {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                return Err(
+                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                // Ok to not have any metadata to delete.
+                                None => {}
+                            };
+                            match &data_record.document {
+                                Some(document) => match &self.full_text_index_writer {
+                                    Some(writer) => {
+                                        let err =
+                                            writer.delete_document(document, segment_offset_id).await;
+                                        match err {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                tracing::error!("Error deleting document {:?}", e);
+                                                return Err(
+                                                    ApplyMaterializedLogError::FTSDocumentDeleteError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        panic!("Invariant violation. FTS index writer should be set")
+                                    }
+                                },
+                                // The record that is to be deleted might not have
+                                // a document, it is fine and should not be an error.
+                                None => {}
+                            };
+                        },
+                        None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
+                    };
+                    // Add new.
+                    match &record.0.metadata_to_be_merged {
+                        Some(metadata) => {
+                            for (key, value) in metadata.iter() {
+                                match self.set_metadata(key, value, segment_offset_id).await {
+                                    Ok(()) => {}
+                                    Err(e) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
+                                    }
+                                }
+                            }
+                        }
+                        None => {}
+                    };
+                    match &record.0.final_document {
+                        Some(document) => match &self.full_text_index_writer {
+                            Some(writer) => {
+                                let _ = writer
+                                    .add_document(document, segment_offset_id as i32)
+                                    .await;
+                            }
+                            None => panic!(
+                                "Invariant violation. Expected full text index writer to be set"
+                            ),
+                        },
+                        // It is ok for the user to not pass in any document.
+                        None => {}
+                    };
+                },
+                MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
         Ok(())
