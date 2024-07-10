@@ -66,6 +66,7 @@ class LocalHnswSegment(VectorReader):
         self._index = None
         self._dimensionality = None
         self._total_elements_added = 0
+        self._total_elements_updated = 0
         self._max_seq_id = self._consumer.min_seqid()
 
         self._id_to_seq_id = {}
@@ -275,6 +276,7 @@ class LocalHnswSegment(VectorReader):
 
             # If that succeeds, update the total count
             self._total_elements_added += batch.add_count
+            self._total_elements_updated += batch.update_count
 
             # If that succeeds, finally the seq ID
             self._max_seq_id = batch.max_seq_id

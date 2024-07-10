@@ -41,6 +41,7 @@ class PersistentData:
 
     dimensionality: Optional[int]
     total_elements_added: int
+    total_elements_updated: int
     max_seq_id: SeqId
 
     id_to_label: Dict[str, int]
@@ -51,6 +52,7 @@ class PersistentData:
         self,
         dimensionality: Optional[int],
         total_elements_added: int,
+        total_elements_updated: int,
         max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
@@ -58,6 +60,7 @@ class PersistentData:
     ):
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
+        self.total_elements_updated = total_elements_updated
         self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
@@ -121,6 +124,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._persist_data = PersistentData(
                 self._dimensionality,
                 self._total_elements_added,
+                self._total_elements_updated,
                 self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
@@ -195,6 +199,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Persist the metadata
         self._persist_data.dimensionality = self._dimensionality
         self._persist_data.total_elements_added = self._total_elements_added
+        self._persist_data.total_elements_updated = self._total_elements_updated
         self._persist_data.max_seq_id = self._max_seq_id
 
         # TODO: This should really be stored in sqlite, the index itself, or a better
@@ -214,6 +219,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         super()._apply_batch(batch)
         if (
             self._total_elements_added - self._persist_data.total_elements_added
+            >= self._sync_threshold
+        ) or (
+            self._total_elements_updated - self._persist_data.total_elements_updated
             >= self._sync_threshold
         ):
             self._persist()

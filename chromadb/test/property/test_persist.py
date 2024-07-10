@@ -9,6 +9,7 @@ import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
+from chromadb.segment import SegmentManager, VectorReader
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
@@ -120,6 +121,46 @@ def test_persist(
     system_2.stop()
     del client_2
     del system_2
+
+
+def test_sync_threshold(settings: Settings) -> None:
+    system = System(settings)
+    system.start()
+    client = ClientCreator.from_system(system)
+
+    collection = client.create_collection(
+        name="test", metadata={"hnsw:batch_size": 3, "hnsw:sync_threshold": 3}
+    )
+
+    manager = system.instance(SegmentManager)
+    segment = manager.get_segment(collection.id, VectorReader)
+
+    def get_index_last_modified_at() -> float:
+        try:
+            return os.path.getmtime(segment._get_metadata_file())  # type: ignore[attr-defined]
+        except FileNotFoundError:
+            return -1
+
+    last_modified_at = get_index_last_modified_at()
+
+    collection.add(ids=["1", "2"], embeddings=[[1.0], [2.0]])
+
+    # Should not have yet persisted
+    assert get_index_last_modified_at() == last_modified_at
+    last_modified_at = get_index_last_modified_at()
+
+    # Now there's 3 additions, and the sync threshold is 3...
+    collection.add(ids=["3"], embeddings=[[3.0]])
+
+    # ...so it should have persisted
+    assert get_index_last_modified_at() > last_modified_at
+    last_modified_at = get_index_last_modified_at()
+
+    # The same thing should happen with upserts
+    collection.upsert(ids=["1", "2", "3"], embeddings=[[1.0], [2.0], [3.0]])
+
+    # Should have persisted
+    assert get_index_last_modified_at() > last_modified_at
 
 
 def load_and_check(
