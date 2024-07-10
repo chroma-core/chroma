@@ -190,7 +190,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 # submit_embeddings so we do not reorder the records before submitting them
                 embedding_record = LogRecord(
                     log_offset=seq_id,
-                    operation_record=OperationRecord(
+                    record=OperationRecord(
                         id=id,
                         embedding=submit_embedding_record["embedding"],
                         encoding=submit_embedding_record["encoding"],
@@ -321,7 +321,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     [
                         LogRecord(
                             log_offset=row[0],
-                            operation_record=OperationRecord(
+                            record=OperationRecord(
                                 operation=_operation_codes_inv[row[1]],
                                 id=row[2],
                                 embedding=vector,

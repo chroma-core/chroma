@@ -38,8 +38,7 @@ class Batch:
     def get_written_vectors(self, ids: List[str]) -> List[Vector]:
         """Get the list of vectors to write in this batch"""
         return [
-            cast(Vector, self._ids_to_records[id]["operation_record"]["embedding"])
-            for id in ids
+            cast(Vector, self._ids_to_records[id]["record"]["embedding"]) for id in ids
         ]
 
     def get_record(self, id: str) -> LogRecord:
@@ -60,26 +59,21 @@ class Batch:
         The exists_already flag should be set to True if the ID does exist in the index, and False otherwise.
         """
 
-        id = record["operation_record"]["id"]
-        if record["operation_record"]["operation"] == Operation.DELETE:
+        id = record["record"]["id"]
+        if record["record"]["operation"] == Operation.DELETE:
             # If the ID was previously written, remove it from the written set
             # And update the add/update/delete counts
             if id in self._written_ids:
                 self._written_ids.remove(id)
-                if (
-                    self._ids_to_records[id]["operation_record"]["operation"]
-                    == Operation.ADD
-                ):
+                if self._ids_to_records[id]["record"]["operation"] == Operation.ADD:
                     self.add_count -= 1
                 elif (
-                    self._ids_to_records[id]["operation_record"]["operation"]
-                    == Operation.UPDATE
+                    self._ids_to_records[id]["record"]["operation"] == Operation.UPDATE
                 ):
                     self.update_count -= 1
                     self._deleted_ids.add(id)
                 elif (
-                    self._ids_to_records[id]["operation_record"]["operation"]
-                    == Operation.UPSERT
+                    self._ids_to_records[id]["record"]["operation"] == Operation.UPSERT
                 ):
                     if id in self._upsert_add_ids:
                         self.add_count -= 1
@@ -104,15 +98,15 @@ class Batch:
                 self._deleted_ids.remove(id)
 
             # Update the add/update counts
-            if record["operation_record"]["operation"] == Operation.UPSERT:
+            if record["record"]["operation"] == Operation.UPSERT:
                 if not exists_already:
                     self.add_count += 1
                     self._upsert_add_ids.add(id)
                 else:
                     self.update_count += 1
-            elif record["operation_record"]["operation"] == Operation.ADD:
+            elif record["record"]["operation"] == Operation.ADD:
                 self.add_count += 1
-            elif record["operation_record"]["operation"] == Operation.UPDATE:
+            elif record["record"]["operation"] == Operation.UPDATE:
                 self.update_count += 1
 
         self.max_seq_id = max(self.max_seq_id, record["log_offset"])

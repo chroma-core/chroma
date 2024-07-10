@@ -68,8 +68,8 @@ class BruteForceIndex:
             )
 
         for i, record in enumerate(records):
-            id = record["operation_record"]["id"]
-            vector = record["operation_record"]["embedding"]
+            id = record["record"]["id"]
+            vector = record["record"]["embedding"]
             self.id_to_seq_id[id] = record["log_offset"]
             if id in self.deleted_ids:
                 self.deleted_ids.remove(id)
@@ -88,14 +88,14 @@ class BruteForceIndex:
 
     def delete(self, records: List[LogRecord]) -> None:
         for record in records:
-            id = record["operation_record"]["id"]
+            id = record["record"]["id"]
             if id in self.id_to_index:
                 index = self.id_to_index[id]
                 self.deleted_ids.add(id)
                 del self.id_to_index[id]
                 del self.index_to_id[index]
                 del self.id_to_seq_id[id]
-                self.vectors[index].fill(np.NaN)
+                self.vectors[index].fill(np.nan)
                 self.free_indices.append(index)
             else:
                 logger.warning(f"Delete of nonexisting embedding ID: {id}")

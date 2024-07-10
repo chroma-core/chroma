@@ -228,10 +228,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             raise RuntimeError("Cannot add embeddings to stopped component")
         with WriteRWLock(self._lock):
             for record in records:
-                if record["operation_record"]["embedding"] is not None:
-                    self._ensure_index(
-                        len(records), len(record["operation_record"]["embedding"])
-                    )
+                if record["record"]["embedding"] is not None:
+                    self._ensure_index(len(records), len(record["record"]["embedding"]))
                 if not self._index_initialized:
                     # If the index is not initialized here, it means that we have
                     # not yet added any records to the index. So we can just
@@ -240,8 +238,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
                 self._max_seq_id = max(self._max_seq_id, record["log_offset"])
-                id = record["operation_record"]["id"]
-                op = record["operation_record"]["operation"]
+                id = record["record"]["id"]
+                op = record["record"]["operation"]
                 exists_in_index = self._id_to_label.get(
                     id, None
                 ) is not None or self._brute_force_index.has_id(id)
@@ -256,23 +254,23 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
-                    if record["operation_record"]["embedding"] is not None:
+                    if record["record"]["embedding"] is not None:
                         if exists_in_index:
                             self._curr_batch.apply(record)
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(
-                                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
+                                f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
                 elif op == Operation.ADD:
-                    if record["operation_record"]["embedding"] is not None:
+                    if record["record"]["embedding"] is not None:
                         if not exists_in_index:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
-                    if record["operation_record"]["embedding"] is not None:
+                    if record["record"]["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
                 if len(self._curr_batch) >= self._batch_size:

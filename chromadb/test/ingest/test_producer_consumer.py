@@ -135,16 +135,14 @@ def assert_records_match(
     """Given a list of inserted and consumed records, make sure they match"""
     assert len(consumed_records) == len(inserted_records)
     for inserted, consumed in zip(inserted_records, consumed_records):
-        assert inserted["id"] == consumed["operation_record"]["id"]
-        assert inserted["operation"] == consumed["operation_record"]["operation"]
-        assert inserted["encoding"] == consumed["operation_record"]["encoding"]
-        assert inserted["metadata"] == consumed["operation_record"]["metadata"]
+        assert inserted["id"] == consumed["record"]["id"]
+        assert inserted["operation"] == consumed["record"]["operation"]
+        assert inserted["encoding"] == consumed["record"]["encoding"]
+        assert inserted["metadata"] == consumed["record"]["metadata"]
 
         if inserted["embedding"] is not None:
-            assert consumed["operation_record"]["embedding"] is not None
-            assert_approx_equal(
-                inserted["embedding"], consumed["operation_record"]["embedding"]
-            )
+            assert consumed["record"]["embedding"] is not None
+            assert_approx_equal(inserted["embedding"], consumed["record"]["embedding"])
 
 
 @pytest.mark.asyncio
