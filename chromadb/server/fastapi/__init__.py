@@ -565,11 +565,6 @@ class FastAPI(Server):
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
-            json_decode = orjson.loads(raw_body)
-            # In 0.5.4 we added the configuration field to the CreateCollection model
-            # This field is optional, so we need to check if it exists in the json
-            if "configuration" not in json_decode:
-                json_decode["configuration"] = None
             create = CreateCollection.model_validate(orjson.loads(raw_body))
             configuration = (
                 CollectionConfigurationInternal()
