@@ -107,19 +107,6 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             collection_configuration.get_parameter("hnsw_configuration").value,
         )
 
-    @staticmethod
-    @override
-    def configuration_from_collection_configuration(
-        collection_configuration: CollectionConfigurationInternal,
-    ) -> HNSWConfigurationInternal:
-        print(
-            "HAMMAD DDEBUG IN GRPC_SEGMENT, configuration_from_collection_configuration"
-        )
-        return cast(
-            HNSWConfigurationInternal,
-            collection_configuration.get_parameter("hnsw_configuration").value,
-        )
-
     @override
     def delete(self) -> None:
         raise NotImplementedError()

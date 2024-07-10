@@ -133,10 +133,8 @@ def from_proto_submit(
 
 def from_proto_segment(segment: proto.Segment) -> Segment:
     if not segment.HasField("configuration_json_str"):
-        print("HAMMAD PROTO WITHOUT CONFIGURATION")
         configuration = None
     else:
-        print("HAMMAD PROTO WITH CONFIGURATION", segment.configuration_json_str)
         configuration_json_str = segment.configuration_json_str
         configuration_type = ConfigurationInternal.configuration_type_from_json_str(
             configuration_json_str
