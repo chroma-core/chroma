@@ -6,6 +6,11 @@ from typing_extensions import TypedDict
 import uuid
 import numpy as np
 import numpy.typing as npt
+from chromadb.api.configuration import (
+    CollectionConfiguration,
+    CollectionConfigurationInternal,
+    HNSWConfiguration,
+)
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
@@ -42,12 +47,6 @@ np.random.seed(0)  # unnecessary, hypothesis does this for us
 
 # Please make changes to these strategies incrementally, testing to make sure they don't
 # start generating unsatisfiable examples.
-
-test_hnsw_config = {
-    "hnsw:construction_ef": 128,
-    "hnsw:search_ef": 128,
-    "hnsw:M": 128,
-}
 
 
 class RecordSet(TypedDict):
@@ -166,7 +165,7 @@ def collection_name(draw: st.DrawFn) -> str:
 
 
 collection_metadata = st.one_of(
-    st.none(), st.dictionaries(safe_text, st.one_of(*safe_values))
+    st.none(), st.dictionaries(safe_text, st.one_of(*safe_values), min_size=1)
 )
 
 
@@ -255,6 +254,7 @@ class ExternalCollection:
 
     name: str
     metadata: Optional[types.Metadata]
+    configuration: CollectionConfigurationInternal
     embedding_function: Optional[types.EmbeddingFunction[Embeddable]]
 
 
@@ -304,19 +304,17 @@ def collections(
             "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 
+    hnsw_params: Dict[str, Union[str, int]] = {}
     if with_hnsw_params:
-        if metadata is None:
-            metadata = {}
-        metadata.update(test_hnsw_config)
         if use_persistent_hnsw_params:
-            metadata["hnsw:sync_threshold"] = draw(
+            hnsw_params["sync_threshold"] = draw(
                 st.integers(min_value=3, max_value=max_hnsw_sync_threshold)
             )
-            metadata["hnsw:batch_size"] = draw(
+            hnsw_params["batch_size"] = draw(
                 st.integers(
                     min_value=3,
                     max_value=min(
-                        [metadata["hnsw:sync_threshold"], max_hnsw_batch_size]
+                        [int(hnsw_params["sync_threshold"]), int(max_hnsw_batch_size)]
                     ),
                 )
             )
@@ -324,7 +322,13 @@ def collections(
         if draw(st.booleans()):
             # TODO: pull the distance functions from a source of truth that lives not
             # in tests once https://github.com/chroma-core/issues/issues/61 lands
-            metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
+            hnsw_space = draw(st.sampled_from(["cosine", "l2", "ip"]))
+            hnsw_params["space"] = hnsw_space
+
+    hnsw_configuration = HNSWConfiguration(**hnsw_params)  # type: ignore[arg-type]
+    collection_configuration = CollectionConfiguration(
+        hnsw_configuration=hnsw_configuration
+    )
 
     known_metadata_keys: Dict[str, Union[int, str, float]] = {}
     if add_filterable_data:
@@ -363,6 +367,7 @@ def collections(
     return Collection(
         id=uuid.uuid4(),
         name=name,
+        configuration=collection_configuration,
         metadata=metadata,
         dimension=dimension,
         dtype=dtype,
@@ -376,7 +381,10 @@ def collections(
 
 @st.composite
 def metadata(
-    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+    draw: st.DrawFn,
+    collection: Collection,
+    min_size: int = 0,
+    max_size: Optional[int] = None,
 ) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
@@ -412,17 +420,17 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
         # Blacklist certain unicode characters that affect sqlite processing.
         # For example, the null (/x00) character makes sqlite stop processing a string.
         # Also, blacklist _ and % for cluster tests.
-        blacklist_categories = ("Cc", "Cs", "Pc", "Po")
+        local_blacklist_categories = ("Cc", "Cs", "Pc", "Po")
         if collection.known_document_keywords:
             known_words_st = st.sampled_from(collection.known_document_keywords)
         else:
             known_words_st = st.text(
                 min_size=3,
-                alphabet=st.characters(blacklist_categories=blacklist_categories),  # type: ignore
+                alphabet=st.characters(blacklist_categories=local_blacklist_categories),  # type: ignore
             )
 
         random_words_st = st.text(
-            min_size=3, alphabet=st.characters(blacklist_categories=blacklist_categories)  # type: ignore
+            min_size=3, alphabet=st.characters(blacklist_categories=local_blacklist_categories)  # type: ignore
         )
         words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
         return " ".join(words)
@@ -550,10 +558,11 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     # This is hacky, but the distributed system does not support $in or $in so we
     # need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $in and $nin
+    legal_ops: List[Optional[str]]
     if not NOT_CLUSTER_ONLY:
-        legal_ops: List[Optional[str]] = [None, "$eq"]
+        legal_ops = [None, "$eq"]
     else:
-        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+        legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
@@ -599,16 +608,17 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     # This is hacky, but the distributed system does not support $not_contains
     # so we need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $not_contains
+    # TODO(typing): WhereOperator does not have $contains, $not_contains literals
     op: WhereOperator
     if not NOT_CLUSTER_ONLY:
         op = draw(st.sampled_from(["$contains"]))
     else:
         op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
-    if op == "$contains":
+    if op == "$contains":  # type: ignore[comparison-overlap]
         return {"$contains": word}
     else:
-        assert op == "$not_contains"
+        assert op == "$not_contains"  # type: ignore[comparison-overlap]
         return {"$not_contains": word}
 
 

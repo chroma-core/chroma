@@ -222,22 +222,31 @@ def ann_accuracy(
     # l2 is the default distance function
     distance_function = distance_functions.l2
     accuracy_threshold = 1e-6
-    assert collection.metadata is not None
     assert embeddings is not None
-    if "hnsw:space" in collection.metadata:
-        space = collection.metadata["hnsw:space"]
-        # TODO: ip and cosine are numerically unstable in HNSW.
-        # The higher the dimensionality, the more noise is introduced, since each float element
-        # of the vector has noise added, which is then subsequently included in all normalization calculations.
-        # This means that higher dimensions will have more noise, and thus more error.
-        assert all(isinstance(e, list) for e in embeddings)
-        dim = len(embeddings[0])
-        accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
-        if space == "cosine":
-            distance_function = distance_functions.cosine
-        if space == "ip":
-            distance_function = distance_functions.ip
+    hnsw_config: HNSWConfigurationInternal = cast(
+        HNSWConfigurationInternal,
+        (
+            collection.get_model()
+            .get_configuration()
+            .get_parameter("hnsw_configuration")
+            .value
+        ),
+    )
+
+    space = hnsw_config.get_parameter("space").value
+    # TODO: ip and cosine are numerically unstable in HNSW.
+    # The higher the dimensionality, the more noise is introduced, since each float element
+    # of the vector has noise added, which is then subsequently included in all normalization calculations.
+    # This means that higher dimensions will have more noise, and thus more error.
+    assert all(isinstance(e, list) for e in embeddings)
+    dim = len(embeddings[0])
+    accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
+
+    if space == "cosine":
+        distance_function = distance_functions.cosine
+    if space == "ip":
+        distance_function = distance_functions.ip
 
     # Perform exact distance computation
     query_embeddings = (

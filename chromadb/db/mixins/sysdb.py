@@ -21,6 +21,7 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.segment import SegmentType
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -39,6 +40,8 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
+
+from chromadb.api.configuration import ConfigurationInternal
 
 
 class SqlSysDB(SqlDB, SysDB):
@@ -161,12 +164,18 @@ class SqlSysDB(SqlDB, SysDB):
                     segments.type,
                     segments.scope,
                     segments.collection,
+                    segments.config_json_str,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(segment["id"])),
                     ParameterValue(segment["type"]),
                     ParameterValue(segment["scope"].value),
                     ParameterValue(self.uuid_to_db(segment["collection"])),
+                    ParameterValue(
+                        segment["configuration"].to_json_str()
+                        if segment["configuration"]
+                        else None
+                    ),
                 )
             )
             sql, params = get_sql(insert_segment, self.parameter_format())
@@ -311,6 +320,7 @@ class SqlSysDB(SqlDB, SysDB):
                 segments_t.type,
                 segments_t.scope,
                 segments_t.collection,
+                segments_t.config_json_str,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
@@ -344,12 +354,33 @@ class SqlSysDB(SqlDB, SysDB):
                 scope = SegmentScope(str(rows[0][2]))
                 collection = self.uuid_from_db(rows[0][3]) if rows[0][3] else None
                 metadata = self._metadata_from_rows(rows)
+                if rows[0][4] is not None:
+                    # TODO: Check validity of the configuration type for the current segment type
+                    configuration_type = (
+                        ConfigurationInternal.configuration_type_from_json_str(
+                            rows[0][4]
+                        )
+                    )
+                    configuration = configuration_type.from_json_str(rows[0][4])
+                else:
+                    # If we are loading a persisted HNSW segment, we need to check for legacy HNSW params
+                    # Prior to 07/2024, we stored HNSW params in metadata.
+                    if type == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                        configuration = (
+                            self._insert_hnsw_vector_segment_config_from_legacy_params(
+                                segment_id, metadata
+                            )
+                        )
+                    else:
+                        configuration = None
+
                 segments.append(
                     Segment(
                         id=cast(UUID, id),
                         type=type,
                         scope=scope,
                         collection=collection,
+                        configuration=configuration,
                         metadata=metadata,
                     )
                 )
@@ -445,7 +476,7 @@ class SqlSysDB(SqlDB, SysDB):
                     # configuration stored in the database. This non-destructively migrates
                     # the collection to have a configuration, and takes into account any
                     # HNSW params that might be in the existing metadata.
-                    configuration = self._insert_config_from_legacy_params(
+                    configuration = self._insert_collection_config_from_legacy_params(
                         collection_id, metadata
                     )
 
@@ -816,7 +847,7 @@ class SqlSysDB(SqlDB, SysDB):
 
             raise error
 
-    def _insert_config_from_legacy_params(
+    def _insert_collection_config_from_legacy_params(
         self, collection_id: Any, metadata: Optional[Metadata]
     ) -> CollectionConfigurationInternal:
         """Insert the configuration from legacy metadata params into the collections table, and return the configuration object."""
@@ -855,3 +886,36 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             cur.execute(sql, params)
         return configuration
+
+    def _insert_hnsw_vector_segment_config_from_legacy_params(
+        self, segment_id: Any, metadata: Optional[Metadata]
+    ) -> HNSWConfigurationInternal:
+        """Insert the configuration from legacy metadata params into the segments table, and return the configuration object."""
+
+        # This is a legacy case where we don't have configuration stored in the database
+        # This is non-destructive, we don't delete or overwrite any keys in the metadata
+        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
+
+        segments_t = Table("segments")
+
+        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
+        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
+
+        hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
+            hnsw_metadata_params  # type: ignore[arg-type]
+        )
+        # Write the configuration into the database
+        hnsw_configuration_json_str = hnsw_configuration.to_json_str()
+        q = (
+            self.querybuilder()
+            .update(segments_t)
+            .set(
+                segments_t.config_json_str,
+                ParameterValue(hnsw_configuration_json_str),
+            )
+            .where(segments_t.id == ParameterValue(segment_id))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        with self.tx() as cur:
+            cur.execute(sql, params)
+        return hnsw_configuration

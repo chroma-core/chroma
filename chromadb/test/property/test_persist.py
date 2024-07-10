@@ -10,6 +10,7 @@ import hypothesis.strategies as st
 import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api.configuration import CollectionConfiguration, HNSWConfiguration
 from chromadb.config import Settings, System
 from chromadb.segment import SegmentManager, VectorReader
 import chromadb.test.property.strategies as strategies
@@ -88,6 +89,7 @@ def test_persist(
     client_1.reset()
     coll = client_1.create_collection(
         name=collection_strategy.name,
+        configuration=collection_strategy.configuration,
         metadata=collection_strategy.metadata,  # type: ignore[arg-type]
         embedding_function=collection_strategy.embedding_function,
     )
@@ -137,7 +139,10 @@ def test_sync_threshold(settings: Settings) -> None:
     client = ClientCreator.from_system(system)
 
     collection = client.create_collection(
-        name="test", metadata={"hnsw:batch_size": 3, "hnsw:sync_threshold": 3}
+        name="test",
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(batch_size=3, sync_threshold=3)
+        ),
     )
 
     manager = system.instance(SegmentManager)
@@ -251,6 +256,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.client.reset()
         self.collection = self.client.create_collection(
             name=collection.name,
+            configuration=collection.configuration,
             metadata=collection.metadata,  # type: ignore[arg-type]
             embedding_function=collection.embedding_function,
         )
@@ -316,14 +322,17 @@ def test_delete_add_after_persist(settings: Settings) -> None:
     state.initialize(
         collection=strategies.Collection(
             name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-                # Important: both batch_size and sync_threshold are 3
-                "hnsw:batch_size": 3,
-                "hnsw:sync_threshold": 3,
-            },
+            configuration=CollectionConfiguration(
+                hnsw_configuration=HNSWConfiguration(
+                    ef_construction=128,
+                    ef_search=128,
+                    M=128,
+                    # Important: both batch_size and sync_threshold are 3
+                    batch_size=3,
+                    sync_threshold=3,
+                )
+            ),
+            metadata=None,
             embedding_function=DefaultEmbeddingFunction(),  # type: ignore[arg-type]
             id=UUID("0851f751-2f11-4424-ab23-4ae97074887a"),
             dimension=2,
