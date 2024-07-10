@@ -48,66 +48,6 @@ const records = await client.getRecords(collection, { ids: ["id1"] });
 
 Finally, the `modify()` method on Collection has been moved to Chroma Client as `updateCollection(collection: Collection)`
 
-##### Plurals
-
-We've improved the handling of single element requests vs array requests. Here are a few examples:
-
-```javascript
-// Adding a single document
-await client.addRecords(collection, {
-  id: "id1",
-  embedding: [1, 2, 3],
-  metadata: {
-    foo: "bar",
-  },
-  document: "This is a document.",
-});
-
-// Getting a single document
-const resp = client.getRecords(collection, {
-  id: "id1",
-});
-console.log(resp); // "{id: "id1", embedding: [1, 2, 3], ...}"
-```
-
-##### Simplified Querying
-
-Previously, the request to `query()` had two separate fields `queryTexts` and `queryEmbeddings`. The client had to supply at least one of them but `queryTexts` would be ignored if both were supplied.
-
-Now, there's just a single field `query` on the request params. Clients can provide a string, an array of strings, an embedding or an array of embeddings.
-
-As with the plurals section above, if clients supply a single value, the return type will be a single query result. If clients supply an array query, the return type will be an array of query results.
-
-```javascript
-const resp = client.queryRecords(collection, {
-  query: "query text",
-  nResults: 2,
-});
-
-// Resp equals:
-//   {
-//     ids: ["id1", "id2"],
-//     embeddings: [[1,2,3], [4,5,6]],
-//     documents: ["document 1", "document 2"],
-//     metadatas: [null, null],
-//     distances: [1,2],
-//   }
-
-const resp = client.queryRecords(collection, {
-  query: ["query text", "query text 2"],
-  nResults: 2,
-});
-
-// Resp equals:
-//   {
-//     ids: [["id1", "id2"], ["id3", "id4"]],
-//     embeddings: [[[1,2,3], [4,5,6]], [[7,8,9],[10,11,12]]],
-//     documents: [["document 1", "document 2"], ["document 3", "document 4"]],
-//     metadatas: [[null, null], [null, null]],
-//     distances: [[.7,.8], [.2,.6]],
-//   }
-```
-
 ### v0.5.1
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.

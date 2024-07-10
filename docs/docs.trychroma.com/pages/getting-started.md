@@ -195,7 +195,7 @@ print(results)
 
 ```js
 const results = await client.queryRecords(collection, {
-  query: "This is a query document about hawaii", // Chroma will embed this for you
+  queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
   nResults: 2, // how many results to return
 });
 
@@ -233,17 +233,15 @@ From the above query - you can see that our query about `hawaii` is the semantic
 
 ```js
 {
-  // NOTE: The shape of these results will correspond with the shape of query.
-  // If you supply an array of strings to query, these will be arrays of results.
-  'documents': [
+  'documents': [[
       'This is a document about pineapple',
       'This is a document about oranges'
-  ],
-  'ids': ['id1', 'id2'],
-  'distances': [1.0404009819030762, 1.243080496788025],
+  ]],
+  'ids': [['id1', 'id2']],
+  'distances': [[1.0404009819030762, 1.243080496788025]],
   'uris': null,
   'data': null,
-  'metadatas': [null, null],
+  'metadatas': [[null, null]],
   'embeddings': null,
 }
 ```
@@ -305,7 +303,7 @@ await client.upsertRecords(collection, {
 });
 
 const results = await client.queryRecords(collection, {
-  query: "This is a query document about florida", // Chroma will embed this for you
+  queryTexts: "This is a query document about florida", // Chroma will embed this for you
   nResults: 2, // how many results to return
 });
 

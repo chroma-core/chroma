@@ -477,12 +477,13 @@ Chroma collections can be queried in a variety of ways, using the `.queryRecords
 
 ```javascript
 const result = await client.queryRecords(collection, {
-    query: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
+    queryEmbeddings: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
     nResults: 10,
     where: {"metadata_field": "is_equal_to_this"},
 })
 // input order
-// query - required
+// queryEmbeddings - optional, exactly one of queryEmbeddings and queryTexts must be provided
+// queryTexts - optional
 // n_results - required
 // where - optional
 ```
@@ -527,7 +528,7 @@ collection.get(
 await client.queryRecords(collection, {
     nResults: 10, // n_results
     where: {"metadata_field": "is_equal_to_this"}, // where
-    query: ["doc10", "thus spake zarathustra", ...], // query_text
+    queryTexts: ["doc10", "thus spake zarathustra", ...], // query_text
 })
 ```
 
@@ -575,7 +576,7 @@ client.getRecords(collection,
 )
 
 client.getRecords(collection, {
-    query=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
+    queryEmbeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
     include=["documents"]
 })
 ```
