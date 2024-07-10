@@ -305,17 +305,25 @@ await client.countRecords(collection); // returns the number of items in the col
 
 {% /tabs %}
 
-### Changing the distance function
+### HNSW Parameters
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-`create_collection` also takes an optional `metadata` argument which can be used to customize the distance method of the embedding space by setting the value of `hnsw:space`.
+`create_collection` also takes an optional `configuration` argument, which can be used to configure the parameters of the underlying HNSW index.
+
+This can be used to set the distance function of the embedding space.
 
 ```python
+from chromadb.api.configuration import CollectionConfiguration, HNSWConfiguration
+
+hnsw_configuration = HNSWConfiguration(space="cosine")
+collection_configuration = CollectionConfiguration(hnsw_configuration=hnsw_configuration)
+
+
  collection = client.create_collection(
         name="collection_name",
-        metadata={"hnsw:space": "cosine"} # l2 is the default
+        configuration=collection_configuration
     )
 ```
 
