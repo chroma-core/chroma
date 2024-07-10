@@ -235,6 +235,11 @@ mod tests {
     #[async_trait]
     impl Operator<f32, String> for MockOperator {
         type Error = ();
+
+        fn get_name(&self) -> &'static str {
+            "MockOperator"
+        }
+
         async fn run(&self, input: &f32) -> Result<String, Self::Error> {
             // sleep to simulate work
             tokio::time::sleep(tokio::time::Duration::from_millis(

@@ -52,6 +52,10 @@ pub struct FlushS3Output {
 impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
     type Error = Box<dyn ChromaError>;
 
+    fn get_name(&self) -> &'static str {
+        "FlushS3Operator"
+    }
+
     async fn run(&self, input: &FlushS3Input) -> Result<FlushS3Output, Self::Error> {
         let record_segment_flusher = input.record_segment_writer.clone().commit();
         let record_segment_flush_info = match record_segment_flusher {
@@ -60,7 +64,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        tracing::info!("Record Segment Flushed");
+                        tracing::info!("Record Segment Flushed. File paths {:?}", res);
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,
@@ -85,7 +89,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        println!("HNSW Segment Flushed");
+                        tracing::info!("HNSW Segment Flushed. File paths {:?}", res);
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,
@@ -110,7 +114,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 let res = flusher.flush().await;
                 match res {
                     Ok(res) => {
-                        tracing::info!("Metadata Segment Flushed");
+                        tracing::info!("Metadata Segment Flushed. File paths {:?}", res);
                         SegmentFlushInfo {
                             segment_id,
                             file_paths: res,

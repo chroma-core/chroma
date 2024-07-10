@@ -2,6 +2,7 @@ from concurrent import futures
 from typing import Any, Dict, cast
 from uuid import UUID
 from overrides import overrides
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
@@ -310,10 +311,15 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 )
             )
 
+        configuration = CollectionConfigurationInternal.from_json_str(
+            request.configuration_json_str
+        )
+
         id = UUID(hex=request.id)
         new_collection = Collection(
             id=id,
             name=request.name,
+            configuration=configuration,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             database=database,

@@ -77,7 +77,7 @@ where
                                     parent_span = Span::current().clone();
                                 }
                             }
-                            let child_span = trace_span!(parent: parent_span, "task handler");
+                            let child_span = trace_span!(parent: parent_span, "Component received message", "name" =  C::get_name());
                             let component_context = ComponentContext {
                                     system: self.inner.system.clone(),
                                     sender: self.inner.sender.clone(),

@@ -6,7 +6,7 @@ use crate::index::hnsw_provider::{
     HnswIndexProviderFlushError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
 };
 use crate::index::{
-    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
+    self, HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
 use crate::types::{LogRecord, Operation, Segment};
@@ -345,17 +345,23 @@ impl DistributedHNSWSegmentReader {
                 }
             };
 
-            let index = match hnsw_index_provider
-                .open(&index_uuid, segment, dimensionality as i32)
-                .await
-            {
-                Ok(index) => index,
-                Err(e) => {
-                    return Err(Box::new(
-                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(*e),
-                    ))
-                }
-            };
+            let index =
+                match hnsw_index_provider.get(&index_uuid) {
+                    Some(index) => index,
+                    None => {
+                        match hnsw_index_provider
+                            .open(&index_uuid, segment, dimensionality as i32)
+                            .await
+                        {
+                            Ok(index) => index,
+                            Err(e) => return Err(Box::new(
+                                DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
+                                    *e,
+                                ),
+                            )),
+                        }
+                    }
+                };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index,

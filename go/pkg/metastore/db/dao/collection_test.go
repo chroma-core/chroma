@@ -118,7 +118,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion() {
 	collectionName := "test_collection_get_collections"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	// verify default values
 	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.NoError(err)
@@ -130,7 +130,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion
 	version, err := suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(10), 0)
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
-	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
+	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.Len(collections, 1)
 	suite.Equal(int64(10), collections[0].Collection.LogPosition)
 	suite.Equal(int32(1), collections[0].Collection.Version)

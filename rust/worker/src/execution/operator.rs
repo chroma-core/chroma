@@ -20,6 +20,7 @@ where
     // It would have been nice to do this with a default trait for result
     // but that's not stable in rust yet.
     async fn run(&self, input: &I) -> Result<O, Self::Error>;
+    fn get_name(&self) -> &'static str;
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +91,7 @@ pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
 /// erase the I, O types from the Task struct so that tasks.
 #[async_trait]
 pub(crate) trait TaskWrapper: Send + Debug {
+    fn get_name(&self) -> &'static str;
     async fn run(&self);
     fn id(&self) -> Uuid;
 }
@@ -104,6 +106,10 @@ where
     Input: Send + Sync + Debug,
     Output: Send + Sync + Debug,
 {
+    fn get_name(&self) -> &'static str {
+        self.operator.get_name()
+    }
+
     async fn run(&self) {
         let result = AssertUnwindSafe(self.operator.run(&self.input))
             .catch_unwind()
@@ -198,6 +204,11 @@ mod tests {
     #[async_trait]
     impl Operator<(), ()> for MockOperator {
         type Error = ();
+
+        fn get_name(&self) -> &'static str {
+            "MockOperator"
+        }
+
         async fn run(&self, _: &()) -> Result<(), Self::Error> {
             println!("MockOperator running");
             panic!("MockOperator panicking");

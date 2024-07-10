@@ -64,6 +64,11 @@ impl ChromaError for CountRecordsError {
 #[async_trait]
 impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
     type Error = CountRecordsError;
+
+    fn get_name(&self) -> &'static str {
+        "CountRecordsOperator"
+    }
+
     async fn run(
         &self,
         input: &CountRecordsInput,
@@ -204,6 +209,7 @@ mod tests {
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
     use std::{collections::HashMap, str::FromStr};
+    use tracing::Instrument;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -286,6 +292,7 @@ mod tests {
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
+                .instrument(tracing::info_span!("Materialize logs"))
                 .await
                 .expect("Log materialization failed");
             segment_writer

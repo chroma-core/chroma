@@ -122,9 +122,10 @@ class Segment(_message.Message):
     def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
 
 class Collection(_message.Message):
-    __slots__ = ("id", "name", "metadata", "dimension", "tenant", "database", "log_position", "version")
+    __slots__ = ("id", "name", "configuration_json_str", "metadata", "dimension", "tenant", "database", "log_position", "version")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
+    CONFIGURATION_JSON_STR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
@@ -133,13 +134,14 @@ class Collection(_message.Message):
     VERSION_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
+    configuration_json_str: str
     metadata: UpdateMetadata
     dimension: int
     tenant: str
     database: str
     log_position: int
     version: int
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., log_position: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., configuration_json_str: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., log_position: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
 
 class Database(_message.Message):
     __slots__ = ("id", "name", "tenant")
