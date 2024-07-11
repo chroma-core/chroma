@@ -10,6 +10,7 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
+use std::cmp::Ordering::{Equal, Greater, Less};
 use std::io::SeekFrom;
 use thiserror::Error;
 use uuid::Uuid;
@@ -62,6 +63,45 @@ impl Block {
         delta
     }
 
+    fn binary_search<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<V> {
+        // Copied from std lib and modified for two nested level comparison.
+        let mut size = self.len();
+        let mut left = 0;
+        let mut right = size;
+        let prefix_arr = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        while left < right {
+            let mid = left + size / 2;
+
+            let prefix_cmp = prefix_arr.value(mid).cmp(prefix);
+            // This control flow produces conditional moves, which results in
+            // fewer branches and instructions than if/else or matching on
+            // cmp::Ordering.
+            // This is x86 asm for u8: https://rust.godbolt.org/z/698eYffTx.
+            left = if prefix_cmp == Less { mid + 1 } else { left };
+            right = if prefix_cmp == Greater { mid } else { right };
+            if prefix_cmp == Equal {
+                let key_cmp = K::get(self.data.column(1), mid).partial_cmp(&key).unwrap(); // NaN not expected
+                left = if key_cmp == Less { mid + 1 } else { left };
+                right = if key_cmp == Greater { mid } else { right };
+                if key_cmp == Equal {
+                    return Some(V::get(self.data.column(2), mid));
+                }
+            }
+
+            size = right - left;
+        }
+        None
+    }
+
     /*
         ===== Block Queries =====
     */
@@ -74,20 +114,7 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<V> {
-        let prefix_arr = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        for i in 0..self.data.num_rows() {
-            let curr_prefix = prefix_arr.value(i);
-            let curr_key = K::get(self.data.column(1), i);
-            if curr_prefix == prefix && curr_key == key {
-                return Some(V::get(self.data.column(2), i));
-            }
-        }
-        None
+        self.binary_search(prefix, key)
     }
 
     /// Get all the values for a given prefix in the block
