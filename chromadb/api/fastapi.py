@@ -77,7 +77,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         # This is because httpx uses a slower json serializer
         if "json" in kwargs:
             data = orjson.dumps(kwargs.pop("json"))
-            kwargs["data"] = data
+            kwargs["content"] = data
 
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
