@@ -23,6 +23,9 @@ EPS = 1e-6
 def test_add(
     client: ClientAPI,
 ) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
     reset(client)
     collection = client.create_collection(
         name="test",
@@ -41,6 +44,7 @@ def test_add(
         )
 
     random_query = [random.random(), random.random(), random.random()]
+    print("Generated data with seed ", seed)
 
     # Query the collection with a random query
     results = collection.query(
