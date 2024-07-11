@@ -23,9 +23,13 @@ EPS = 1e-6
 def test_add(
     client: ClientAPI,
 ) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
     reset(client)
     collection = client.create_collection(
         name="test",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
 
     # Add 1000 records, where each embedding has 3 dimensions randomly generated
@@ -41,6 +45,7 @@ def test_add(
         )
 
     random_query = [random.random(), random.random(), random.random()]
+    print("Generated data with seed ", seed)
 
     # Query the collection with a random query
     results = collection.query(
@@ -66,9 +71,13 @@ def test_add(
 
 @skip_if_not_cluster()
 def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
     reset(client)
     collection = client.create_collection(
-        name="test_add_include_all_with_compaction_delay"
+        name="test_add_include_all_with_compaction_delay",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
 
     ids = []
@@ -86,6 +95,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
 
     random_query_1 = [random.random(), random.random(), random.random()]
     random_query_2 = [random.random(), random.random(), random.random()]
+    print("Generated data with seed ", seed)
 
     # Query the collection with a random query
     results = collection.query(
