@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
@@ -179,43 +180,57 @@ impl BlockManager {
         match block {
             Some(block) => Some(block),
             None => {
-                let key = format!("block/{}", id);
-                let bytes = self.storage.get(&key).await;
-                let mut buf: Vec<u8> = Vec::new();
-                match bytes {
-                    Ok(mut bytes) => {
-                        let res = bytes.read_to_end(&mut buf).await;
-                        match res {
-                            Ok(_) => {}
-                            Err(e) => {
-                                // TODO: Return an error to callsite instead of None.
-                                tracing::error!("Error reading block {:?} from s3 {:?}", key, e);
-                                return None;
+                async {
+                    let key = format!("block/{}", id);
+                    let bytes = self.storage.get(&key).instrument(
+                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
+                    ).await;
+                    let mut buf: Vec<u8> = Vec::new();
+                    match bytes {
+                        Ok(mut bytes) => {
+                            let res = bytes.read_to_end(&mut buf).instrument(
+                                tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end"),
+                            ).await;
+                            tracing::info!("Read {:?} bytes from s3", buf.len());
+                            match res {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    // TODO: Return an error to callsite instead of None.
+                                    tracing::error!(
+                                        "Error reading block {:?} from s3 {:?}",
+                                        key,
+                                        e
+                                    );
+                                    return None;
+                                }
+                            }
+                            let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
+                            let block = deserialization_span.in_scope(|| Block::from_bytes(&buf, *id));
+                            match block {
+                                Ok(block) => {
+                                    self.read_cache.write().insert(*id, block.clone());
+                                    Some(block)
+                                }
+                                Err(e) => {
+                                    // TODO: Return an error to callsite instead of None.
+                                    tracing::error!(
+                                        "Error converting bytes to Block {:?}/{:?}",
+                                        key,
+                                        e
+                                    );
+                                    None
+                                }
                             }
                         }
-                        let block = Block::from_bytes(&buf, *id);
-                        match block {
-                            Ok(block) => {
-                                self.read_cache.write().insert(*id, block.clone());
-                                Some(block)
-                            }
-                            Err(e) => {
-                                // TODO: Return an error to callsite instead of None.
-                                tracing::error!(
-                                    "Error converting bytes to Block {:?}/{:?}",
-                                    key,
-                                    e
-                                );
-                                None
-                            }
+                        Err(e) => {
+                            // TODO: Return an error to callsite instead of None.
+                            tracing::error!("Error reading block {:?} from s3 {:?}", key, e);
+                            None
                         }
-                    }
-                    Err(e) => {
-                        // TODO: Return an error to callsite instead of None.
-                        tracing::error!("Error reading block {:?} from s3 {:?}", key, e);
-                        None
                     }
                 }
+                .instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold"))
+                .await
             }
         }
     }

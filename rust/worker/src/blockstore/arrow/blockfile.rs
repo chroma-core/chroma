@@ -281,15 +281,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) async fn get(&'me self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
-        let block = self
-            .get_block(target_block_id)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Get Block", block_id = %target_block_id))
-            .await;
+        let block = self.get_block(target_block_id).await;
         let res = match block {
-            Some(block) => {
-                let block_get_span = tracing::trace_span!(parent: Span::current(), "Block Get", block_id = %target_block_id);
-                block_get_span.in_scope(|| block.get(prefix, key.clone()))
-            }
+            Some(block) => block.get(prefix, key.clone()),
             None => {
                 tracing::error!("Block with id {:?} not found", target_block_id);
                 return Err(Box::new(ArrowBlockfileError::BlockNotFound));

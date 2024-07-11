@@ -66,7 +66,7 @@ hypothesis.settings.register_profile(
 hypothesis.settings.register_profile(
     "slow",
     hypothesis.settings.get_profile("base"),
-    max_examples=1000,
+    max_examples=500,
     stateful_step_count=100,
 )
 

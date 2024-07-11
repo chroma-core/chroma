@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use std::path::Path;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use thiserror::Error;
+use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -120,6 +121,7 @@ impl HnswIndexProvider {
         }
     }
 
+    #[instrument]
     async fn load_hnsw_segment_into_directory(
         &self,
         source_id: &Uuid,
@@ -128,12 +130,11 @@ impl HnswIndexProvider {
         // Fetch the files from storage and put them in the index storage path
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
-            println!("Loading hnsw index file: {}", key);
             let res = self.storage.get(&key).await;
             let mut reader = match res {
                 Ok(reader) => reader,
                 Err(e) => {
-                    println!("Failed to load hnsw index file from storage: {}", e);
+                    tracing::error!("Failed to load hnsw index file from storage: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
                 }
             };
@@ -144,26 +145,22 @@ impl HnswIndexProvider {
             let mut file_handle = match file_handle {
                 Ok(file) => file,
                 Err(e) => {
-                    println!("Failed to create file: {}", e);
+                    tracing::error!("Failed to create file: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
-            let copy_res = tokio::io::copy(&mut reader, &mut file_handle).await;
+            let copy_res = tokio::io::copy(&mut reader, &mut file_handle)
+                .instrument(tracing::info_span!(parent: Span::current(), "hnsw provider file read", file = file))
+                .await;
             match copy_res {
-                Ok(_) => {
-                    println!(
-                        "Copied storage key: {} to file: {}",
-                        key,
-                        file_path.to_str().unwrap()
-                    );
+                Ok(bytes_read) => {
+                    tracing::info!("Copied {} bytes to file {:?}", bytes_read, file_path);
                 }
                 Err(e) => {
-                    println!("Failed to copy file: {}", e);
+                    tracing::error!("Failed to copy file: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             }
-            // bytes is an AsyncBufRead, so we fil and consume it to a file
-            println!("Loaded hnsw index file: {}", file);
         }
         Ok(())
     }
