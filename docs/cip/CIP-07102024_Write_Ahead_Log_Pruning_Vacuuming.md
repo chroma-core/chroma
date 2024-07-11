@@ -22,7 +22,7 @@ A new configuration parameter will be added, `log:vacuum_threshold`. It defaults
 Two additional things will be done after write transactions:
 
 1. The `embeddings_queue` table will be pruned to remove rows that are no longer needed. Specifically, rows with a sequence ID less than the minimum sequence ID of any active subscriber will be deleted.
-2. `PRAGMA freelist_count` will be checked to see if the number of free pages multiplied by the page size is greater than the `log:vacuum_threshold` parameter. If so, `PRAGMA incremental_vacuum` is run to free up pages. This is a non-blocking operation.
+2. `PRAGMA freelist_count` will be checked to see if the number of free pages multiplied by the page size (`PRAGMA page_size`) is greater than the `log:vacuum_threshold` parameter. If so, `PRAGMA incremental_vacuum` is run to free up pages. This is a non-blocking operation.
 
 Tentatively this will be done after every write transaction, assuming the added latency is minimal. If this is not the case, it will be run on some interval.
 
@@ -37,6 +37,8 @@ chroma vacuum --path ./chroma_data
 This automatically runs the pruning operation described above before running `VACUUM`. Prior to any modifications, it checks that there is enough available disk space to complete the vacuum (i.e. the free space on the disk is at least twice the size of the database).[^2]
 
 `chroma vacuum` should be run infrequently; it may increase query performance but the degree to which it does so is currently unknown.
+
+We should clearly document that `chroma vacuum` is not intended to be run while the Chroma server is running, maybe in the form of a confirmation prompt.
 
 ## Compatibility, Deprecation, and Migration Plan
 
