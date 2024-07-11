@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use std::path::Path;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use thiserror::Error;
+use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -120,6 +121,7 @@ impl HnswIndexProvider {
         }
     }
 
+    #[instrument]
     async fn load_hnsw_segment_into_directory(
         &self,
         source_id: &Uuid,
@@ -148,7 +150,9 @@ impl HnswIndexProvider {
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
-            let copy_res = tokio::io::copy(&mut reader, &mut file_handle).await;
+            let copy_res = tokio::io::copy(&mut reader, &mut file_handle)
+                .instrument(tracing::info_span!(parent: Span::current(), "hnsw provider file read", file = file))
+                .await;
             match copy_res {
                 Ok(_) => {
                     println!(
