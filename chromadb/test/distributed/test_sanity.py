@@ -29,6 +29,7 @@ def test_add(
     reset(client)
     collection = client.create_collection(
         name="test",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
 
     # Add 1000 records, where each embedding has 3 dimensions randomly generated
@@ -75,7 +76,8 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
     print("Generating data with seed ", seed)
     reset(client)
     collection = client.create_collection(
-        name="test_add_include_all_with_compaction_delay"
+        name="test_add_include_all_with_compaction_delay",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
 
     ids = []
