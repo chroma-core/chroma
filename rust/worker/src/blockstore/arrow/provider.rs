@@ -191,6 +191,7 @@ impl BlockManager {
                             let res = bytes.read_to_end(&mut buf).instrument(
                                 tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end"),
                             ).await;
+                            tracing::info!("Read {:?} bytes from s3", buf.len());
                             match res {
                                 Ok(_) => {}
                                 Err(e) => {
