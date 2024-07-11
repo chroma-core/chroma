@@ -6,6 +6,7 @@ import yaml
 import string
 
 from chromadb import TokenTransportHeader
+from chromadb.api import AsyncServerAPI
 from chromadb.test.property.strategies import collection_name
 
 
@@ -233,3 +234,7 @@ def _dump_to_tmpfile(data: Any) -> str:
     with open(tmp.name, "w") as f:
         yaml.dump(data, f)
     return tmp.name
+
+
+async def list_col_async(client: AsyncServerAPI):
+    return await client.list_collections()
