@@ -34,7 +34,7 @@ In addition to the configuration parameter described above, a new `chroma vacuum
 chroma vacuum --path ./chroma_data
 ```
 
-This automatically runs the pruning operation described above before running `VACUUM`.
+This automatically runs the pruning operation described above before running `VACUUM`. Prior to any modifications, it checks that there is enough available disk space to complete the vacuum (i.e. the free space on the disk is at least twice the size of the database).[^2]
 
 `chroma vacuum` should be run infrequently; it may increase query performance but the degree to which it does so is currently unknown.
 
@@ -42,7 +42,7 @@ This automatically runs the pruning operation described above before running `VA
 
 Incremental vacuuming is not available by default in SQLite, and it's a little more complicated than just flipping a setting:
 
-> However, changing from "none" to "full" or "incremental" can only occur when the database is new (no tables have yet been created) or by running the VACUUM command.[^2]
+> However, changing from "none" to "full" or "incremental" can only occur when the database is new (no tables have yet been created) or by running the VACUUM command.[^3]
 
 This means existing installations will not benefit from auto-pruning until they run `chroma vacuum`.
 
@@ -61,4 +61,5 @@ Both auto-pruning and the vacuum command should be thoroughly tested with proper
 - [Excellent overview of different vacuuming strategies](https://blogs.gnome.org/jnelson/2015/01/06/sqlite-vacuum-and-auto_vacuum/)
 
 [^1]: [SQLite Vacuum](https://sqlite.org/lang_vacuum.html)
-[^2]: https://www.sqlite.org/pragma.html#pragma_auto_vacuum
+[^2]: [2.9: Transient Database Used by Vacuum](https://www.sqlite.org/tempfiles.html)
+[^3]: https://www.sqlite.org/pragma.html#pragma_auto_vacuum
