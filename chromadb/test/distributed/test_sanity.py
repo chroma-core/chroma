@@ -70,6 +70,9 @@ def test_add(
 
 @skip_if_not_cluster()
 def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
     reset(client)
     collection = client.create_collection(
         name="test_add_include_all_with_compaction_delay"
@@ -90,6 +93,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
 
     random_query_1 = [random.random(), random.random(), random.random()]
     random_query_2 = [random.random(), random.random(), random.random()]
+    print("Generated data with seed ", seed)
 
     # Query the collection with a random query
     results = collection.query(
