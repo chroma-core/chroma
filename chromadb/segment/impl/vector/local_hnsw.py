@@ -43,6 +43,7 @@ class LocalHnswSegment(VectorReader):
     _index: Optional[hnswlib.Index]
     _dimensionality: Optional[int]
     _total_elements_added: int
+    _total_elements_updated: int
     _max_seq_id: SeqId
 
     _lock: ReadWriteLock

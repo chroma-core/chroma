@@ -89,6 +89,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_directory: str
     _allow_reset: bool
 
+    _invalid_operations_since_last_persist: int = 0
+
     _opentelemtry_client: OpenTelemetryClient
 
     def __init__(self, system: System, segment: Segment):
@@ -211,6 +213,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
 
+        self._invalid_operations_since_last_persist = 0
+
     @trace_method(
         "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
     )
@@ -227,6 +231,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if (
             num_elements_added_since_last_persist
             + num_elements_updated_since_last_persist
+            + self._invalid_operations_since_last_persist
             >= self._sync_threshold
         ):
             self._persist()
@@ -275,6 +280,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
+                            self._invalid_operations_since_last_persist += 1
                 elif op == Operation.ADD:
                     if record["record"]["embedding"] is not None:
                         if not exists_in_index:
@@ -282,11 +288,16 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(f"Add of existing embedding ID: {id}")
+                            self._invalid_operations_since_last_persist += 1
                 elif op == Operation.UPSERT:
                     if record["record"]["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
-                if len(self._curr_batch) >= self._batch_size:
+
+                if (
+                    len(self._curr_batch) + self._invalid_operations_since_last_persist
+                    >= self._batch_size
+                ):
                     self._apply_batch(self._curr_batch)
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()
