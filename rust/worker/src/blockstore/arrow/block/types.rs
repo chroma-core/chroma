@@ -68,7 +68,8 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<V> {
-        // Copied from std lib and modified for two nested level comparison.
+        // Copied from std lib https://doc.rust-lang.org/src/core/slice/mod.rs.html#2786
+        // and modified for two nested level comparisons.
         let mut size = self.len();
         let mut left = 0;
         let mut right = size;
@@ -89,7 +90,9 @@ impl Block {
             left = if prefix_cmp == Less { mid + 1 } else { left };
             right = if prefix_cmp == Greater { mid } else { right };
             if prefix_cmp == Equal {
-                let key_cmp = K::get(self.data.column(1), mid).partial_cmp(&key).unwrap(); // NaN not expected
+                let key_cmp = K::get(self.data.column(1), mid)
+                    .partial_cmp(&key)
+                    .expect("NaN not expected"); // NaN not expected
                 left = if key_cmp == Less { mid + 1 } else { left };
                 right = if key_cmp == Greater { mid } else { right };
                 if key_cmp == Equal {
