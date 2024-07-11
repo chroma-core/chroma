@@ -6,6 +6,7 @@ use crate::errors::{ChromaError, ErrorCodes};
 use super::{Index, IndexConfig, PersistentIndex};
 use crate::types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
 use thiserror::Error;
+use tracing::instrument;
 use uuid::Uuid;
 
 const DEFAULT_MAX_ELEMENTS: usize = 10000;
@@ -255,6 +256,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         Ok(())
     }
 
+    #[instrument(name = "HnswIndex load", level = "info")]
     fn load(
         path: &str,
         index_config: &IndexConfig,
