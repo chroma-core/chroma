@@ -217,11 +217,16 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def _apply_batch(self, batch: Batch) -> None:
         super()._apply_batch(batch)
-        if (
+        num_elements_added_since_last_persist = (
             self._total_elements_added - self._persist_data.total_elements_added
-            >= self._sync_threshold
-        ) or (
+        )
+        num_elements_updated_since_last_persist = (
             self._total_elements_updated - self._persist_data.total_elements_updated
+        )
+
+        if (
+            num_elements_added_since_last_persist
+            + num_elements_updated_since_last_persist
             >= self._sync_threshold
         ):
             self._persist()

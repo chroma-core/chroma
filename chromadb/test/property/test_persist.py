@@ -161,6 +161,14 @@ def test_sync_threshold(settings: Settings) -> None:
 
     # Should have persisted
     assert get_index_last_modified_at() > last_modified_at
+    last_modified_at = get_index_last_modified_at()
+
+    # Mixed usage should also trigger persistence
+    collection.add(ids=["4"], embeddings=[[4.0]])
+    collection.upsert(ids=["1", "2"], embeddings=[[1.0], [2.0]])
+
+    # Should have persisted
+    assert get_index_last_modified_at() > last_modified_at
 
 
 def load_and_check(
