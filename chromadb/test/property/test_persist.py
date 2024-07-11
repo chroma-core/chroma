@@ -2,6 +2,7 @@ import logging
 import multiprocessing
 from multiprocessing.connection import Connection
 import multiprocessing.context
+import time
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
@@ -136,6 +137,8 @@ def test_sync_threshold(settings: Settings) -> None:
     segment = manager.get_segment(collection.id, VectorReader)
 
     def get_index_last_modified_at() -> float:
+        # Time resolution on Windows can be up to 10ms
+        time.sleep(0.1)
         try:
             return os.path.getmtime(segment._get_metadata_file())  # type: ignore[attr-defined]
         except FileNotFoundError:
