@@ -240,10 +240,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._max_seq_id = max(self._max_seq_id, record["log_offset"])
                 id = record["record"]["id"]
                 op = record["record"]["operation"]
-                exists_in_index = self._id_to_label.get(
-                    id, None
-                ) is not None or self._brute_force_index.has_id(id)
+
                 exists_in_bf_index = self._brute_force_index.has_id(id)
+                exists_in_persisted_index = self._id_to_label.get(id, None) is not None
+                exists_in_index = exists_in_bf_index or exists_in_persisted_index
+
+                id_is_pending_delete = self._curr_batch.is_deleted(id)
 
                 if op == Operation.DELETE:
                     if exists_in_index:
@@ -264,11 +266,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             )
                 elif op == Operation.ADD:
                     if record["record"]["embedding"] is not None:
-                        if not exists_in_index:
+                        if exists_in_index and not id_is_pending_delete:
+                            logger.warning(f"Add of existing embedding ID: {id}")
+                        else:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
-                        else:
-                            logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
                     if record["record"]["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)
