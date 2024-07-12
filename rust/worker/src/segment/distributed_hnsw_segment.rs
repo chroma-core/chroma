@@ -6,7 +6,7 @@ use crate::index::hnsw_provider::{
     HnswIndexProviderFlushError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
 };
 use crate::index::{
-    self, HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
+    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
 use crate::types::{LogRecord, MaterializedLogOperation, Operation, Segment};
@@ -216,8 +216,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
     }
 
     fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
-        let hnsw_index_id = self.index.read().id;
-        let res = self.hnsw_index_provider.commit(&hnsw_index_id);
+        let res = self.hnsw_index_provider.commit(self.index.clone());
         match res {
             Ok(_) => Ok(self),
             Err(e) => Err(e),

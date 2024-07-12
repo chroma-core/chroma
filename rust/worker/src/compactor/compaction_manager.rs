@@ -26,7 +26,6 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -222,12 +221,12 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             assignment_policy,
         );
 
-        // TODO: hnsw index provider should be injected somehow
         let blockfile_provider = BlockfileProvider::try_from_config(&(
             config.blockfile_provider.clone(),
             storage.clone(),
         ))
         .await?;
+
         let hnsw_index_provider =
             HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
                 .await?;
@@ -317,6 +316,7 @@ mod tests {
     use crate::types::OperationRecord;
     use crate::types::Segment;
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::str::FromStr;
     use uuid::Uuid;
 

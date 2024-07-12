@@ -315,7 +315,7 @@ impl HnswIndexProvider {
                 return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
             }
         };
-
+        // HnswIndex init is not thread safe. We should not call it from multiple threads
         let index = match HnswIndex::init(&index_config, Some(&hnsw_config), id) {
             Ok(index) => index,
             Err(e) => {
@@ -327,14 +327,7 @@ impl HnswIndexProvider {
         Ok(index)
     }
 
-    pub(crate) fn commit(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderCommitError>> {
-        let index = match self.cache.get(id) {
-            Some(index) => index,
-            None => {
-                return Err(Box::new(HnswIndexProviderCommitError::NoIndexFound(*id)));
-            }
-        };
-
+    pub(crate) fn commit(&self, index: Arc<RwLock<HnswIndex>>) -> Result<(), Box<dyn ChromaError>> {
         match index.write().save() {
             Ok(_) => {}
             Err(e) => {
@@ -346,24 +339,6 @@ impl HnswIndexProvider {
     }
 
     pub(crate) async fn flush(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
-        // Scope to drop the cache lock before we await to write to s3
-        // TODO: since we commit(), we don't need to save the index here
-        {
-            // let cache = self.cache.read();
-            let index = match self.cache.get(id) {
-                Some(index) => index,
-                None => {
-                    return Err(Box::new(HnswIndexProviderFlushError::NoIndexFound(*id)));
-                }
-            };
-            match index.write().save() {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(Box::new(HnswIndexProviderFlushError::HnswSaveError(e)));
-                }
-            };
-        }
-
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
