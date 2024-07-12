@@ -42,6 +42,7 @@ class PersistentData:
     dimensionality: Optional[int]
     total_elements_added: int
     total_elements_updated: int
+    total_invalid_operations: int
     max_seq_id: SeqId
 
     id_to_label: Dict[str, int]
@@ -53,6 +54,7 @@ class PersistentData:
         dimensionality: Optional[int],
         total_elements_added: int,
         total_elements_updated: int,
+        total_invalid_operations: int,
         max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
@@ -61,6 +63,7 @@ class PersistentData:
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
         self.total_elements_updated = total_elements_updated
+        self.total_invalid_operations = total_invalid_operations
         self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
@@ -68,8 +71,9 @@ class PersistentData:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # Field was added after the initial implementation
+        # Fields were added after the initial implementation
         self.total_elements_updated = 0
+        self.total_invalid_operations = 0
 
     @staticmethod
     def load_from_file(filename: str) -> "PersistentData":
@@ -93,8 +97,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_data: PersistentData
     _persist_directory: str
     _allow_reset: bool
-
-    _invalid_operations_since_last_persist: int = 0
 
     _opentelemtry_client: OpenTelemetryClient
 
@@ -132,6 +134,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._dimensionality,
                 self._total_elements_added,
                 self._total_elements_updated,
+                self._total_invalid_operations,
                 self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
@@ -218,8 +221,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
 
-        self._invalid_operations_since_last_persist = 0
-
     @trace_method(
         "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
     )
@@ -232,11 +233,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         num_elements_updated_since_last_persist = (
             self._total_elements_updated - self._persist_data.total_elements_updated
         )
+        num_invalid_operations_since_last_persist = (
+            self._total_invalid_operations - self._persist_data.total_invalid_operations
+        )
 
         if (
             num_elements_added_since_last_persist
             + num_elements_updated_since_last_persist
-            + self._invalid_operations_since_last_persist
+            + num_invalid_operations_since_last_persist
             >= self._sync_threshold
         ):
             self._persist()
@@ -285,7 +289,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
-                            self._invalid_operations_since_last_persist += 1
+                            self._total_invalid_operations += 1
                 elif op == Operation.ADD:
                     if record["record"]["embedding"] is not None:
                         if not exists_in_index:
@@ -293,14 +297,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(f"Add of existing embedding ID: {id}")
-                            self._invalid_operations_since_last_persist += 1
+                            self._total_invalid_operations += 1
                 elif op == Operation.UPSERT:
                     if record["record"]["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
 
                 if (
-                    len(self._curr_batch) + self._invalid_operations_since_last_persist
+                    len(self._curr_batch) + self._total_invalid_operations
                     >= self._batch_size
                 ):
                     self._apply_batch(self._curr_batch)
