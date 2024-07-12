@@ -69,6 +69,7 @@ class LocalHnswSegment(VectorReader):
         self._dimensionality = None
         self._total_elements_added = 0
         self._total_elements_updated = 0
+        self._total_invalid_operations = 0
         self._max_seq_id = self._consumer.min_seqid()
 
         self._id_to_seq_id = {}
