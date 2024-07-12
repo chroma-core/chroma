@@ -282,6 +282,8 @@ def collections(
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
     with_persistent_hnsw_params: bool = False,
+    max_hnsw_batch_size: int = 2000,
+    max_hnsw_sync_threshold: int = 2000,
 ) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
@@ -302,9 +304,11 @@ def collections(
             metadata = {}
         metadata.update(test_hnsw_config)
         if with_persistent_hnsw_params:
-            metadata["hnsw:batch_size"] = draw(st.integers(min_value=3, max_value=2000))
+            metadata["hnsw:batch_size"] = draw(
+                st.integers(min_value=3, max_value=max_hnsw_batch_size)
+            )
             metadata["hnsw:sync_threshold"] = draw(
-                st.integers(min_value=3, max_value=2000)
+                st.integers(min_value=3, max_value=max_hnsw_sync_threshold)
             )
         # Sometimes, select a space at random
         if draw(st.booleans()):

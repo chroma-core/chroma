@@ -66,6 +66,11 @@ class PersistentData:
         self.label_to_id = label_to_id
         self.id_to_seq_id = id_to_seq_id
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Field was added after the initial implementation
+        self.total_elements_updated = 0
+
     @staticmethod
     def load_from_file(filename: str) -> "PersistentData":
         """Load persistent data from a file"""
