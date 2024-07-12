@@ -1,0 +1,62 @@
+name: Performance Regression
+
+on:
+  schedule:
+    - cron: "0 11 * * *" # 4:00 AM PT (11:00 AM UTC)
+
+env:
+  PERF_TESTS_SHA: "a68bbab1"
+  AWS_REGION: "us-west-1`"
+
+jobs:
+  run-performance-tests:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout chromadb
+        uses: actions/checkout@v3
+        with:
+          repository: "chroma-core/chroma"
+          path: "chroma"
+          ref: "main"
+
+      - name: Checkout perf-tests at specific SHA
+        uses: actions/checkout@v3
+        with:
+          repository: "chroma-core/perf-tests"
+          ref: ${{ env.PERF_TESTS_SHA }}
+          path: "perf-tests"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies for chromadb
+        run: |
+          cd chroma
+          pip install -e .
+          pip install -r requirements.txt
+
+      - name: Install dependencies for perf-tests
+        run: |
+          cd perf-tests
+          pip install -e .
+          pip install -r requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::369178033109:role/github-action-s3-perf-tests
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run performance tests
+        run: |
+          cd perf-tests
+          python run.py experiments/ci-regression.json
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
