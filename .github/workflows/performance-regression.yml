@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 11 * * *" # 4:00 AM PT (11:00 AM UTC)
+  push:
+    branches:
+      - perf-regression-ci
 
 env:
   PERF_TESTS_SHA: "a68bbab1"
