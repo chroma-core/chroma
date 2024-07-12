@@ -281,7 +281,7 @@ def collections(
     with_hnsw_params: bool = False,
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
-    with_persistent_hnsw_params: bool = False,
+    with_persistent_hnsw_params: st.SearchStrategy[bool] = st.just(False),
     max_hnsw_batch_size: int = 2000,
     max_hnsw_sync_threshold: int = 2000,
 ) -> Collection:
@@ -294,16 +294,18 @@ def collections(
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
-    if with_persistent_hnsw_params and not with_hnsw_params:
+    use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
+
+    if use_persistent_hnsw_params and not with_hnsw_params:
         raise ValueError(
-            "with_hnsw_params requires with_persistent_hnsw_params to be true"
+            "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 
     if with_hnsw_params:
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
-        if with_persistent_hnsw_params:
+        if use_persistent_hnsw_params:
             metadata["hnsw:batch_size"] = draw(
                 st.integers(min_value=3, max_value=max_hnsw_batch_size)
             )

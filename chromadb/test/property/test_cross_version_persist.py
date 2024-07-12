@@ -275,10 +275,10 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     strategies.collections(
         with_hnsw_params=True,
         has_embeddings=True,
-        with_persistent_hnsw_params=True,
         # By default, these are set to 2000, which makes it unlikely that index mutations will ever be fully flushed
         max_hnsw_sync_threshold=10,
         max_hnsw_batch_size=10,
+        with_persistent_hnsw_params=st.booleans(),
     ),
     key="coll",
 )
