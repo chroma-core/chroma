@@ -58,7 +58,9 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
 
 
 collection_st = st.shared(
-    strategies.collections(with_hnsw_params=True, with_persistent_hnsw_params=True),
+    strategies.collections(
+        with_hnsw_params=True, with_persistent_hnsw_params=st.just(True)
+    ),
     key="coll",
 )
 

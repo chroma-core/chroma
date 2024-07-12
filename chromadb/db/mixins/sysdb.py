@@ -19,6 +19,7 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -776,7 +777,12 @@ class SqlSysDB(SqlDB, SysDB):
         collections_t = Table("collections")
 
         # Get any existing HNSW params from the metadata
-        hnsw_metadata_params = HnswParams.extract(metadata or {})
+        metadata = metadata or {}
+        if metadata.get("hnsw:batch_size") or metadata.get("hnsw:sync_threshold"):
+            hnsw_metadata_params = PersistentHnswParams.extract(metadata)
+        else:
+            hnsw_metadata_params = HnswParams.extract(metadata)
+
         hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
             hnsw_metadata_params  # type: ignore[arg-type]
         )
