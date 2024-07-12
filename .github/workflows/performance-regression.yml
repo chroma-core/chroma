@@ -1,6 +1,7 @@
 name: Performance Regression
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "0 11 * * *" # 4:00 AM PT (11:00 AM UTC)
 
