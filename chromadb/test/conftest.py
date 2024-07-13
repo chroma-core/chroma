@@ -692,7 +692,7 @@ def system_fixtures_root_and_singleton_tenant_db_user() -> (
         pytest.param(
             (
                 fastapi_fixture_admin_and_singleton_tenant_db_user,
-                "chromadb.api.fastapi.AsyncFastAPI",
+                "chromadb.api.async_fastapi.AsyncFastAPI",
             ),
             id="fastapi_fixture_admin_and_singleton_tenant_db_user_async",
         ),
