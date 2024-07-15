@@ -101,7 +101,7 @@ def vacuum(
         raise typer.Exit(code=1)
 
     if not force and not typer.confirm(
-        "Are you sure you want to vacuum the database? This will block both reads and writes to the database, and may take a while."
+        "Are you sure you want to vacuum the database? This will block both reads and writes to the database and may take a while."
     ):
         rich.print("Vacuum cancelled.")
         raise typer.Exit(code=0)
