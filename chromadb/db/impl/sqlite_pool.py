@@ -20,7 +20,7 @@ class Connection:
         self._pool = pool
         self._db_file = db_file
         self._conn = sqlite3.connect(
-            db_file, check_same_thread=False, uri=is_uri, *args, **kwargs
+            db_file, timeout=1000, check_same_thread=False, uri=is_uri, *args, **kwargs
         )  # type: ignore
         self._conn.isolation_level = None  # Handle commits explicitly
 

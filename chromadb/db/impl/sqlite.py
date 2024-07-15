@@ -248,8 +248,10 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     def unique_constraint_error() -> Type[BaseException]:
         return sqlite3.IntegrityError
 
-    def vacuum(self) -> None:
+    def vacuum(self, timeout: int = 5) -> None:
+        """Runs VACUUM on the database. `timeout` is the maximum time to wait for an exclusive lock in seconds."""
         conn = self._conn_pool.connect()
+        conn.execute(f"PRAGMA busy_timeout = {int(timeout) * 1000}")
         conn.execute("VACUUM")
         conn.execute(
             """
@@ -257,3 +259,4 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             VALUES ('vacuum', CURRENT_TIMESTAMP)
             """
         )
+        conn.close_actual()
