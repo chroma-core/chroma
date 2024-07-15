@@ -70,10 +70,10 @@ class PersistentData:
         self.id_to_seq_id = id_to_seq_id
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
         # Fields were added after the initial implementation
         self.total_elements_updated = 0
         self.total_invalid_operations = 0
+        self.__dict__.update(state)
 
     @staticmethod
     def load_from_file(filename: str) -> "PersistentData":
