@@ -11,6 +11,10 @@ path = "src/bin/query_service.rs"
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
 
+[[bin]]
+name = "s3_test"
+path = "src/bin/s3_test.rs"
+
 [[bench]]
 name = "distance_metrics"
 path = "src/benches/distance_metrics.rs"

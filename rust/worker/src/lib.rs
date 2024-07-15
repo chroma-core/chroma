@@ -16,10 +16,10 @@ mod system;
 mod tracing;
 mod types;
 mod utils;
-
 use config::Configurable;
 use memberlist::MemberlistProvider;
-
+use rand::Rng;
+use tokio::io::AsyncReadExt;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
@@ -27,6 +27,53 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 mod chroma_proto {
     tonic::include_proto!("chroma");
+}
+
+pub async fn s3_test_entrypoint() {
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
+        Err(_) => config::RootConfig::load(),
+    };
+
+    let storage = storage::from_config(&config.query_service.storage)
+        .await
+        .expect("Failed to create storage");
+
+    let file_size_bytes = 500 * 1024 * 1024; // 500MB
+    let file_name_prefix = "test_file";
+    let random_suffix: u32 = rand::thread_rng().gen();
+    let full_key = format!("{}_{}", file_name_prefix, random_suffix);
+
+    // Generate a random byte array of size file_size_bytes
+    let mut rng = rand::thread_rng();
+    let byte = rng.gen::<u8>();
+    let mut file_data: Vec<u8> = vec![byte; file_size_bytes];
+    println!("Generated random file data of size: {}", file_size_bytes);
+
+    // Write the file to the storage
+    storage.put_bytes(&full_key, file_data).await.unwrap();
+    println!("Wrote file to storage with key: {}", full_key);
+
+    // Read the file from the storage
+    let start_req_time = std::time::Instant::now();
+    let mut read_file_data = storage.get(&full_key).await.unwrap();
+    let get_time = std::time::Instant::now();
+    println!(
+        "Initial get time from storage with key: {} in {:?} seconds",
+        full_key,
+        get_time.duration_since(start_req_time).as_secs_f64()
+    );
+    let mut read_buffer: Vec<u8> = Vec::new();
+    read_file_data.read_to_end(&mut read_buffer).await.unwrap();
+    let end_req_time = std::time::Instant::now();
+    let req_time = end_req_time - start_req_time;
+    println!(
+        "Read file from storage with key: {} in {:?} seconds",
+        full_key,
+        req_time.as_secs_f64()
+    );
+
+    storage.get_parallel(10, &full_key).await;
 }
 
 pub async fn query_service_entrypoint() {

@@ -19,10 +19,14 @@ use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_smithy_types::byte_stream::ByteStream;
+use futures::stream;
+use futures::FutureExt;
+use futures::StreamExt;
 use std::clone::Clone;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncBufRead;
+use tokio::io::AsyncReadExt;
 
 #[derive(Clone)]
 pub(crate) struct S3Storage {
@@ -150,6 +154,94 @@ impl S3Storage {
         }
     }
 
+    pub(crate) async fn get_parallel(&self, num_reqs: usize, key: &str) {
+        // Head the object to get its content length
+        // Divide the content length by num_reqs to get the chunk size
+        // Create a range of byte ranges to fetch
+        // Fetch the byte ranges in parallel
+
+        let head_start_time = std::time::Instant::now();
+        let head_res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        let head_time = std::time::Instant::now();
+        let head_req_time = head_time - head_start_time;
+        println!(
+            "Headed object with key: {} in {:?} seconds",
+            key,
+            head_req_time.as_secs_f64()
+        );
+
+        let content_length = match head_res {
+            Ok(res) => match res.content_length {
+                Some(len) => len as usize,
+                None => {
+                    panic!("No content length in head response");
+                    return;
+                }
+            },
+            Err(e) => {
+                panic!("Error in head request: {:?}", e);
+                return;
+            }
+        };
+
+        println!("Content length: {}", content_length);
+        println!("Number of requests: {}", num_reqs);
+        let chunk_size = content_length / num_reqs;
+        println!("Chunk size: {}", chunk_size);
+        let mut ranges = Vec::new();
+        for i in 0..num_reqs {
+            let start = i * chunk_size;
+            let end = if i == num_reqs - 1 {
+                content_length
+            } else {
+                (i + 1) * chunk_size - 1
+            };
+            ranges.push((start, end));
+        }
+
+        let mut output_buffer: Vec<u8> = vec![0; content_length];
+        let mut output_slices = output_buffer.chunks_mut(chunk_size).collect::<Vec<_>>();
+
+        let ranged_and_output_slices = ranges.iter().zip(output_slices.drain(..));
+
+        let mut futures = Vec::new();
+        for (range, output_slice) in ranged_and_output_slices {
+            let range_str = format!("bytes={}-{}", range.0, range.1);
+            let fut = self
+                .client
+                .get_object()
+                .bucket(self.bucket.clone())
+                .key(key)
+                .range(range_str.clone())
+                .send()
+                .then(|res| async move {
+                    let body = res.unwrap().body;
+                    let mut reader = body.into_async_read();
+                    reader.read_exact(output_slice).await.unwrap();
+                });
+            futures.push(fut);
+        }
+
+        let start_time = std::time::Instant::now();
+        let _ = stream::iter(futures)
+            .buffer_unordered(num_reqs)
+            .collect::<Vec<_>>()
+            .await;
+        let end_time = std::time::Instant::now();
+        let req_time = end_time - start_time;
+        println!(
+            "Fetched {} ranges in parallel in {:?} seconds",
+            num_reqs,
+            req_time.as_secs_f64()
+        );
+    }
+
     pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let bytestream = ByteStream::from(bytes);
         self.put_bytestream(key, bytestream).await
@@ -243,7 +335,8 @@ impl Configurable<StorageConfig> for S3Storage {
 
                         // Set up s3 client
                         let config = aws_sdk_s3::config::Builder::new()
-                            .endpoint_url("http://minio.chroma:9000".to_string())
+                            // .endpoint_url("http://minio.chroma:9000".to_string())
+                            .endpoint_url("http://192.168.194.120:9000".to_string())
                             .credentials_provider(cred)
                             .behavior_version_latest()
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))
