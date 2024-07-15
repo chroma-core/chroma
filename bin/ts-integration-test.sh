@@ -49,7 +49,6 @@ export CHROMA_SERVER_HTTP_PORT=8000
 export CHROMA_SERVER_NOFILE=65535
 
 cd clients/js
-# moved off of yarn to npm to fix issues with jackspeak/cliui/string-width versions #1314
 pnpm install
 
 pnpm test:run
