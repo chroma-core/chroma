@@ -1,12 +1,17 @@
 from typing import Optional
 
+import rich.markdown
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing_extensions import Annotated
 import typer
+import rich
 import uvicorn
 import os
 import webbrowser
 
 from chromadb.cli.utils import set_log_file_path
+from chromadb.config import Settings, System
+from chromadb.db.impl.sqlite import SqliteDB
 
 app = typer.Typer()
 
@@ -81,6 +86,42 @@ def run(
         return
 
     uvicorn.run(**config)
+
+
+@app.command()  # type: ignore
+def vacuum(
+    path: str = typer.Option(
+        help="The path to a Chroma data directory.",
+    ),
+    force: bool = typer.Option(False, help="Force vacuuming without confirmation."),
+) -> None:
+    """Vacuum the database"""
+    if not os.path.exists(path):
+        rich.print(f"[bold red]Path {path} does not exist.[/bold red]")
+        raise typer.Exit(code=1)
+
+    if not force and not typer.confirm(
+        "Are you sure you want to vacuum the database? This will block both reads and writes to the database, and may take a while."
+    ):
+        rich.print("Vacuum cancelled.")
+        raise typer.Exit(code=0)
+
+    # todo: check free tmp space?
+    settings = Settings()
+    settings.is_persistent = True
+    settings.persist_directory = path
+    system = System(settings=settings)
+    sqlite = system.instance(SqliteDB)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        transient=True,
+    ) as progress:
+        progress.add_task("Vacuuming (this may take a while)...")
+        sqlite.vacuum()
+
+    rich.print(":soap: [bold]vacuum complete![/bold]")
 
 
 @app.command()  # type: ignore

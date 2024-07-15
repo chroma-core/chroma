@@ -247,3 +247,13 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def unique_constraint_error() -> Type[BaseException]:
         return sqlite3.IntegrityError
+
+    def vacuum(self) -> None:
+        conn = self._conn_pool.connect()
+        conn.execute("VACUUM")
+        conn.execute(
+            """
+            INSERT INTO maintenance_log (operation, timestamp)
+            VALUES ('vacuum', CURRENT_TIMESTAMP)
+            """
+        )

@@ -595,8 +595,8 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
             raise e
 
 
-@pytest.fixture
-def sqlite_persistent() -> Generator[System, None, None]:
+@pytest.fixture(scope="module")
+def sqlite_persistent():
     yield from sqlite_persistent_fixture()
 
 
