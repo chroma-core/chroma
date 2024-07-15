@@ -1,5 +1,6 @@
 import hypothesis.stateful
 import hypothesis.strategies
+from overrides import overrides
 import pytest
 import logging
 import hypothesis
@@ -94,6 +95,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self.record_set_state = strategies.StateMachineRecordSet(
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
+
+    @overrides
+    def teardown(self) -> None:
+        self.client.delete_collection(self.collection.name)
 
     @rule(
         target=embedding_ids,
