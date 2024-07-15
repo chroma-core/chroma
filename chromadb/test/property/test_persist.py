@@ -3,6 +3,7 @@ import multiprocessing
 from multiprocessing.connection import Connection
 import multiprocessing.context
 from typing import Generator, Callable
+from uuid import UUID
 from hypothesis import given
 import hypothesis.strategies as st
 import pytest
@@ -13,7 +14,6 @@ import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
-    collection_st as embedding_collection_st,
     trace,
     EmbeddingStateMachineBase,
 )
@@ -27,6 +27,7 @@ import os
 import shutil
 import tempfile
 from chromadb.api.client import Client as ClientCreator
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
@@ -59,7 +60,11 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
 
 collection_st = st.shared(
     strategies.collections(
-        with_hnsw_params=True, with_persistent_hnsw_params=st.just(True)
+        with_hnsw_params=True,
+        with_persistent_hnsw_params=st.just(True),
+        # Makes it more likely to find persist-related bugs (by default these are set to 2000).
+        max_hnsw_batch_size=10,
+        max_hnsw_sync_threshold=10,
     ),
     key="coll",
 )
@@ -180,10 +185,8 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.client.reset()
         super().__init__(self.client)
 
-    @initialize(collection=embedding_collection_st, batch_size=st.integers(min_value=3, max_value=2000), sync_threshold=st.integers(min_value=3, max_value=2000))  # type: ignore
-    def initialize(
-        self, collection: strategies.Collection, batch_size: int, sync_threshold: int
-    ):
+    @initialize(collection=collection_st)  # type: ignore
+    def initialize(self, collection: strategies.Collection):
         self.client.reset()
         self.collection = self.client.create_collection(
             name=collection.name,
@@ -241,3 +244,55 @@ def test_persist_embeddings_state(
     run_state_machine_as_test(
         lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
     )  # type: ignore
+
+
+# Ideally this scenario would be exercised by Hypothesis, but most runs don't seem to trigger this particular state.
+def test_delete_add_after_persist(settings: Settings) -> None:
+    client = chromadb.Client(settings)
+    state = PersistEmbeddingsStateMachine(settings=settings, client=client)
+
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+                # Important: both batch_size and sync_threshold are 3
+                "hnsw:batch_size": 3,
+                "hnsw:sync_threshold": 3,
+            },
+            embedding_function=DefaultEmbeddingFunction(),  # type: ignore[arg-type]
+            id=UUID("0851f751-2f11-4424-ab23-4ae97074887a"),
+            dimension=2,
+            dtype=None,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
+
+    state.add_embeddings(
+        record_set={
+            # Add 3 records to hit the batch_size and sync_threshold
+            "ids": ["0", "1", "2"],
+            "embeddings": [[0, 0], [0, 0], [0, 0]],
+            "metadatas": [None, None, None],
+            "documents": None,
+        }
+    )
+
+    # Delete and then re-add record
+    state.delete_by_ids(ids=["0"])
+    state.add_embeddings(
+        record_set={
+            "ids": ["0"],
+            "embeddings": [[1, 1]],
+            "metadatas": [None],
+            "documents": None,
+        }
+    )
+
+    # At this point, the changes above are not fully persisted
+    state.fields_match()
