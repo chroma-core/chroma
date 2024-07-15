@@ -106,7 +106,6 @@ def vacuum(
         rich.print("Vacuum cancelled.")
         raise typer.Exit(code=0)
 
-    # todo: check free tmp space?
     settings = Settings()
     settings.is_persistent = True
     settings.persist_directory = path
@@ -119,7 +118,11 @@ def vacuum(
         transient=True,
     ) as progress:
         progress.add_task("Vacuuming (this may take a while)...")
-        sqlite.vacuum()
+        try:
+            sqlite.vacuum()
+        except Exception as e:
+            rich.print(f"[bold red]Error vacuuming database:[/bold red] {e}")
+            raise typer.Exit(code=1)
 
     rich.print(":soap: [bold]vacuum complete![/bold]")
 
