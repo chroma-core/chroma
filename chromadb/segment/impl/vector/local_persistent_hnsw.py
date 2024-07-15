@@ -2,7 +2,7 @@ import os
 import shutil
 from overrides import override
 import pickle
-from typing import Dict, List, Optional, Sequence, Set, cast
+from typing import Any, Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
@@ -69,7 +69,7 @@ class PersistentData:
         self.label_to_id = label_to_id
         self.id_to_seq_id = id_to_seq_id
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Any) -> None:
         # Fields were added after the initial implementation
         self.total_elements_updated = 0
         self.total_invalid_operations = 0
@@ -305,8 +305,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
 
+                num_invalid_operations_since_last_persist = (
+                    self._total_invalid_operations
+                    - self._persist_data.total_invalid_operations
+                )
+
                 if (
-                    len(self._curr_batch) + self._total_invalid_operations
+                    len(self._curr_batch) + num_invalid_operations_since_last_persist
                     >= self._batch_size
                 ):
                     self._apply_batch(self._curr_batch)
