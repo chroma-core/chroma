@@ -52,7 +52,7 @@ Users should see disk space freed immediately after upgrading and running `chrom
 
 ## Test Plan
 
-Both auto-pruning and the vacuum command should be thoroughly tested with property-based testing. For the vacuum command, we should also test with concurrent read/write load to ensure the database is not corrupted.
+Auto-pruning should be thoroughly tested with property-based testing. We should test `chroma vacuum` with concurrent write operations to confirm it behaves as expected and emits the appropriate error messages.
 
 ## Rejected Alternatives
 
