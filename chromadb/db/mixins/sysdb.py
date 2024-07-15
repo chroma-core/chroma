@@ -771,12 +771,13 @@ class SqlSysDB(SqlDB, SysDB):
 
         # This is a legacy case where we don't have configuration stored in the database
         # This is non-destructive, we don't delete or overwrite any keys in the metadata
-        from chromadb.segment.impl.vector.hnsw_params import HnswParams
+        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 
         collections_t = Table("collections")
 
-        # Get any existing HNSW params from the metadata
-        hnsw_metadata_params = HnswParams.extract(metadata or {})
+        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
+        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
+
         hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
             hnsw_metadata_params  # type: ignore[arg-type]
         )

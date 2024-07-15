@@ -61,7 +61,7 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
 collection_st = st.shared(
     strategies.collections(
         with_hnsw_params=True,
-        with_persistent_hnsw_params=True,
+        with_persistent_hnsw_params=st.just(True),
         # Makes it more likely to find persist-related bugs (by default these are set to 2000).
         max_hnsw_batch_size=10,
         max_hnsw_sync_threshold=10,
