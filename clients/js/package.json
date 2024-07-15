@@ -17,6 +17,7 @@
     "openapi-types": "^12.1.3",
     "prettier": "2.8.7",
     "rimraf": "^5.0.0",
+    "testcontainers": "^10.9.0",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.1",
     "tsd": "^0.28.1",
@@ -44,6 +45,7 @@
     "dist"
   ],
   "scripts": {
+    "jest": "jest",
     "test": "run-s db:clean db:cleanauth db:run test:runfull db:clean test:runfull-authonly db:cleanauth",
     "testnoauth": "run-s db:clean db:run test:runfull db:clean",
     "testauth": "run-s db:cleanauth test:runfull-authonly db:cleanauth",
