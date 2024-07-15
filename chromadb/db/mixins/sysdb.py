@@ -19,7 +19,6 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
-from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -772,16 +771,12 @@ class SqlSysDB(SqlDB, SysDB):
 
         # This is a legacy case where we don't have configuration stored in the database
         # This is non-destructive, we don't delete or overwrite any keys in the metadata
-        from chromadb.segment.impl.vector.hnsw_params import HnswParams
+        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 
         collections_t = Table("collections")
 
-        # Get any existing HNSW params from the metadata
-        metadata = metadata or {}
-        if metadata.get("hnsw:batch_size") or metadata.get("hnsw:sync_threshold"):
-            hnsw_metadata_params = PersistentHnswParams.extract(metadata)
-        else:
-            hnsw_metadata_params = HnswParams.extract(metadata)
+        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
+        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
 
         hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
             hnsw_metadata_params  # type: ignore[arg-type]
