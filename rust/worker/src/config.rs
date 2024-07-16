@@ -104,6 +104,7 @@ pub(crate) struct QueryServiceConfig {
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) blockfile_provider: crate::blockstore::config::BlockfileProviderConfig,
+    pub(crate) hnsw_provider: crate::index::config::HnswProviderConfig,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +131,7 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
     pub(crate) blockfile_provider: crate::blockstore::config::BlockfileProviderConfig,
+    pub(crate) hnsw_provider: crate::index::config::HnswProviderConfig,
 }
 
 /// # Description
@@ -203,6 +205,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -255,6 +262,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
                 "#,
             );
             let config = RootConfig::load();
@@ -323,6 +335,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -375,6 +392,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -461,6 +483,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -513,6 +540,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
                 "#,
             );
             let config = RootConfig::load();
@@ -593,6 +625,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -637,6 +674,11 @@ mod tests {
                                 sparse_index_cache_config:
                                     lru:
                                         capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            lru:
+                                capacity: 1000
                 "#,
             );
             let config = RootConfig::load();

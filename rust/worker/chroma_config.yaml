@@ -49,6 +49,11 @@ query_service:
                 sparse_index_cache_config:
                     lru:
                         capacity: 1000
+    hnsw_provider:
+        hnsw_temporary_path: "~/tmp"
+        hnsw_cache_config:
+            lru:
+                capacity: 1000
 
 compaction_service:
     service_name: "compaction-service"
@@ -101,3 +106,8 @@ compaction_service:
                 sparse_index_cache_config:
                     lru:
                         capacity: 1000
+    hnsw_provider:
+        hnsw_temporary_path: "~/tmp"
+        hnsw_cache_config:
+            lru:
+                capacity: 1000

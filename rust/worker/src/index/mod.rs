@@ -1,3 +1,4 @@
+pub(crate) mod config;
 pub(crate) mod fulltext;
 mod hnsw;
 pub(crate) mod hnsw_provider;
