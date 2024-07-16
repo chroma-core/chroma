@@ -139,7 +139,6 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
 
   const pageTitle = `${title}${title !== "Chroma" ? " | Chroma Docs": " Docs" }`
 
-
   // generate the github edit link
   let filePath = router.asPath.split('/').slice(1).join('/')
 

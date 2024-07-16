@@ -112,6 +112,20 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}"
+          # Output the logs zip file path as a job output
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v2
+        with:
+          name: logs
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
 
   test-thin-client:
     strategy:

@@ -1,7 +1,7 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{
-    DeletedMetadata, LogRecord, Metadata, MetadataDelta, MetadataValue,
+    DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue,
     MetadataValueConversionError, Operation, OperationRecord, UpdateMetadata, UpdateMetadataValue,
 };
 use async_trait::async_trait;
@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 
 use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
 
@@ -147,7 +148,7 @@ pub(crate) struct MaterializedLogRecord<'referred_data> {
     // For e.g. if log has [Insert, Upsert] then final operation is insert.
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
-    pub(crate) final_operation: Operation,
+    pub(crate) final_operation: MaterializedLogOperation,
     // This is the metadata obtained by combining all the operations
     // present in the log for this id.
     // E.g. if has log has [Insert(a: h), Update(a: b, c: d), Update(a: e, f: g)] then this
@@ -173,6 +174,14 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // needed. If you only need a reference then use merged_document_ref
     // defined below.
     pub(crate) fn merged_document(&self) -> Option<String> {
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            return match self.final_document {
+                Some(doc) => Some(doc.to_string()),
+                None => None,
+            };
+        }
         return match self.final_document {
             Some(doc) => Some(doc.to_string()),
             None => match self.data_record.as_ref() {
@@ -186,6 +195,14 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     }
 
     pub(crate) fn merged_document_ref(&self) -> Option<&str> {
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            return match self.final_document {
+                Some(doc) => Some(doc),
+                None => None,
+            };
+        }
         return match self.final_document {
             Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
@@ -223,13 +240,20 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // Performs a deep copy of the metadata so only use it if really
     // needed. If you only need reference then use merged_metadata_ref below.
     pub(crate) fn merged_metadata(&self) -> HashMap<String, MetadataValue> {
-        let mut final_metadata = match self.data_record.as_ref() {
-            Some(data_record) => match data_record.metadata {
-                Some(ref map) => map.clone(), // auto deref here.
+        let mut final_metadata;
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            final_metadata = HashMap::new();
+        } else {
+            final_metadata = match self.data_record.as_ref() {
+                Some(data_record) => match data_record.metadata {
+                    Some(ref map) => map.clone(), // auto deref here.
+                    None => HashMap::new(),
+                },
                 None => HashMap::new(),
-            },
-            None => HashMap::new(),
-        };
+            };
+        }
         match self.metadata_to_be_merged.as_ref() {
             Some(metadata) => {
                 for (key, value) in metadata {
@@ -305,17 +329,21 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // Returns references to metadata present in the materialized log record.
     pub(crate) fn merged_metadata_ref(&self) -> HashMap<&str, &MetadataValue> {
         let mut final_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
-        match &self.data_record {
-            Some(data_record) => match &data_record.metadata {
-                Some(meta) => {
-                    for (meta_key, meta_val) in meta {
-                        final_metadata.insert(meta_key, meta_val);
+        if self.final_operation != MaterializedLogOperation::OverwriteExisting
+            && self.final_operation != MaterializedLogOperation::AddNew
+        {
+            match &self.data_record {
+                Some(data_record) => match &data_record.metadata {
+                    Some(meta) => {
+                        for (meta_key, meta_val) in meta {
+                            final_metadata.insert(meta_key, meta_val);
+                        }
                     }
-                }
+                    None => (),
+                },
                 None => (),
-            },
-            None => (),
-        };
+            };
+        }
         match &self.metadata_to_be_merged {
             Some(meta) => {
                 for (meta_key, meta_val) in meta {
@@ -337,6 +365,14 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     }
 
     pub(crate) fn merged_embeddings(&self) -> &[f32] {
+        if self.final_operation == MaterializedLogOperation::OverwriteExisting
+            || self.final_operation == MaterializedLogOperation::AddNew
+        {
+            return match self.final_embedding {
+                Some(embed) => embed,
+                None => panic!("Expected source of embedding"),
+            };
+        }
         return match self.final_embedding {
             Some(embed) => embed,
             None => match self.data_record.as_ref() {
@@ -357,7 +393,7 @@ impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
             data_record: Some(data_record),
             offset_id,
             user_id: None,
-            final_operation: Operation::Add,
+            final_operation: MaterializedLogOperation::Initial,
             metadata_to_be_merged: None,
             metadata_to_be_deleted: None,
             final_document: None,
@@ -414,7 +450,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
             data_record: None,
             offset_id,
             user_id: Some(user_id),
-            final_operation: Operation::Add,
+            final_operation: MaterializedLogOperation::AddNew,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
             final_document: document,
@@ -449,6 +485,12 @@ impl<'me> LogMaterializer<'me> {
     pub(crate) async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
+        // Trace the total_len since len() iterates over the entire chunk
+        // and we don't want to do that just to trace the length.
+        tracing::info!(
+            "Total length of logs in materializer: {}",
+            self.logs.total_len()
+        );
         let next_offset_id;
         match self.curr_offset_id.as_ref() {
             Some(curr_offset_id) => {
@@ -472,42 +514,38 @@ impl<'me> LogMaterializer<'me> {
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-        let mut invalid_adds: HashSet<&str> = HashSet::new();
         match &self.record_segment_reader {
             Some(reader) => {
-                for (log_record, _) in self.logs.iter() {
-                    let mut exists = false;
-                    match reader
-                        .data_exists_for_user_id(log_record.record.id.as_str())
-                        .await
-                    {
-                        Ok(res) => exists = res,
-                        Err(e) => {
-                            return Err(LogMaterializerError::RecordSegmentError(e));
-                        }
-                    };
-                    // Ignore loading Adds.
-                    if exists && log_record.record.operation == Operation::Add {
-                        invalid_adds.insert(log_record.record.id.as_str());
-                        continue;
-                    }
-                    if exists {
-                        match reader
-                            .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
+                async {
+                    for (log_record, _) in self.logs.iter() {
+                        let exists = match reader
+                            .data_exists_for_user_id(log_record.record.id.as_str())
                             .await
                         {
-                            Ok((data_record, offset_id)) => {
-                                existing_id_to_materialized.insert(
-                                    log_record.record.id.as_str(),
-                                    MaterializedLogRecord::from((data_record, offset_id)),
-                                );
-                            }
+                            Ok(res) => res,
                             Err(e) => {
                                 return Err(LogMaterializerError::RecordSegmentError(e));
                             }
+                        };
+                        if exists {
+                            match reader
+                                .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
+                                .await
+                            {
+                                Ok((data_record, offset_id)) => {
+                                    existing_id_to_materialized.insert(
+                                        log_record.record.id.as_str(),
+                                        MaterializedLogRecord::from((data_record, offset_id)),
+                                    );
+                                }
+                                Err(e) => {
+                                    return Err(LogMaterializerError::RecordSegmentError(e));
+                                }
+                            }
                         }
                     }
-                }
+                    Ok(())
+                }.instrument(tracing::info_span!(parent: Span::current(), "Materialization read from stroage")).await?;
             }
             // If record segment is uninitialized then there's nothing
             // in the record segment yet.
@@ -515,109 +553,114 @@ impl<'me> LogMaterializer<'me> {
         }
         // Populate updates to these and fresh records that are being
         // inserted for the first time.
-        for (log_record, _) in self.logs.iter() {
-            match log_record.record.operation {
-                Operation::Add => {
-                    // If user is trying to insert a key that is invalid then ignore.
-                    // Also if it already existed in the log before then ignore.
-                    if !new_id_to_materialized.contains_key(log_record.record.id.as_str())
-                        && !invalid_adds.contains(log_record.record.id.as_str())
-                    {
-                        let next_offset_id =
-                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let materialized_record = match MaterializedLogRecord::try_from((
-                            &log_record.record,
-                            next_offset_id,
-                            log_record.record.id.as_str(),
-                        )) {
-                            Ok(record) => record,
-                            Err(e) => {
-                                return Err(e);
+        async {
+            for (log_record, _) in self.logs.iter() {
+                match log_record.record.operation {
+                    Operation::Add => {
+                        // If this is an add of a record present in the segment then add
+                        // only if it has been previously deleted in the log.
+                        if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                            // safe to unwrap
+                            let operation = existing_id_to_materialized
+                                .get(log_record.record.id.as_str())
+                                .unwrap()
+                                .final_operation
+                                .clone();
+                            match operation {
+                                MaterializedLogOperation::DeleteExisting => {
+                                    let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();
+                                    // Overwrite.
+                                    let mut materialized_record =
+                                        match MaterializedLogRecord::try_from((
+                                            &log_record.record,
+                                            curr_val.offset_id,
+                                            log_record.record.id.as_str(),
+                                        )) {
+                                            Ok(record) => record,
+                                            Err(e) => {
+                                                return Err(e);
+                                            }
+                                        };
+                                    materialized_record.data_record = curr_val.data_record;
+                                    materialized_record.final_operation =
+                                        MaterializedLogOperation::OverwriteExisting;
+                                    existing_id_to_materialized
+                                        .insert(log_record.record.id.as_str(), materialized_record);
+                                },
+                                MaterializedLogOperation::AddNew => panic!("Invariant violation. Existing record can never have an Add new state"),
+                                MaterializedLogOperation::Initial | MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {
+                                    // Invalid add so skip.
+                                    continue;
+                                }
                             }
-                        };
-                        new_id_to_materialized
-                            .insert(log_record.record.id.as_str(), materialized_record);
-                    }
-                }
-                Operation::Delete => {
-                    // If the delete is for a record that is currently not in the
-                    // record segment, then we can just NOT process these records
-                    // at all. On the other hand if it is for a record that is currently
-                    // in segment then we'll have to pass it as a delete
-                    // to the compactor so that it can be deleted.
-                    if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                        new_id_to_materialized.remove(log_record.record.id.as_str());
-                    } else if existing_id_to_materialized
-                        .contains_key(log_record.record.id.as_str())
-                    {
-                        // Mark state as deleted. Other fields become noop after such a delete.
-                        // We should still clear them out since there can be a subsequent insert
-                        // for the same id after the delete.
-                        let record_from_map = existing_id_to_materialized
-                            .get_mut(log_record.record.id.as_str())
-                            .unwrap();
-                        record_from_map.final_operation = Operation::Delete;
-                        record_from_map.final_document = None;
-                        record_from_map.final_embedding = None;
-                        record_from_map.metadata_to_be_merged = None;
-                        record_from_map.metadata_to_be_deleted = None;
-                        record_from_map.user_id = None;
-                    }
-                }
-                Operation::Update => {
-                    let mut created_in_log = true;
-                    let record_from_map = match existing_id_to_materialized
-                        .get_mut(log_record.record.id.as_str())
-                    {
-                        Some(res) => {
-                            created_in_log = false;
-                            res
                         }
-                        None => match new_id_to_materialized.get_mut(log_record.record.id.as_str())
+                        // Adding an entry that does not exist on the segment yet.
+                        // Only add if it hasn't been added before in the log.
+                        else if !new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                            let next_offset_id =
+                                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            let materialized_record = match MaterializedLogRecord::try_from((
+                                &log_record.record,
+                                next_offset_id,
+                                log_record.record.id.as_str(),
+                            )) {
+                                Ok(record) => record,
+                                Err(e) => {
+                                    return Err(e);
+                                }
+                            };
+                            new_id_to_materialized
+                                .insert(log_record.record.id.as_str(), materialized_record);
+                        }
+                    }
+                    Operation::Delete => {
+                        // If the delete is for a record that is currently not in the
+                        // record segment, then we can just NOT process these records
+                        // at all. On the other hand if it is for a record that is currently
+                        // in segment then we'll have to pass it as a delete
+                        // to the compactor so that it can be deleted.
+                        if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                            new_id_to_materialized.remove(log_record.record.id.as_str());
+                        } else if existing_id_to_materialized
+                            .contains_key(log_record.record.id.as_str())
                         {
-                            Some(res) => res,
-                            None => {
-                                // Does not exist in either maps. Ignore this update.
-                                continue;
+                            // Mark state as deleted. Other fields become noop after such a delete.
+                            let record_from_map = existing_id_to_materialized
+                                .get_mut(log_record.record.id.as_str())
+                                .unwrap();
+                            record_from_map.final_operation = MaterializedLogOperation::DeleteExisting;
+                            record_from_map.final_document = None;
+                            record_from_map.final_embedding = None;
+                            record_from_map.metadata_to_be_merged = None;
+                            record_from_map.metadata_to_be_deleted = None;
+                            record_from_map.user_id = None;
+                        }
+                    }
+                    Operation::Update => {
+                        let record_from_map = match existing_id_to_materialized
+                            .get_mut(log_record.record.id.as_str())
+                        {
+                            Some(res) => {
+                                match res.final_operation {
+                                    // Ignore the update if deleted.
+                                    MaterializedLogOperation::DeleteExisting => {
+                                        continue;
+                                    },
+                                    MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for an entry that exists on the segment"),
+                                    MaterializedLogOperation::Initial | MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {}
+                                }
+                                res
                             }
-                        },
-                    };
+                            None => match new_id_to_materialized.get_mut(log_record.record.id.as_str())
+                            {
+                                Some(res) => res,
+                                None => {
+                                    // Does not exist in either maps. Ignore this update.
+                                    continue;
+                                }
+                            },
+                        };
 
-                    match merge_update_metadata(
-                        (
-                            &record_from_map.metadata_to_be_merged,
-                            &record_from_map.metadata_to_be_deleted,
-                        ),
-                        &log_record.record.metadata,
-                    ) {
-                        Ok(meta) => {
-                            record_from_map.metadata_to_be_merged = meta.0;
-                            record_from_map.metadata_to_be_deleted = meta.1;
-                        }
-                        Err(e) => {
-                            return Err(LogMaterializerError::MetadataMaterializationError(e));
-                        }
-                    };
-                    if log_record.record.document.is_some() {
-                        record_from_map.final_document =
-                            Some(log_record.record.document.as_ref().unwrap().as_str());
-                    }
-                    if log_record.record.embedding.is_some() {
-                        record_from_map.final_embedding =
-                            Some(log_record.record.embedding.as_ref().unwrap().as_slice());
-                    }
-                    // Only update the operation state for records that were not created
-                    // from the log.
-                    if !created_in_log {
-                        record_from_map.final_operation = Operation::Update;
-                    }
-                }
-                Operation::Upsert => {
-                    if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                        // Just another update.
-                        let record_from_map = existing_id_to_materialized
-                            .get_mut(log_record.record.id.as_str())
-                            .unwrap();
                         match merge_update_metadata(
                             (
                                 &record_from_map.metadata_to_be_merged,
@@ -633,70 +676,166 @@ impl<'me> LogMaterializer<'me> {
                                 return Err(LogMaterializerError::MetadataMaterializationError(e));
                             }
                         };
-                        if log_record.record.document.is_some() {
-                            record_from_map.final_document =
-                                Some(log_record.record.document.as_ref().unwrap().as_str());
-                        }
-                        if log_record.record.embedding.is_some() {
-                            record_from_map.final_embedding =
-                                Some(log_record.record.embedding.as_ref().unwrap().as_slice());
-                        }
-                        // We implicitly convert all upsert operations to either update
-                        // or insert depending on whether it already existed in storage or not.
-                        record_from_map.final_operation = Operation::Update;
-                    } else if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                        // Just another update.
-                        let record_from_map = new_id_to_materialized
-                            .get_mut(log_record.record.id.as_str())
-                            .unwrap();
-                        match merge_update_metadata(
-                            (
-                                &record_from_map.metadata_to_be_merged,
-                                &record_from_map.metadata_to_be_deleted,
-                            ),
-                            &log_record.record.metadata,
-                        ) {
-                            Ok(meta) => {
-                                record_from_map.metadata_to_be_merged = meta.0;
-                                record_from_map.metadata_to_be_deleted = meta.1;
+                        match log_record.record.document.as_ref() {
+                            Some(doc) => {
+                                record_from_map.final_document = Some(doc);
                             }
-                            Err(e) => {
-                                return Err(LogMaterializerError::MetadataMaterializationError(e));
-                            }
-                        };
-                        if log_record.record.document.is_some() {
-                            record_from_map.final_document =
-                                Some(log_record.record.document.as_ref().unwrap().as_str());
+                            None => {}
                         }
-                        if log_record.record.embedding.is_some() {
-                            record_from_map.final_embedding =
-                                Some(log_record.record.embedding.as_ref().unwrap().as_slice());
-                        }
-                        // This record is not present on storage yet hence final operation is
-                        // Add.
-                        record_from_map.final_operation = Operation::Add;
-                    } else {
-                        // Insert.
-                        let next_offset_id =
-                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let materialized_record = match MaterializedLogRecord::try_from((
-                            &log_record.record,
-                            next_offset_id,
-                            log_record.record.id.as_str(),
-                        )) {
-                            Ok(record) => record,
-                            Err(e) => {
-                                return Err(e);
+                        match log_record.record.embedding.as_ref() {
+                            Some(emb) => {
+                                record_from_map.final_embedding = Some(emb.as_slice());
                             }
-                        };
-                        new_id_to_materialized
-                            .insert(log_record.record.id.as_str(), materialized_record);
+                            None => {}
+                        }
+                        match record_from_map.final_operation {
+                            MaterializedLogOperation::Initial => {
+                                record_from_map.final_operation =
+                                    MaterializedLogOperation::UpdateExisting;
+                            }
+                            // State remains as is.
+                            MaterializedLogOperation::AddNew
+                            | MaterializedLogOperation::OverwriteExisting
+                            | MaterializedLogOperation::UpdateExisting => {}
+                            // Not expected.
+                            MaterializedLogOperation::DeleteExisting => {
+                                panic!("Invariant violation. Should not be updating a deleted record")
+                            }
+                        }
+                    }
+                    Operation::Upsert => {
+                        if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                            // safe to unwrap here.
+                            let operation = existing_id_to_materialized
+                                .get(log_record.record.id.as_str())
+                                .unwrap()
+                                .final_operation
+                                .clone();
+                            match operation {
+                                MaterializedLogOperation::DeleteExisting => {
+                                    let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();
+                                    // Overwrite.
+                                    let mut materialized_record =
+                                        match MaterializedLogRecord::try_from((
+                                            &log_record.record,
+                                            curr_val.offset_id,
+                                            log_record.record.id.as_str(),
+                                        )) {
+                                            Ok(record) => record,
+                                            Err(e) => {
+                                                return Err(e);
+                                            }
+                                        };
+                                    materialized_record.data_record = curr_val.data_record;
+                                    materialized_record.final_operation =
+                                        MaterializedLogOperation::OverwriteExisting;
+                                    existing_id_to_materialized
+                                        .insert(log_record.record.id.as_str(), materialized_record);
+                                },
+                                MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for records that exist in the segment"),
+                                MaterializedLogOperation::Initial | MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {
+                                    // Update.
+                                    let record_from_map = existing_id_to_materialized.get_mut(log_record.record.id.as_str()).unwrap();
+                                    match merge_update_metadata((&record_from_map.metadata_to_be_merged, &record_from_map.metadata_to_be_deleted,),&log_record.record.metadata,) {
+                                        Ok(meta) => {
+                                            record_from_map.metadata_to_be_merged = meta.0;
+                                            record_from_map.metadata_to_be_deleted = meta.1;
+                                        }
+                                        Err(e) => {
+                                            return Err(LogMaterializerError::MetadataMaterializationError(e));
+                                        }
+                                    };
+                                    match log_record.record.document.as_ref() {
+                                        Some(doc) => {
+                                            record_from_map.final_document = Some(doc);
+                                        }
+                                        None => {}
+                                    }
+                                    match log_record.record.embedding.as_ref() {
+                                        Some(emb) => {
+                                            record_from_map.final_embedding = Some(emb.as_slice());
+                                        }
+                                        None => {}
+                                    }
+                                    match record_from_map.final_operation {
+                                        MaterializedLogOperation::Initial => {
+                                            record_from_map.final_operation =
+                                                MaterializedLogOperation::UpdateExisting;
+                                        }
+                                        // State remains as is.
+                                        MaterializedLogOperation::AddNew
+                                        | MaterializedLogOperation::OverwriteExisting
+                                        | MaterializedLogOperation::UpdateExisting => {}
+                                        // Not expected.
+                                        MaterializedLogOperation::DeleteExisting => {
+                                            panic!("Invariant violation. Should not be updating a deleted record")
+                                        }
+                                    }
+                                }
+                            }
+                        } else if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                            // Update.
+                            let record_from_map = new_id_to_materialized
+                                .get_mut(log_record.record.id.as_str())
+                                .unwrap();
+                            match merge_update_metadata(
+                                (
+                                    &record_from_map.metadata_to_be_merged,
+                                    &record_from_map.metadata_to_be_deleted,
+                                ),
+                                &log_record.record.metadata,
+                            ) {
+                                Ok(meta) => {
+                                    record_from_map.metadata_to_be_merged = meta.0;
+                                    record_from_map.metadata_to_be_deleted = meta.1;
+                                }
+                                Err(e) => {
+                                    return Err(LogMaterializerError::MetadataMaterializationError(e));
+                                }
+                            };
+                            match log_record.record.document.as_ref() {
+                                Some(doc) => {
+                                    record_from_map.final_document = Some(doc);
+                                }
+                                None => {}
+                            }
+                            match log_record.record.embedding.as_ref() {
+                                Some(emb) => {
+                                    record_from_map.final_embedding = Some(emb.as_slice());
+                                }
+                                None => {}
+                            }
+                            // This record is not present on storage yet hence final operation is
+                            // AddNew and not UpdateExisting.
+                            record_from_map.final_operation = MaterializedLogOperation::AddNew;
+                        } else {
+                            // Insert.
+                            let next_offset =
+                                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            let materialized_record = match MaterializedLogRecord::try_from((
+                                &log_record.record,
+                                next_offset,
+                                log_record.record.id.as_str(),
+                            )) {
+                                Ok(record) => record,
+                                Err(e) => {
+                                    return Err(e);
+                                }
+                            };
+                            new_id_to_materialized
+                                .insert(log_record.record.id.as_str(), materialized_record);
+                        }
                     }
                 }
             }
-        }
+            Ok(())
+        }.instrument(tracing::info_span!(parent: Span::current(), "Materialization main iteration")).await?;
         let mut res = vec![];
         for (_key, value) in existing_id_to_materialized {
+            // Ignore records that only had invalid ADDS on the log.
+            if value.final_operation == MaterializedLogOperation::Initial {
+                continue;
+            }
             res.push(value);
         }
         for (_key, value) in new_id_to_materialized {
@@ -744,22 +883,924 @@ pub(crate) trait SegmentFlusher {
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
-
     use super::*;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::{
-        blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
-        segment::record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+        blockstore::{
+            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+            provider::BlockfileProvider,
+        },
+        segment::{
+            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+            record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+        },
         storage::{local::LocalStorage, Storage},
-        types::{MetadataValue, Operation, OperationRecord, UpdateMetadataValue},
+        types::{
+            DirectComparison, DirectDocumentComparison, MetadataValue, Operation, OperationRecord,
+            UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+        },
     };
     use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
 
     #[tokio::test]
-    async fn test_materializer() {
+    async fn test_materializer_add_delete_upsert() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("doc1")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let mut update_metadata = HashMap::new();
+        update_metadata.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new_world")),
+        );
+        let data = vec![
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata),
+                    document: Some(String::from("number")),
+                    operation: Operation::Upsert,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            .await
+            .expect("Error creating segment reader");
+        let materializer = LogMaterializer {
+            record_segment_reader: Some(reader),
+            logs: data,
+            curr_offset_id: None,
+        };
+        let res = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        let mut res_vec = vec![];
+        for (record, _) in res.iter() {
+            res_vec.push(record);
+        }
+        res_vec.sort_by(|x, y| x.merged_user_id_ref().cmp(y.merged_user_id_ref()));
+        assert_eq!(1, res_vec.len());
+        let emb_1 = res_vec[0];
+        assert_eq!(1, emb_1.offset_id);
+        assert_eq!("number", emb_1.merged_document_ref().unwrap());
+        assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
+        assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
+        let mut res_metadata = HashMap::new();
+        res_metadata.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new_world")),
+        );
+        assert_eq!(res_metadata, emb_1.merged_metadata());
+        assert_eq!(
+            MaterializedLogOperation::OverwriteExisting,
+            emb_1.final_operation
+        );
+        // Now write this, read again and validate.
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        segment_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Error applying materialized log chunk");
+        metadata_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        let flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // Read.
+        let segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment reader");
+        let all_data = segment_reader
+            .get_all_data()
+            .await
+            .expect("Get all data failed");
+        assert_eq!(all_data.len(), 1);
+        let record = &all_data[0];
+        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.document, Some("number"));
+        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.metadata, Some(res_metadata));
+        // Search by metadata filter.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new_world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("number"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("doc"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_materializer_add_upsert() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("doc1")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let mut update_metadata = HashMap::new();
+        update_metadata.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new_world")),
+        );
+        let data = vec![LogRecord {
+            log_offset: 2,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: Some(vec![7.0, 8.0, 9.0]),
+                encoding: None,
+                metadata: Some(update_metadata),
+                document: None,
+                operation: Operation::Upsert,
+            },
+        }];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            .await
+            .expect("Error creating segment reader");
+        let materializer = LogMaterializer {
+            record_segment_reader: Some(reader),
+            logs: data,
+            curr_offset_id: None,
+        };
+        let res = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        let mut res_vec = vec![];
+        for (record, _) in res.iter() {
+            res_vec.push(record);
+        }
+        res_vec.sort_by(|x, y| x.merged_user_id_ref().cmp(y.merged_user_id_ref()));
+        assert_eq!(1, res_vec.len());
+        let emb_1 = res_vec[0];
+        assert_eq!(1, emb_1.offset_id);
+        assert_eq!("doc1", emb_1.merged_document_ref().unwrap());
+        assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
+        assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
+        let mut res_metadata = HashMap::new();
+        res_metadata.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new_world")),
+        );
+        res_metadata.insert(
+            String::from("bye"),
+            MetadataValue::Str(String::from("world")),
+        );
+        assert_eq!(res_metadata, emb_1.merged_metadata());
+        assert_eq!(
+            MaterializedLogOperation::UpdateExisting,
+            emb_1.final_operation
+        );
+        // Now write this, read again and validate.
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        segment_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Error applying materialized log chunk");
+        metadata_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        let flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // Read.
+        let segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment reader");
+        let all_data = segment_reader
+            .get_all_data()
+            .await
+            .expect("Get all data failed");
+        assert_eq!(all_data.len(), 1);
+        let record = &all_data[0];
+        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.document, Some("doc1"));
+        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.metadata, Some(res_metadata));
+        // Search by metadata filter.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new_world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("doc1"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("number"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_materializer_add_delete_upsert_update() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("doc1")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            let flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        }
+        let mut update_metadata = HashMap::new();
+        update_metadata.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new_world")),
+        );
+        let data = vec![
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![7.0, 8.0, 9.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata),
+                    document: None,
+                    operation: Operation::Upsert,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("number")),
+                    operation: Operation::Update,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            .await
+            .expect("Error creating segment reader");
+        let materializer = LogMaterializer {
+            record_segment_reader: Some(reader),
+            logs: data,
+            curr_offset_id: None,
+        };
+        let res = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        let mut res_vec = vec![];
+        for (record, _) in res.iter() {
+            res_vec.push(record);
+        }
+        res_vec.sort_by(|x, y| x.merged_user_id_ref().cmp(y.merged_user_id_ref()));
+        assert_eq!(1, res_vec.len());
+        let emb_1 = res_vec[0];
+        assert_eq!(1, emb_1.offset_id);
+        assert_eq!("number", emb_1.merged_document_ref().unwrap());
+        assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings());
+        assert_eq!("embedding_id_1", emb_1.merged_user_id_ref());
+        let mut res_metadata = HashMap::new();
+        res_metadata.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new_world")),
+        );
+        assert_eq!(res_metadata, emb_1.merged_metadata());
+        assert_eq!(
+            MaterializedLogOperation::OverwriteExisting,
+            emb_1.final_operation
+        );
+        // Now write this, read again and validate.
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        segment_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Error applying materialized log chunk");
+        metadata_writer
+            .apply_materialized_log_chunk(res.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        let flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // Read.
+        let segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment reader");
+        let all_data = segment_reader
+            .get_all_data()
+            .await
+            .expect("Get all data failed");
+        assert_eq!(all_data.len(), 1);
+        let record = &all_data[0];
+        assert_eq!(record.id, "embedding_id_1");
+        assert_eq!(record.document, Some("number"));
+        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.metadata, Some(res_metadata));
+        // Search by metadata filter.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new_world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("number"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("doc1"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_materializer_basic() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -916,7 +1957,7 @@ mod tests {
                 assert_eq!("doc3", log.final_document.unwrap());
                 assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.unwrap());
                 assert_eq!(3, log.offset_id);
-                assert_eq!(Operation::Add, log.final_operation);
+                assert_eq!(MaterializedLogOperation::AddNew, log.final_operation);
                 let mut hello_found = 0;
                 let mut hello_again_found = 0;
                 for (key, value) in log.metadata_to_be_merged.as_ref().unwrap() {
@@ -934,7 +1975,10 @@ mod tests {
                 assert_eq!(hello_again_found, 1);
             } else if log.data_record.as_ref().unwrap().id == "embedding_id_2" {
                 id2_found += 1;
-                assert_eq!(Operation::Delete, log.final_operation);
+                assert_eq!(
+                    MaterializedLogOperation::DeleteExisting,
+                    log.final_operation
+                );
                 assert_eq!(2, log.offset_id);
                 assert_eq!(None, log.final_document);
                 assert_eq!(None, log.final_embedding);
@@ -943,7 +1987,10 @@ mod tests {
                 assert_eq!(true, log.data_record.is_some());
             } else if log.data_record.as_ref().unwrap().id == "embedding_id_1" {
                 id1_found += 1;
-                assert_eq!(Operation::Update, log.final_operation);
+                assert_eq!(
+                    MaterializedLogOperation::UpdateExisting,
+                    log.final_operation
+                );
                 assert_eq!(1, log.offset_id);
                 assert_eq!(None, log.final_document);
                 assert_eq!(None, log.final_embedding);

@@ -12,7 +12,6 @@ import pytest
 import json
 from urllib import request
 from chromadb import config
-from chromadb.api import ServerAPI
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -20,8 +19,12 @@ from packaging import version as packaging_version
 import re
 import multiprocessing
 from chromadb.config import Settings
+from chromadb.api.client import Client as ClientCreator
 
-MINIMUM_VERSION = "0.4.1"
+# Minimum persisted version we support, and other substantial change versions
+# 0.4.1 is the first version with persistence
+# 0.5.3 is the first version with the new API where the serverapi and client api return types and arguments differ
+BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
@@ -36,7 +39,7 @@ def versions() -> List[str]:
     # Older versions on pypi contain "devXYZ" suffixes
     versions = [v for v in versions if version_re.match(v)]
     versions.sort(key=packaging_version.Version)
-    return [MINIMUM_VERSION, versions[-1]]
+    return BASELINE_VERSIONS + [versions[-1]]
 
 
 def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,6 +169,16 @@ def install_version(version: str) -> None:
 def install(pkg: str, path: str) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
+    print("Purging pip cache")
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "cache",
+            "purge",
+        ]
+    )
     print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(
         [
@@ -176,6 +189,7 @@ def install(pkg: str, path: str) -> int:
             "-q",
             "install",
             pkg,
+            "--no-binary=chroma-hnswlib",
             "--target={}".format(path),
         ]
     )
@@ -223,6 +237,12 @@ def persist_generated_data_with_old_version(
         system.start()
 
         api.reset()
+        # In 0.5.4 we changed the API of the server api level to
+        # deal with collection models instead of collections
+        # in order to work with this we need to wrap the api in a client
+        # for versions greater than or equal to 0.5.4
+        if packaging_version.Version(version) >= packaging_version.Version("0.5.4"):
+            api = old_module.api.client.Client.from_system(system)
         coll = api.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,
@@ -252,7 +272,15 @@ def persist_generated_data_with_old_version(
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
 collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
-    strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
+    strategies.collections(
+        with_hnsw_params=True,
+        has_embeddings=True,
+        # By default, these are set to 2000, which makes it unlikely that index mutations will ever be fully flushed
+        max_hnsw_sync_threshold=10,
+        max_hnsw_batch_size=10,
+        with_persistent_hnsw_params=st.booleans(),
+    ),
+    key="coll",
 )
 
 
@@ -279,7 +307,7 @@ def test_cycle_versions(
         embeddings_strategy["metadatas"], list
     ):
         embeddings_strategy["metadatas"] = [
-            m if m is None or len(m) > 0 else None  # type: ignore
+            m if m is None or len(m) > 0 else None
             for m in embeddings_strategy["metadatas"]
         ]
 
@@ -310,12 +338,16 @@ def test_cycle_versions(
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
-    api = system.instance(ServerAPI)
     system.start()
-    coll = api.get_collection(
+    client = ClientCreator.from_system(system)
+    coll = client.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
     )
+
+    # Should be able to add embeddings
+    coll.add(**embeddings_strategy)  # type: ignore
+
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)

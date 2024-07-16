@@ -10,7 +10,7 @@ use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction}
 
 use arrow::array::Int32Array;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -35,18 +35,19 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct UncommittedPostings {
     // token -> {doc -> [start positions]}
     positional_postings: HashMap<String, PositionalPostingListBuilder>,
     // (token, doc) pairs that should be deleted from storage.
-    deleted_token_doc_pairs: Vec<(String, i32)>,
+    deleted_token_doc_pairs: HashSet<(String, i32)>,
 }
 
 impl UncommittedPostings {
     pub(crate) fn new() -> Self {
         Self {
             positional_postings: HashMap::new(),
-            deleted_token_doc_pairs: Vec::new(),
+            deleted_token_doc_pairs: HashSet::new(),
         }
     }
 }
@@ -236,7 +237,7 @@ impl<'me> FullTextIndexWriter<'me> {
                         // to remove the old postings list for this pair from storage.
                         uncommitted_postings
                             .deleted_token_doc_pairs
-                            .push((token.text.clone(), offset_id as i32));
+                            .insert((token.text.clone(), offset_id as i32));
                     }
                     Err(e) => {
                         // This is a fatal invariant violation: we've been asked to
@@ -275,7 +276,7 @@ impl<'me> FullTextIndexWriter<'me> {
         // Delete (token, doc) pairs from blockfile first. Note that the ordering is
         // important here i.e. we need to delete before inserting the new postings
         // list otherwise we could incorrectly delete posting lists that shouldn't be deleted.
-        for (token, offset_id) in uncommitted_postings.deleted_token_doc_pairs.drain(..) {
+        for (token, offset_id) in uncommitted_postings.deleted_token_doc_pairs.drain() {
             match self
                 .posting_lists_blockfile_writer
                 .delete::<u32, &Int32Array>(token.as_str(), offset_id as u32)
@@ -294,14 +295,18 @@ impl<'me> FullTextIndexWriter<'me> {
                     Some(doc_id) => {
                         let positional_posting_list =
                             built_list.get_positions_for_doc_id(doc_id).unwrap();
-                        match self
-                            .posting_lists_blockfile_writer
-                            .set(key.as_str(), doc_id as u32, &positional_posting_list)
-                            .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                return Err(FullTextIndexError::BlockfileWriteError(e));
+                        // Don't add if postings list is empty for this (token, doc) combo.
+                        // This can happen with deletes.
+                        if positional_posting_list.len() > 0 {
+                            match self
+                                .posting_lists_blockfile_writer
+                                .set(key.as_str(), doc_id as u32, &positional_posting_list)
+                                .await
+                            {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    return Err(FullTextIndexError::BlockfileWriteError(e));
+                                }
                             }
                         }
                     }
@@ -313,15 +318,18 @@ impl<'me> FullTextIndexWriter<'me> {
         }
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         for (key, value) in uncommitted_frequencies.drain() {
-            // Delete the old frequency.
-            match self
-                .frequencies_blockfile_writer
-                .delete::<u32, u32>(key.as_str(), value.1 as u32)
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(FullTextIndexError::BlockfileWriteError(e));
+            // Delete only if the token existed previously.
+            if value.1 > 0 {
+                // Delete the old frequency.
+                match self
+                    .frequencies_blockfile_writer
+                    .delete::<u32, u32>(key.as_str(), value.1 as u32)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        return Err(FullTextIndexError::BlockfileWriteError(e));
+                    }
                 }
             }
             // Insert the new frequency.
@@ -448,6 +456,10 @@ impl<'me> FullTextIndexReader<'me> {
             // Throw away the "value" since we store frequencies in the keys.
             token_frequencies.push((token.text.to_string(), res.1));
         }
+
+        if token_frequencies.len() == 0 {
+            return Ok(vec![]);
+        }
         // TODO sort by frequency. This adds an additional layer of complexity
         // with repeat characters where we need to keep track of which positions
         // for the character have been seen/used in the matching algorithm. By
@@ -459,17 +471,13 @@ impl<'me> FullTextIndexReader<'me> {
         // doc ID -> possible starting locations for the query.
         let mut candidates: HashMap<u32, Vec<i32>> = HashMap::new();
         let first_token = token_frequencies[0].0.as_str();
-        let first_token_offset = tokens[0].offset_from as i32;
         let first_token_positional_posting_list = self
             .posting_lists_blockfile_reader
             .get_by_prefix(first_token)
             .await
             .unwrap();
         for (_, doc_id, positions) in first_token_positional_posting_list.iter() {
-            let positions_vec: Vec<i32> = positions
-                .iter()
-                .map(|x| x.unwrap() - first_token_offset)
-                .collect();
+            let positions_vec: Vec<i32> = positions.iter().map(|x| x.unwrap()).collect();
             candidates.insert(*doc_id, positions_vec);
         }
 

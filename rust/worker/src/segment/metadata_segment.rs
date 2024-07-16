@@ -27,8 +27,8 @@ use crate::index::metadata::types::{
     MetadataIndexReader, MetadataIndexWriter,
 };
 use crate::types::{
-    BooleanOperator, MetadataValue, Operation, Segment, Where, WhereClauseComparator,
-    WhereDocument, WhereDocumentOperator,
+    BooleanOperator, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use crate::types::{SegmentType, WhereComparison};
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
@@ -423,6 +423,151 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         Ok(())
     }
+
+    pub(crate) async fn set_metadata(
+        &self,
+        prefix: &str,
+        key: &MetadataValue,
+        offset_id: u32,
+    ) -> Result<(), MetadataIndexError> {
+        match key {
+            MetadataValue::Str(v) => {
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, v.as_str(), offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into str metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::Int(v) => {
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, *v as u32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::Float(v) => {
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, *v as f32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::Bool(v) => {
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, *v, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into bool metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn delete_metadata(
+        &self,
+        prefix: &str,
+        key: &MetadataValue,
+        offset_id: u32,
+    ) -> Result<(), MetadataIndexError> {
+        match key {
+            MetadataValue::Str(v) => {
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, v.as_str(), offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from str metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::Int(v) => {
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, *v as u32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::Float(v) => {
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, *v as f32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::Bool(v) => {
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, *v, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from bool metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn update_metadata(
+        &self,
+        key: &str,
+        old_value: &MetadataValue,
+        new_value: &MetadataValue,
+        offset_id: u32,
+    ) -> Result<(), MetadataSegmentError> {
+        // Delete old value.
+        self.delete_metadata(key, old_value, offset_id).await?;
+        // Insert new value.
+        Ok(self.set_metadata(key, new_value, offset_id).await?)
+    }
 }
 
 impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
@@ -433,52 +578,16 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         for record in records.iter() {
             let segment_offset_id = record.0.offset_id;
             match record.0.final_operation {
-                Operation::Add => {
+                MaterializedLogOperation::AddNew => {
                     // We can ignore record.0.metadata_to_be_deleted
                     // for fresh adds. TODO on whether to propagate error.
                     match &record.0.metadata_to_be_merged {
                         Some(metadata) => {
                             for (key, value) in metadata.iter() {
-                                match value {
-                                    MetadataValue::Str(value) => {
-                                        match &self.string_metadata_index_writer {
-                                            Some(writer) => {
-                                                let a = writer
-                                                    .set(key, value.as_str(), segment_offset_id)
-                                                    .await;
-                                            }
-                                            None => {}
-                                        }
-                                    }
-                                    MetadataValue::Float(value) => {
-                                        match &self.f32_metadata_index_writer {
-                                            Some(writer) => {
-                                                let _ = writer
-                                                    .set(key, *value as f32, segment_offset_id)
-                                                    .await;
-                                            }
-                                            None => {}
-                                        }
-                                    }
-                                    MetadataValue::Int(value) => {
-                                        match &self.u32_metadata_index_writer {
-                                            Some(writer) => {
-                                                let _ = writer
-                                                    .set(key, *value as u32, segment_offset_id)
-                                                    .await;
-                                            }
-                                            None => {}
-                                        }
-                                    }
-                                    MetadataValue::Bool(value) => {
-                                        match &self.bool_metadata_index_writer {
-                                            Some(writer) => {
-                                                let _ = writer
-                                                    .set(key, *value, segment_offset_id)
-                                                    .await;
-                                            }
-                                            None => {}
-                                        }
+                                match self.set_metadata(key, value, segment_offset_id).await {
+                                    Ok(()) => {}
+                                    Err(e) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
                                     }
                                 }
                             }
@@ -492,324 +601,152 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     .add_document(document, segment_offset_id as i32)
                                     .await;
                             }
-                            None => {}
+                            None => panic!(
+                                "Invariant violation. Expected full text index writer to be set"
+                            ),
                         },
+                        // It is ok for the user to not pass in any document.
                         None => {}
                     };
                 }
-                Operation::Delete => match &record.0.data_record {
+                MaterializedLogOperation::DeleteExisting => match &record.0.data_record {
                     Some(data_record) => {
                         match &data_record.metadata {
                             Some(metadata) => {
                                 for (key, value) in metadata.iter() {
-                                    match value {
-                                        MetadataValue::Str(value) => {
-                                            match &self.string_metadata_index_writer {
-                                                Some(writer) => {
-                                                    let _ = writer
-                                                        .delete(
-                                                            key,
-                                                            value.as_str(),
-                                                            segment_offset_id,
-                                                        )
-                                                        .await;
-                                                }
-                                                None => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
-                                                }
-                                            }
-                                        }
-                                        MetadataValue::Float(value) => {
-                                            match &self.f32_metadata_index_writer {
-                                                Some(writer) => {
-                                                    let _ = writer
-                                                        .delete(
-                                                            key,
-                                                            *value as f32,
-                                                            segment_offset_id,
-                                                        )
-                                                        .await;
-                                                }
-                                                None => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
-                                                }
-                                            }
-                                        }
-                                        MetadataValue::Int(value) => {
-                                            match &self.u32_metadata_index_writer {
-                                                Some(writer) => {
-                                                    let _ = writer
-                                                        .delete(
-                                                            key,
-                                                            *value as u32,
-                                                            segment_offset_id,
-                                                        )
-                                                        .await;
-                                                }
-                                                None => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
-                                                }
-                                            }
-                                        }
-                                        MetadataValue::Bool(value) => {
-                                            match &self.bool_metadata_index_writer {
-                                                Some(writer) => {
-                                                    let _ = writer
-                                                        .delete(key, *value, segment_offset_id)
-                                                        .await;
-                                                }
-                                                None => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
-                                                }
-                                            }
+                                    match self.delete_metadata(key, value, segment_offset_id).await
+                                    {
+                                        Ok(()) => {}
+                                        Err(e) => {
+                                            return Err(
+                                                ApplyMaterializedLogError::BlockfileDeleteError,
+                                            );
                                         }
                                     }
                                 }
                             }
+                            // Ok to not have any metadata to delete.
                             None => {}
                         };
                         match &data_record.document {
                             Some(document) => match &self.full_text_index_writer {
                                 Some(writer) => {
-                                    let _ =
+                                    let err =
                                         writer.delete_document(document, segment_offset_id).await;
+                                    match err {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            tracing::error!("Error deleting document {:?}", e);
+                                            return Err(
+                                                ApplyMaterializedLogError::FTSDocumentDeleteError,
+                                            );
+                                        }
+                                    }
                                 }
                                 None => {
-                                    return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                                    panic!("Invariant violation. FTS index writer should be set")
                                 }
                             },
-                            None => {
-                                return Err(ApplyMaterializedLogError::BlockfileDeleteError);
-                            }
+                            // The record that is to be deleted might not have
+                            // a document, it is fine and should not be an error.
+                            None => {}
                         };
                     }
-                    None => {}
+                    None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                 },
-                Operation::Update => {
+                MaterializedLogOperation::UpdateExisting => {
                     let metadata_delta = record.0.metadata_delta();
-                    // Updates.
+                    // Metadata updates.
                     for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
-                        match new_value {
-                            MetadataValue::Str(new_val_str) => match old_value {
-                                MetadataValue::Str(old_val_str) => {
-                                    match &self.string_metadata_index_writer {
-                                        Some(writer) => {
-                                            match writer
-                                                .update(
-                                                    update_key,
-                                                    old_val_str.as_str().into(),
-                                                    new_val_str.as_str().into(),
-                                                    segment_offset_id,
-                                                )
-                                                .await
-                                            {
-                                                Ok(()) => {}
-                                                Err(e) => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            panic!("Invariant violation. String metadata index writer should be set");
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
-                                }
-                            },
-                            MetadataValue::Float(new_val_float) => match old_value {
-                                MetadataValue::Float(old_val_float) => {
-                                    match &self.f32_metadata_index_writer {
-                                        Some(writer) => {
-                                            match writer
-                                                .update(
-                                                    update_key,
-                                                    (*old_val_float as f32).into(),
-                                                    (*new_val_float as f32).into(),
-                                                    segment_offset_id,
-                                                )
-                                                .await
-                                            {
-                                                Ok(()) => {}
-                                                Err(e) => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            panic!("Invariant violation. Float metadata index writer should be set");
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
-                                }
-                            },
-                            MetadataValue::Int(new_val_int) => match old_value {
-                                MetadataValue::Int(old_val_int) => {
-                                    match &self.u32_metadata_index_writer {
-                                        Some(writer) => {
-                                            match writer
-                                                .update(
-                                                    update_key,
-                                                    (*old_val_int as u32).into(),
-                                                    (*new_val_int as u32).into(),
-                                                    segment_offset_id,
-                                                )
-                                                .await
-                                            {
-                                                Ok(()) => {}
-                                                Err(e) => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            panic!("Invariant violation. u32 metadata index writer should be set");
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
-                                }
-                            },
-                            MetadataValue::Bool(new_val_bool) => match old_value {
-                                MetadataValue::Bool(old_val_bool) => {
-                                    match &self.bool_metadata_index_writer {
-                                        Some(writer) => {
-                                            match writer
-                                                .update(
-                                                    update_key,
-                                                    (*old_val_bool).into(),
-                                                    (*new_val_bool).into(),
-                                                    segment_offset_id,
-                                                )
-                                                .await
-                                            {
-                                                Ok(()) => {}
-                                                Err(e) => {
-                                                    return Err(ApplyMaterializedLogError::BlockfileUpdateError);
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            panic!("Invariant violation. Bool metadata index writer should be set");
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    return Err(ApplyMaterializedLogError::MetadataUpdateNotValid);
-                                }
-                            },
+                        match self
+                            .update_metadata(update_key, old_value, new_value, segment_offset_id)
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(e) => {
+                                return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                            }
                         }
                     }
-                    // Inserts.
+                    // Metadata inserts.
                     for (insert_key, new_value) in metadata_delta.metadata_to_insert {
-                        match new_value {
-                            MetadataValue::Str(new_val_str) => {
-                                match &self.string_metadata_index_writer {
-                                    Some(writer) => {
-                                        match writer
-                                            .set(
-                                                insert_key,
-                                                new_val_str.as_str(),
-                                                segment_offset_id,
-                                            )
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileSetError,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. String metadata index writer should be set");
-                                    }
-                                }
-                            }
-                            MetadataValue::Float(new_val_float) => {
-                                match &self.f32_metadata_index_writer {
-                                    Some(writer) => {
-                                        match writer
-                                            .set(
-                                                insert_key,
-                                                *new_val_float as f32,
-                                                segment_offset_id,
-                                            )
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileSetError,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. Float metadata index writer should be set");
-                                    }
-                                }
-                            }
-                            MetadataValue::Int(new_val_int) => {
-                                match &self.u32_metadata_index_writer {
-                                    Some(writer) => {
-                                        match writer
-                                            .set(insert_key, *new_val_int as u32, segment_offset_id)
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileSetError,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. Int metadata index writer should be set");
-                                    }
-                                }
-                            }
-                            MetadataValue::Bool(new_val_bool) => {
-                                match &self.bool_metadata_index_writer {
-                                    Some(writer) => {
-                                        match writer
-                                            .set(insert_key, *new_val_bool, segment_offset_id)
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileSetError,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. Bool metadata index writer should be set");
-                                    }
-                                }
+                        match self
+                            .set_metadata(insert_key, new_value, segment_offset_id)
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(e) => {
+                                return Err(ApplyMaterializedLogError::BlockfileSetError);
                             }
                         }
                     }
-                    // Deletes.
+                    // Metadata deletes.
                     for (delete_key, old_value) in metadata_delta.metadata_to_delete {
-                        match old_value {
-                            MetadataValue::Str(old_val_str) => {
-                                match &self.string_metadata_index_writer {
-                                    Some(writer) => {
+                        match self
+                            .delete_metadata(delete_key, old_value, segment_offset_id)
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(e) => {
+                                return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                            }
+                        }
+                    }
+                    // Update the document if present.
+                    match record.0.final_document {
+                        Some(doc) => match &self.full_text_index_writer {
+                            Some(writer) => match &record.0.data_record {
+                                Some(record) => match record.document {
+                                    Some(old_doc) => {
                                         match writer
-                                            .delete(
-                                                delete_key,
-                                                old_val_str.as_str(),
-                                                segment_offset_id,
-                                            )
+                                            .update_document(&old_doc, doc, segment_offset_id)
                                             .await
+                                        {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "FTS Update document failed {:?}",
+                                                    e
+                                                );
+                                                return Err(
+                                                    ApplyMaterializedLogError::FTSDocumentUpdateError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    // Previous version of record does not contain document string.
+                                    None => match writer
+                                        .add_document(doc, segment_offset_id as i32)
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Add document for an update failed {:?}",
+                                                e
+                                            );
+                                            return Err(
+                                                ApplyMaterializedLogError::FTSDocumentAddError,
+                                            );
+                                        }
+                                    },
+                                },
+                                None => panic!("Invariant violation. Record should be set by materializer for an update")
+                            },
+                            None => panic!("Invariant violation. FTS index writer should be set"),
+                        },
+                        // Ok to not have any update for the document. Do not error.
+                        None => {}
+                    }
+                }
+                MaterializedLogOperation::OverwriteExisting => {
+                    // Delete existing.
+                    match &record.0.data_record {
+                        Some(data_record) => {
+                            match &data_record.metadata {
+                                Some(metadata) => {
+                                    for (key, value) in metadata.iter() {
+                                        match self.delete_metadata(key, value, segment_offset_id).await
                                         {
                                             Ok(()) => {}
                                             Err(e) => {
@@ -818,86 +755,67 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                 );
                                             }
                                         }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. String metadata index writer should be set");
                                     }
                                 }
-                            }
-                            MetadataValue::Float(old_val_float) => {
-                                match &self.f32_metadata_index_writer {
+                                // Ok to not have any metadata to delete.
+                                None => {}
+                            };
+                            match &data_record.document {
+                                Some(document) => match &self.full_text_index_writer {
                                     Some(writer) => {
-                                        match writer
-                                            .delete(
-                                                delete_key,
-                                                *old_val_float as f32,
-                                                segment_offset_id,
-                                            )
-                                            .await
-                                        {
-                                            Ok(()) => {}
+                                        let err =
+                                            writer.delete_document(document, segment_offset_id).await;
+                                        match err {
+                                            Ok(_) => {}
                                             Err(e) => {
+                                                tracing::error!("Error deleting document {:?}", e);
                                                 return Err(
-                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                    ApplyMaterializedLogError::FTSDocumentDeleteError,
                                                 );
                                             }
                                         }
                                     }
                                     None => {
-                                        panic!("Invariant violation. Float metadata index writer should be set");
+                                        panic!("Invariant violation. FTS index writer should be set")
                                     }
-                                }
-                            }
-                            MetadataValue::Int(old_val_int) => {
-                                match &self.u32_metadata_index_writer {
-                                    Some(writer) => {
-                                        match writer
-                                            .delete(
-                                                delete_key,
-                                                *old_val_int as u32,
-                                                segment_offset_id,
-                                            )
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileDeleteError,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. Int metadata index writer should be set");
-                                    }
-                                }
-                            }
-                            MetadataValue::Bool(old_val_bool) => {
-                                match &self.bool_metadata_index_writer {
-                                    Some(writer) => {
-                                        match writer
-                                            .set(delete_key, *old_val_bool, segment_offset_id)
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileDeleteError,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. Bool metadata index writer should be set");
+                                },
+                                // The record that is to be deleted might not have
+                                // a document, it is fine and should not be an error.
+                                None => {}
+                            };
+                        },
+                        None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
+                    };
+                    // Add new.
+                    match &record.0.metadata_to_be_merged {
+                        Some(metadata) => {
+                            for (key, value) in metadata.iter() {
+                                match self.set_metadata(key, value, segment_offset_id).await {
+                                    Ok(()) => {}
+                                    Err(e) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
                                     }
                                 }
                             }
                         }
-                    }
-                }
-                Operation::Upsert => {
-                    panic!("Invariant violation. There should be no upserts in materialized log");
-                }
+                        None => {}
+                    };
+                    match &record.0.final_document {
+                        Some(document) => match &self.full_text_index_writer {
+                            Some(writer) => {
+                                let _ = writer
+                                    .add_document(document, segment_offset_id as i32)
+                                    .await;
+                            }
+                            None => panic!(
+                                "Invariant violation. Expected full text index writer to be set"
+                            ),
+                        },
+                        // It is ok for the user to not pass in any document.
+                        None => {}
+                    };
+                },
+                MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
         Ok(())
@@ -1933,5 +1851,1021 @@ impl MetadataSegmentReader<'_> {
             return Ok(results);
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{collections::HashMap, str::FromStr};
+
+    use uuid::Uuid;
+
+    use crate::{
+        blockstore::{
+            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+            provider::BlockfileProvider,
+        },
+        cache::{
+            cache::Cache,
+            config::{CacheConfig, UnboundedCacheConfig},
+        },
+        chroma_proto::r#where,
+        execution::data::data_chunk::Chunk,
+        segment::{
+            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+            record_segment::{
+                RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+            },
+            LogMaterializer, SegmentFlusher, SegmentWriter,
+        },
+        storage::{local::LocalStorage, Storage},
+        types::{
+            DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
+            OperationRecord, UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+        },
+    };
+
+    #[tokio::test]
+    async fn empty_blocks() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: Some(update_metadata.clone()),
+                        document: Some(String::from("This is a document about cats.")),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: Some(update_metadata),
+                        document: Some(String::from("This is a document about dogs.")),
+                        operation: Operation::Add,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let data = vec![
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+        ];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // No data should be present.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Record segment reader should be initialized by now");
+        let res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Error getting all data from record segment");
+        assert_eq!(res.len(), 0);
+        // Add a few records and they should exist.
+        let data = vec![
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about cats.")),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 6,
+                record: OperationRecord {
+                    id: "embedding_id_4".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about dogs.")),
+                    operation: Operation::Add,
+                },
+            },
+        ];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // No data should be present.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Record segment reader should be initialized by now");
+        let res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Error getting all data from record segment");
+        assert_eq!(res.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn metadata_update_same_key_different_type() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: Some(update_metadata.clone()),
+                        document: Some(String::from("This is a document about cats.")),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: Some(update_metadata),
+                        document: Some(String::from("This is a document about dogs.")),
+                        operation: Operation::Add,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let mut update_metadata_id1 = HashMap::new();
+        update_metadata_id1.insert(
+            String::from("hello"),
+            UpdateMetadataValue::Str(String::from("new world")),
+        );
+        let mut update_metadata_id2 = HashMap::new();
+        update_metadata_id2.insert(String::from("hello"), UpdateMetadataValue::Float(1.0));
+        let data = vec![
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: Some(update_metadata_id1.clone()),
+                    document: None,
+                    operation: Operation::Update,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: Some(update_metadata_id2.clone()),
+                    document: None,
+                    operation: Operation::Update,
+                },
+            },
+        ];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // Search by f32 metadata value first.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleDoubleComparison(
+                1.0,
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(2 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("new world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        // Record segment should also have the updated values.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let mut res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Record segment get all data failed");
+        assert_eq!(res.len(), 2);
+        res.sort_by(|x, y| x.id.cmp(y.id));
+        let mut id1_mt = HashMap::new();
+        id1_mt.insert(
+            String::from("hello"),
+            MetadataValue::Str(String::from("new world")),
+        );
+        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+        let mut id2_mt = HashMap::new();
+        id2_mt.insert(String::from("hello"), MetadataValue::Float(1.0));
+        assert_eq!(res.get(1).as_ref().unwrap().metadata, Some(id2_mt));
+    }
+
+    #[tokio::test]
+    async fn metadata_deletes() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("hello"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            update_metadata.insert(
+                String::from("bye"),
+                UpdateMetadataValue::Str(String::from("world")),
+            );
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata.clone()),
+                    document: Some(String::from("This is a document about cats.")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let mut update_metadata_id1 = HashMap::new();
+        update_metadata_id1.insert(String::from("hello"), UpdateMetadataValue::None);
+        let data = vec![LogRecord {
+            log_offset: 2,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: Some(update_metadata_id1.clone()),
+                document: None,
+                operation: Operation::Update,
+            },
+        }];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // Only one key should be present.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("hello"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        let where_clause = Where::DirectWhereComparison(DirectComparison {
+            key: String::from("bye"),
+            comparison: WhereComparison::SingleStringComparison(
+                String::from("world"),
+                crate::types::WhereClauseComparator::Equal,
+            ),
+        });
+        let res = metadata_segment_reader
+            .query(Some(&where_clause), None, None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        // Record segment should also have the updated values.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let mut res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Record segment get all data failed");
+        assert_eq!(res.len(), 1);
+        res.sort_by(|x, y| x.id.cmp(y.id));
+        let mut id1_mt = HashMap::new();
+        id1_mt.insert(
+            String::from("bye"),
+            MetadataValue::Str(String::from("world")),
+        );
+        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+    }
+
+    #[tokio::test]
+    async fn document_updates() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileRecord,
+            scope: crate::types::SegmentScope::RECORD,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = crate::types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: crate::types::SegmentType::BlockfileMetadata,
+            scope: crate::types::SegmentScope::METADATA,
+            collection: Some(
+                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            ),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("hello")),
+                    operation: Operation::Add,
+                },
+            }];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let data = vec![LogRecord {
+            log_offset: 2,
+            record: OperationRecord {
+                id: "embedding_id_1".to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: Some(String::from("bye")),
+                operation: Operation::Update,
+            },
+        }];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer =
+            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let mut metadata_writer =
+            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Error creating segment writer");
+        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
+        let mat_records = materializer
+            .materialize()
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(mat_records.clone())
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .write_to_blockfiles()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        // FTS for hello should return empty.
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("hello"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 0);
+        // FTS for bye should return the lone document.
+        let where_document_clause =
+            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                document: String::from("bye"),
+                operator: crate::types::WhereDocumentOperator::Contains,
+            });
+        let res = metadata_segment_reader
+            .query(None, Some(&where_document_clause), None, 0, 0)
+            .await
+            .expect("Metadata segment query failed")
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        // Record segment should also have the updated values.
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let mut res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Record segment get all data failed");
+        assert_eq!(res.len(), 1);
+        res.sort_by(|x, y| x.id.cmp(y.id));
+        assert_eq!(
+            res.get(0).as_ref().unwrap().document,
+            Some(String::from("bye").as_str())
+        );
     }
 }

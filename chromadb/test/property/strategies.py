@@ -99,11 +99,16 @@ class Record(TypedDict):
 # TODO: support empty strings everywhere
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
+sql_alphabet_minus_underscore = (
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+)
+safe_text_min_size_3 = st.text(alphabet=sql_alphabet_minus_underscore, min_size=3)
 tenant_database_name = st.text(alphabet=sql_alphabet, min_size=3)
 
 # Workaround for FastAPI json encoding peculiarities
 # https://github.com/tiangolo/fastapi/blob/8ac8d70d52bb0dd9eb55ba4e22d3e383943da05c/fastapi/encoders.py#L104
 safe_text = safe_text.filter(lambda s: not s.startswith("_sa"))
+safe_text_min_size_3 = safe_text_min_size_3.filter(lambda s: not s.startswith("_sa"))
 tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_sa"))
 
 safe_integers = st.integers(
@@ -276,7 +281,9 @@ def collections(
     with_hnsw_params: bool = False,
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
-    with_persistent_hnsw_params: bool = False,
+    with_persistent_hnsw_params: st.SearchStrategy[bool] = st.just(False),
+    max_hnsw_batch_size: int = 2000,
+    max_hnsw_sync_threshold: int = 2000,
 ) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
@@ -287,19 +294,23 @@ def collections(
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
-    if with_persistent_hnsw_params and not with_hnsw_params:
+    use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
+
+    if use_persistent_hnsw_params and not with_hnsw_params:
         raise ValueError(
-            "with_hnsw_params requires with_persistent_hnsw_params to be true"
+            "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 
     if with_hnsw_params:
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
-        if with_persistent_hnsw_params:
-            metadata["hnsw:batch_size"] = draw(st.integers(min_value=3, max_value=2000))
+        if use_persistent_hnsw_params:
+            metadata["hnsw:batch_size"] = draw(
+                st.integers(min_value=3, max_value=max_hnsw_batch_size)
+            )
             metadata["hnsw:sync_threshold"] = draw(
-                st.integers(min_value=3, max_value=2000)
+                st.integers(min_value=3, max_value=max_hnsw_sync_threshold)
             )
         # Sometimes, select a space at random
         if draw(st.booleans()):
@@ -316,10 +327,21 @@ def collections(
     if has_documents is None:
         has_documents = draw(st.booleans())
     assert has_documents is not None
-    if has_documents and add_filterable_data:
-        known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
+    # For cluster tests, we want to avoid generating documents and where_document
+    # clauses of length < 3. We also don't want them to contain certan special
+    # characters like _ and % that implicitly involve searching for a regex in sqlite.
+    if not NOT_CLUSTER_ONLY:
+        if has_documents and add_filterable_data:
+            known_document_keywords = draw(
+                st.lists(safe_text_min_size_3, min_size=5, max_size=5)
+            )
+        else:
+            known_document_keywords = []
     else:
-        known_document_keywords = []
+        if has_documents and add_filterable_data:
+            known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
+        else:
+            known_document_keywords = []
 
     if not has_documents:
         has_embeddings = True
@@ -375,6 +397,27 @@ def metadata(
 @st.composite
 def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
+    # For cluster tests, we want to avoid generating documents of length < 3.
+    # We also don't want them to contain certan special
+    # characters like _ and % that implicitly involve searching for a regex in sqlite.
+    if not NOT_CLUSTER_ONLY:
+        # Blacklist certain unicode characters that affect sqlite processing.
+        # For example, the null (/x00) character makes sqlite stop processing a string.
+        # Also, blacklist _ and % for cluster tests.
+        blacklist_categories = ("Cc", "Cs", "Pc", "Po")
+        if collection.known_document_keywords:
+            known_words_st = st.sampled_from(collection.known_document_keywords)
+        else:
+            known_words_st = st.text(
+                min_size=3,
+                alphabet=st.characters(blacklist_categories=blacklist_categories),  # type: ignore
+            )
+
+        random_words_st = st.text(
+            min_size=3, alphabet=st.characters(blacklist_categories=blacklist_categories)  # type: ignore
+        )
+        words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
+        return " ".join(words)
 
     # Blacklist certain unicode characters that affect sqlite processing.
     # For example, the null (/x00) character makes sqlite stop processing a string.
@@ -531,10 +574,19 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
 @st.composite
 def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
-    if collection.known_document_keywords:
-        word = draw(st.sampled_from(collection.known_document_keywords))
+    # For cluster tests, we want to avoid generating where_document
+    # clauses of length < 3. We also don't want them to contain certan special
+    # characters like _ and % that implicitly involve searching for a regex in sqlite.
+    if not NOT_CLUSTER_ONLY:
+        if collection.known_document_keywords:
+            word = draw(st.sampled_from(collection.known_document_keywords))
+        else:
+            word = draw(safe_text_min_size_3)
     else:
-        word = draw(safe_text)
+        if collection.known_document_keywords:
+            word = draw(st.sampled_from(collection.known_document_keywords))
+        else:
+            word = draw(safe_text)
 
     # This is hacky, but the distributed system does not support $not_contains
     # so we need to avoid generating these operators for now in that case.

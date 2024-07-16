@@ -4,6 +4,11 @@ from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
+from chromadb.api.configuration import (
+    CollectionConfigurationInternal,
+    ConfigurationParameter,
+    HNSWConfigurationInternal,
+)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
     Cursor,
@@ -185,6 +190,7 @@ class SqlSysDB(SqlDB, SysDB):
         self,
         id: UUID,
         name: str,
+        configuration: CollectionConfigurationInternal,
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -204,10 +210,11 @@ class SqlSysDB(SqlDB, SysDB):
         existing = self.get_collections(name=name, tenant=tenant, database=database)
         if existing:
             if get_or_create:
+                # We ignore configuration on the get path - configuration is immutable
                 collection = existing[0]
                 if metadata is not None and collection["metadata"] != metadata:
                     self.update_collection(
-                        collection["id"],
+                        collection.id,
                         metadata=metadata,
                     )
                 return (
@@ -222,6 +229,7 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
+            configuration=configuration,
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -239,12 +247,14 @@ class SqlSysDB(SqlDB, SysDB):
                 .columns(
                     collections.id,
                     collections.name,
+                    collections.config_json_str,
                     collections.dimension,
                     collections.database_id,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["name"]),
+                    ParameterValue(configuration.to_json_str()),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
                     self.querybuilder()
@@ -267,7 +277,7 @@ class SqlSysDB(SqlDB, SysDB):
                     cur,
                     metadata_t,
                     metadata_t.collection_id,
-                    collection["id"],
+                    collection.id,
                     collection["metadata"],
                 )
         return collection, True
@@ -378,6 +388,7 @@ class SqlSysDB(SqlDB, SysDB):
             .select(
                 collections_t.id,
                 collections_t.name,
+                collections_t.config_json_str,
                 collections_t.dimension,
                 databases_t.name,
                 databases_t.tenant_id,
@@ -421,16 +432,30 @@ class SqlSysDB(SqlDB, SysDB):
                 id = self.uuid_from_db(str(collection_id))
                 rows = list(collection_rows)
                 name = str(rows[0][1])
-                dimension = int(rows[0][2]) if rows[0][2] else None
                 metadata = self._metadata_from_rows(rows)
+                dimension = int(rows[0][3]) if rows[0][3] else None
+                if rows[0][2] is not None:
+                    configuration = CollectionConfigurationInternal.from_json_str(
+                        rows[0][2]
+                    )
+                else:
+                    # 07/2024: This is a legacy case where we don't have a collection
+                    # configuration stored in the database. This non-destructively migrates
+                    # the collection to have a configuration, and takes into account any
+                    # HNSW params that might be in the existing metadata.
+                    configuration = self._insert_config_from_legacy_params(
+                        collection_id, metadata
+                    )
+
                 collections.append(
                     Collection(
                         id=cast(UUID, id),
                         name=name,
+                        configuration=configuration,
                         metadata=metadata,
                         dimension=dimension,
-                        tenant=str(rows[0][4]),
-                        database=str(rows[0][3]),
+                        tenant=str(rows[0][5]),
+                        database=str(rows[0][4]),
                         version=0,
                     )
                 )
@@ -738,3 +763,43 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         if sql:
             cur.execute(sql, params)
+
+    def _insert_config_from_legacy_params(
+        self, collection_id: Any, metadata: Optional[Metadata]
+    ) -> CollectionConfigurationInternal:
+        """Insert the configuration from legacy metadata params into the collections table, and return the configuration object."""
+
+        # This is a legacy case where we don't have configuration stored in the database
+        # This is non-destructive, we don't delete or overwrite any keys in the metadata
+        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
+
+        collections_t = Table("collections")
+
+        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
+        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
+
+        hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
+            hnsw_metadata_params  # type: ignore[arg-type]
+        )
+        configuration = CollectionConfigurationInternal(
+            parameters=[
+                ConfigurationParameter(
+                    name="hnsw_configuration", value=hnsw_configuration
+                )
+            ]
+        )
+        # Write the configuration into the database
+        configuration_json_str = configuration.to_json_str()
+        q = (
+            self.querybuilder()
+            .update(collections_t)
+            .set(
+                collections_t.config_json_str,
+                ParameterValue(configuration_json_str),
+            )
+            .where(collections_t.id == ParameterValue(collection_id))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        with self.tx() as cur:
+            cur.execute(sql, params)
+        return configuration

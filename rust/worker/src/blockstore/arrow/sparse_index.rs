@@ -8,8 +8,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::block::delta::BlockDelta;
-use super::block::{self, Block};
-use super::provider::BlockManager;
+use super::block::Block;
 use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range
@@ -75,7 +74,7 @@ impl Ord for SparseIndexDelimiter {
 /// - `len` - Get the number of blocks in the sparse index
 /// - `is_valid` - Check if the sparse index is valid, useful for debugging and testing
 #[derive(Clone)]
-pub(super) struct SparseIndex {
+pub(crate) struct SparseIndex {
     pub(super) forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
     reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
     pub(super) id: Uuid,
@@ -329,22 +328,65 @@ impl SparseIndex {
             .insert(block_id, SparseIndexDelimiter::Key(start_key));
     }
 
-    pub(super) fn replace_block(
-        &self,
-        old_block_id: Uuid,
-        new_block_id: Uuid,
-        new_start_key: CompositeKey,
-    ) {
+    pub(super) fn replace_block(&self, old_block_id: Uuid, new_block_id: Uuid) {
         let mut forward = self.forward.lock();
         let mut reverse = self.reverse.lock();
         if let Some(old_start_key) = reverse.remove(&old_block_id) {
             forward.remove(&old_start_key);
-            if old_start_key == SparseIndexDelimiter::Start {
-                forward.insert(SparseIndexDelimiter::Start, new_block_id);
-            } else {
-                forward.insert(SparseIndexDelimiter::Key(new_start_key), new_block_id);
-            }
+            forward.insert(old_start_key.clone(), new_block_id);
+            reverse.insert(new_block_id, old_start_key);
         }
+    }
+
+    fn correct_start_key(&self) {
+        if self.len() == 0 {
+            return;
+        }
+        let key_copy;
+        {
+            let lock_guard = self.forward.lock();
+            let mut curr_iter = lock_guard.iter();
+            let (key, _) = curr_iter.nth(0).unwrap();
+            if key == &SparseIndexDelimiter::Start {
+                return;
+            }
+            key_copy = key.clone();
+        }
+        tracing::info!("Correcting start key of sparse index {:?}", self.id);
+        let mut forward = self.forward.lock();
+        let mut reverse = self.reverse.lock();
+        if let Some(id) = forward.remove(&key_copy) {
+            reverse.remove(&id);
+            forward.insert(SparseIndexDelimiter::Start, id.clone());
+            reverse.insert(id, SparseIndexDelimiter::Start);
+        }
+    }
+
+    pub(super) fn remove_block(&self, block_id: &Uuid) -> bool {
+        // We commit and flush an empty dummy block if the blockfile is empty.
+        // It can happen that other indexes of the segment are not empty. In this case,
+        // our segment open() logic breaks down since we only handle either
+        // all indexes initialized or none at all but not other combinations.
+        // We could argue that we should fix the readers to handle these cases
+        // but this is simpler, easier and less error prone to do.
+        let mut removed = false;
+        if self.len() > 1 {
+            let mut forward = self.forward.lock();
+            let mut reverse = self.reverse.lock();
+            if let Some(start_key) = reverse.remove(block_id) {
+                forward.remove(&start_key);
+            }
+            removed = true;
+        }
+        // It can happen that the sparse index does not contain
+        // the start key after this sequence of operations,
+        // for e.g. consider the following:
+        // sparse_index: {start_key: block_id1, some_key: block_id2, some_other_key: block_id3}
+        // If we delete block_id1 from the sparse index then it becomes
+        // {some_key: block_id2, some_other_key: block_id3}
+        // This should be changed to {start_key: block_id2, some_other_key: block_id3}
+        self.correct_start_key();
+        removed
     }
 
     pub(super) fn len(&self) -> usize {

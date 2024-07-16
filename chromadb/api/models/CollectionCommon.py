@@ -1,5 +1,6 @@
 from typing import (
     TYPE_CHECKING,
+    Dict,
     Generic,
     Optional,
     Tuple,
@@ -97,29 +98,34 @@ class CollectionCommon(Generic[ClientT]):
 
     @property
     def id(self) -> UUID:
-        return self._model["id"]
+        return self._model.id
 
     @property
     def name(self) -> str:
-        return self._model["name"]
+        return self._model.name
+
+    @property
+    def configuration_json(self) -> Dict[str, Any]:
+        return self._model.configuration_json
 
     @property
     def metadata(self) -> CollectionMetadata:
-        return cast(CollectionMetadata, self._model["metadata"])
+        return cast(CollectionMetadata, self._model.metadata)
 
     @property
     def tenant(self) -> str:
-        return self._model["tenant"]
+        return self._model.tenant
 
     @property
     def database(self) -> str:
-        return self._model["database"]
+        return self._model.database
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, CollectionCommon):
             return False
         id_match = self.id == other.id
         name_match = self.name == other.name
+        configuration_match = self.configuration_json == other.configuration_json
         metadata_match = self.metadata == other.metadata
         tenant_match = self.tenant == other.tenant
         database_match = self.database == other.database
@@ -128,6 +134,7 @@ class CollectionCommon(Generic[ClientT]):
         return (
             id_match
             and name_match
+            and configuration_match
             and metadata_match
             and tenant_match
             and database_match
@@ -135,13 +142,16 @@ class CollectionCommon(Generic[ClientT]):
             and data_loader_match
         )
 
+    def __repr__(self) -> str:
+        return f"Collection(id={self.id}, name={self.name})"
+
     def get_model(self) -> CollectionModel:
         return self._model
 
     def _validate_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -234,7 +244,7 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -303,7 +313,7 @@ class CollectionCommon(Generic[ClientT]):
 
         # We need to include uris in the result from the API to load datas
         if "data" in include and "uris" not in include:
-            valid_include.append("uris")
+            valid_include.append("uris")  # type: ignore[arg-type]
 
         return valid_ids, valid_where, valid_where_document, valid_include
 
@@ -325,7 +335,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_and_prepare_query_request(
         self,
-        query_embeddings: Optional[
+        query_embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -399,7 +409,7 @@ class CollectionCommon(Generic[ClientT]):
                 )
 
         if "data" in include and "uris" not in include:
-            valid_include.append("uris")
+            valid_include.append("uris")  # type: ignore[arg-type]
 
         return (
             valid_query_embeddings,
@@ -443,7 +453,7 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_update_request(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -488,7 +498,7 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_upsert_request(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -540,7 +550,7 @@ class CollectionCommon(Generic[ClientT]):
 
     @staticmethod
     def _normalize_embeddings(
-        embeddings: Union[
+        embeddings: Union[  # type: ignore[type-arg]
             OneOrMany[Embedding],
             OneOrMany[np.ndarray],
         ]

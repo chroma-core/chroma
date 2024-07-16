@@ -245,8 +245,13 @@ impl StringValueStorage {
 
     fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.len();
-        let mut value_builder =
-            StringBuilder::with_capacity(item_capacity, self.get_value_size(0, self.len()));
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = StringBuilder::new();
+        } else {
+            value_builder =
+                StringBuilder::with_capacity(item_capacity, self.get_value_size(0, self.len()));
+        }
 
         let storage = self.storage.read();
         let storage = match storage.as_ref() {
@@ -267,7 +272,7 @@ impl StringValueStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct UInt32Storage {
     pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
 }
@@ -342,7 +347,12 @@ impl UInt32Storage {
 
     fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.storage.read().len();
-        let mut value_builder = UInt32Builder::with_capacity(item_capacity);
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = UInt32Builder::new();
+        } else {
+            value_builder = UInt32Builder::with_capacity(item_capacity);
+        }
         for (_, value) in self.storage.read().iter() {
             value_builder.append_value(*value);
         }
@@ -355,7 +365,7 @@ impl UInt32Storage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct Int32ArrayStorage {
     pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
 }
@@ -437,10 +447,15 @@ impl Int32ArrayStorage {
 
     fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.storage.read().len();
-        let mut value_builder = ListBuilder::with_capacity(
-            Int32Builder::with_capacity(self.total_value_count()),
-            item_capacity,
-        );
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = ListBuilder::new(Int32Builder::new());
+        } else {
+            value_builder = ListBuilder::with_capacity(
+                Int32Builder::with_capacity(self.total_value_count()),
+                item_capacity,
+            );
+        }
 
         let storage = self.storage.read();
         for (_, value) in storage.iter() {
@@ -464,7 +479,7 @@ impl Int32ArrayStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct RoaringBitmapStorage {
     pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
 }
@@ -544,8 +559,12 @@ impl RoaringBitmapStorage {
 
     fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.len();
-        let mut value_builder =
-            BinaryBuilder::with_capacity(item_capacity, self.total_value_count());
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = BinaryBuilder::new();
+        } else {
+            value_builder = BinaryBuilder::with_capacity(item_capacity, self.total_value_count());
+        }
 
         let storage = self.storage.read();
         for (_, value) in storage.iter() {
@@ -561,7 +580,7 @@ impl RoaringBitmapStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct DataRecordStorage {
     pub(super) id_storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
     pub(super) embedding_storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<f32>>>>,
@@ -706,18 +725,32 @@ impl DataRecordStorage {
 
     fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.len();
-        let embedding_len = self.embedding_storage.read().iter().next().unwrap().1.len() as i32;
-        let mut id_builder =
-            StringBuilder::with_capacity(item_capacity, self.get_id_size(0, self.len()));
-        let mut embedding_builder = FixedSizeListBuilder::with_capacity(
-            Float32Builder::with_capacity(self.get_total_embedding_count()),
-            embedding_len,
-            item_capacity,
-        );
-        let mut metadata_builder =
-            BinaryBuilder::with_capacity(item_capacity, self.get_metadata_size(0, self.len()));
-        let mut document_builder =
-            StringBuilder::with_capacity(item_capacity, self.get_document_size(0, self.len()));
+        let mut embedding_builder;
+        let mut id_builder;
+        let mut metadata_builder;
+        let mut document_builder;
+        let mut embedding_len;
+        if item_capacity == 0 {
+            // ok to initialize fixed size float list with fixed size as 0.
+            embedding_len = 0;
+            embedding_builder = FixedSizeListBuilder::new(Float32Builder::new(), 0);
+            id_builder = StringBuilder::new();
+            metadata_builder = BinaryBuilder::new();
+            document_builder = StringBuilder::new();
+        } else {
+            embedding_len = self.embedding_storage.read().iter().next().unwrap().1.len() as i32;
+            id_builder =
+                StringBuilder::with_capacity(item_capacity, self.get_id_size(0, self.len()));
+            embedding_builder = FixedSizeListBuilder::with_capacity(
+                Float32Builder::with_capacity(self.get_total_embedding_count()),
+                embedding_len,
+                item_capacity,
+            );
+            metadata_builder =
+                BinaryBuilder::with_capacity(item_capacity, self.get_metadata_size(0, self.len()));
+            document_builder =
+                StringBuilder::with_capacity(item_capacity, self.get_document_size(0, self.len()));
+        }
 
         let id_storage = self.id_storage.read();
         let embedding_storage = self.embedding_storage.read();

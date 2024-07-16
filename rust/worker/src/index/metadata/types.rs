@@ -929,7 +929,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(metadata_key, *k).await;
+                    let read = blockfile_reader.get_lte(metadata_key, *k).await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();

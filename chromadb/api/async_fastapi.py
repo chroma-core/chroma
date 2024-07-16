@@ -1,13 +1,14 @@
 import asyncio
 from uuid import UUID
 import urllib.parse
-import orjson as json
+import orjson
 from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
-from chromadb.api import AsyncServerAPI, json_to_collection_model
+from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -16,20 +17,14 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
-import chromadb.utils.embedding_functions as ef
 
-from chromadb.types import Database, Tenant
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 
-from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.types import (
-    DataLoader,
     Documents,
-    Embeddable,
     Embeddings,
-    EmbeddingFunction,
     IDs,
     Include,
-    Loadable,
     Metadatas,
     URIs,
     Where,
@@ -115,13 +110,20 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def _make_request(
         self, method: str, path: str, **kwargs: Dict[str, Any]
     ) -> Any:
+        # If the request has json in kwargs, use orjson to serialize it,
+        # remove it from kwargs, and add it to the data parameter
+        # This is because httpx uses a slower json serializer
+        if "json" in kwargs:
+            data = orjson.dumps(kwargs.pop("json"))
+            kwargs["data"] = data
+
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
         response = await self._get_client().request(method, url, **cast(Any, kwargs))
         BaseHTTPClient._raise_chroma_error(response)
-        return json.loads(response.text)
+        return orjson.loads(response.text)
 
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
@@ -187,7 +189,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Sequence[AsyncCollection]:
+    ) -> Sequence[CollectionModel]:
         resp_json = await self._make_request(
             "get",
             "/collections",
@@ -201,13 +203,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             ),
         )
 
-        collections = []
-        for json_collection in resp_json:
-            model = json_to_collection_model(json_collection)
-
-            collections.append(AsyncCollection(client=self, model=model))
-
-        return collections
+        models = [
+            CollectionModel.from_json(json_collection) for json_collection in resp_json
+        ]
+        return models
 
     @trace_method("AsyncFastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
@@ -227,15 +226,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         """Creates a collection"""
         resp_json = await self._make_request(
             "post",
@@ -243,19 +239,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
+                "configuration": configuration.to_json() if configuration else None,
                 "get_or_create": get_or_create,
             },
             params={"tenant": tenant, "database": database},
         )
 
-        model = json_to_collection_model(resp_json)
+        model = CollectionModel.from_json(resp_json)
 
-        return AsyncCollection(
-            client=self,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return model
 
     @trace_method("AsyncFastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -263,13 +255,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
@@ -283,14 +271,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             params=params,
         )
 
-        model = json_to_collection_model(resp_json)
+        model = CollectionModel.from_json(resp_json)
 
-        return AsyncCollection(
-            client=self,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
+        return model
 
     @trace_method(
         "AsyncFastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
@@ -299,19 +282,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> AsyncCollection:
+    ) -> CollectionModel:
         return await self.create_collection(
             name=name,
+            configuration=configuration,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             get_or_create=True,
             tenant=tenant,
             database=database,
@@ -369,7 +348,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return await self._get(
             collection_id,
             limit=n,
-            include=["embeddings", "documents", "metadatas"],
+            include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
         )
 
     @trace_method("AsyncFastAPI._get", OpenTelemetryGranularity.OPERATION)
@@ -385,7 +364,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
@@ -412,7 +391,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
-            included=resp_json["included"],
+            included=resp_json.get("included", include),
         )
 
     @trace_method("AsyncFastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -522,7 +501,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         n_results: int = 10,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         resp_json = await self._make_request(
             "post",
@@ -544,7 +523,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,
-            included=resp_json["included"],
+            included=resp_json.get("included", include),
         )
 
     @trace_method("AsyncFastAPI.reset", OpenTelemetryGranularity.ALL)

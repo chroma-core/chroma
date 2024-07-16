@@ -21,23 +21,39 @@ query_service:
             host: "sysdb.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     storage:
         S3:
             bucket: "chroma-storage"
             credentials: "Minio"
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 30000 # 1 minute
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
+    blockfile_provider:
+        Arrow:
+            max_block_size_bytes: 16384
+            block_manager_config:
+                block_cache_config:
+                    lru:
+                        capacity: 1000
+            sparse_index_manager_config:
+                sparse_index_cache_config:
+                    lru:
+                        capacity: 1000
+    hnsw_provider:
+        hnsw_temporary_path: "~/tmp"
+        hnsw_cache_config:
+            lru:
+                capacity: 1000
 
 compaction_service:
     service_name: "compaction-service"
@@ -57,19 +73,19 @@ compaction_service:
             host: "sysdb.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     storage:
         S3:
             bucket: "chroma-storage"
             credentials: "Minio"
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 60000 # 1 minute
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -77,5 +93,21 @@ compaction_service:
     compactor:
         compaction_manager_queue_size: 1000
         max_concurrent_jobs: 100
-        compaction_interval_sec: 60
+        compaction_interval_sec: 10
         min_compaction_size: 10
+    blockfile_provider:
+        Arrow:
+            max_block_size_bytes: 16384
+            block_manager_config:
+                block_cache_config:
+                    lru:
+                        capacity: 1000
+            sparse_index_manager_config:
+                sparse_index_cache_config:
+                    lru:
+                        capacity: 1000
+    hnsw_provider:
+        hnsw_temporary_path: "~/tmp"
+        hnsw_cache_config:
+            lru:
+                capacity: 1000

@@ -101,6 +101,10 @@ impl ChromaError for RegisterError {
 impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
     type Error = RegisterError;
 
+    fn get_name(&self) -> &'static str {
+        "RegisterOperator"
+    }
+
     async fn run(&self, input: &RegisterInput) -> Result<RegisterOutput, RegisterError> {
         let mut sysdb = input.sysdb.clone();
         let mut log = input.log.clone();

@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 use crate::blockstore::provider::BlockfileProvider;
 use crate::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
@@ -10,7 +7,7 @@ use crate::chroma_proto::{
 };
 use crate::config::{Configurable, QueryServiceConfig};
 use crate::errors::ChromaError;
-use crate::execution::operator::TaskMessage;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
@@ -18,11 +15,12 @@ use crate::execution::orchestration::{
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::{Receiver, System};
+use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
 use crate::types::MetadataValue;
 use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace, trace_span, Instrument};
@@ -33,7 +31,7 @@ pub struct WorkerServer {
     // System
     system: Option<System>,
     // Component dependencies
-    dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
+    dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -49,7 +47,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
-                println!("Failed to create sysdb component: {:?}", err);
+                tracing::error!("Failed to create sysdb component: {:?}", err);
                 return Err(err);
             }
         };
@@ -57,28 +55,33 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
-                println!("Failed to create log component: {:?}", err);
+                tracing::error!("Failed to create log component: {:?}", err);
                 return Err(err);
             }
         };
         let storage = match crate::storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
-                println!("Failed to create storage component: {:?}", err);
+                tracing::error!("Failed to create storage component: {:?}", err);
                 return Err(err);
             }
         };
-        // TODO: inject hnsw index provider somehow
-        // TODO: inject blockfile provider somehow
-        // TODO: real path
-        let path = PathBuf::from("~/tmp");
+
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
+                .await?;
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
             sysdb,
             log,
-            hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            hnsw_index_provider,
+            blockfile_provider,
             port: config.my_port,
         })
     }
@@ -116,7 +119,7 @@ impl WorkerServer {
         Ok(())
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.dispatcher = Some(dispatcher);
     }
 
@@ -138,24 +141,19 @@ impl WorkerServer {
 
         let mut proto_results_for_all = Vec::new();
 
-        let parse_vectors_span = trace_span!("Input vectors parsing");
         let mut query_vectors = Vec::new();
-        let _ = parse_vectors_span.in_scope(|| {
-            for proto_query_vector in request.vectors {
-                let (query_vector, _encoding) = match proto_query_vector.try_into() {
-                    Ok((vector, encoding)) => (vector, encoding),
-                    Err(e) => {
-                        return Err(Status::internal(format!("Error converting vector: {}", e)));
-                    }
-                };
-                query_vectors.push(query_vector);
-            }
-            trace!("Parsed vectors {:?}", query_vectors);
-            Ok(())
-        });
+        for proto_query_vector in request.vectors {
+            let (query_vector, _encoding) = match proto_query_vector.try_into() {
+                Ok((vector, encoding)) => (vector, encoding),
+                Err(e) => {
+                    return Err(Status::internal(format!("Error converting vector: {}", e)));
+                }
+            };
+            query_vectors.push(query_vector);
+        }
 
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 return Err(Status::internal("No dispatcher found"));
             }
@@ -175,7 +173,7 @@ impl WorkerServer {
                     self.sysdb.clone(),
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
-                    dispatcher.clone(),
+                    dispatcher,
                 );
                 orchestrator.run().await
             }
@@ -244,7 +242,7 @@ impl WorkerServer {
         };
 
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 return Err(Status::internal("No dispatcher found"));
             }
@@ -263,7 +261,7 @@ impl WorkerServer {
             segment_uuid,
             self.log.clone(),
             self.sysdb.clone(),
-            dispatcher.clone(),
+            dispatcher,
             self.blockfile_provider.clone(),
         );
         let result = orchestrator.run().await;
@@ -562,14 +560,16 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::storage::local::LocalStorage;
     use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
-
-    use super::*;
     use chroma_proto::debug_client::DebugClient;
     use tempfile::tempdir;
 
@@ -579,7 +579,9 @@ mod tests {
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let hnsw_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,
@@ -589,8 +591,14 @@ mod tests {
             hnsw_index_provider: HnswIndexProvider::new(
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
+                hnsw_index_cache,
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider: BlockfileProvider::new_arrow(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            ),
             port,
         };
 
@@ -599,7 +607,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         server.set_system(system.clone());
-        server.set_dispatcher(dispatcher_handle.receiver());
+        server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
             let _ = crate::server::WorkerServer::run(server).await;

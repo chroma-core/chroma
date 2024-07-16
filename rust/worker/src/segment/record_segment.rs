@@ -4,7 +4,7 @@ use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
-use crate::types::{Operation, Segment, SegmentType};
+use crate::types::{MaterializedLogOperation, Operation, Segment, SegmentType};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -297,6 +297,14 @@ pub enum ApplyMaterializedLogError {
     EmbeddingNotSet,
     #[error("Metadata update not valid")]
     MetadataUpdateNotValid,
+    #[error("Document delete error")]
+    DocumentDeleteError,
+    #[error("FTS Document add error")]
+    FTSDocumentAddError,
+    #[error("FTS Document delete error")]
+    FTSDocumentDeleteError,
+    #[error("FTS Document update error")]
+    FTSDocumentUpdateError,
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -306,6 +314,10 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::MetadataUpdateNotValid => ErrorCodes::Internal,
+            ApplyMaterializedLogError::DocumentDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FTSDocumentAddError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
         }
     }
@@ -318,7 +330,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
     ) -> Result<(), ApplyMaterializedLogError> {
         for (log_record, _) in records.iter() {
             match log_record.final_operation {
-                Operation::Add => {
+                MaterializedLogOperation::AddNew => {
                     // Set all four.
                     // Set user id to offset id.
                     match self
@@ -374,7 +386,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
-                Operation::Update => {
+                MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
                     // needs to change. Blockfile does not have Read then write
                     // semantics so we'll delete and insert.
@@ -386,7 +398,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from user_id_to_id {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     }
@@ -404,12 +417,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
-                Operation::Upsert => {
-                    // MaterializedLogRecord already converts upserts into either updates or inserts
-                    // so here we expect to not have any records of this type.
-                    panic!("Invariant violation. After log materialization there shouldn't be any upserts.");
-                }
-                Operation::Delete => {
+                MaterializedLogOperation::DeleteExisting => {
                     // Delete user id to offset id.
                     match self
                         .user_id_to_id
@@ -419,7 +427,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from user_id_to_id {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     };
@@ -432,7 +441,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from id_to_user_id {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     };
@@ -445,11 +455,13 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .await
                     {
                         Ok(()) => (),
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::error!("Error deleting from id_to_data {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                         }
                     }
                 }
+                MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
         }
         Ok(())
@@ -528,7 +540,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         let mut flushed_files = HashMap::new();
 
         match res_user_id_to_id {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     USER_ID_TO_OFFSET_ID.to_string(),
                     vec![user_id_to_id_bf_id.to_string()],
@@ -540,7 +552,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_user_id {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_USER_ID.to_string(),
                     vec![id_to_user_id_bf_id.to_string()],
@@ -552,7 +564,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_id_to_data {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_DATA.to_string(),
                     vec![id_to_data_bf_id.to_string()],
@@ -579,6 +591,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
@@ -783,6 +796,11 @@ impl RecordSegmentReader<'_> {
                     data.push(data_record);
                 }
                 Err(e) => {
+                    tracing::error!(
+                        "[GetAllData] Error getting data record for index {:?}: {:?}",
+                        i,
+                        e
+                    );
                     return Err(e);
                 }
             }

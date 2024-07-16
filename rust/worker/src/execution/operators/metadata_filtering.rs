@@ -9,27 +9,20 @@ use crate::{
     segment::{
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
+        LogMaterializer, LogMaterializerError,
     },
     types::{
-        LogRecord, MetadataValue, Operation, Segment, Where, WhereClauseComparator, WhereDocument,
-        WhereDocumentOperator,
+        LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+        WhereClauseComparator, WhereDocument, WhereDocumentOperator,
     },
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use core::panic;
-use futures::stream::Count;
-use regex::Regex;
 use roaring::RoaringBitmap;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU16, AtomicU32},
-        Arc,
-    },
-};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tonic::async_trait;
+use tracing::{Instrument, Span};
 
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringOperator {}
@@ -118,6 +111,11 @@ impl ChromaError for MetadataFilteringError {
 #[async_trait]
 impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilteringOperator {
     type Error = MetadataFilteringError;
+
+    fn get_name(&self) -> &'static str {
+        "MetadataFilteringOperator"
+    }
+
     async fn run(
         &self,
         input: &MetadataFilteringInput,
@@ -155,7 +153,11 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         // Step 1: Materialize the logs.
         let materializer =
             LogMaterializer::new(record_segment_reader, input.log_record.clone(), None);
-        let mat_records = match materializer.materialize().await {
+        let mat_records = match materializer
+            .materialize()
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await
+        {
             Ok(records) => records,
             Err(e) => {
                 return Err(MetadataFilteringError::MetadataFilteringLogMaterializationError(e));
@@ -169,7 +171,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             // so that they can be ignored when reading from the segment later.
             ids_in_mat_log.insert(records.offset_id);
             // Skip deleted records.
-            if records.final_operation == Operation::Delete {
+            if records.final_operation == MaterializedLogOperation::DeleteExisting {
                 continue;
             }
             ids_to_metadata.insert(records.offset_id, records.merged_metadata_ref());
@@ -509,16 +511,20 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     let mut matching_contains = vec![];
                     // Upstream sorts materialized records by offset id so matching_contains
                     // will be sorted.
+                    // Note: Uncomment this out when adding FTS support for queries
+                    // containing _ or %. Currently, we disable such scenarios in tests
+                    // for distributed version.
                     // Emulate sqlite behavior. _ and % match to any character in sqlite.
-                    let normalized_query = query.replace("_", ".").replace("%", ".");
-                    let re = Regex::new(normalized_query.as_str()).unwrap();
+                    // let normalized_query = query.replace("_", ".").replace("%", ".");
+                    // let re = Regex::new(normalized_query.as_str()).unwrap();
                     for (record, _) in mat_records.iter() {
-                        if record.final_operation == Operation::Delete {
+                        if record.final_operation == MaterializedLogOperation::DeleteExisting {
                             continue;
                         }
                         match record.merged_document_ref() {
                             Some(doc) => {
-                                if re.is_match(doc) {
+                                /* if re.is_match(doc) { */
+                                if doc.contains(query) {
                                     matching_contains.push(record.offset_id as i32);
                                 }
                             }
@@ -643,7 +649,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     let user_id = log_records.merged_user_id_ref();
                     if query_ids_set.contains(user_id) {
                         remaining_id_set.remove(user_id);
-                        if log_records.final_operation != Operation::Delete {
+                        if log_records.final_operation != MaterializedLogOperation::DeleteExisting {
                             user_supplied_offset_ids.push(log_records.offset_id);
                         }
                     }
@@ -734,15 +740,21 @@ mod test {
 
     use uuid::Uuid;
 
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::{
-        blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
+        blockstore::{
+            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+            provider::BlockfileProvider,
+        },
         execution::{
             data::data_chunk::Chunk,
             operator::Operator,
             operators::metadata_filtering::{MetadataFilteringInput, MetadataFilteringOperator},
         },
         segment::{
-            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+            metadata_segment::MetadataSegmentWriter,
             record_segment::{
                 RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
             },
@@ -760,7 +772,14 @@ mod test {
     async fn where_and_where_document_from_log() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -972,7 +991,14 @@ mod test {
     async fn where_from_metadata_segment() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -1155,7 +1181,14 @@ mod test {
     async fn query_ids_only() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {

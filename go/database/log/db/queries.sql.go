@@ -134,7 +134,7 @@ type InsertRecordParams struct {
 }
 
 const purgeRecords = `-- name: PurgeRecords :exec
-DELETE FROM record_log r using collection c where r.collection_id = c.id and r.offset < c.record_compaction_offset_position
+DELETE FROM record_log r using collection c where r.collection_id = c.id and r.offset <= c.record_compaction_offset_position
 `
 
 func (q *Queries) PurgeRecords(ctx context.Context) error {

@@ -7,7 +7,6 @@ import traceback
 import bcrypt
 import logging
 
-from fastapi import HTTPException
 from overrides import override
 from pydantic import SecretStr
 
@@ -19,12 +18,15 @@ from chromadb.auth import (
     AuthError,
 )
 from chromadb.config import System
+from chromadb.errors import ChromaAuthError
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from starlette.datastructures import Headers
+
+
 from typing import Dict
+
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +102,11 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
         "BasicAuthenticationServerProvider.authenticate", OpenTelemetryGranularity.ALL
     )
     @override
-    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Dict[str, str]) -> UserIdentity:
         try:
-            if AUTHORIZATION_HEADER not in headers:
+            if AUTHORIZATION_HEADER.lower() not in headers.keys():
                 raise AuthError(AUTHORIZATION_HEADER + " header not found")
-            _auth_header = headers[AUTHORIZATION_HEADER]
+            _auth_header = headers[AUTHORIZATION_HEADER.lower()]
             _auth_header = re.sub(r"^Basic ", "", _auth_header)
             _auth_header = _auth_header.strip()
 
@@ -141,4 +143,4 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
         time.sleep(
             random.uniform(0.001, 0.005)
         )  # add some jitter to avoid timing attacks
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise ChromaAuthError()

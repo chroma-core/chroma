@@ -64,6 +64,11 @@ impl ChromaError for CountRecordsError {
 #[async_trait]
 impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
     type Error = CountRecordsError;
+
+    fn get_name(&self) -> &'static str {
+        "CountRecordsOperator"
+    }
+
     async fn run(
         &self,
         input: &CountRecordsInput,
@@ -78,6 +83,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Err(e) => {
                 match *e {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
+                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized");
                         // This means there no compaction has occured.
                         // So we can just traverse the log records
                         // and count the number of records.
@@ -203,6 +209,7 @@ mod tests {
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
     use std::{collections::HashMap, str::FromStr};
+    use tracing::{Instrument, Span};
     use uuid::Uuid;
 
     #[tokio::test]
@@ -285,6 +292,7 @@ mod tests {
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
                 .expect("Log materialization failed");
             segment_writer

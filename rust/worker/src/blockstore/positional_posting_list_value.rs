@@ -60,6 +60,7 @@ impl ChromaError for PositionalPostingListBuilderError {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct PositionalPostingListBuilder {
     doc_ids: HashSet<i32>,
     positions: HashMap<i32, Vec<i32>>,
@@ -91,10 +92,6 @@ impl PositionalPostingListBuilder {
         &mut self,
         doc_id: i32,
     ) -> Result<(), PositionalPostingListBuilderError> {
-        if !self.doc_ids.contains(&doc_id) {
-            return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
-        }
-
         self.doc_ids.remove(&doc_id);
         self.positions.remove(&doc_id);
         Ok(())

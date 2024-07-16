@@ -7,7 +7,7 @@ use crate::config::CompactionServiceConfig;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::errors::ErrorCodes;
-use crate::execution::operator::TaskMessage;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
@@ -18,15 +18,14 @@ use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::Component;
 use crate::system::ComponentContext;
+use crate::system::ComponentHandle;
 use crate::system::Handler;
-use crate::system::Receiver;
 use crate::system::System;
 use async_trait::async_trait;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +41,7 @@ pub(crate) struct CompactionManager {
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
     // Dispatcher
-    dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
+    dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Config
     compaction_manager_queue_size: usize,
     compaction_interval: Duration,
@@ -95,7 +94,7 @@ impl CompactionManager {
         compaction_job: &CompactionJob,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 println!("No dispatcher found");
                 return Err(Box::new(CompactionError::FailedToCompact));
@@ -112,7 +111,7 @@ impl CompactionManager {
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
                     self.hnsw_index_provider.clone(),
-                    dispatcher.clone(),
+                    dispatcher,
                     None,
                     None,
                     Arc::new(AtomicU32::new(0)),
@@ -161,7 +160,7 @@ impl CompactionManager {
         (num_completed_jobs, num_failed_jobs)
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.dispatcher = Some(dispatcher);
     }
 
@@ -222,17 +221,23 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             assignment_policy,
         );
 
-        // TODO: real path
-        let path = PathBuf::from("~/tmp");
-        // TODO: blockfile proivder should be injected somehow
-        // TODO: hnsw index provider should be injected somehow
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
+
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
+                .await?;
+
         Ok(CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
-            HnswIndexProvider::new(storage.clone(), path),
+            blockfile_provider,
+            hnsw_index_provider,
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
             min_compaction_size,
@@ -253,12 +258,8 @@ impl Component for CompactionManager {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
-        ctx.scheduler.schedule(
-            ctx.sender.clone(),
-            ScheduleMessage {},
-            self.compaction_interval,
-            ctx,
-        );
+        ctx.scheduler
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
     }
 }
 
@@ -271,6 +272,8 @@ impl Debug for CompactionManager {
 // ============== Handlers ==============
 #[async_trait]
 impl Handler<ScheduleMessage> for CompactionManager {
+    type Result = ();
+
     async fn handle(
         &mut self,
         _message: ScheduleMessage,
@@ -279,17 +282,15 @@ impl Handler<ScheduleMessage> for CompactionManager {
         println!("CompactionManager: Performing compaction");
         self.compact_batch().await;
         // Compaction is done, schedule the next compaction
-        ctx.scheduler.schedule(
-            ctx.sender.clone(),
-            ScheduleMessage {},
-            self.compaction_interval,
-            ctx,
-        );
+        ctx.scheduler
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
     }
 }
 
 #[async_trait]
 impl Handler<Memberlist> for CompactionManager {
+    type Result = ();
+
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
         self.scheduler.set_memberlist(message);
     }
@@ -297,11 +298,13 @@ impl Handler<Memberlist> for CompactionManager {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
@@ -312,6 +315,8 @@ mod tests {
     use crate::types::Operation;
     use crate::types::OperationRecord;
     use crate::types::Segment;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::str::FromStr;
     use uuid::Uuid;
 
@@ -492,13 +497,25 @@ mod tests {
         // Set memberlist
         scheduler.set_memberlist(vec![my_member_id.clone()]);
 
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let hnsw_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let mut manager = CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(storage.clone()),
-            HnswIndexProvider::new(storage, PathBuf::from(tmpdir.path().to_str().unwrap())),
+            BlockfileProvider::new_arrow(
+                storage.clone(),
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            ),
+            HnswIndexProvider::new(
+                storage,
+                PathBuf::from(tmpdir.path().to_str().unwrap()),
+                hnsw_cache,
+            ),
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,
@@ -508,7 +525,7 @@ mod tests {
 
         let dispatcher = Dispatcher::new(10, 10, 10);
         let dispatcher_handle = system.start_component(dispatcher);
-        manager.set_dispatcher(dispatcher_handle.receiver());
+        manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);
         let (num_completed, number_failed) = manager.compact_batch().await;
         assert_eq!(num_completed, 2);

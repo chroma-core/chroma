@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use std::path::Path;
 
 #[derive(Deserialize, Debug)]
 /// The configuration for the chosen storage.
@@ -14,6 +13,8 @@ pub(crate) enum StorageConfig {
     S3(S3StorageConfig),
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
+    #[serde(alias = "sync_local")]
+    SyncLocal(LocalStorageConfig),
 }
 
 #[derive(Deserialize, PartialEq, Debug)]

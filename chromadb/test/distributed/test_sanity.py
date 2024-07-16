@@ -3,32 +3,33 @@
 # test working and then enable
 import random
 from typing import List
-from chromadb.api import ServerAPI
+
+import numpy as np
+from chromadb.api import ClientAPI
 import time
 
 from chromadb.api.types import QueryResult
 from chromadb.test.conftest import (
     COMPACTION_SLEEP,
-    MEMBERLIST_SLEEP,
+    reset,
     skip_if_not_cluster,
 )
+from chromadb.utils.distance_functions import l2
 
 EPS = 1e-6
 
 
 @skip_if_not_cluster()
 def test_add(
-    api: ServerAPI,
+    client: ClientAPI,
 ) -> None:
-    api.reset()
-
-    # Once we reset, we have to wait for sometime to let the memberlist on the frontends
-    # propagate, there isn't a clean way to do this so we sleep for a configured amount of time
-    # to ensure that the memberlist has propagated
-    time.sleep(MEMBERLIST_SLEEP)
-
-    collection = api.create_collection(
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
+    reset(client)
+    collection = client.create_collection(
         name="test",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
 
     # Add 1000 records, where each embedding has 3 dimensions randomly generated
@@ -44,18 +45,18 @@ def test_add(
         )
 
     random_query = [random.random(), random.random(), random.random()]
+    print("Generated data with seed ", seed)
 
     # Query the collection with a random query
     results = collection.query(
         query_embeddings=[random_query],  # type: ignore
         n_results=10,
-        include=["distances"],
+        include=["distances"],  # type: ignore[list-item]
     )
 
     # Check that the distances are correct in l2
     ground_truth_distances = [
-        sum((a - b) ** 2 for a, b in zip(embedding, random_query))
-        for embedding in embeddings
+        l2(np.array(random_query), np.array(embedding)) for embedding in embeddings
     ]
     ground_truth_distances.sort()
     retrieved_distances = results["distances"][0]  # type: ignore
@@ -65,17 +66,18 @@ def test_add(
         assert retrieved_distances[i - 1] <= retrieved_distances[i]
 
     for i in range(len(retrieved_distances)):
-        assert abs(ground_truth_distances[i] - retrieved_distances[i]) < EPS
+        assert np.allclose(ground_truth_distances[i], retrieved_distances[i], atol=EPS)
 
 
 @skip_if_not_cluster()
-def test_add_include_all_with_compaction_delay(api: ServerAPI) -> None:
-    api.reset()
-
-    time.sleep(MEMBERLIST_SLEEP)
-
-    collection = api.create_collection(
-        name="test_add_include_all_with_compaction_delay"
+def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
+    reset(client)
+    collection = client.create_collection(
+        name="test_add_include_all_with_compaction_delay",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
 
     ids = []
@@ -93,12 +95,13 @@ def test_add_include_all_with_compaction_delay(api: ServerAPI) -> None:
 
     random_query_1 = [random.random(), random.random(), random.random()]
     random_query_2 = [random.random(), random.random(), random.random()]
+    print("Generated data with seed ", seed)
 
     # Query the collection with a random query
     results = collection.query(
         query_embeddings=[random_query_1, random_query_2],  # type: ignore
         n_results=10,
-        include=["metadatas", "documents", "distances", "embeddings"],
+        include=["metadatas", "documents", "distances", "embeddings"],  # type: ignore[list-item]
     )
 
     ids_and_embeddings = list(zip(ids, embeddings))

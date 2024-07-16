@@ -1,5 +1,6 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
 use crate::execution::operators::count_records::{
     CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
@@ -13,23 +14,17 @@ use crate::execution::operators::metadata_filtering::{
     MetadataFilteringOutput,
 };
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
-use crate::index::metadata::types::MetadataIndexError;
+use crate::execution::orchestration::common::terminate_with_error;
 use crate::log::log::PullLogsError;
-use crate::segment::metadata_segment::MetadataSegmentReader;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
-use crate::system::{Component, ComponentContext, Handler};
+use crate::system::{Component, ComponentContext, ComponentHandle, Handler};
 use crate::types::{Collection, LogRecord, Metadata, SegmentType};
 use crate::types::{Where, WhereDocument};
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    execution::operator::TaskMessage,
-    log::log::Log,
-    sysdb::sysdb::SysDb,
-    system::{Receiver, System},
+    blockstore::provider::BlockfileProvider, log::log::Log, sysdb::sysdb::SysDb, system::System,
     types::Segment,
 };
 use async_trait::async_trait;
-use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -64,7 +59,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Query params
     where_clause: Option<Where>,
@@ -85,7 +80,7 @@ pub(crate) struct CountQueryOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
@@ -131,7 +126,7 @@ impl CountQueryOrchestrator {
         metadata_segment_id: &Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
     ) -> Self {
         Self {
@@ -158,7 +153,7 @@ impl CountQueryOrchestrator {
             Ok(segment) => segment,
             Err(e) => {
                 tracing::error!("Error getting metadata segment: {:?}", e);
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -167,7 +162,8 @@ impl CountQueryOrchestrator {
             Some(collection_id) => collection_id,
             None => {
                 tracing::error!("Metadata segment has no collection");
-                self.terminate_with_error(
+                terminate_with_error(
+                    self.result_channel.take(),
                     Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
                     ctx,
                 );
@@ -183,7 +179,7 @@ impl CountQueryOrchestrator {
             Ok(segment) => segment,
             Err(e) => {
                 tracing::error!("Error getting record segment: {:?}", e);
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -195,7 +191,7 @@ impl CountQueryOrchestrator {
             Ok(collection) => collection,
             Err(e) => {
                 tracing::error!("Error getting collection: {:?}", e);
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -213,7 +209,8 @@ impl CountQueryOrchestrator {
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
                 tracing::error!("Error getting system time: {:?}", e);
-                self.terminate_with_error(
+                terminate_with_error(
+                    self.result_channel.take(),
                     Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
                     ctx,
                 );
@@ -234,7 +231,7 @@ impl CountQueryOrchestrator {
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -335,22 +332,6 @@ impl CountQueryOrchestrator {
         };
     }
 
-    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-        match result_channel.send(Err(error)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[CountQueryOrchestrator] Result channel dropped before sending error");
-            }
-        }
-        // Cancel the orchestrator so it stops processing
-        ctx.cancellation_token.cancel();
-    }
-
     ///  Run the orchestrator and return the result.
     ///  # Note
     ///  Use this over spawning the component directly. This method will start the component and
@@ -383,6 +364,8 @@ impl Component for CountQueryOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -400,7 +383,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
                     self.blockfile_provider.clone(),
                     logs.logs(),
                 );
-                let msg = wrap(operator, input, ctx.sender.as_receiver());
+                let msg = wrap(operator, input, ctx.receiver());
                 match self.dispatcher.send(msg, None).await {
                     Ok(_) => (),
                     Err(e) => {
@@ -411,7 +394,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
                 }
             }
             Err(e) => {
-                self.terminate_with_error(Box::new(e), ctx);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }
@@ -419,6 +402,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
 
 #[async_trait]
 impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<CountRecordsOutput, CountRecordsError>,
@@ -428,7 +413,7 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOr
         let msg = match message {
             Ok(m) => m,
             Err(e) => {
-                return self.terminate_with_error(Box::new(e), ctx);
+                return terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         };
         let channel = self
@@ -452,7 +437,7 @@ impl MetadataQueryOrchestrator {
         query_ids: Option<Vec<String>>,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
         where_clause: Option<Where>,
         where_document_clause: Option<WhereDocument>,
@@ -486,7 +471,7 @@ impl MetadataQueryOrchestrator {
         let metadata_segment = match metdata_segment {
             Ok(segment) => segment,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -494,7 +479,8 @@ impl MetadataQueryOrchestrator {
         let collection_id = match metadata_segment.collection {
             Some(collection_id) => collection_id,
             None => {
-                self.terminate_with_error(
+                terminate_with_error(
+                    self.result_channel.take(),
                     Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
                     ctx,
                 );
@@ -510,7 +496,7 @@ impl MetadataQueryOrchestrator {
         let record_segment = match record_segment {
             Ok(segment) => segment,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -521,7 +507,7 @@ impl MetadataQueryOrchestrator {
         {
             Ok(collection) => collection,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -539,7 +525,8 @@ impl MetadataQueryOrchestrator {
         let end_timestamp = match end_timestamp {
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
-                self.terminate_with_error(
+                terminate_with_error(
+                    self.result_channel.take(),
                     Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
                     ctx,
                 );
@@ -560,7 +547,7 @@ impl MetadataQueryOrchestrator {
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -592,7 +579,7 @@ impl MetadataQueryOrchestrator {
         );
 
         let op = MetadataFilteringOperator::new();
-        let task = wrap(op, input, ctx.sender.as_receiver());
+        let task = wrap(op, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -693,22 +680,6 @@ impl MetadataQueryOrchestrator {
         };
     }
 
-    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-        match result_channel.send(Err(error)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[MetadataQueryOrchestrator] Result channel dropped before sending error");
-            }
-        }
-        // Cancel the orchestrator so it stops processing
-        ctx.cancellation_token.cancel();
-    }
-
     ///  Run the orchestrator and return the result.
     ///  # Note
     ///  Use this over spawning the component directly. This method will start the component and
@@ -741,6 +712,8 @@ impl Component for MetadataQueryOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -754,7 +727,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
             }
             Err(e) => {
                 tracing::error!("Error pulling logs: {:?}", e);
-                self.terminate_with_error(Box::new(e), ctx);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }
@@ -764,6 +737,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
 impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
     for MetadataQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<MetadataFilteringOutput, MetadataFilteringError>,
@@ -774,7 +749,7 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
             Ok(output) => output,
             Err(e) => {
                 tracing::error!("Error merging metadata results: {:?}", e);
-                return self.terminate_with_error(Box::new(e), ctx);
+                return terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         };
 
@@ -792,7 +767,7 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
             self.blockfile_provider.clone(),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -808,6 +783,8 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>>
     for MetadataQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>,
@@ -818,7 +795,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
             Ok(output) => output,
             Err(e) => {
                 tracing::error!("Error merging metadata results: {:?}", e);
-                return self.terminate_with_error(Box::new(e), ctx);
+                return terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         };
 

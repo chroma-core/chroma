@@ -6,7 +6,8 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
     execution::{
         data::data_chunk::Chunk,
-        operator::{wrap, TaskMessage, TaskResult},
+        dispatcher::Dispatcher,
+        operator::{wrap, TaskResult},
         operators::{
             get_vectors_operator::{
                 GetVectorsOperator, GetVectorsOperatorError, GetVectorsOperatorInput,
@@ -14,10 +15,14 @@ use crate::{
             },
             pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput},
         },
+        orchestration::common::terminate_with_error,
     },
     log::log::{Log, PullLogsError},
     sysdb::sysdb::SysDb,
-    system::{ChannelError, Component, ComponentContext, Handler, Receiver, System},
+    system::{
+        ChannelError, Component, ComponentContext, ComponentHandle, Handler, ReceiverForMessage,
+        System,
+    },
     types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
 use async_trait::async_trait;
@@ -67,7 +72,7 @@ pub struct GetVectorsOrchestrator {
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel:
@@ -81,7 +86,7 @@ impl GetVectorsOrchestrator {
         hnsw_segment_id: Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
     ) -> Self {
         Self {
@@ -101,7 +106,7 @@ impl GetVectorsOrchestrator {
 
     async fn pull_logs(
         &mut self,
-        self_address: Box<dyn Receiver<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
         ctx: &ComponentContext<Self>,
     ) {
         self.state = ExecutionState::PullLogs;
@@ -111,7 +116,11 @@ impl GetVectorsOrchestrator {
             // TODO: change protobuf definition to use u64 instead of i64
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
-                self.terminate_with_error(Box::new(GetVectorsError::SystemTimeError(e)), ctx);
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(GetVectorsError::SystemTimeError(e)),
+                    ctx,
+                );
                 return;
             }
         };
@@ -136,7 +145,11 @@ impl GetVectorsOrchestrator {
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
-                self.terminate_with_error(Box::new(GetVectorsError::TaskSendError(e)), ctx);
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(GetVectorsError::TaskSendError(e)),
+                    ctx,
+                );
             }
         }
     }
@@ -144,7 +157,7 @@ impl GetVectorsOrchestrator {
     async fn get_vectors(
         &mut self,
         self_address: Box<
-            dyn Receiver<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>,
         >,
         log: Chunk<LogRecord>,
         ctx: &ComponentContext<Self>,
@@ -168,25 +181,13 @@ impl GetVectorsOrchestrator {
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
-                self.terminate_with_error(Box::new(GetVectorsError::TaskSendError(e)), ctx);
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(GetVectorsError::TaskSendError(e)),
+                    ctx,
+                );
             }
         }
-    }
-
-    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-        match result_channel.send(Err(error)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[HnswQueryOrchestrator] Result channel dropped before sending error");
-            }
-        }
-        // Cancel the orchestrator so it stops processing
-        ctx.cancellation_token.cancel();
     }
 
     ///  Run the orchestrator and return the result.
@@ -221,7 +222,7 @@ impl Component for GetVectorsOrchestrator {
             match get_hnsw_segment_by_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
                 Ok(segment) => segment,
                 Err(e) => {
-                    self.terminate_with_error(e, ctx);
+                    terminate_with_error(self.result_channel.take(), e, ctx);
                     return;
                 }
             };
@@ -229,7 +230,8 @@ impl Component for GetVectorsOrchestrator {
         let collection_id = match &hnsw_segment.collection {
             Some(collection_id) => collection_id,
             None => {
-                self.terminate_with_error(
+                terminate_with_error(
+                    self.result_channel.take(),
                     Box::new(GetVectorsError::HnswSegmentHasNoCollection),
                     ctx,
                 );
@@ -240,7 +242,7 @@ impl Component for GetVectorsOrchestrator {
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -249,7 +251,7 @@ impl Component for GetVectorsOrchestrator {
             match get_record_segment_by_collection_id(self.sysdb.clone(), collection_id).await {
                 Ok(segment) => segment,
                 Err(e) => {
-                    self.terminate_with_error(e, ctx);
+                    terminate_with_error(self.result_channel.take(), e, ctx);
                     return;
                 }
             };
@@ -257,7 +259,7 @@ impl Component for GetVectorsOrchestrator {
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
 
-        self.pull_logs(ctx.sender.as_receiver(), ctx).await;
+        self.pull_logs(ctx.receiver(), ctx).await;
     }
 }
 
@@ -265,6 +267,8 @@ impl Component for GetVectorsOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -274,10 +278,10 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrat
         match message {
             Ok(output) => {
                 let logs = output.logs();
-                self.get_vectors(ctx.sender.as_receiver(), logs, ctx).await;
+                self.get_vectors(ctx.receiver(), logs, ctx).await;
             }
             Err(e) => {
-                self.terminate_with_error(Box::new(e), ctx);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }
@@ -287,6 +291,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for GetVectorsOrchestrat
 impl Handler<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>
     for GetVectorsOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>,
@@ -316,7 +322,7 @@ impl Handler<TaskResult<GetVectorsOperatorOutput, GetVectorsOperatorError>>
                 ctx.cancellation_token.cancel();
             }
             Err(e) => {
-                self.terminate_with_error(Box::new(e), ctx);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }

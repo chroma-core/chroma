@@ -6,16 +6,16 @@ use crate::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    types::{LogRecord, Metadata, MetadataValueConversionError, Operation, Segment},
+    types::{
+        LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Operation,
+        Segment,
+    },
     utils::merge_sorted_vecs_conjunction,
 };
 use async_trait::async_trait;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU32, Arc},
-};
+use std::collections::HashSet;
 use thiserror::Error;
-use tracing::{error, trace};
+use tracing::{error, trace, Instrument, Span};
 
 #[derive(Debug)]
 pub struct MergeMetadataResultsOperator {}
@@ -92,6 +92,10 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 {
     type Error = MergeMetadataResultsOperatorError;
 
+    fn get_name(&self) -> &'static str {
+        "MergeMetadataResultsOperator"
+    }
+
     async fn run(
         &self,
         input: &MergeMetadataResultsOperatorInput,
@@ -163,7 +167,11 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         // Step 1: Materialize the logs.
         let materializer =
             LogMaterializer::new(record_segment_reader, input.filtered_log.clone(), None);
-        let mat_records = match materializer.materialize().await {
+        let mat_records = match materializer
+            .materialize()
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await
+        {
             Ok(records) => records,
             Err(e) => {
                 return Err(MergeMetadataResultsOperatorError::LogMaterializationError(
@@ -186,7 +194,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         // deleted also here so that we can subsequently ignore
                         // them when reading the record segment.
                         visited_ids.insert(log.offset_id);
-                        if log.final_operation != Operation::Delete {
+                        if log.final_operation != MaterializedLogOperation::DeleteExisting {
                             documents.push(log.merged_document());
                             let final_metadata = log.merged_metadata();
                             if !final_metadata.is_empty() {
@@ -280,7 +288,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     // It's important to insert even the deleted records here
                     // so that they can be ignored when reading from the segment.
                     ids_in_log.insert(log.merged_user_id());
-                    if log.final_operation != Operation::Delete {
+                    if log.final_operation != MaterializedLogOperation::DeleteExisting {
                         documents.push(log.merged_document());
                         let final_metadata = log.merged_metadata();
                         if !final_metadata.is_empty() {
@@ -360,6 +368,10 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
 #[cfg(test)]
 mod test {
+    use crate::blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
     use std::{
         collections::HashMap,
         str::FromStr,
@@ -368,8 +380,11 @@ mod test {
 
     use uuid::Uuid;
 
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::{
-        blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider},
+        cache,
         execution::{
             data::data_chunk::Chunk,
             operator::Operator,
@@ -392,7 +407,14 @@ mod test {
     async fn test_merge_and_hydrate() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {
@@ -680,7 +702,14 @@ mod test {
     async fn test_merge_and_hydrate_full_scan() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = crate::types::Segment {

@@ -2,7 +2,7 @@ import os
 import shutil
 from overrides import override
 import pickle
-from typing import Dict, List, Optional, Sequence, Set, cast
+from typing import Any, Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
@@ -41,6 +41,8 @@ class PersistentData:
 
     dimensionality: Optional[int]
     total_elements_added: int
+    total_elements_updated: int
+    total_invalid_operations: int
     max_seq_id: SeqId
 
     id_to_label: Dict[str, int]
@@ -51,6 +53,8 @@ class PersistentData:
         self,
         dimensionality: Optional[int],
         total_elements_added: int,
+        total_elements_updated: int,
+        total_invalid_operations: int,
         max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
@@ -58,10 +62,18 @@ class PersistentData:
     ):
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
+        self.total_elements_updated = total_elements_updated
+        self.total_invalid_operations = total_invalid_operations
         self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
         self.id_to_seq_id = id_to_seq_id
+
+    def __setstate__(self, state: Any) -> None:
+        # Fields were added after the initial implementation
+        self.total_elements_updated = 0
+        self.total_invalid_operations = 0
+        self.__dict__.update(state)
 
     @staticmethod
     def load_from_file(filename: str) -> "PersistentData":
@@ -121,6 +133,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._persist_data = PersistentData(
                 self._dimensionality,
                 self._total_elements_added,
+                self._total_elements_updated,
+                self._total_invalid_operations,
                 self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
@@ -195,6 +209,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Persist the metadata
         self._persist_data.dimensionality = self._dimensionality
         self._persist_data.total_elements_added = self._total_elements_added
+        self._persist_data.total_elements_updated = self._total_elements_updated
         self._persist_data.max_seq_id = self._max_seq_id
 
         # TODO: This should really be stored in sqlite, the index itself, or a better
@@ -212,8 +227,20 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def _apply_batch(self, batch: Batch) -> None:
         super()._apply_batch(batch)
-        if (
+        num_elements_added_since_last_persist = (
             self._total_elements_added - self._persist_data.total_elements_added
+        )
+        num_elements_updated_since_last_persist = (
+            self._total_elements_updated - self._persist_data.total_elements_updated
+        )
+        num_invalid_operations_since_last_persist = (
+            self._total_invalid_operations - self._persist_data.total_invalid_operations
+        )
+
+        if (
+            num_elements_added_since_last_persist
+            + num_elements_updated_since_last_persist
+            + num_invalid_operations_since_last_persist
             >= self._sync_threshold
         ):
             self._persist()
@@ -228,10 +255,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             raise RuntimeError("Cannot add embeddings to stopped component")
         with WriteRWLock(self._lock):
             for record in records:
-                if record["operation_record"]["embedding"] is not None:
-                    self._ensure_index(
-                        len(records), len(record["operation_record"]["embedding"])
-                    )
+                if record["record"]["embedding"] is not None:
+                    self._ensure_index(len(records), len(record["record"]["embedding"]))
                 if not self._index_initialized:
                     # If the index is not initialized here, it means that we have
                     # not yet added any records to the index. So we can just
@@ -240,12 +265,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
                 self._max_seq_id = max(self._max_seq_id, record["log_offset"])
-                id = record["operation_record"]["id"]
-                op = record["operation_record"]["operation"]
-                exists_in_index = self._id_to_label.get(
-                    id, None
-                ) is not None or self._brute_force_index.has_id(id)
+                id = record["record"]["id"]
+                op = record["record"]["operation"]
+
                 exists_in_bf_index = self._brute_force_index.has_id(id)
+                exists_in_persisted_index = self._id_to_label.get(id, None) is not None
+                exists_in_index = exists_in_bf_index or exists_in_persisted_index
+
+                id_is_pending_delete = self._curr_batch.is_deleted(id)
 
                 if op == Operation.DELETE:
                     if exists_in_index:
@@ -256,26 +283,37 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
-                    if record["operation_record"]["embedding"] is not None:
+                    if record["record"]["embedding"] is not None:
                         if exists_in_index:
                             self._curr_batch.apply(record)
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(
-                                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
+                                f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
+                            self._total_invalid_operations += 1
                 elif op == Operation.ADD:
-                    if record["operation_record"]["embedding"] is not None:
-                        if not exists_in_index:
+                    if record["record"]["embedding"] is not None:
+                        if exists_in_index and not id_is_pending_delete:
+                            logger.warning(f"Add of existing embedding ID: {id}")
+                            self._total_invalid_operations += 1
+                        else:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
-                        else:
-                            logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
-                    if record["operation_record"]["embedding"] is not None:
+                    if record["record"]["embedding"] is not None:
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
-                if len(self._curr_batch) >= self._batch_size:
+
+                num_invalid_operations_since_last_persist = (
+                    self._total_invalid_operations
+                    - self._persist_data.total_invalid_operations
+                )
+
+                if (
+                    len(self._curr_batch) + num_invalid_operations_since_last_persist
+                    >= self._batch_size
+                ):
                     self._apply_batch(self._curr_batch)
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()

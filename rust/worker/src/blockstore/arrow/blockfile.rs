@@ -11,12 +11,11 @@ use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
 use parking_lot::Mutex;
+use std::mem::transmute;
 use std::{collections::HashMap, sync::Arc};
-use std::{collections::HashSet, mem::transmute};
 use thiserror::Error;
+use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
-
-pub(super) const MAX_BLOCK_SIZE: usize = 16384;
 
 #[derive(Clone)]
 pub(crate) struct ArrowBlockfileWriter {
@@ -58,11 +57,15 @@ impl ArrowBlockfileWriter {
             let mut block_deltas_map = block_deltas.lock();
             block_deltas_map.insert(initial_block.id, initial_block);
         }
+        tracing::debug!(
+            "Constructed blockfile writer on empty sparse index with id {:?}",
+            id
+        );
         Self {
             block_manager,
             sparse_index_manager,
-            block_deltas: block_deltas,
-            sparse_index: sparse_index,
+            block_deltas,
+            sparse_index,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -75,6 +78,10 @@ impl ArrowBlockfileWriter {
         new_sparse_index: SparseIndex,
     ) -> Self {
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
+        tracing::debug!(
+            "Constructed blockfile writer from existing sparse index id {:?}",
+            id
+        );
         Self {
             block_manager,
             sparse_index_manager,
@@ -88,18 +95,25 @@ impl ArrowBlockfileWriter {
     pub(crate) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
-        let mut delta_ids = HashSet::new();
+        let mut blocks = Vec::new();
         for delta in self.block_deltas.lock().values() {
-            // TODO: might these error?
-            self.block_manager.commit::<K, V>(delta);
-            delta_ids.insert(delta.id);
+            let mut removed = false;
+            // Skip empty blocks. Also, remove from sparse index.
+            if delta.len() == 0 {
+                tracing::info!("Delta with id {:?} is empty", delta.id);
+                removed = self.sparse_index.remove_block(&delta.id);
+            }
+            if !removed {
+                // TODO: might these error?
+                let block = self.block_manager.commit::<K, V>(delta);
+                blocks.push(block);
+            }
         }
-        self.sparse_index_manager.commit(self.sparse_index.clone());
 
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
             self.sparse_index_manager,
-            delta_ids,
+            blocks,
             self.sparse_index,
             self.id,
         );
@@ -140,15 +154,11 @@ impl ArrowBlockfileWriter {
         let delta = match delta {
             None => {
                 let block = self.block_manager.get(&target_block_id).await.unwrap();
-                let new_delta = self.block_manager.fork::<K, V>(&block.id);
+                let new_delta = self.block_manager.fork::<K, V>(&block.id).await;
                 let new_id = new_delta.id;
-                self.sparse_index.replace_block(
-                    target_block_id,
-                    new_delta.id,
-                    new_delta
-                        .get_min_key()
-                        .expect("Block should never be empty when forked"),
-                );
+                // Blocks can be empty.
+                self.sparse_index
+                    .replace_block(target_block_id, new_delta.id);
                 {
                     let mut deltas = self.block_deltas.lock();
                     deltas.insert(new_id, new_delta.clone());
@@ -161,8 +171,8 @@ impl ArrowBlockfileWriter {
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
-        if delta.get_size::<K, V>() > MAX_BLOCK_SIZE {
-            let new_blocks = delta.split::<K, V>();
+        if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+            let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
                 self.sparse_index.add_block(split_key, new_delta.id);
                 let mut deltas = self.block_deltas.lock();
@@ -196,15 +206,10 @@ impl ArrowBlockfileWriter {
         let delta = match delta {
             None => {
                 let block = self.block_manager.get(&target_block_id).await.unwrap();
-                let new_delta = self.block_manager.fork::<K, V>(&block.id);
+                let new_delta = self.block_manager.fork::<K, V>(&block.id).await;
                 let new_id = new_delta.id;
-                self.sparse_index.replace_block(
-                    target_block_id,
-                    new_delta.id,
-                    new_delta
-                        .get_min_key()
-                        .expect("Block should never be empty when forked"),
-                );
+                self.sparse_index
+                    .replace_block(target_block_id, new_delta.id);
                 {
                     let mut deltas = self.block_deltas.lock();
                     deltas.insert(new_id, new_delta.clone());
@@ -275,14 +280,21 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
         let block = self.get_block(target_block_id).await;
         let res = match block {
-            Some(block) => block.get(prefix, key),
+            Some(block) => block.get(prefix, key.clone()),
             None => {
+                tracing::error!("Block with id {:?} not found", target_block_id);
                 return Err(Box::new(ArrowBlockfileError::BlockNotFound));
             }
         };
         match res {
             Some(value) => Ok(value),
             None => {
+                tracing::error!(
+                    "Key {:?}/{:?} not found in block {:?}",
+                    prefix,
+                    key,
+                    target_block_id
+                );
                 return Err(Box::new(BlockfileError::NotFoundError));
             }
         }
@@ -309,6 +321,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     block_offset += b.len();
                 }
                 None => {
+                    tracing::error!("Block id {:?} not found", uuid);
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             }
@@ -320,6 +333,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 return Ok((prefix, key, value));
             }
             _ => {
+                tracing::error!(
+                    "Value not found at index {:?} for block",
+                    index - block_offset,
+                );
                 return Err(Box::new(BlockfileError::NotFoundError));
             }
         }
@@ -518,8 +535,13 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
 #[cfg(test)]
 mod tests {
+    use crate::blockstore::arrow::sparse_index;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::{
-        blockstore::arrow::{blockfile::MAX_BLOCK_SIZE, provider::ArrowBlockfileProvider},
+        blockstore::arrow::provider::ArrowBlockfileProvider,
+        blockstore::{arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, BlockfileError},
+        cache,
         log::config::{self, GrpcLogConfig},
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
@@ -529,17 +551,21 @@ mod tests {
     use proptest::prelude::*;
     use proptest::test_runner::Config;
     use rand::seq::IteratorRandom;
-    use std::{
-        collections::HashMap,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::HashMap;
     use tokio::runtime::Runtime;
 
     #[tokio::test]
     async fn test_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
 
@@ -553,7 +579,8 @@ mod tests {
         let value2 = Int32Array::from(vec![4, 5, 6]);
         writer.set(prefix_2, key2, &value2).await.unwrap();
 
-        writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id)
@@ -571,7 +598,14 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-            let blockfile_provider = ArrowBlockfileProvider::new(storage);
+            let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let blockfile_provider = ArrowBlockfileProvider::new(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            );
             let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
 
@@ -586,7 +620,8 @@ mod tests {
                 }
             }
             // commit.
-            writer.commit::<&str, u32>().unwrap();
+            let flusher = writer.commit::<&str, u32>().unwrap();
+            flusher.flush::<&str, u32>().await.unwrap();
 
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let prefix_query = format!("{}/{}", "prefix", prefix_for_query);
@@ -628,7 +663,14 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-            let blockfile_provider = ArrowBlockfileProvider::new(storage);
+            let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let blockfile_provider = ArrowBlockfileProvider::new(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            );
             let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
             println!("Number of keys {}", num_keys);
@@ -638,7 +680,8 @@ mod tests {
                 writer.set(prefix, key.as_str(), i as u32).await.unwrap();
             }
             // commit.
-            writer.commit::<&str, u32>().unwrap();
+            let flusher = writer.commit::<&str, u32>().unwrap();
+            flusher.flush::<&str, u32>().await.unwrap();
 
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let query = format!("{}/{}", "key", query_key);
@@ -735,7 +778,14 @@ mod tests {
     async fn test_blockfile() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
 
@@ -749,7 +799,8 @@ mod tests {
         let value2 = Int32Array::from(vec![4, 5, 6]);
         writer.set(prefix_2, key2, &value2).await.unwrap();
 
-        writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id)
@@ -767,7 +818,14 @@ mod tests {
     async fn test_splitting() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
@@ -777,7 +835,9 @@ mod tests {
             let value = Int32Array::from(vec![i]);
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit::<&str, &Int32Array>().unwrap();
+
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_1)
@@ -810,7 +870,9 @@ mod tests {
             let value = Int32Array::from(vec![i]);
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit::<&str, &Int32Array>().unwrap();
+
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_2)
@@ -843,7 +905,8 @@ mod tests {
             let value = Int32Array::from(vec![i]);
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_3)
@@ -869,7 +932,14 @@ mod tests {
     async fn test_splitting_boundary() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
@@ -885,7 +955,8 @@ mod tests {
             let value = Int32Array::from(vec![i]);
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_1)
@@ -903,7 +974,14 @@ mod tests {
     async fn test_string_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
@@ -918,7 +996,8 @@ mod tests {
                 .unwrap();
         }
 
-        writer.commit::<&str, &str>().unwrap();
+        let flusher = writer.commit::<&str, &str>().unwrap();
+        flusher.flush::<&str, &str>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
@@ -932,7 +1011,14 @@ mod tests {
     async fn test_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
 
         let writer = provider.create::<f32, &str>().unwrap();
         let id = writer.id();
@@ -944,7 +1030,8 @@ mod tests {
             writer.set("key", key, value.as_str()).await.unwrap();
         }
 
-        writer.commit::<f32, &str>().unwrap();
+        let flusher = writer.commit::<f32, &str>().unwrap();
+        flusher.flush::<f32, &str>().await.unwrap();
 
         let reader = provider.open::<f32, &str>(&id).await.unwrap();
         for i in 0..n {
@@ -958,7 +1045,14 @@ mod tests {
     async fn test_roaring_bitmap_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
 
         let writer = blockfile_provider
             .create::<&str, &roaring::RoaringBitmap>()
@@ -972,7 +1066,11 @@ mod tests {
             let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit::<&str, &roaring::RoaringBitmap>().unwrap();
+        let flusher = writer.commit::<&str, &roaring::RoaringBitmap>().unwrap();
+        flusher
+            .flush::<&str, &roaring::RoaringBitmap>()
+            .await
+            .unwrap();
 
         let reader = blockfile_provider
             .open::<&str, roaring::RoaringBitmap>(&id)
@@ -993,7 +1091,14 @@ mod tests {
     async fn test_uint_key_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
 
         let writer = blockfile_provider.create::<u32, u32>().unwrap();
         let id = writer.id();
@@ -1005,7 +1110,8 @@ mod tests {
             writer.set("key", key, value).await.unwrap();
         }
 
-        writer.commit::<u32, u32>().unwrap();
+        let flusher = writer.commit::<u32, u32>().unwrap();
+        flusher.flush::<u32, u32>().await.unwrap();
 
         let reader = blockfile_provider.open::<u32, u32>(&id).await.unwrap();
         for i in 0..n {
@@ -1019,7 +1125,14 @@ mod tests {
     async fn test_data_record_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
 
         let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
         let id = writer.id();
@@ -1038,7 +1151,8 @@ mod tests {
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
 
-        writer.commit::<&str, &DataRecord>().unwrap();
+        let flusher = writer.commit::<&str, &DataRecord>().unwrap();
+        flusher.flush::<&str, &DataRecord>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, DataRecord>(&id)
@@ -1063,17 +1177,25 @@ mod tests {
         // Tests the case where a value is larger than half the block size
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
 
         let val_1_small = "a";
-        let val_2_large = "a".repeat(MAX_BLOCK_SIZE / 2 + 1);
+        let val_2_large = "a".repeat(TEST_MAX_BLOCK_SIZE_BYTES / 2 + 1);
 
         writer.set("key", "1", val_1_small).await.unwrap();
         writer.set("key", "2", val_2_large.as_str()).await.unwrap();
-        writer.commit::<&str, &str>().unwrap();
+        let flusher = writer.commit::<&str, &str>().unwrap();
+        flusher.flush::<&str, &str>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         let val_1 = reader.get("key", "1").await.unwrap();
@@ -1087,7 +1209,14 @@ mod tests {
     async fn test_delete() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
 
@@ -1100,7 +1229,8 @@ mod tests {
                 .await
                 .unwrap();
         }
-        writer.commit::<&str, &str>().unwrap();
+        let flusher = writer.commit::<&str, &str>().unwrap();
+        flusher.flush::<&str, &str>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
@@ -1122,7 +1252,8 @@ mod tests {
                 .await
                 .unwrap();
         }
-        writer.commit::<&str, &str>().unwrap();
+        let flusher = writer.commit::<&str, &str>().unwrap();
+        flusher.flush::<&str, &str>().await.unwrap();
 
         // Check that the deleted keys are gone
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1141,7 +1272,14 @@ mod tests {
     async fn test_get_at_index() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let blockfile_provider = ArrowBlockfileProvider::new(storage);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
 
@@ -1151,7 +1289,8 @@ mod tests {
             let value = Int32Array::from(vec![i]);
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
-        writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_1)
@@ -1165,6 +1304,98 @@ mod tests {
             assert_eq!(res.0, "key");
             assert_eq!(res.1, expected_key);
             assert_eq!(res.2, expected_value);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_first_block_removal() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let id_1 = writer.id();
+
+        // Add the larger keys first then smaller.
+        let n = 1200;
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer.set("key", key.as_str(), &value).await.unwrap();
+        }
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        // Create another writer.
+        let writer = blockfile_provider
+            .fork::<&str, &Int32Array>(&id_1)
+            .await
+            .expect("BlockfileWriter fork unsuccessful");
+        // Delete everything but the last 10 keys.
+        let delete_end = n * 2 - 10;
+        for i in 0..delete_end {
+            let key = format!("{:04}", i);
+            writer
+                .delete::<&str, &Int32Array>("key", key.as_str())
+                .await
+                .expect("Delete failed");
+        }
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        let id_2 = flusher.id();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_2)
+            .await
+            .unwrap();
+
+        for i in 0..delete_end {
+            let key = format!("{:04}", i);
+            assert_eq!(reader.contains("key", &key).await, false);
+        }
+
+        for i in delete_end..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value.values(), &[i]);
+        }
+
+        let writer = blockfile_provider
+            .fork::<&str, &Int32Array>(&id_1)
+            .await
+            .expect("BlockfileWriter fork unsuccessful");
+        // Add everything back.
+        for i in 0..delete_end {
+            let key = format!("{:04}", i);
+            let value = Int32Array::from(vec![i]);
+            writer
+                .set::<&str, &Int32Array>("key", key.as_str(), &value)
+                .await
+                .expect("Delete failed");
+        }
+        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        let id_3 = flusher.id();
+        flusher.flush::<&str, &Int32Array>().await.unwrap();
+
+        let reader = blockfile_provider
+            .open::<&str, Int32Array>(&id_3)
+            .await
+            .unwrap();
+
+        for i in 0..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap();
+            assert_eq!(value.values(), &[i]);
         }
     }
 }

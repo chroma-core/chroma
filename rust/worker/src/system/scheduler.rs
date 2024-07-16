@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
-use super::sender::Sender;
-use super::{Component, ComponentContext, Handler};
+use super::{Component, ComponentContext, Handler, Message};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
@@ -25,17 +24,13 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn schedule<C, M>(
-        &self,
-        sender: Sender<C>,
-        message: M,
-        duration: Duration,
-        ctx: &ComponentContext<C>,
-    ) where
+    pub(crate) fn schedule<C, M>(&self, message: M, duration: Duration, ctx: &ComponentContext<C>)
+    where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
     {
         let cancel = ctx.cancellation_token.clone();
+        let sender = ctx.receiver().clone();
         let handle = tokio::spawn(async move {
             select! {
                 _ = cancel.cancelled() => {
@@ -64,16 +59,17 @@ impl Scheduler {
 
     pub(crate) fn schedule_interval<C, M>(
         &self,
-        sender: Sender<C>,
         message: M,
         duration: Duration,
         num_times: Option<usize>,
         ctx: &ComponentContext<C>,
     ) where
         C: Component + Handler<M>,
-        M: Debug + Send + Clone + 'static,
+        M: Message + Clone,
     {
         let cancel = ctx.cancellation_token.clone();
+
+        let sender = ctx.receiver().clone();
 
         let handle = tokio::spawn(async move {
             let mut counter = 0;
@@ -165,6 +161,8 @@ mod tests {
     }
     #[async_trait]
     impl Handler<ScheduleMessage> for TestComponent {
+        type Result = ();
+
         async fn handle(
             &mut self,
             _message: ScheduleMessage,
@@ -186,17 +184,11 @@ mod tests {
 
         async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
-            ctx.scheduler
-                .schedule(ctx.sender.clone(), ScheduleMessage {}, duration, ctx);
+            ctx.scheduler.schedule(ScheduleMessage {}, duration, ctx);
 
             let num_times = 4;
-            ctx.scheduler.schedule_interval(
-                ctx.sender.clone(),
-                ScheduleMessage {},
-                duration,
-                Some(num_times),
-                ctx,
-            );
+            ctx.scheduler
+                .schedule_interval(ScheduleMessage {}, duration, Some(num_times), ctx);
         }
     }
 

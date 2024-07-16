@@ -43,6 +43,21 @@ class IDAlreadyExistsError(ChromaError):
         return "IDAlreadyExists"
 
 
+class ChromaAuthError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 403
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "AuthError"
+
+    @overrides
+    def message(self) -> str:
+        return "Forbidden"
+
+
 class DuplicateIDError(ChromaError):
     @classmethod
     @overrides

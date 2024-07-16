@@ -43,6 +43,7 @@ export namespace Api {
 
   export interface CreateCollection {
     name: string;
+    configuration: Api.CreateCollection.Configuration | null;
     metadata?: Api.CreateCollection.Metadata | null;
     get_or_create?: boolean;
   }
@@ -52,6 +53,8 @@ export namespace Api {
    * @namespace CreateCollection
    */
   export namespace CreateCollection {
+    export interface Configuration {}
+
     export interface Metadata {}
   }
 
