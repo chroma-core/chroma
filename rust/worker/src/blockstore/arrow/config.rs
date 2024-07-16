@@ -1,6 +1,5 @@
-use serde::Deserialize;
-
 use crate::cache::config::CacheConfig;
+use serde::Deserialize;
 
 #[cfg(test)]
 // A small block size for testing, so that triggering splits etc is easier

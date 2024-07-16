@@ -19,14 +19,14 @@ where
     V: Send + Sync + Clone + 'static,
 {
     Unbounded(UnboundedCache<K, V>),
-    Foyer(FoyerCache<K, V>),
+    Foyer(FoyerCacheWrapper<K, V>),
 }
 
 impl<K: Send + Sync + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cache<K, V> {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new(config)),
-            _ => Cache::Foyer(FoyerCacheWrapper::new(config).cache),
+            _ => Cache::Foyer(FoyerCacheWrapper::new(config)),
         }
     }
 
@@ -46,7 +46,7 @@ impl<K: Send + Sync + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cac
                 let entry = cache.get(key);
                 match entry {
                     Some(v) => {
-                        let value = v.value().to_owned();
+                        let value = v.to_owned();
                         Some(value)
                     }
                     None => None,
@@ -93,6 +93,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,

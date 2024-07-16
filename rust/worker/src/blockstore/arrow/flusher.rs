@@ -39,8 +39,9 @@ impl ArrowBlockfileFlusher {
             panic!("Invariant violation. Sparse index should be not empty during flush.");
         }
         // TODO: We could flush in parallel
-        self.block_manager.flush(&self.blocks).await?;
-
+        for block in &self.blocks {
+            self.block_manager.flush(block).await?;
+        }
         self.sparse_index_manager
             .flush::<K>(&self.sparse_index)
             .await?;

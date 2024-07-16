@@ -74,7 +74,7 @@ impl Ord for SparseIndexDelimiter {
 /// - `len` - Get the number of blocks in the sparse index
 /// - `is_valid` - Check if the sparse index is valid, useful for debugging and testing
 #[derive(Clone)]
-pub struct SparseIndex {
+pub(crate) struct SparseIndex {
     pub(super) forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
     reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
     pub(super) id: Uuid,

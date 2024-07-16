@@ -6,4 +6,4 @@ pub(crate) mod config;
 pub mod key;
 pub mod memory;
 pub(crate) mod provider;
-pub use types::*;
+pub(crate) use types::*;

@@ -1,6 +1,3 @@
-use crate::cache::cache::Cache;
-use crate::errors::ChromaError;
-use core::hash::Hash;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]

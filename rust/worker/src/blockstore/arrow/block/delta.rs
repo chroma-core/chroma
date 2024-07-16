@@ -255,8 +255,7 @@ mod test {
             let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
             values_before_flush.push(read);
         }
-        let blocks = vec![block.clone()];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&block.clone().id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
@@ -292,12 +291,11 @@ mod test {
             let read = block.get::<&str, &str>("prefix", &key);
             values_before_flush.push(read.unwrap().to_string());
         }
-        let blocks = vec![block.clone()];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
 
         let block = block_manager.get(&delta_id).await.unwrap();
         // TODO: enable this assertion after the sizing is fixed
-        // assert_eq!(size, block.get_size());
+        assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
             let read = block.get::<&str, &str>("prefix", &key);
@@ -316,8 +314,7 @@ mod test {
         let forked_block = block_manager.fork::<&str, &str>(&delta_id).await;
         let new_id = forked_block.id.clone();
         let block = block_manager.commit::<&str, &str>(&forked_block);
-        let blocks = vec![block.clone()];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
@@ -351,8 +348,7 @@ mod test {
             let read = block.get::<f32, &str>("prefix", key).unwrap();
             values_before_flush.push(read);
         }
-        let blocks = vec![block.clone()];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
         for i in 0..n {
@@ -383,11 +379,10 @@ mod test {
 
         let size = delta.get_size::<&str, &RoaringBitmap>();
         let block = block_manager.commit::<&str, &RoaringBitmap>(&delta);
-        let blocks = vec![block];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         // TODO: enable this assertion after the sizing is fixed
-        // assert_eq!(size, block.get_size());
+        assert_eq!(size, block.get_size());
 
         for i in 0..n {
             let key = format!("{:04}", i);
@@ -448,8 +443,7 @@ mod test {
 
         let size = delta.get_size::<&str, &DataRecord>();
         let block = block_manager.commit::<&str, &DataRecord>(&delta);
-        let blocks = vec![block];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         for i in 0..3 {
             let read = block.get::<&str, DataRecord>("", ids[i]).unwrap();
@@ -483,8 +477,7 @@ mod test {
 
         let size = delta.get_size::<u32, &str>();
         let block = block_manager.commit::<u32, &str>(&delta);
-        let blocks = vec![block];
-        block_manager.flush(&blocks).await.unwrap();
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
 

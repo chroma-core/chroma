@@ -266,25 +266,23 @@ impl BlockManager {
         }
     }
 
-    pub(super) async fn flush(&self, block: &Vec<Block>) -> Result<(), Box<dyn ChromaError>> {
-        for block in block {
-            let bytes = match block.to_bytes() {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    tracing::error!("Failed to convert block to bytes");
-                    return Err(Box::new(e));
-                }
-            };
-            let key = format!("block/{}", block.id);
-            let res = self.storage.put_bytes(&key, bytes).await;
-            match res {
-                Ok(_) => {
-                    tracing::info!("Block: {} written to storage", block.id);
-                }
-                Err(e) => {
-                    tracing::info!("Error writing block to storage {}", e);
-                    return Err(Box::new(e));
-                }
+    pub(super) async fn flush(&self, block: &Block) -> Result<(), Box<dyn ChromaError>> {
+        let bytes = match block.to_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::error!("Failed to convert block to bytes");
+                return Err(Box::new(e));
+            }
+        };
+        let key = format!("block/{}", block.id);
+        let res = self.storage.put_bytes(&key, bytes).await;
+        match res {
+            Ok(_) => {
+                tracing::info!("Block: {} written to storage", block.id);
+            }
+            Err(e) => {
+                tracing::info!("Error writing block to storage {}", e);
+                return Err(Box::new(e));
             }
         }
         Ok(())
