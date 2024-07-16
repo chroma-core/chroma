@@ -37,6 +37,7 @@ pub async fn s3_test_entrypoint() {
 
     let mb = 500;
     let n_requests = 10;
+    let n_max = 10;
 
     let storage = storage::from_config(&config.query_service.storage)
         .await
@@ -76,7 +77,7 @@ pub async fn s3_test_entrypoint() {
         req_time.as_secs_f64()
     );
 
-    storage.get_parallel(n_requests, &full_key).await;
+    storage.get_parallel(n_requests, n_max, &full_key).await;
 }
 
 pub async fn query_service_entrypoint() {

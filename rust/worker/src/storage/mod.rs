@@ -78,10 +78,10 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn get_parallel(&self, num_reqs: usize, key: &str) {
+    pub(crate) async fn get_parallel(&self, num_reqs: usize, num_max: usize, key: &str) {
         match self {
             Storage::S3(s3) => {
-                s3.get_parallel(num_reqs, key).await;
+                s3.get_parallel(num_reqs, num_max, key).await;
             }
             Storage::Local(_) => {
                 panic!("Local storage does not support parallel reads");

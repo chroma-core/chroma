@@ -154,7 +154,7 @@ impl S3Storage {
         }
     }
 
-    pub(crate) async fn get_parallel(&self, num_reqs: usize, key: &str) {
+    pub(crate) async fn get_parallel(&self, num_reqs: usize, num_max: usize, key: &str) {
         // Head the object to get its content length
         // Divide the content length by num_reqs to get the chunk size
         // Create a range of byte ranges to fetch
@@ -233,13 +233,14 @@ impl S3Storage {
                     let body = res.unwrap().body;
                     let mut reader = body.into_async_read();
                     reader.read_exact(output_slice).await.unwrap();
+                    println!("Fetched range: {}", range_str);
                 });
             futures.push(fut);
         }
 
         let start_time = std::time::Instant::now();
         let _ = stream::iter(futures)
-            .buffer_unordered(num_reqs)
+            .buffer_unordered(num_max)
             .collect::<Vec<_>>()
             .await;
         let end_time = std::time::Instant::now();
