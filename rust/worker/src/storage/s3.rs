@@ -219,75 +219,75 @@ impl S3Storage {
 
         let ranged_and_output_slices = ranges.iter().zip(output_slices.drain(..));
 
-        // let mut futures = Vec::new();
-        // for (range, output_slice) in ranged_and_output_slices {
-        //     let range_str = format!("bytes={}-{}", range.0, range.1);
-        //     let fut = self
-        //         .client
-        //         .get_object()
-        //         .bucket(self.bucket.clone())
-        //         .key(key)
-        //         .range(range_str.clone())
-        //         .send()
-        //         .then(|res| async move {
-        //             let body = res.unwrap().body;
-        //             let mut reader = body.into_async_read();
-        //             reader.read_exact(output_slice).await.unwrap();
-        //         });
-        //     futures.push(fut);
-        // }
-
-        // let start_time = std::time::Instant::now();
-        // let _ = stream::iter(futures)
-        //     .buffer_unordered(num_reqs)
-        //     .collect::<Vec<_>>()
-        //     .await;
-        // let end_time = std::time::Instant::now();
-        // let req_time = end_time - start_time;
-        // println!(
-        //     "Fetched {} ranges in parallel in {:?} seconds",
-        //     num_reqs,
-        //     req_time.as_secs_f64()
-        // );
-
-        // try it using tasks for each request
-        let mut tasks = Vec::new();
+        let mut futures = Vec::new();
         for (range, output_slice) in ranged_and_output_slices {
             let range_str = format!("bytes={}-{}", range.0, range.1);
-            let client = self.client.clone();
-            let bucket = self.bucket.clone();
-            let key = key.to_string();
-            let task = tokio::spawn(async move {
-                let res = client
-                    .get_object()
-                    .bucket(bucket)
-                    .key(&key)
-                    .range(range_str.clone())
-                    .send()
-                    .await;
-                match res {
-                    Ok(res) => {
-                        let body = res.body;
-                        let mut reader = body.into_async_read();
-                        reader.read_exact(output_slice).await.unwrap();
-                        println!("Fetched range: {}", range_str);
-                    }
-                    Err(e) => {
-                        println!("Error in range request: {:?}", e);
-                    }
-                }
-            });
-            tasks.push(task);
+            let fut = self
+                .client
+                .get_object()
+                .bucket(self.bucket.clone())
+                .key(key)
+                .range(range_str.clone())
+                .send()
+                .then(|res| async move {
+                    let body = res.unwrap().body;
+                    let mut reader = body.into_async_read();
+                    reader.read_exact(output_slice).await.unwrap();
+                });
+            futures.push(fut);
         }
 
         let start_time = std::time::Instant::now();
-        futures::future::join_all(tasks).await;
+        let _ = stream::iter(futures)
+            .buffer_unordered(num_reqs)
+            .collect::<Vec<_>>()
+            .await;
         let end_time = std::time::Instant::now();
+        let req_time = end_time - start_time;
         println!(
             "Fetched {} ranges in parallel in {:?} seconds",
             num_reqs,
-            end_time - start_time
+            req_time.as_secs_f64()
         );
+
+        // try it using tasks for each request
+        // let mut tasks = Vec::new();
+        // for (range, output_slice) in ranged_and_output_slices {
+        //     let range_str = format!("bytes={}-{}", range.0, range.1);
+        //     let client = self.client.clone();
+        //     let bucket = self.bucket.clone();
+        //     let key = key.to_string();
+        //     let task = tokio::spawn(async move {
+        //         let res = client
+        //             .get_object()
+        //             .bucket(bucket)
+        //             .key(&key)
+        //             .range(range_str.clone())
+        //             .send()
+        //             .await;
+        //         match res {
+        //             Ok(res) => {
+        //                 let body = res.body;
+        //                 let mut reader = body.into_async_read();
+        //                 reader.read_exact(output_slice).await.unwrap();
+        //                 println!("Fetched range: {}", range_str);
+        //             }
+        //             Err(e) => {
+        //                 println!("Error in range request: {:?}", e);
+        //             }
+        //         }
+        //     });
+        //     tasks.push(task);
+        // }
+
+        // let start_time = std::time::Instant::now();
+        // futures::future::join_all(tasks).await;
+        // let end_time = std::time::Instant::now();
+        // println!(
+        //     "Fetched {} ranges in parallel in {:?} seconds",
+        //     num_reqs,
+        //     end_time - start_time
+        // );
     }
 
     pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {

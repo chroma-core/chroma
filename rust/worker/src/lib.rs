@@ -35,11 +35,14 @@ pub async fn s3_test_entrypoint() {
         Err(_) => config::RootConfig::load(),
     };
 
+    let mb = 500;
+    let n_requests = 10;
+
     let storage = storage::from_config(&config.query_service.storage)
         .await
         .expect("Failed to create storage");
 
-    let file_size_bytes = 500 * 1024 * 1024; // 500MB
+    let file_size_bytes = mb * 1024 * 1024; // 500MB
     let file_name_prefix = "test_file";
     let random_suffix: u32 = rand::thread_rng().gen();
     let full_key = format!("{}_{}", file_name_prefix, random_suffix);
@@ -73,7 +76,7 @@ pub async fn s3_test_entrypoint() {
         req_time.as_secs_f64()
     );
 
-    storage.get_parallel(10, &full_key).await;
+    storage.get_parallel(n_requests, &full_key).await;
 }
 
 pub async fn query_service_entrypoint() {
