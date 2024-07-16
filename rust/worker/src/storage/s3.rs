@@ -205,40 +205,88 @@ impl S3Storage {
             ranges.push((start, end));
         }
 
+        // let mut output_buffer: Vec<u8> = unsafe {
+        //     vec![0; content_length];
+        // };
+        // make output buffer 'static since we know we will be using it for the lifetime of the function
         let mut output_buffer: Vec<u8> = vec![0; content_length];
-        let mut output_slices = output_buffer.chunks_mut(chunk_size).collect::<Vec<_>>();
+        let mut output_buffer_slice = output_buffer.as_mut_slice();
+        let mut unsafe_output_buffer: &'static mut [u8] =
+            unsafe { std::mem::transmute(output_buffer_slice) };
+        let mut output_slices = unsafe_output_buffer
+            .chunks_mut(chunk_size)
+            .collect::<Vec<_>>();
 
         let ranged_and_output_slices = ranges.iter().zip(output_slices.drain(..));
 
-        let mut futures = Vec::new();
+        // let mut futures = Vec::new();
+        // for (range, output_slice) in ranged_and_output_slices {
+        //     let range_str = format!("bytes={}-{}", range.0, range.1);
+        //     let fut = self
+        //         .client
+        //         .get_object()
+        //         .bucket(self.bucket.clone())
+        //         .key(key)
+        //         .range(range_str.clone())
+        //         .send()
+        //         .then(|res| async move {
+        //             let body = res.unwrap().body;
+        //             let mut reader = body.into_async_read();
+        //             reader.read_exact(output_slice).await.unwrap();
+        //         });
+        //     futures.push(fut);
+        // }
+
+        // let start_time = std::time::Instant::now();
+        // let _ = stream::iter(futures)
+        //     .buffer_unordered(num_reqs)
+        //     .collect::<Vec<_>>()
+        //     .await;
+        // let end_time = std::time::Instant::now();
+        // let req_time = end_time - start_time;
+        // println!(
+        //     "Fetched {} ranges in parallel in {:?} seconds",
+        //     num_reqs,
+        //     req_time.as_secs_f64()
+        // );
+
+        // try it using tasks for each request
+        let mut tasks = Vec::new();
         for (range, output_slice) in ranged_and_output_slices {
             let range_str = format!("bytes={}-{}", range.0, range.1);
-            let fut = self
-                .client
-                .get_object()
-                .bucket(self.bucket.clone())
-                .key(key)
-                .range(range_str.clone())
-                .send()
-                .then(|res| async move {
-                    let body = res.unwrap().body;
-                    let mut reader = body.into_async_read();
-                    reader.read_exact(output_slice).await.unwrap();
-                });
-            futures.push(fut);
+            let client = self.client.clone();
+            let bucket = self.bucket.clone();
+            let key = key.to_string();
+            let task = tokio::spawn(async move {
+                let res = client
+                    .get_object()
+                    .bucket(bucket)
+                    .key(&key)
+                    .range(range_str.clone())
+                    .send()
+                    .await;
+                match res {
+                    Ok(res) => {
+                        let body = res.body;
+                        let mut reader = body.into_async_read();
+                        reader.read_exact(output_slice).await.unwrap();
+                        println!("Fetched range: {}", range_str);
+                    }
+                    Err(e) => {
+                        println!("Error in range request: {:?}", e);
+                    }
+                }
+            });
+            tasks.push(task);
         }
 
         let start_time = std::time::Instant::now();
-        let _ = stream::iter(futures)
-            .buffer_unordered(num_reqs)
-            .collect::<Vec<_>>()
-            .await;
+        futures::future::join_all(tasks).await;
         let end_time = std::time::Instant::now();
-        let req_time = end_time - start_time;
         println!(
             "Fetched {} ranges in parallel in {:?} seconds",
             num_reqs,
-            req_time.as_secs_f64()
+            end_time - start_time
         );
     }
 
