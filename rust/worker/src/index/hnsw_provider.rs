@@ -3,6 +3,7 @@ use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
+use crate::cache;
 use crate::cache::cache::Cache;
 use crate::config::Configurable;
 use crate::errors::ErrorCodes;
@@ -54,7 +55,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
         config: &(HnswProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
-        let cache = Cache::new(&hnsw_config.hnsw_cache_config);
+        let cache = cache::from_config(&hnsw_config.hnsw_cache_config).await?;
         Ok(Self {
             cache,
             storage: storage.clone(),
@@ -177,7 +178,10 @@ impl HnswIndexProvider {
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
-            let total_bytes_written = self.copy_stream_to_local_file(reader, file_handle).await?;
+            let total_bytes_written = self
+                .copy_stream_to_local_file(reader, file_handle)
+                .instrument(tracing::info_span!(parent: Span::current(), "hnsw provider file read", file = file))
+                .await?;
             tracing::info!(
                 "Copied {} bytes from storage key: {} to file: {}",
                 total_bytes_written,
@@ -212,6 +216,7 @@ impl HnswIndexProvider {
                     total_bytes_written += chunk.len() as u64;
                 }
                 Err(e) => {
+                    tracing::error!("Failed to copy file: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             }
