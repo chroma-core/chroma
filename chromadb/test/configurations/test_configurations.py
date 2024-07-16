@@ -4,6 +4,7 @@ from chromadb.api.configuration import (
     ConfigurationDefinition,
     StaticParameterError,
     ConfigurationParameter,
+    HNSWConfiguration,
 )
 
 
@@ -76,3 +77,8 @@ def test_validation() -> None:
     ]
     with pytest.raises(ValueError):
         TestConfiguration(parameters=invalid_parameter_names)
+
+
+def test_hnsw_validation() -> None:
+    with pytest.raises(ValueError, match="must be less than or equal"):
+        HNSWConfiguration(batch_size=500, sync_threshold=100)
