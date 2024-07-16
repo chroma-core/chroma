@@ -83,7 +83,7 @@ class Collection(
             id=id,
             name=name,
             metadata=metadata,
-            configuration_json=configuration.to_json(),
+            configuration_json=configuration.to_json() if configuration else {},
             dimension=dimension,
             tenant=tenant,
             database=database,
@@ -136,9 +136,11 @@ class Collection(
         params_map = json_map.copy()
 
         # Get the CollectionConfiguration from the JSON map, and remove it from the map
-        configuration = CollectionConfigurationInternal.from_json(
-            params_map.pop("configuration_json", None)
-        )
+        configuration = None
+        if "configuration_json" in params_map:
+            configuration = CollectionConfigurationInternal.from_json(
+                params_map.pop("configuration_json")
+            )
 
         return cls(configuration=configuration, **params_map)
 
