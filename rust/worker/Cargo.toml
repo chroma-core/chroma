@@ -56,6 +56,7 @@ opentelemetry-otlp = "0.12.0"
 shuttle = "0.7.1"
 regex = "1.10.5"
 flatbuffers = "24.3.25"
+foyer = "0.8"
 
 [dev-dependencies]
 proptest = "1.4.0"

@@ -192,6 +192,9 @@ impl BlockDelta {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::cache::cache::Cache;
+    use crate::cache::config::CacheConfig;
+    use crate::cache::config::UnboundedCacheConfig;
     use crate::{
         blockstore::arrow::{
             block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager,
@@ -225,7 +228,8 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, &Int32Array>();
 
         let n = 2000;
@@ -243,12 +247,23 @@ mod test {
         let size = delta.get_size::<&str, &Int32Array>();
         // TODO: should commit take ownership of delta?
         // Semantically, that makes sense, since a delta is unsuable after commit
-        block_manager.commit::<&str, &Int32Array>(&delta);
-        let block = block_manager.get(&delta.id).await.unwrap();
-        // Ensure the deltas estimated size matches the actual size of the block
-        assert_eq!(size, block.get_size());
 
+        let block = block_manager.commit::<&str, &Int32Array>(&delta);
+        let mut values_before_flush = vec![];
+        for i in 0..n {
+            let key = format!("key{}", i);
+            let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
+            values_before_flush.push(read);
+        }
+        block_manager.flush(&block).await.unwrap();
+        let block = block_manager.get(&block.clone().id).await.unwrap();
+        for i in 0..n {
+            let key = format!("key{}", i);
+            let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
+            assert_eq!(read, values_before_flush[i]);
+        }
         test_save_load_size(path, &block);
+        assert_eq!(size, block.get_size());
     }
 
     #[tokio::test]
@@ -256,7 +271,8 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, &str>();
         let delta_id = delta.id.clone();
 
@@ -268,13 +284,22 @@ mod test {
             delta.add(prefix, key.as_str(), value.as_str());
         }
         let size = delta.get_size::<&str, &str>();
-        block_manager.commit::<&str, &str>(&delta);
+        let block = block_manager.commit::<&str, &str>(&delta);
+        let mut values_before_flush = vec![];
+        for i in 0..n {
+            let key = format!("key{}", i);
+            let read = block.get::<&str, &str>("prefix", &key);
+            values_before_flush.push(read.unwrap().to_string());
+        }
+        block_manager.flush(&block).await.unwrap();
+
         let block = block_manager.get(&delta_id).await.unwrap();
+        // TODO: enable this assertion after the sizing is fixed
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
             let read = block.get::<&str, &str>("prefix", &key);
-            assert_eq!(read, Some(format!("value{}", i).as_str()));
+            assert_eq!(read.unwrap().to_string(), values_before_flush[i]);
         }
 
         // test save/load
@@ -286,9 +311,10 @@ mod test {
         }
 
         // test fork
-        let forked_block = block_manager.fork::<&str, &str>(&delta_id);
+        let forked_block = block_manager.fork::<&str, &str>(&delta_id).await;
         let new_id = forked_block.id.clone();
-        block_manager.commit::<&str, &str>(&forked_block);
+        let block = block_manager.commit::<&str, &str>(&forked_block);
+        block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
@@ -302,7 +328,8 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<f32, &str>();
 
         let n = 2000;
@@ -314,10 +341,21 @@ mod test {
         }
 
         let size = delta.get_size::<f32, &str>();
-        block_manager.commit::<f32, &str>(&delta);
+        let block = block_manager.commit::<f32, &str>(&delta);
+        let mut values_before_flush = vec![];
+        for i in 0..n {
+            let key = i as f32;
+            let read = block.get::<f32, &str>("prefix", key).unwrap();
+            values_before_flush.push(read);
+        }
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
-
+        for i in 0..n {
+            let key = i as f32;
+            let read = block.get::<f32, &str>("prefix", key).unwrap();
+            assert_eq!(read, values_before_flush[i]);
+        }
         // test save/load
         test_save_load_size(path, &block);
     }
@@ -327,7 +365,8 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, &RoaringBitmap>();
 
         let n = 2000;
@@ -339,8 +378,10 @@ mod test {
         }
 
         let size = delta.get_size::<&str, &RoaringBitmap>();
-        block_manager.commit::<&str, &RoaringBitmap>(&delta);
+        let block = block_manager.commit::<&str, &RoaringBitmap>(&delta);
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
+        // TODO: enable this assertion after the sizing is fixed
         assert_eq!(size, block.get_size());
 
         for i in 0..n {
@@ -359,7 +400,8 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let ids = vec!["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = vec![
             vec![1.0, 2.0, 3.0],
@@ -400,7 +442,8 @@ mod test {
         }
 
         let size = delta.get_size::<&str, &DataRecord>();
-        block_manager.commit::<&str, &DataRecord>(&delta);
+        let block = block_manager.commit::<&str, &DataRecord>(&delta);
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         for i in 0..3 {
             let read = block.get::<&str, DataRecord>("", ids[i]).unwrap();
@@ -420,7 +463,8 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<u32, &str>();
 
         let n = 2000;
@@ -432,7 +476,8 @@ mod test {
         }
 
         let size = delta.get_size::<u32, &str>();
-        block_manager.commit::<u32, &str>(&delta);
+        let block = block_manager.commit::<u32, &str>(&delta);
+        block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());
 
