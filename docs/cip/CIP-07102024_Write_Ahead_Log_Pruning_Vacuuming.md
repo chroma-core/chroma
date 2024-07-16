@@ -17,28 +17,20 @@ This CIP addresses both issues.
 
 ## Proposed Changes
 
-Two additional things will be done after write transactions:
+After every write transaction, if `log:prune` is enabled, the `embeddings_queue` table will be pruned to remove rows that are no longer needed. Specifically, rows with a sequence ID less than the minimum sequence ID of any active subscriber will be deleted. (As long as this is done continuously, this is a relatively cheap operation.)
 
-1. The `embeddings_queue` table will be pruned to remove rows that are no longer needed. Specifically, rows with a sequence ID less than the minimum sequence ID of any active subscriber will be deleted. (As long as this is done continuously, this is a relatively cheap operation.)
-2. `PRAGMA freelist_count` will be checked to see if the number of free pages multiplied by the page size is greater than the `log:vacuum_threshold` parameter. If so, `PRAGMA incremental_vacuum` is run to free up pages, up to `log:vacuum_limit`. This adds latency to write transactions, but will not block read transactions.
-
-### New configuration parameters
-
-**`log:vacuum_threshold`**:
-
-- Default: 1GB
-- Unit: megabytes (Postgres' convention)
-- Usage: this helps avoid excessive fragmentation—without this parameter, or if it's set to `0`, it is effectively the same as SQLite's full vacuum mode.
-
-**`log:vacuum_limit`**:
-
-- Default: 0
-- Unit: megabytes (Postgres' convention)
-- Usage: vacuuming adds latency to write transactions. This allows rough control over the added latency by only vacuuming free pages up to this limit. If set to `0`, vacuuming will always reclaim all available space. If set to a small non-zero value, it's possible that
+This does not directly reduce the disk size of the database, but allows SQLite to reuse the space occupied by the deleted rows—thus effectively bounding the disk usage of the `embeddings_queue` table by `hnsw:sync_threshold`.
 
 ## Public Interfaces
 
-In addition to the configuration parameter described above, a new `chroma vacuum` command will be added to the CLI to manually perform a full vacuum of the database. Usage:
+### New collection configuration parameters
+
+**`log:prune`**:
+
+- Default: `true`
+- Usage: this exists mainly to ease migration. The only reason to set this to `false` is if your application is extremely latency-sensitive.
+
+### New CLI command
 
 ```bash
 chroma vacuum --path ./chroma_data
@@ -52,11 +44,12 @@ We should clearly document that `chroma vacuum` is not intended to be run while 
 
 ## Compatibility, Deprecation, and Migration Plan
 
-Incremental vacuuming is not available by default in SQLite, and it's a little more complicated than just flipping a setting:
+The new `log:prune` parameter defaults to `false` on existing collections, because:
 
-> However, changing from "none" to "full" or "incremental" can only occur when the database is new (no tables have yet been created) or by running the VACUUM command.[^2]
+- The first pruning operation for an existing collection can be very slow.
+- Some users may be relying on the WAL as a full backup.
 
-This means existing installations will not benefit from auto-pruning until they run `chroma vacuum`.
+This means existing installations will not benefit from auto-pruning until they run `chroma vacuum`. During the vacuum, `log:prune` will automatically be set to `true` on all collections.
 
 Users should see disk space freed immediately after upgrading and running `chroma vacuum` for the first time. Subsequent runs of `chroma vacuum` will likely free up no or very little disk space as the database will be continuously auto-pruned from that point forward.
 
@@ -72,6 +65,8 @@ Auto-pruning should be thoroughly tested with property-based testing. We should 
 
 ### Incremental vacuum experiment
 
+(This is kept for posterity, but is no longer relevant to the current proposal.)
+
 Some tests were run to determine the impact of `PRAGMA incremental_vacuum` on read and write queries.
 
 Observations:
@@ -80,7 +75,7 @@ Observations:
 - One or more (depending on number of threads) parallel read queries will see a large latency spike, which in most cases seems to be at least the duration of the vacuum operation.
 - `PRAGMA incremental_vacuum` and write queries cannot be run in parallel (this is true in general for any query that writes data when in journaling mode).
 - As a corollary to the above: if another process/thread writes and defers its commit, it can easily block the vacuum and cause it to time out.
-- On a 2023 MacBook Pro, running `PRAGMA incremental_vacuum` on a database with ~1GB worth of free pages took around 900-1000ms.
+- On a 2023 MacBook Pro M3 Pro, running `PRAGMA incremental_vacuum` on a database with ~1GB worth of free pages took around 900-1000ms.
 
 <details>
 <summary>Source code</summary>
@@ -128,17 +123,22 @@ import string
 def random_string(len):
   return ''.join(random.choices(string.ascii_uppercase + string.digits, k=len))
 
-def print_results(timings):
+def print_results(timings, vacuum_start, vacuum_end):
   if len(timings) == 0:
     return
 
-  timings.sort()
-  p95 = timings[int(len(timings) * 0.95)]
-  print(f"Ran {len(timings)} concurrent queries")
-  print(f"Query duration 95th percentile: {p95 * 1000}ms")
-  print(f"Query duration max: {timings[-1] * 1000}ms")
+  durations = [end - start for (start, end) in timings]
 
-def query_read(ready_event: Event, shutdown_event: Event):
+  durations.sort()
+  p95 = durations[int(len(durations) * 0.95)]
+  print(f"Ran {len(durations)} concurrent queries")
+  print(f"Query duration 95th percentile: {p95 * 1000}ms")
+  print(f"Query duration max: {durations[-1] * 1000}ms")
+
+  num_queries_during_vacuum = sum(1 for (start, end) in timings if start >= vacuum_start and end <= vacuum_end)
+  print(f"Number of queries during vacuum: {num_queries_during_vacuum}")
+
+def query_read(ready_event: Event, shutdown_event: Event, timings_tx):
   conn = sqlite3.connect("test.sqlite")
 
   ready_event.set()
@@ -146,30 +146,28 @@ def query_read(ready_event: Event, shutdown_event: Event):
   while not shutdown_event.is_set():
     started_at = time.time()
     conn.execute("SELECT COUNT(*) FROM test")
-    duration = (time.time() - started_at)
-    timings.append(duration)
+    timings.append((started_at, time.time()))
 
   conn.close()
-  print_results(timings)
+  timings_tx.send(timings)
 
-def query_write(ready_event: Event, shutdown_event: Event):
+def query_write(ready_event: Event, shutdown_event: Event, timings_tx):
   conn = sqlite3.connect("test.sqlite", check_same_thread=False)
-  cur = conn.cursor()
 
   ready_event.set()
   timings = []
   while not shutdown_event.is_set():
     started_at = time.time()
-    cur.execute("INSERT INTO test (name) VALUES (?)", (random_string(32),))
-    duration = (time.time() - started_at)
-    timings.append(duration)
+    conn.execute("INSERT INTO test (name) VALUES (?)", (random_string(32),))
+    conn.commit()
+    timings.append((started_at, time.time()))
 
   conn.close()
-  print_results(timings)
+  timings_tx.send(timings)
 
 
 def increment_vacuum():
-  conn = sqlite3.connect("test.sqlite", check_same_thread=False)
+  conn = sqlite3.connect("test.sqlite", timeout=0, check_same_thread=False)
 
   conn.execute("DELETE FROM test")
   conn.commit()
@@ -177,23 +175,27 @@ def increment_vacuum():
   ctx = multiprocessing.get_context("spawn")
   ready_event = ctx.Event()
   shutdown_event = ctx.Event()
+  (timings_tx, timings_rx) = ctx.Pipe()
   # can switch between concurrent read and writes
-  process = ctx.Process(target=query_read, args=(ready_event, shutdown_event,), daemon=True)
-  # process = ctx.Process(target=query_write, args=(ready_event, shutdown_event,), daemon=True)
+  # process = ctx.Process(target=query_read, args=(ready_event, shutdown_event, timings_tx), daemon=True)
+  process = ctx.Process(target=query_write, args=(ready_event, shutdown_event, timings_tx), daemon=True)
   process.start()
   ready_event.wait()
 
-  started_at = time.time()
+  vacuum_started_at = time.time()
   r = conn.execute("PRAGMA incremental_vacuum")
   # https://stackoverflow.com/a/56412002
   r.fetchall()
-  finished_at = time.time()
+  vacuum_finished_at = time.time()
+  print(f"Vacuum took {(vacuum_finished_at - vacuum_started_at) * 1000}ms")
 
-  print(f"Vacuum took {(finished_at - started_at) * 1000}ms")
   conn.close()
 
   shutdown_event.set()
   process.join()
+
+  timings = timings_rx.recv()
+  print_results(timings, vacuum_started_at, vacuum_finished_at)
 
 if __name__ == '__main__':
   increment_vacuum()
@@ -207,4 +209,3 @@ if __name__ == '__main__':
 - [Excellent overview of different vacuuming strategies](https://blogs.gnome.org/jnelson/2015/01/06/sqlite-vacuum-and-auto_vacuum/)
 
 [^1]: [2.9: Transient Database Used by Vacuum](https://www.sqlite.org/tempfiles.html)
-[^2]: https://www.sqlite.org/pragma.html#pragma_auto_vacuum
