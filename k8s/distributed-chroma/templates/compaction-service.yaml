@@ -60,6 +60,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+      {{if .Values.compactionService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.compactionService.tolerations | nindent 8 }}
+      {{ end }}
       updateStrategy:
         type: RollingUpdate
         rollingUpdate:
