@@ -1,3 +1,5 @@
+from typing import Tuple
+from overrides import overrides
 import pytest
 from chromadb.api.configuration import (
     ConfigurationInternal,
@@ -77,6 +79,27 @@ def test_validation() -> None:
     ]
     with pytest.raises(ValueError):
         TestConfiguration(parameters=invalid_parameter_names)
+
+
+def test_configuration_validation() -> None:
+    class FooConfiguration(ConfigurationInternal):
+        definitions = {
+            "foo": ConfigurationDefinition(
+                name="foo",
+                validator=lambda value: isinstance(value, str),
+                is_static=False,
+                default_value="default",
+            ),
+        }
+
+        @overrides
+        def validator(self) -> Tuple[bool, str | None]:
+            if self.parameter_map.get("foo") != "bar":
+                return False, "foo must be 'bar'"
+            return super().validator()
+
+    with pytest.raises(ValueError, match="foo must be 'bar'"):
+        FooConfiguration(parameters=[ConfigurationParameter(name="foo", value="baz")])
 
 
 def test_hnsw_validation() -> None:
