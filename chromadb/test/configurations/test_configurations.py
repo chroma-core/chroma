@@ -26,6 +26,10 @@ class TestConfiguration(ConfigurationInternal):
         ),
     }
 
+    @overrides
+    def configuration_validator(self) -> None:
+        pass
+
 
 def test_default_values() -> None:
     default_test_configuration = TestConfiguration()
@@ -96,7 +100,6 @@ def test_configuration_validation() -> None:
         def configuration_validator(self) -> None:
             if self.parameter_map.get("foo") != "bar":
                 raise InvalidConfigurationError("foo must be 'bar'")
-            return super().configuration_validator()
 
     with pytest.raises(ValueError, match="foo must be 'bar'"):
         FooConfiguration(parameters=[ConfigurationParameter(name="foo", value="baz")])

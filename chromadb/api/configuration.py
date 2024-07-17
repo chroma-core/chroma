@@ -137,6 +137,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
             return NotImplemented
         return self.parameter_map == __value.parameter_map
 
+    @abstractmethod
     def configuration_validator(self) -> None:
         """Perform custom validation when parameters are dependent on each other.
 
@@ -364,6 +365,10 @@ class CollectionConfigurationInternal(ConfigurationInternal):
             default_value=HNSWConfigurationInternal(),
         ),
     }
+
+    @override
+    def configuration_validator(self) -> None:
+        pass
 
 
 # This is the user-facing interface for HNSW index configuration parameters.
