@@ -93,10 +93,10 @@ def test_configuration_validation() -> None:
         }
 
         @overrides
-        def validator(self) -> None:
+        def configuration_validator(self) -> None:
             if self.parameter_map.get("foo") != "bar":
                 raise InvalidConfigurationError("foo must be 'bar'")
-            return super().validator()
+            return super().configuration_validator()
 
     with pytest.raises(ValueError, match="foo must be 'bar'"):
         FooConfiguration(parameters=[ConfigurationParameter(name="foo", value="baz")])

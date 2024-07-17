@@ -116,8 +116,8 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
                 if not isinstance(parameter.value, type(definition.default_value)):
                     raise ValueError(f"Invalid parameter value: {parameter.value}")
 
-                validator = definition.validator
-                if not validator(parameter.value):
+                parameter_validator = definition.validator
+                if not parameter_validator(parameter.value):
                     raise ValueError(f"Invalid parameter value: {parameter.value}")
                 self.parameter_map[parameter.name] = parameter
         # Apply the defaults for any missing parameters
@@ -127,7 +127,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
                     name=name, value=definition.default_value
                 )
 
-        self.validator()
+        self.configuration_validator()
 
     def __repr__(self) -> str:
         return f"Configuration({self.parameter_map.values()})"
@@ -137,7 +137,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
             return NotImplemented
         return self.parameter_map == __value.parameter_map
 
-    def validator(self) -> None:
+    def configuration_validator(self) -> None:
         """Perform custom validation when parameters are dependent on each other.
 
         Raises an InvalidConfigurationError if the configuration is invalid.
@@ -273,7 +273,7 @@ class HNSWConfigurationInternal(ConfigurationInternal):
     }
 
     @override
-    def validator(self) -> None:
+    def configuration_validator(self) -> None:
         batch_size = self.parameter_map.get("batch_size")
         sync_threshold = self.parameter_map.get("sync_threshold")
 
