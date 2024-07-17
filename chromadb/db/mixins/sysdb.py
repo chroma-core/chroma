@@ -9,6 +9,7 @@ from chromadb.api.configuration import (
     CollectionConfigurationInternal,
     ConfigurationParameter,
     HNSWConfigurationInternal,
+    InvalidConfigurationError,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
@@ -775,40 +776,47 @@ class SqlSysDB(SqlDB, SysDB):
                 f"Unable to decode configuration from JSON string: {json_str}"
             )
 
-        # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
-        hnsw_configuration = config_json.get("hnsw_configuration")
-        if hnsw_configuration:
-            batch_size = hnsw_configuration.get("batch_size")
-            sync_threshold = hnsw_configuration.get("sync_threshold")
+        try:
+            return CollectionConfigurationInternal.from_json_str(json_str)
+        except InvalidConfigurationError as error:
+            # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
+            hnsw_configuration = config_json.get("hnsw_configuration")
+            if hnsw_configuration:
+                batch_size = hnsw_configuration.get("batch_size")
+                sync_threshold = hnsw_configuration.get("sync_threshold")
 
-            if batch_size and sync_threshold and batch_size > sync_threshold:
-                config_json["hnsw_configuration"][
-                    "sync_threshold"
-                ] = HNSWConfigurationInternal.definitions[
-                    "sync_threshold"
-                ].default_value
-                config_json["hnsw_configuration"][
-                    "batch_size"
-                ] = HNSWConfigurationInternal.definitions["batch_size"].default_value
-                configuration = CollectionConfigurationInternal.from_json(config_json)
-
-                collections_t = Table("collections")
-                q = (
-                    self.querybuilder()
-                    .update(collections_t)
-                    .set(
-                        collections_t.config_json_str,
-                        ParameterValue(configuration.to_json_str()),
+                if batch_size and sync_threshold and batch_size > sync_threshold:
+                    config_json["hnsw_configuration"][
+                        "sync_threshold"
+                    ] = HNSWConfigurationInternal.definitions[
+                        "sync_threshold"
+                    ].default_value
+                    config_json["hnsw_configuration"][
+                        "batch_size"
+                    ] = HNSWConfigurationInternal.definitions[
+                        "batch_size"
+                    ].default_value
+                    configuration = CollectionConfigurationInternal.from_json(
+                        config_json
                     )
-                    .where(collections_t.id == ParameterValue(collection_id))
-                )
-                sql, params = get_sql(q, self.parameter_format())
-                with self.tx() as cur:
-                    cur.execute(sql, params)
 
-                return configuration
+                    collections_t = Table("collections")
+                    q = (
+                        self.querybuilder()
+                        .update(collections_t)
+                        .set(
+                            collections_t.config_json_str,
+                            ParameterValue(configuration.to_json_str()),
+                        )
+                        .where(collections_t.id == ParameterValue(collection_id))
+                    )
+                    sql, params = get_sql(q, self.parameter_format())
+                    with self.tx() as cur:
+                        cur.execute(sql, params)
 
-        return CollectionConfigurationInternal.from_json_str(json_str)
+                    return configuration
+
+            raise error
 
     def _insert_config_from_legacy_params(
         self, collection_id: Any, metadata: Optional[Metadata]
