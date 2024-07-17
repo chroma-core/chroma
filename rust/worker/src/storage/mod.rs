@@ -7,7 +7,6 @@ pub(crate) mod config;
 pub(crate) mod local;
 pub(crate) mod s3;
 pub(crate) mod stream;
-pub(crate) mod sync_local;
 use futures::Stream;
 use thiserror::Error;
 
@@ -15,7 +14,6 @@ use thiserror::Error;
 pub(crate) enum Storage {
     S3(s3::S3Storage),
     Local(local::LocalStorage),
-    SyncLocal(sync_local::SyncLocalStorage),
 }
 
 #[derive(Error, Debug)]
@@ -78,13 +76,6 @@ impl Storage {
                     Err(e) => Err(GetError::LocalError(e)),
                 }
             }
-            Storage::SyncLocal(sync_local) => {
-                let res = sync_local.get(key).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => Err(GetError::LocalError(e)),
-                }
-            }
         }
     }
 
@@ -95,10 +86,6 @@ impl Storage {
                 .await
                 .map_err(|e| PutError::S3Error(e)),
             Storage::Local(local) => local
-                .put_file(key, path)
-                .await
-                .map_err(|e| PutError::LocalError(e)),
-            Storage::SyncLocal(sync_local) => sync_local
                 .put_file(key, path)
                 .await
                 .map_err(|e| PutError::LocalError(e)),
@@ -115,10 +102,6 @@ impl Storage {
                 .put_bytes(key, &bytes)
                 .await
                 .map_err(|e| PutError::LocalError(e)),
-            Storage::SyncLocal(sync_local) => sync_local
-                .put_bytes(key, &bytes)
-                .await
-                .map_err(|e| PutError::LocalError(e)),
         }
     }
 }
@@ -128,9 +111,6 @@ pub(crate) async fn from_config(config: &StorageConfig) -> Result<Storage, Box<d
         StorageConfig::S3(_) => Ok(Storage::S3(s3::S3Storage::try_from_config(config).await?)),
         StorageConfig::Local(_) => Ok(Storage::Local(
             local::LocalStorage::try_from_config(config).await?,
-        )),
-        StorageConfig::SyncLocal(_) => Ok(Storage::SyncLocal(
-            sync_local::SyncLocalStorage::try_from_config(config).await?,
         )),
     }
 }
