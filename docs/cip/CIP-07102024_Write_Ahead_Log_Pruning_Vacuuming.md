@@ -147,6 +147,45 @@ main()
 
 </details>
 
+Additionally, the baseline latency of `collection.add()` on calls that trigger a persist was measured to be 49-62ms.
+
+<details>
+<summary>Source code for baseline latency measurement</summary>
+
+```python
+import chromadb
+import numpy as np
+import time
+
+SYNC_THRESHOLD = 1000
+
+client = chromadb.PersistentClient("./bench-baseline")
+collection = client.create_collection("test")
+
+timings = []
+
+for batch_i in range(10):
+  ids = [f"test-{i}" for i in range(SYNC_THRESHOLD)]
+  embeddings = np.random.rand(SYNC_THRESHOLD, 1024).astype(np.float32)
+
+  # Add all except last id
+  collection.add(ids=ids[:-1], embeddings=embeddings[:-1])
+  print("added all except last id")
+
+  # Should trigger the persist
+  started_at = time.time()
+  collection.add(ids=[ids[-1]], embeddings=[embeddings[-1].tolist()])
+  timings.append(time.time() - started_at)
+
+  collection.delete(ids=ids)
+
+print(f"p50: {np.percentile(timings, 50) * 1000}ms")
+print(f"p90: {np.percentile(timings, 90) * 1000}ms")
+print(f"p99: {np.percentile(timings, 99) * 1000}ms")
+```
+
+</details>
+
 ### Incremental vacuum experiment
 
 (This is kept for posterity, but is no longer relevant to the current proposal.)
