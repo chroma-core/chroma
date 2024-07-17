@@ -786,16 +786,14 @@ class SqlSysDB(SqlDB, SysDB):
                 sync_threshold = hnsw_configuration.get("sync_threshold")
 
                 if batch_size and sync_threshold and batch_size > sync_threshold:
-                    config_json["hnsw_configuration"][
-                        "sync_threshold"
-                    ] = HNSWConfigurationInternal.definitions[
-                        "sync_threshold"
-                    ].default_value
-                    config_json["hnsw_configuration"][
-                        "batch_size"
-                    ] = HNSWConfigurationInternal.definitions[
-                        "batch_size"
-                    ].default_value
+                    # Allow new defaults to be set
+                    hnsw_configuration = {
+                        k: v
+                        for k, v in hnsw_configuration.items()
+                        if k not in ["batch_size", "sync_threshold"]
+                    }
+                    config_json.update({"hnsw_configuration": hnsw_configuration})
+
                     configuration = CollectionConfigurationInternal.from_json(
                         config_json
                     )
