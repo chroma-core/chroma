@@ -63,6 +63,90 @@ Auto-pruning should be thoroughly tested with property-based testing. We should 
 
 ## Appendix
 
+### WAL deletion experiment
+
+Some tests were run to determine the impact on latency of deleting rows from `embeddings_queue`. Added latency scales with `hnsw:sync_threshold`.
+
+Observations from running on a 2023 MacBook Pro M3 Pro, using 1024 dimension embeddings:
+
+- `hnsw:sync_threshold` of 1000 (the default) adds ~1ms of latency (p50 of 1.01ms, p99 of 1.26ms).
+- `hnsw:sync_threshold` of 10_000 adds 9-56ms of latency (p50 of 9ms, p90 of 10ms, p99 of 56ms).
+
+<details>
+<summary>Source code</summary>
+
+```python
+import sqlite3
+import time
+import numpy as np
+import os
+
+DEFAULT_SYNC_THRESHOLD = 1000
+EMBEDDING_DIMENSION = 1024
+
+def measure(conn, sync_threshold, repeat):
+  timings = []
+  for _ in range(repeat):
+    # Create
+    for i in range(sync_threshold):
+      encoded_embedding = np.random.rand(EMBEDDING_DIMENSION).astype(np.float32).tobytes()
+
+      conn.execute("""
+      INSERT INTO embeddings_queue (operation, topic, id, vector, encoding, metadata)
+      VALUES (?, ?, ?, ?, ?, ?)
+      """, (0, "test", i, encoded_embedding, "test", "test"))
+      conn.commit()
+
+    # Delete
+    started_at = time.time()
+    conn.execute("DELETE FROM embeddings_queue WHERE seq_id <= ?", (sync_threshold,))
+    conn.commit()
+    timings.append(time.time() - started_at)
+
+  return timings
+
+def print_timings(timings, batch_size):
+  print(f"Ran {len(timings)} delete queries deleting {batch_size} rows each")
+  print(f"p50: {np.percentile(timings, 50) * 1000}ms")
+  print(f"p90: {np.percentile(timings, 90) * 1000}ms")
+  print(f"p99: {np.percentile(timings, 99) * 1000}ms")
+
+
+def main():
+  os.remove("test.sqlite")
+  conn = sqlite3.connect("test.sqlite")
+  conn.execute("""
+  CREATE TABLE embeddings_queue (
+      seq_id INTEGER PRIMARY KEY,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      operation INTEGER NOT NULL,
+      topic TEXT NOT NULL,
+      id TEXT NOT NULL,
+      vector BLOB,
+      encoding TEXT,
+      metadata TEXT
+  )
+  """)
+
+  num_rows = DEFAULT_SYNC_THRESHOLD * 16
+
+  print(f"hnsw:sync_threshold = {DEFAULT_SYNC_THRESHOLD}:")
+  timings = measure(conn, DEFAULT_SYNC_THRESHOLD, 50)
+  print_timings(timings, DEFAULT_SYNC_THRESHOLD)
+
+  conn.execute("DELETE FROM embeddings_queue")
+  conn.commit()
+
+  sync_threshold = DEFAULT_SYNC_THRESHOLD * 10
+  print(f"hnsw:sync_threshold = {sync_threshold}:")
+  timings = measure(conn, sync_threshold, 50)
+  print_timings(timings, sync_threshold)
+
+main()
+```
+
+</details>
+
 ### Incremental vacuum experiment
 
 (This is kept for posterity, but is no longer relevant to the current proposal.)
