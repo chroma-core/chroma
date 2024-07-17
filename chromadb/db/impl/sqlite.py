@@ -98,6 +98,10 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
+            # The SQLite docs recommend running this at startup for applications with long-lived connections.
+            # > the "PRAGMA optimize" command automatically limits the scope of ANALYZE subcommands so that the overall "PRAGMA optimize" command completes quickly even on enormous databases
+            # https://www.sqlite.org/lang_analyze.html
+            cur.execute("PRAGMA optimize=0x10002")
         self.initialize_migrations()
 
     @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
