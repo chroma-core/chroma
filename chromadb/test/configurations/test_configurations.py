@@ -1,9 +1,9 @@
-from typing import Tuple
 from overrides import overrides
 import pytest
 from chromadb.api.configuration import (
     ConfigurationInternal,
     ConfigurationDefinition,
+    InvalidConfigurationError,
     StaticParameterError,
     ConfigurationParameter,
     HNSWConfiguration,
@@ -93,9 +93,9 @@ def test_configuration_validation() -> None:
         }
 
         @overrides
-        def validator(self) -> Tuple[bool, str | None]:
+        def validator(self) -> None:
             if self.parameter_map.get("foo") != "bar":
-                return False, "foo must be 'bar'"
+                raise InvalidConfigurationError("foo must be 'bar'")
             return super().validator()
 
     with pytest.raises(ValueError, match="foo must be 'bar'"):

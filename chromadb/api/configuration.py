@@ -8,7 +8,6 @@ from typing import (
     List,
     Optional,
     Protocol,
-    Tuple,
     Union,
     TypeVar,
     cast,
@@ -23,6 +22,12 @@ from chromadb.serde import JSONSerializable
 
 class StaticParameterError(Exception):
     """Represents an error that occurs when a static parameter is set."""
+
+    pass
+
+
+class InvalidConfigurationError(ValueError):
+    """Represents an error that occurs when a configuration is invalid."""
 
     pass
 
@@ -122,11 +127,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
                     name=name, value=definition.default_value
                 )
 
-        (is_valid, error_msg) = self.validator()
-        if not is_valid:
-            if error_msg:
-                raise ValueError(f"Invalid configuration: {error_msg}")
-            raise ValueError("Invalid configuration")
+        self.validator()
 
     def __repr__(self) -> str:
         return f"Configuration({self.parameter_map.values()})"
@@ -136,12 +137,12 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
             return NotImplemented
         return self.parameter_map == __value.parameter_map
 
-    def validator(self) -> Tuple[bool, Optional[str]]:
+    def validator(self) -> None:
         """Perform custom validation when parameters are dependent on each other.
 
-        Returns a tuple with a boolean indicating whether the configuration is valid and an optional error message.
+        Raises an InvalidConfigurationError if the configuration is invalid.
         """
-        return (True, None)
+        pass
 
     def get_parameters(self) -> List[ConfigurationParameter]:
         """Returns the parameters of the configuration."""
@@ -272,7 +273,7 @@ class HNSWConfigurationInternal(ConfigurationInternal):
     }
 
     @override
-    def validator(self) -> Tuple[bool, Optional[str]]:
+    def validator(self) -> None:
         batch_size = self.parameter_map.get("batch_size")
         sync_threshold = self.parameter_map.get("sync_threshold")
 
@@ -281,9 +282,9 @@ class HNSWConfigurationInternal(ConfigurationInternal):
             and sync_threshold
             and cast(int, batch_size.value) > cast(int, sync_threshold.value)
         ):
-            return (False, "batch_size must be less than or equal to sync_threshold")
-
-        return super().validator()
+            raise InvalidConfigurationError(
+                "batch_size must be less than or equal to sync_threshold"
+            )
 
     @classmethod
     def from_legacy_params(cls, params: Dict[str, Any]) -> Self:
