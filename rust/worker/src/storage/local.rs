@@ -24,7 +24,7 @@ impl LocalStorage {
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, String> {
         let file_path = format!("{}/{}", self.root, key);
         tracing::debug!("Reading from path: {}", file_path);
-        match tokio::fs::File::open(file_path).await {
+        match std::fs::File::open(file_path) {
             Ok(file) => {
                 let stream = file.byte_stream();
                 return Ok(Box::new(stream));
@@ -41,8 +41,8 @@ impl LocalStorage {
         // Create the path if it doesn't exist, we unwrap since this should only be used in tests
         let as_path = std::path::Path::new(&path);
         let parent = as_path.parent().unwrap();
-        tokio::fs::create_dir_all(parent).await.unwrap();
-        let res = tokio::fs::write(&path, bytes).await;
+        std::fs::create_dir_all(parent).unwrap();
+        let res = std::fs::write(&path, bytes);
         match res {
             Ok(_) => {
                 return Ok(());
@@ -54,7 +54,7 @@ impl LocalStorage {
     }
 
     pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
-        let file = tokio::fs::read(path).await;
+        let file = std::fs::read(path);
         match file {
             Ok(bytes_u8) => {
                 return self.put_bytes(key, &bytes_u8).await;

@@ -6,7 +6,7 @@ mod tests {
             cache::Cache,
             config::{CacheConfig, UnboundedCacheConfig},
         },
-        storage::{sync_local::SyncLocalStorage, Storage},
+        storage::{local::LocalStorage, Storage},
     };
     use rand::Rng;
     use shuttle::{future, thread};
@@ -16,8 +16,7 @@ mod tests {
         shuttle::check_random(
             || {
                 let tmp_dir = tempfile::tempdir().unwrap();
-                let storage =
-                    Storage::SyncLocal(SyncLocalStorage::new(tmp_dir.path().to_str().unwrap()));
+                let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
                 let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
                 let sparse_index_cache =
                     Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
