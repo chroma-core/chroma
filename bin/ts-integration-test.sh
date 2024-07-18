@@ -9,31 +9,31 @@ function cleanup {
 function setup_auth {
   local auth_type="$1"
   case "$auth_type" in
-    basic)
-      docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
-      cat <<EOF > .chroma_env
+  basic)
+    docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin >server.htpasswd
+    cat <<EOF >.chroma_env
 CHROMA_SERVER_AUTHN_CREDENTIALS_FILE="/chroma/server.htpasswd"
 CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
 EOF
-      ;;
-    token)
-      cat <<EOF > .chroma_env
+    ;;
+  token)
+    cat <<EOF >.chroma_env
 CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="Authorization"
 CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
 CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 EOF
-      ;;
-    xtoken)
-          cat <<EOF > .chroma_env
+    ;;
+  xtoken)
+    cat <<EOF >.chroma_env
 CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="X-Chroma-Token"
 CHROMA_SERVER_AUTHN_CREDENTIALS="test-token"
 CHROMA_SERVER_AUTHN_PROVIDER="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
 EOF
     ;;
-    *)
-      echo "Unknown auth type: $auth_type"
-      exit 1
-      ;;
+  *)
+    echo "Unknown auth type: $auth_type"
+    exit 1
+    ;;
   esac
 }
 
@@ -49,10 +49,9 @@ export CHROMA_SERVER_HTTP_PORT=8000
 export CHROMA_SERVER_NOFILE=65535
 
 cd clients/js
-# moved off of yarn to npm to fix issues with jackspeak/cliui/string-width versions #1314
-npm install
+pnpm install
 
-npm run test:run
+pnpm test:run
 docker compose down
 
 cd ../..
@@ -62,7 +61,7 @@ for auth_type in basic token xtoken; do
   setup_auth "$auth_type"
   cd clients/js
   docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
-  npm run test:run-auth-"$auth_type"
+  pnpm test:run-auth-"$auth_type"
   cd ../..
   docker compose down
 done
