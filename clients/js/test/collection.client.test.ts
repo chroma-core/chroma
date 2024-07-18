@@ -1,5 +1,6 @@
 import { expect, test, beforeEach } from "@jest/globals";
 import chroma from "./initClient";
+import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
 
 beforeEach(async () => {
   await chroma.reset();
@@ -7,12 +8,11 @@ beforeEach(async () => {
 
 test("it should list collections", async () => {
   let collections = await chroma.listCollections();
-  expect(collections).toBeDefined();
-  expect(collections).toBeInstanceOf(Array);
-  expect(collections.length).toBe(0);
-  const collection = await chroma.createCollection({ name: "test" });
+  expect(Array.isArray(collections)).toBe(true);
+  expect(collections).toHaveLength(0);
+  await chroma.createCollection({ name: "test" });
   collections = await chroma.listCollections();
-  expect(collections.length).toBe(1);
+  expect(collections).toHaveLength(1);
 });
 
 test("it should create a collection", async () => {
@@ -75,7 +75,10 @@ test("it should create a collection", async () => {
 
 test("it should get a collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
-  const collection2 = await chroma.getCollection({ name: "test" });
+  const collection2 = await chroma.getCollection({
+    name: "test",
+    embeddingFunction: new DefaultEmbeddingFunction(),
+  });
   expect(collection).toBeDefined();
   expect(collection2).toBeDefined();
   expect(collection).toHaveProperty("name");
