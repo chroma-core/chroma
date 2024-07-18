@@ -306,11 +306,16 @@ def collections(
             metadata = {}
         metadata.update(test_hnsw_config)
         if use_persistent_hnsw_params:
-            metadata["hnsw:batch_size"] = draw(
-                st.integers(min_value=3, max_value=max_hnsw_batch_size)
-            )
             metadata["hnsw:sync_threshold"] = draw(
                 st.integers(min_value=3, max_value=max_hnsw_sync_threshold)
+            )
+            metadata["hnsw:batch_size"] = draw(
+                st.integers(
+                    min_value=3,
+                    max_value=min(
+                        [metadata["hnsw:sync_threshold"], max_hnsw_batch_size]
+                    ),
+                )
             )
         # Sometimes, select a space at random
         if draw(st.booleans()):
