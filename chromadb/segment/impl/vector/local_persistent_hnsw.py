@@ -414,6 +414,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 hnsw_pointer: int = 0
                 curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
                 curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
+
+                # Filter deleted results that haven't yet been removed from the persisted index
+                curr_hnsw_result = [
+                    x
+                    for x in curr_hnsw_result
+                    if not self._curr_batch.is_deleted(x["id"])
+                ]
+
                 curr_results: List[VectorQueryResult] = []
                 # In the case where filters cause the number of results to be less than k,
                 # we set k to be the number of results
@@ -433,10 +441,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             else:
                                 id = curr_hnsw_result[hnsw_pointer]["id"]
                                 # Only add the hnsw result if it is not in the brute force index
-                                # as updated or deleted
-                                if not self._brute_force_index.has_id(
-                                    id
-                                ) and not self._curr_batch.is_deleted(id):
+                                if not self._brute_force_index.has_id(id):
                                     curr_results.append(curr_hnsw_result[hnsw_pointer])
                                 hnsw_pointer += 1
                         else:
@@ -448,9 +453,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             min(len(curr_hnsw_result), hnsw_pointer + remaining + 1),
                         ):
                             id = curr_hnsw_result[i]["id"]
-                            if not self._brute_force_index.has_id(
-                                id
-                            ) and not self._curr_batch.is_deleted(id):
+                            if not self._brute_force_index.has_id(id):
                                 curr_results.append(curr_hnsw_result[i])
                     elif remaining > 0 and bf_pointer < len(curr_bf_result):
                         curr_results.extend(
