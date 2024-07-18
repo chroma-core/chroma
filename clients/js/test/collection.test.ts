@@ -64,7 +64,7 @@ test("it fails with a nice error when calling the legacy functions", async () =>
   const collection = await chroma.createCollection({ name: "test" });
   // @ts-ignore
   expect(collection.peek()).rejects.toThrowErrorMatchingInlineSnapshot(
-    `"Collection's methods have been moved to ChromaClient. Please use ChromaClient.peekRecords() instead."`,
+    `"Collection methods have been moved to ChromaClient. Please use ChromaClient.peekRecords() instead."`,
   );
 });
 
