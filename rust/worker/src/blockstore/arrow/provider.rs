@@ -128,7 +128,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         };
         Ok(ArrowBlockfileProvider::new(
             storage.clone(),
-            blockfile_config.max_block_size_bytes,
+            blockfile_config.block_manager_config.max_block_size_bytes,
             block_cache,
             sparse_index_cache,
         ))

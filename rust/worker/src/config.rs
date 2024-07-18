@@ -196,8 +196,8 @@ mod tests {
                         worker_queue_size: 100
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -253,8 +253,8 @@ mod tests {
                         min_compaction_size: 10
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -326,8 +326,8 @@ mod tests {
                         worker_queue_size: 100
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -383,8 +383,8 @@ mod tests {
                         min_compaction_size: 10
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -474,8 +474,8 @@ mod tests {
                         worker_queue_size: 100
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -531,8 +531,8 @@ mod tests {
                         min_compaction_size: 10
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -616,8 +616,8 @@ mod tests {
                         worker_queue_size: 100
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
@@ -665,8 +665,8 @@ mod tests {
                         min_compaction_size: 10
                     blockfile_provider:
                         Arrow:
-                            max_block_size_bytes: 16384
                             block_manager_config:
+                                max_block_size_bytes: 16384
                                 block_cache_config:
                                     lru:
                                         capacity: 1000
