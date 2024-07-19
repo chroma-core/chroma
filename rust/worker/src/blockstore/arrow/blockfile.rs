@@ -14,7 +14,6 @@ use parking_lot::Mutex;
 use std::mem::transmute;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
-use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -535,14 +534,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
 #[cfg(test)]
 mod tests {
-    use crate::blockstore::arrow::sparse_index;
     use crate::cache::cache::Cache;
     use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::{
+        blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES,
         blockstore::arrow::provider::ArrowBlockfileProvider,
-        blockstore::{arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, BlockfileError},
-        cache,
-        log::config::{self, GrpcLogConfig},
         segment::DataRecord,
         storage::{local::LocalStorage, Storage},
         types::MetadataValue,

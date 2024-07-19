@@ -4,7 +4,7 @@ mod tests {
         blockstore::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
         cache::{
             cache::Cache,
-            config::{CacheConfig, UnboundedCacheConfig},
+            config::{CacheConfig, LruConfig},
         },
         storage::{local::LocalStorage, Storage},
     };
@@ -13,13 +13,18 @@ mod tests {
 
     #[test]
     fn test_blockfile_shuttle() {
+        const BLOCK_CACHE_CAPACITY: usize = 1000;
+        const SPARSE_INDEX_CACHE_CAPACITY: usize = 1000;
         shuttle::check_random(
             || {
                 let tmp_dir = tempfile::tempdir().unwrap();
                 let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-                let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-                let sparse_index_cache =
-                    Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+                let block_cache = Cache::new(&CacheConfig::Lru(LruConfig {
+                    capacity: BLOCK_CACHE_CAPACITY,
+                }));
+                let sparse_index_cache = Cache::new(&CacheConfig::Lru(LruConfig {
+                    capacity: SPARSE_INDEX_CACHE_CAPACITY,
+                }));
                 let blockfile_provider = ArrowBlockfileProvider::new(
                     storage,
                     TEST_MAX_BLOCK_SIZE_BYTES,
