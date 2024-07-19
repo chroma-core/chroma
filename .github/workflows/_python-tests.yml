@@ -31,7 +31,7 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_restart_persisted.py"]
+                   "chromadb/test/property/test_restart_persist.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
