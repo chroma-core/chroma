@@ -216,11 +216,6 @@ export type ModifyCollectionParams = {
   metadata?: CollectionMetadata;
 };
 
-/** This type represents the different ways the user can express a query for documents
- *  - string: a simple text query which will be converted to an Embedding
- *  - Embedding: a list of numbers representing the embedding of the query
- */
-
 export type BaseQueryParams = {
   nResults?: PositiveInteger;
   where?: Where;
