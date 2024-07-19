@@ -81,6 +81,7 @@ class Consumer(Component):
     def subscribe(
         self,
         collection_id: UUID,
+        segment_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,
@@ -110,7 +111,7 @@ class Consumer(Component):
         pass
 
     @abstractmethod
-    def ack(self, segment_id: UUID, up_to_seq_id: SeqId) -> None:
+    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
         """Acknowledge that all records up to and including the given SeqID have been
         processed. (This allows the stream to delete old records.)"""
         pass

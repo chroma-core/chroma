@@ -62,6 +62,7 @@ class SqliteMetadataSegment(MetadataReader):
             seq_id = self.max_seqid()
             self._subscription = self._consumer.subscribe(
                 collection_id=self._collection_id,
+                segment_id=self._id,
                 consume_fn=self._write_metadata,
                 start=seq_id,
             )
@@ -503,7 +504,8 @@ class SqliteMetadataSegment(MetadataReader):
                 elif record["record"]["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
-        self._consumer.ack(self._id, records[-1]["log_offset"])
+        if self._subscription:
+            self._consumer.ack(self._subscription, records[-1]["log_offset"])
 
     @trace_method(
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL

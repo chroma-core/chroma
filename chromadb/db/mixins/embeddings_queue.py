@@ -60,6 +60,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     class Subscription:
         id: UUID
         topic_name: str
+        segment_id: UUID
         start: int
         end: int
         callback: ConsumerCallbackFn
@@ -68,12 +69,14 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             self,
             id: UUID,
             topic_name: str,
+            segment_id: UUID,
             start: int,
             end: int,
             callback: ConsumerCallbackFn,
         ):
             self.id = id
             self.topic_name = topic_name
+            self.segment_id = segment_id
             self.start = start
             self.end = end
             self.callback = callback
@@ -252,6 +255,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     def subscribe(
         self,
         collection_id: UUID,
+        segment_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,
@@ -268,7 +272,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         start, end = self._validate_range(start, end)
 
         subscription = self.Subscription(
-            subscription_id, topic_name, start, end, consume_fn
+            subscription_id, topic_name, segment_id, start, end, consume_fn
         )
 
         # Backfill first, so if it errors we do not add the subscription
@@ -290,15 +294,18 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     @trace_method("SqlEmbeddingsQueue.ack", OpenTelemetryGranularity.ALL)
     @override
-    # todo: interface is a little strange, should use subscription_id? or different util?
-    def ack(self, segment_id: UUID, up_to_seq_id: SeqId) -> None:
+    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
+        subscription = self._get_subscription_by_id(subscription_id)
+        if not subscription:
+            raise ValueError(f"Subscription {subscription_id} not found")
+
         q = (
             self.querybuilder()
             .into(Table("max_seq_id"))
             # todo: should max against current value
             .columns("segment_id", "seq_id")
             .insert(
-                ParameterValue(self.uuid_to_db(segment_id)),
+                ParameterValue(self.uuid_to_db(subscription.segment_id)),
                 ParameterValue(SqlDB.encode_seq_id(up_to_seq_id)),
             )
         )
@@ -455,3 +462,13 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             )
             if _called_from_test:
                 raise e
+
+    @trace_method(
+        "SqlEmbeddingsQueue._get_subscription_by_id", OpenTelemetryGranularity.ALL
+    )
+    def _get_subscription_by_id(self, subscription_id: UUID) -> Optional[Subscription]:
+        for subscriptions in self._subscriptions.values():
+            for subscription in subscriptions:
+                if subscription.id == subscription_id:
+                    return subscription
+        return None

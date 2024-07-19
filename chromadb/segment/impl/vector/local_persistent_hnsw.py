@@ -222,7 +222,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if self._num_log_records_since_last_persist >= self._sync_threshold:
             self._persist()
             if self._subscription:
-                self._consumer.ack(self._id, self._max_seq_id)
+                self._consumer.ack(self._subscription, self._max_seq_id)
 
         self._num_log_records_since_last_batch = 0
 
