@@ -1,6 +1,5 @@
 name: Run (intensive) tests nightly
 on:
-  push:
   schedule:
       # 2:15 AM PDT, offseted by a few minutes because:
       # "The schedule event can be delayed during periods of high loads of GitHub Actions workflow runs. High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped."
@@ -18,10 +17,6 @@ jobs:
     runs-on: "depot-ubuntu-22.04-8"
     steps:
       - uses: actions/checkout@v3
-      - name: Setup upterm session
-        uses: lhotari/action-upterm@v1
-        with:
-          limit-access-to-actor: true
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
