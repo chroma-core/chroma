@@ -96,6 +96,11 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	if collectionToCompact == nil {
 		collectionToCompact = []log.GetAllCollectionsToCompactRow{}
 	}
+	if err != nil {
+		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
+	} else {
+		trace_log.Info("Got collections to compact from record_log table", zap.Int("collectionCount", len(collectionToCompact)))
+	}
 	return
 }
 func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Context, collectionId string, offsetPosition int64) (err error) {
