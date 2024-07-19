@@ -36,20 +36,19 @@ test("wrong code returns an error", async () => {
     embeddings: EMBEDDINGS,
     metadatas: METADATAS,
   });
-  try {
-    await collection.get({
+
+  await expect(
+    collection.get({
       where: {
         //@ts-ignore supposed to fail
         test: { $contains: "hello" },
       },
-    });
-  } catch (error: any) {
-    expect(error).toBeDefined();
-    expect(error).toBeInstanceOf(ChromaValueError);
-    expect(error.message).toMatchInlineSnapshot(
-      `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
-    );
-  }
+    }),
+  ).rejects.toThrow(
+    new ChromaValueError(
+      "Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains",
+    ),
+  );
 });
 
 test("it should get embedding with matching documents", async () => {
@@ -105,9 +104,9 @@ test("should error on non existing collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
-  expect(async () => {
-    await collection.get({ ids: IDS });
-  }).rejects.toThrow(InvalidCollectionError);
+  await expect(collection.get({ ids: IDS })).rejects.toThrow(
+    InvalidCollectionError,
+  );
 });
 
 test("it should throw an error if the collection does not exist", async () => {
