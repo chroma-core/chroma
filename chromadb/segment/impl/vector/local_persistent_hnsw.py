@@ -267,10 +267,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             self._brute_force_index.delete([record])
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
-                        # todo: needed?
-                        self._curr_batch.max_seq_id = max(
-                            self._curr_batch.max_seq_id, record["log_offset"]
-                        )
 
                 elif op == Operation.UPDATE:
                     if record["record"]["embedding"] is not None:
