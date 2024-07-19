@@ -15,17 +15,17 @@ test("it should add single embeddings to a collection", async () => {
   const embedding = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const metadata = { test: "test" };
   await chroma.addRecords(collection, {
-    id,
-    embedding,
-    metadata,
+    ids: id,
+    embeddings: embedding,
+    metadatas: metadata,
   });
   const count = await chroma.countRecords(collection);
   expect(count).toBe(1);
   var res = await chroma.getRecords(collection, {
-    id,
+    ids: id,
     include: [IncludeEnum.Embeddings],
   });
-  expect(res.embedding).toEqual(embedding);
+  expect(res.embeddings?.[0]).toEqual(embedding);
 });
 
 test("it should add batch embeddings to a collection", async () => {
@@ -95,14 +95,13 @@ if (!process.env.COHERE_API_KEY) {
 test("add documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  let resp = await chroma.addRecords(collection, {
+  await chroma.addRecords(collection, {
     ids: IDS,
     embeddings: EMBEDDINGS,
     documents: DOCUMENTS,
   });
-  expect(resp).toBe(true);
-  const results = await chroma.getRecords(collection, { id: "test1" });
-  expect(results.document).toBe("This is a test");
+  const results = await chroma.getRecords(collection, { ids: "test1" });
+  expect(results.documents[0]).toBe("This is a test");
 });
 
 test("should error on non existing collection", async () => {

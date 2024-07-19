@@ -416,14 +416,10 @@ export class ChromaClient {
   async addRecords(
     collection: Collection,
     params: AddRecordsParams,
-  ): Promise<AddResponse> {
-    if (typeof params.ids === "string") {
-      throw new Error(
-        "To add a single record, use the singular field names (id, embedding, metadata, document) instead of the plural field names (ids, embeddings, metadatas, documents)",
-      );
-    }
+  ): Promise<void> {
     await this.init();
-    return await this.api.add(
+
+    await this.api.add(
       collection.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
       (await prepareRecordRequest(
@@ -454,12 +450,8 @@ export class ChromaClient {
    * ```
    */
   async upsertRecords(collection: Collection, params: UpsertRecordsParams) {
-    if (typeof params.ids === "string") {
-      throw new Error(
-        "To upsert a single record, use the singular field names (id, embedding, metadata, document) instead of the plural field names (ids, embeddings, metadatas, documents)",
-      );
-    }
     await this.init();
+
     await this.api.upsert(
       collection.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
@@ -491,15 +483,11 @@ export class ChromaClient {
    * ```
    */
   async updateRecords(collection: Collection, params: UpdateRecordsParams) {
-    if (typeof params.ids === "string") {
-      throw new Error(
-        "To update a single record, use the singular field names (id, embedding, metadata, document) instead of the plural field names (ids, embeddings, metadatas, documents)",
-      );
-    }
     await this.init();
+
     await this.api.update(
       collection.id,
-      await prepareRecordRequest(params, collection.embeddingFunction),
+      await prepareRecordRequest(params, collection.embeddingFunction, true),
       this.api.options,
     );
   }
@@ -532,6 +520,7 @@ export class ChromaClient {
     { ids, where, limit, offset, include, whereDocument }: BaseGetParams = {},
   ): Promise<GetResponse> {
     await this.init();
+
     const idsArray = ids ? toArray(ids) : undefined;
 
     const resp = (await this.api.aGet(

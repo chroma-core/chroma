@@ -15,7 +15,7 @@ test("it should get embedding with matching documents", async () => {
   });
 
   const results = await chroma.getRecords(collection, {
-    id: "test1",
+    ids: "test1",
     include: [
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
@@ -23,7 +23,7 @@ test("it should get embedding with matching documents", async () => {
     ],
   });
 
-  expect(results?.embedding).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  expect(results?.embeddings?.[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   await chroma.updateRecords(collection, {
     ids: ["test1"],
@@ -33,16 +33,19 @@ test("it should get embedding with matching documents", async () => {
   });
 
   const results2 = await chroma.getRecords(collection, {
-    id: "test1",
+    ids: "test1",
     include: [
       IncludeEnum.Embeddings,
       IncludeEnum.Metadatas,
       IncludeEnum.Documents,
     ],
   });
-  expect(results2?.embedding).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
-  expect(results2.metadata).toEqual({ test: "test1new", float_value: -2 });
-  expect(results2.document).toEqual("doc1new");
+  expect(results2?.embeddings?.[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
+  expect(results2.metadatas?.[0]).toEqual({
+    test: "test1new",
+    float_value: -2,
+  });
+  expect(results2.documents?.[0]).toEqual("doc1new");
 });
 
 test("should error on non existing collection", async () => {
@@ -57,6 +60,28 @@ test("should error on non existing collection", async () => {
       documents: ["doc1"],
     });
   }).rejects.toThrow(InvalidCollectionError);
+});
+
+test("should support updating records without a document or an embedding", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await chroma.addRecords(collection, {
+    ids: "test1",
+    documents: "doc1",
+    embeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    metadatas: { test: "test1", float_value: 0.1 },
+  });
+  await chroma.updateRecords(collection, {
+    ids: ["test1"],
+    metadatas: [{ test: "meta1" }],
+  });
+
+  const results = await chroma.getRecords(collection, {
+    ids: "test1",
+    include: [IncludeEnum.Metadatas],
+  });
+
+  expect(results.metadatas[0]?.test).toEqual("meta1");
 });
 
 // this currently fails
