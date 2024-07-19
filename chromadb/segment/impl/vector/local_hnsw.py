@@ -43,8 +43,6 @@ class LocalHnswSegment(VectorReader):
     _index: Optional[hnswlib.Index]
     _dimensionality: Optional[int]
     _total_elements_added: int
-    _total_elements_updated: int
-    _total_invalid_operations: int
     _max_seq_id: SeqId
 
     _lock: ReadWriteLock
@@ -68,8 +66,6 @@ class LocalHnswSegment(VectorReader):
         self._index = None
         self._dimensionality = None
         self._total_elements_added = 0
-        self._total_elements_updated = 0
-        self._total_invalid_operations = 0
         self._max_seq_id = self._consumer.min_seqid()
 
         self._id_to_seq_id = {}
@@ -279,7 +275,6 @@ class LocalHnswSegment(VectorReader):
 
             # If that succeeds, update the total count
             self._total_elements_added += batch.add_count
-            self._total_elements_updated += batch.update_count
 
             # If that succeeds, finally the seq ID
             self._max_seq_id = batch.max_seq_id
@@ -305,7 +300,6 @@ class LocalHnswSegment(VectorReader):
                         batch.apply(record)
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
-                        self._total_invalid_operations += 1
 
                 elif op == Operation.UPDATE:
                     if record["record"]["embedding"] is not None:
@@ -315,13 +309,11 @@ class LocalHnswSegment(VectorReader):
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
-                            self._total_invalid_operations += 1
                 elif op == Operation.ADD:
                     if not label:
                         batch.apply(record, False)
                     else:
                         logger.warning(f"Add of existing embedding ID: {id}")
-                        self._total_invalid_operations += 1
                 elif op == Operation.UPSERT:
                     batch.apply(record, label is not None)
 

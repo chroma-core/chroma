@@ -41,7 +41,6 @@ class PersistentData:
 
     dimensionality: Optional[int]
     total_elements_added: int
-    total_elements_updated: int
     max_seq_id: SeqId
 
     id_to_label: Dict[str, int]
@@ -52,7 +51,6 @@ class PersistentData:
         self,
         dimensionality: Optional[int],
         total_elements_added: int,
-        total_elements_updated: int,
         max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
@@ -60,7 +58,6 @@ class PersistentData:
     ):
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
-        self.total_elements_updated = total_elements_updated
         self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
@@ -115,7 +112,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
-            self._total_elements_updated = self._persist_data.total_elements_updated
             self._max_seq_id = self._persist_data.max_seq_id
             self._id_to_label = self._persist_data.id_to_label
             self._label_to_id = self._persist_data.label_to_id
@@ -127,9 +123,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         else:
             self._persist_data = PersistentData(
                 self._dimensionality,
-                self._max_seq_id,
                 self._total_elements_added,
-                self._total_elements_updated,
+                self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
                 self._id_to_seq_id,
@@ -203,7 +198,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Persist the metadata
         self._persist_data.dimensionality = self._dimensionality
         self._persist_data.total_elements_added = self._total_elements_added
-        self._persist_data.total_elements_updated = self._total_elements_updated
         self._persist_data.max_seq_id = self._max_seq_id
 
         # TODO: This should really be stored in sqlite, the index itself, or a better
@@ -277,12 +271,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
-                            self._total_invalid_operations += 1
                 elif op == Operation.ADD:
                     if record["record"]["embedding"] is not None:
                         if exists_in_index and not id_is_pending_delete:
                             logger.warning(f"Add of existing embedding ID: {id}")
-                            self._total_invalid_operations += 1
                         else:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
