@@ -559,7 +559,7 @@ def sqlite() -> Generator[System, None, None]:
     system.stop()
 
 
-def sqlite_persistent() -> Generator[System, None, None]:
+def sqlite_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -590,8 +590,19 @@ def sqlite_persistent() -> Generator[System, None, None]:
             raise e
 
 
+@pytest.fixture(scope="module")
+def sqlite_persistent() -> Generator[System, None, None]:
+    yield from sqlite_persistent_fixture()
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, async_fastapi, fastapi_persistent, sqlite, sqlite_persistent]
+    fixtures = [
+        fastapi,
+        async_fastapi,
+        fastapi_persistent,
+        sqlite,
+        sqlite_persistent_fixture,
+    ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
