@@ -22,19 +22,25 @@ test("it should create a collection", async () => {
   expect(collection).toHaveProperty("id");
   expect(collection.name).toBe("test");
   let collections = await chroma.listCollections();
+  expect(collections).toHaveLength(1);
 
-  expect(collections).toMatchInlineSnapshot(`
-    [
-      {
-        "database": "default_database",
-        "dimension": null,
-        "id": "${collection.id}",
-        "metadata": null,
-        "name": "test",
-        "tenant": "default_tenant",
-        "version": 0,
-      },
-    ]
+  const [returnedCollection] = collections;
+
+  expect({
+    ...returnedCollection,
+    configuration_json: undefined,
+    id: undefined,
+  }).toMatchInlineSnapshot(`
+    {
+      "configuration_json": undefined,
+      "database": "default_database",
+      "dimension": null,
+      "id": undefined,
+      "metadata": null,
+      "name": "test",
+      "tenant": "default_tenant",
+      "version": 0,
+    }
   `);
 
   expect([{ name: "test2", metadata: null }]).not.toEqual(
@@ -53,21 +59,26 @@ test("it should create a collection", async () => {
   expect(collection2).toHaveProperty("metadata");
   expect(collection2.metadata).toHaveProperty("test");
   expect(collection2.metadata).toEqual({ test: "test" });
-  let collections2 = await chroma.listCollections();
-  expect(collections2).toMatchInlineSnapshot(`
-    [
-      {
-        "database": "default_database",
-        "dimension": null,
-        "id": "${collection2.id}",
-        "metadata": {
-          "test": "test",
-        },
-        "name": "test2",
-        "tenant": "default_tenant",
-        "version": 0,
+  const collections2 = await chroma.listCollections();
+  expect(collections2).toHaveLength(1);
+  const [returnedCollection2] = collections2;
+  expect({
+    ...returnedCollection2,
+    configuration_json: undefined,
+    id: undefined,
+  }).toMatchInlineSnapshot(`
+    {
+      "configuration_json": undefined,
+      "database": "default_database",
+      "dimension": null,
+      "id": undefined,
+      "metadata": {
+        "test": "test",
       },
-    ]
+      "name": "test2",
+      "tenant": "default_tenant",
+      "version": 0,
+    }
   `);
 });
 
