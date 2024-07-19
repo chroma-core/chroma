@@ -74,10 +74,6 @@ export class AdminClient {
         ...this.api.options.headers,
         ...this.authProvider.authenticate(),
       };
-      this.api.options.headers = {
-        ...this.api.options.headers,
-        ...this.authProvider.authenticate(),
-      };
     }
   }
 

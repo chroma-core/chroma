@@ -1,6 +1,7 @@
 import { Api } from "./generated";
 import Count200Response = Api.Count200Response;
 import { AdminClient } from "./AdminClient";
+import { ChromaConnectionError } from "./Errors";
 
 // a function to convert a non-Array object to an Array
 export function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -72,16 +73,24 @@ export async function validateTenantDatabase(
   try {
     await adminClient.getTenant({ name: tenant });
   } catch (error) {
+    if (error instanceof ChromaConnectionError) {
+      throw error;
+    }
     throw new Error(
-      `Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`,
+      `Could not connect to tenant ${tenant}. Are you sure it exists? Underlying error:
+${error}`,
     );
   }
 
   try {
     await adminClient.getDatabase({ name: database, tenantName: tenant });
   } catch (error) {
+    if (error instanceof ChromaConnectionError) {
+      throw error;
+    }
     throw new Error(
-      `Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`,
+      `Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists? Underlying error:
+${error}`,
     );
   }
 }
