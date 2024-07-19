@@ -2,7 +2,7 @@ use crate::blockstore::key::{CompositeKey, KeyWrapper};
 use crate::errors::ChromaError;
 use core::panic;
 use parking_lot::Mutex;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -97,6 +97,47 @@ impl SparseIndex {
         forward.insert(SparseIndexDelimiter::Start, block_id);
         let mut reverse = self.reverse.lock();
         reverse.insert(block_id, SparseIndexDelimiter::Start);
+    }
+
+    pub(super) fn get_all_target_block_ids(
+        &self,
+        search_keys: &mut Vec<CompositeKey>,
+    ) -> Vec<Uuid> {
+        // Sort so that we can search in one iteration.
+        search_keys.sort();
+        let mut result_uuids = Vec::new();
+        let forward = self.forward.lock();
+        let mut curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
+        let mut search_iter = search_keys.iter().peekable();
+        while let Some((curr_key, curr_block_id)) = curr_iter.next() {
+            let search_key = match search_iter.peek() {
+                Some(key) => SparseIndexDelimiter::Key((**key).clone()),
+                None => {
+                    break;
+                }
+            };
+            if let Some((next_key, _)) = next_iter.next() {
+                if search_key >= *curr_key && search_key < *next_key {
+                    result_uuids.push(*curr_block_id);
+                    // Move forward all search keys that match this block.
+                    search_iter.next();
+                    while let Some(key) = search_iter.peek() {
+                        let search_key = SparseIndexDelimiter::Key((**key).clone());
+                        if search_key >= *curr_key && search_key < *next_key {
+                            search_iter.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // last block. All the remaining keys should be satisfied by this.
+                result_uuids.push(*curr_block_id);
+                break;
+            }
+        }
+        result_uuids
     }
 
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
