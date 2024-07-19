@@ -1,7 +1,9 @@
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::{DataRecord, SegmentFlusher};
+use crate::blockstore::arrow::types::ArrowReadableKey;
+use crate::blockstore::key::KeyWrapper;
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
-use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter, Key};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::types::{MaterializedLogOperation, Operation, Segment, SegmentType};
@@ -810,5 +812,24 @@ impl RecordSegmentReader<'_> {
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         self.id_to_data.count().await
+    }
+
+    pub(crate) async fn prefetch_id_to_data(&self, keys: &Vec<u32>) -> () {
+        let prefixes = vec![""; keys.len()];
+        self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
+    }
+
+    pub(crate) async fn prefetch_user_id_to_id(&self, keys: &Vec<&str>) -> () {
+        let prefixes = vec![""; keys.len()];
+        self.user_id_to_id
+            .load_blocks_for_keys(&prefixes, keys)
+            .await
+    }
+
+    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &Vec<u32>) -> () {
+        let prefixes = vec![""; keys.len()];
+        self.id_to_user_id
+            .load_blocks_for_keys(&prefixes, keys)
+            .await
     }
 }
