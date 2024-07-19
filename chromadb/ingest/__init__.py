@@ -42,6 +42,10 @@ class Producer(Component):
         pass
 
     @abstractmethod
+    def clean_log(self, collection_id: UUID) -> None:
+        pass
+
+    @abstractmethod
     def submit_embedding(
         self, collection_id: UUID, embedding: OperationRecord
     ) -> SeqId:
@@ -82,7 +86,7 @@ class Consumer(Component):
         end: Optional[SeqId] = None,
         id: Optional[UUID] = None,
     ) -> UUID:
-        """Register a function that will be called to recieve embeddings for a given
+        """Register a function that will be called to receive embeddings for a given
         collections log stream. The given function may be called any number of times, with any number of
         records, and may be called concurrently.
 
@@ -103,6 +107,12 @@ class Consumer(Component):
     def unsubscribe(self, subscription_id: UUID) -> None:
         """Unregister a subscription. The consume function will no longer be invoked,
         and resources associated with the subscription will be released."""
+        pass
+
+    @abstractmethod
+    def ack(self, segment_id: UUID, up_to_seq_id: SeqId) -> None:
+        """Acknowledge that all records up to and including the given SeqID have been
+        processed. (This allows the stream to delete old records.)"""
         pass
 
     @abstractmethod

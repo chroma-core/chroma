@@ -36,7 +36,7 @@ class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
     _collection: Optional[UUID]
-    _subscription: UUID
+    _subscription: Optional[UUID]
     _settings: Settings
     _params: HnswParams
 
@@ -60,6 +60,7 @@ class LocalHnswSegment(VectorReader):
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
         self._collection = segment["collection"]
+        self._subscription = None
         self._settings = system.settings
         self._params = HnswParams(segment["metadata"] or {})
 
@@ -277,7 +278,7 @@ class LocalHnswSegment(VectorReader):
             self._total_elements_added += batch.add_count
 
             # If that succeeds, finally the seq ID
-            self._max_seq_id = batch.max_seq_id
+            self._max_seq_id = max(self._max_seq_id, batch.max_seq_id)
 
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
     def _write_records(self, records: Sequence[LogRecord]) -> None:
@@ -318,6 +319,8 @@ class LocalHnswSegment(VectorReader):
                     batch.apply(record, label is not None)
 
             self._apply_batch(batch)
+
+        self._consumer.ack(self._id, self._max_seq_id)
 
     @override
     def delete(self) -> None:

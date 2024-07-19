@@ -542,7 +542,7 @@ def integration() -> Generator[System, None, None]:
     system.stop()
 
 
-def sqlite() -> Generator[System, None, None]:
+def sqlite_fixture() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using in-memory Sqlite"""
     settings = Settings(
         chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -557,6 +557,11 @@ def sqlite() -> Generator[System, None, None]:
     system.start()
     yield system
     system.stop()
+
+
+@pytest.fixture
+def sqlite() -> Generator[System, None, None]:
+    yield from sqlite_fixture()
 
 
 def sqlite_persistent_fixture() -> Generator[System, None, None]:
@@ -590,7 +595,7 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
             raise e
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def sqlite_persistent() -> Generator[System, None, None]:
     yield from sqlite_persistent_fixture()
 
@@ -600,7 +605,7 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fastapi,
         async_fastapi,
         fastapi_persistent,
-        sqlite,
+        sqlite_fixture,
         sqlite_persistent_fixture,
     ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:

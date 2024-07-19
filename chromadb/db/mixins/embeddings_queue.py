@@ -52,7 +52,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     Note that this class is only suitable for use cases where the producer and consumer
     are in the same process.
 
-    This is because notifiaction of new embeddings happens solely in-process: this
+    This is because notification of new embeddings happens solely in-process: this
     implementation does not actively listen to the the database for new records added by
     other processes.
     """
@@ -113,6 +113,51 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .delete()
         )
         with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+    @trace_method("SqlEmbeddingsQueue.clean_log", OpenTelemetryGranularity.ALL)
+    @override
+    def clean_log(self, collection_id: UUID) -> None:
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
+
+        segments_t = Table("segments")
+        segment_ids_q = (
+            self.querybuilder()
+            .from_(segments_t)
+            .where(
+                segments_t.collection == ParameterValue(self.uuid_to_db(collection_id))
+            )
+            # todo: small race condition possible when .clean_log is called between segment creations?
+            # This coalesce prevents a correctness bug when two segments exist and:
+            # - one has written to the max_seq_id table
+            # - the other has not never written to the max_seq_id table
+            # In that case, we should not delete any WAL entries as we can't be sure that the second segment is caught up.
+            .select(functions.Coalesce(Table("max_seq_id").seq_id, -1))
+            .left_join(Table("max_seq_id"))
+            .on(segments_t.id == Table("max_seq_id").segment_id)
+        )
+
+        with self.tx() as cur:
+            sql, params = get_sql(segment_ids_q, self.parameter_format())
+            cur.execute(sql, params)
+            results = cur.fetchall()
+            if results:
+                min_seq_id = min(SqlDB.decode_seq_id(row[0]) for row in results)
+            else:
+                min_seq_id = -1
+
+            t = Table("embeddings_queue")
+            q = (
+                self.querybuilder()
+                .from_(t)
+                .where(t.topic == ParameterValue(topic_name))
+                .where(t.seq_id < ParameterValue(min_seq_id))
+                .delete()
+            )
+
             sql, params = get_sql(q, self.parameter_format())
             cur.execute(sql, params)
 
@@ -242,6 +287,25 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     if len(subscriptions) == 0:
                         del self._subscriptions[topic_name]
                     return
+
+    @trace_method("SqlEmbeddingsQueue.ack", OpenTelemetryGranularity.ALL)
+    @override
+    # todo: interface is a little strange, should use subscription_id? or different util?
+    def ack(self, segment_id: UUID, up_to_seq_id: SeqId) -> None:
+        q = (
+            self.querybuilder()
+            .into(Table("max_seq_id"))
+            # todo: should max against current value
+            .columns("segment_id", "seq_id")
+            .insert(
+                ParameterValue(self.uuid_to_db(segment_id)),
+                ParameterValue(SqlDB.encode_seq_id(up_to_seq_id)),
+            )
+        )
+        sql, params = get_sql(q)
+        sql = sql.replace("INSERT", "INSERT OR REPLACE")
+        with self.tx() as cur:
+            cur.execute(sql, params)
 
     @override
     def min_seqid(self) -> SeqId:

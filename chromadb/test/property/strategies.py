@@ -226,6 +226,9 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
 
         return embeddings
 
+    def __repr__(self) -> str:
+        return f"hashing_embedding_function(dim={self.dim}, dtype={self.dtype})"
+
 
 class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
