@@ -48,8 +48,6 @@ func (s *segmentDb) Insert(in *dbmodel.Segment) error {
 		return err
 	}
 	return nil
-
-	return nil
 }
 
 func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error) {
