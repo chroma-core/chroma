@@ -133,7 +133,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .where(
                 segments_t.collection == ParameterValue(self.uuid_to_db(collection_id))
             )
-            # todo: small race condition possible when .clean_log is called between segment creations?
             # This coalesce prevents a correctness bug when two segments exist and:
             # - one has written to the max_seq_id table
             # - the other has not never written to the max_seq_id table
@@ -299,20 +298,20 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if not subscription:
             raise ValueError(f"Subscription {subscription_id} not found")
 
-        q = (
-            self.querybuilder()
-            .into(Table("max_seq_id"))
-            # todo: should max against current value
-            .columns("segment_id", "seq_id")
-            .insert(
-                ParameterValue(self.uuid_to_db(subscription.segment_id)),
-                ParameterValue(SqlDB.encode_seq_id(up_to_seq_id)),
-            )
-        )
-        sql, params = get_sql(q)
-        sql = sql.replace("INSERT", "INSERT OR REPLACE")
         with self.tx() as cur:
-            cur.execute(sql, params)
+            cur.execute(
+                """
+                INSERT INTO max_seq_id (segment_id, seq_id)
+                VALUES (?, ?)
+                ON CONFLICT (segment_id)
+                DO
+                    UPDATE SET seq_id = MAX(seq_id, excluded.seq_id)
+            """,
+                (
+                    self.uuid_to_db(subscription.segment_id),
+                    SqlDB.encode_seq_id(up_to_seq_id),
+                ),
+            )
 
     @override
     def min_seqid(self) -> SeqId:

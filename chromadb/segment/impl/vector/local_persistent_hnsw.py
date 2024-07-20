@@ -86,8 +86,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_directory: str
     _allow_reset: bool
 
-    _invalid_operations_since_last_persist: int = 0
-
     _opentelemtry_client: OpenTelemetryClient
 
     _num_log_records_since_last_batch: int = 0
@@ -223,8 +221,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._persist()
             if self._subscription:
                 self._consumer.ack(self._subscription, self._max_seq_id)
-
-        self._num_log_records_since_last_batch = 0
 
         self._num_log_records_since_last_batch = 0
 

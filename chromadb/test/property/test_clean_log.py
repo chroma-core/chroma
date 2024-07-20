@@ -7,32 +7,18 @@ from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from pypika import Table, functions
-import hypothesis.strategies as st
 from hypothesis.stateful import (
     rule,
     run_state_machine_as_test,
-    initialize,
 )
 
 from chromadb.test.conftest import sqlite_fixture, sqlite_persistent_fixture
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineBase,
     EmbeddingStateMachineStates,
-    trace,
 )
-import chromadb.test.property.strategies as strategies
-
-
-# todo: needed?
-collection_persistent_st = st.shared(
-    # Set a small batch size, otherwise it's unlikely that .clean_log() will have any effect
-    strategies.collections(
-        with_hnsw_params=True,
-        with_persistent_hnsw_params=st.just(True),
-        max_hnsw_sync_threshold=5,
-        max_hnsw_batch_size=5,
-    ),
-    key="coll_persistent",
+from chromadb.test.property.test_restart_persist import (
+    RestartablePersistedEmbeddingStateMachine,
 )
 
 
@@ -48,7 +34,6 @@ def total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
         return cast(int, result.fetchone()[0])
 
 
-# todo: combine with RestartablePersistedEmbeddingStateMachine
 class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
     has_collection_mutated = False
     system: System
@@ -90,46 +75,10 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.has_collection_mutated = True
 
 
-# This machine shares a lot of similarity with the machine in chromadb/test/property/test_persist.py, but it's a separate machine because test_persist makes assertions
-class PersistentLogCleanEmbeddingStateMachine(LogCleanEmbeddingStateMachine):
-    @initialize(collection=collection_persistent_st)  # type: ignore
-    @overrides
-    def initialize(self, collection: strategies.Collection):
-        self.client.reset()
-
-        self.collection = self.client.create_collection(
-            name=collection.name,
-            metadata=collection.metadata,  # type: ignore
-            embedding_function=collection.embedding_function,
-        )
-        self.embedding_function = collection.embedding_function
-        trace("init")
-        self.on_state_change(EmbeddingStateMachineStates.initialize)
-
-        self.record_set_state = strategies.StateMachineRecordSet(
-            ids=[], metadatas=[], documents=[], embeddings=[]
-        )
-
-    @rule()
-    def restart_system(self) -> None:
-        # Simulates restarting chromadb
-        # (there's some edge cases around correctly tracking sequence IDs at client startup)
-        self.system.stop()
-        self.system = System(self.system.settings)
-        self.system.start()
-        self.client.clear_system_cache()
-        self.client = Client.from_system(self.system)
-        self.collection = self.client.get_collection(
-            self.collection.name, embedding_function=self.embedding_function
-        )
-
-    @overrides
-    def teardown(self) -> None:
-        super().teardown()
-        # Need to manually stop the system to cleanup resources because we may have created a new system (above rule).
-        # Normally, we wouldn't have to worry about this as the system from the fixture is shared between state machine runs.
-        # (This helps avoid a "too many open files" error.)
-        self.system.stop()
+class PersistentLogCleanEmbeddingStateMachine(
+    LogCleanEmbeddingStateMachine, RestartablePersistedEmbeddingStateMachine
+):
+    ...
 
 
 @pytest.fixture(params=[sqlite_fixture, sqlite_persistent_fixture])
