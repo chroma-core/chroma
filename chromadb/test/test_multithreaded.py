@@ -195,7 +195,7 @@ def _test_interleaved_add_query(
         if exception is not None:
             raise exception
     if (
-        isinstance(api, SegmentAPI) and api.get_settings().is_persistent is True
+        isinstance(client, SegmentAPI) and client.get_settings().is_persistent is True
     ):  # we can't check invariants for FastAPI
         invariants.fd_not_exceeding_threadpool_size(num_workers)
     # Check that invariants hold
