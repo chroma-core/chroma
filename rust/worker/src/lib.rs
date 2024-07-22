@@ -1,5 +1,6 @@
 mod assignment;
 mod blockstore;
+mod cache;
 mod compactor;
 mod config;
 pub mod distance;

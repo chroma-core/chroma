@@ -8,6 +8,9 @@ use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
+use crate::blockstore::arrow::block::Block;
+use crate::blockstore::arrow::sparse_index::SparseIndex;
+use crate::cache::cache::Cache;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::storage::config::StorageConfig;
@@ -16,6 +19,7 @@ use async_trait::async_trait;
 use core::fmt::{self, Debug};
 use std::fmt::Formatter;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) enum BlockfileProvider {
@@ -41,10 +45,17 @@ impl BlockfileProvider {
         BlockfileProvider::HashMapBlockfileProvider(MemoryBlockfileProvider::new())
     }
 
-    pub(crate) fn new_arrow(storage: Storage, max_block_size_bytes: usize) -> Self {
+    pub(crate) fn new_arrow(
+        storage: Storage,
+        max_block_size_bytes: usize,
+        block_cache: Cache<Uuid, Block>,
+        sparse_index_cache: Cache<Uuid, SparseIndex>,
+    ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
             storage,
             max_block_size_bytes,
+            block_cache,
+            sparse_index_cache,
         ))
     }
 

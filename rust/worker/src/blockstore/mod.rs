@@ -1,5 +1,5 @@
 pub mod positional_posting_list_value;
-mod types;
+pub mod types;
 
 pub mod arrow;
 pub(crate) mod config;

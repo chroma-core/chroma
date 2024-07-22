@@ -1,3 +1,4 @@
+import json
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
@@ -8,6 +9,7 @@ from chromadb.api.configuration import (
     CollectionConfigurationInternal,
     ConfigurationParameter,
     HNSWConfigurationInternal,
+    InvalidConfigurationError,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
@@ -435,8 +437,8 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata = self._metadata_from_rows(rows)
                 dimension = int(rows[0][3]) if rows[0][3] else None
                 if rows[0][2] is not None:
-                    configuration = CollectionConfigurationInternal.from_json_str(
-                        rows[0][2]
+                    configuration = self._load_config_from_json_str_and_migrate(
+                        str(collection_id), rows[0][2]
                     )
                 else:
                     # 07/2024: This is a legacy case where we don't have a collection
@@ -764,6 +766,56 @@ class SqlSysDB(SqlDB, SysDB):
         if sql:
             cur.execute(sql, params)
 
+    def _load_config_from_json_str_and_migrate(
+        self, collection_id: str, json_str: str
+    ) -> CollectionConfigurationInternal:
+        try:
+            config_json = json.loads(json_str)
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"Unable to decode configuration from JSON string: {json_str}"
+            )
+
+        try:
+            return CollectionConfigurationInternal.from_json_str(json_str)
+        except InvalidConfigurationError as error:
+            # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
+            hnsw_configuration = config_json.get("hnsw_configuration")
+            if hnsw_configuration:
+                batch_size = hnsw_configuration.get("batch_size")
+                sync_threshold = hnsw_configuration.get("sync_threshold")
+
+                if batch_size and sync_threshold and batch_size > sync_threshold:
+                    # Allow new defaults to be set
+                    hnsw_configuration = {
+                        k: v
+                        for k, v in hnsw_configuration.items()
+                        if k not in ["batch_size", "sync_threshold"]
+                    }
+                    config_json.update({"hnsw_configuration": hnsw_configuration})
+
+                    configuration = CollectionConfigurationInternal.from_json(
+                        config_json
+                    )
+
+                    collections_t = Table("collections")
+                    q = (
+                        self.querybuilder()
+                        .update(collections_t)
+                        .set(
+                            collections_t.config_json_str,
+                            ParameterValue(configuration.to_json_str()),
+                        )
+                        .where(collections_t.id == ParameterValue(collection_id))
+                    )
+                    sql, params = get_sql(q, self.parameter_format())
+                    with self.tx() as cur:
+                        cur.execute(sql, params)
+
+                    return configuration
+
+            raise error
+
     def _insert_config_from_legacy_params(
         self, collection_id: Any, metadata: Optional[Metadata]
     ) -> CollectionConfigurationInternal:
@@ -771,12 +823,13 @@ class SqlSysDB(SqlDB, SysDB):
 
         # This is a legacy case where we don't have configuration stored in the database
         # This is non-destructive, we don't delete or overwrite any keys in the metadata
-        from chromadb.segment.impl.vector.hnsw_params import HnswParams
+        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 
         collections_t = Table("collections")
 
-        # Get any existing HNSW params from the metadata
-        hnsw_metadata_params = HnswParams.extract(metadata or {})
+        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
+        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
+
         hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
             hnsw_metadata_params  # type: ignore[arg-type]
         )

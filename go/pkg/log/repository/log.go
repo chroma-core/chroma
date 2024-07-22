@@ -35,6 +35,7 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	}()
 	collection, err = queriesWithTx.GetCollectionForUpdate(ctx, collectionId)
 	if err != nil {
+		trace_log.Error("Error in fetching collection from collection table", zap.Error(err))
 		// If no row found, insert one.
 		if errors.Is(err, pgx.ErrNoRows) {
 			trace_log.Info("No rows found in the collection table for collection", zap.String("collectionId", collectionId))
@@ -94,6 +95,11 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
 		collectionToCompact = []log.GetAllCollectionsToCompactRow{}
+	}
+	if err != nil {
+		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
+	} else {
+		trace_log.Info("Got collections to compact from record_log table", zap.Int("collectionCount", len(collectionToCompact)))
 	}
 	return
 }

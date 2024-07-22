@@ -9,6 +9,8 @@
 // streaming from s3.
 
 use super::config::StorageConfig;
+use super::stream::ByteStreamItem;
+use super::stream::S3ByteStream;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use async_trait::async_trait;
@@ -18,11 +20,11 @@ use aws_sdk_s3;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
-use aws_smithy_types::byte_stream::ByteStream;
+use aws_sdk_s3::primitives::ByteStream;
+use futures::Stream;
 use std::clone::Clone;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::io::AsyncBufRead;
 
 #[derive(Clone)]
 pub(crate) struct S3Storage {
@@ -50,6 +52,8 @@ pub enum S3GetError {
     S3GetError(String),
     #[error("No such key: {0}")]
     NoSuchKey(String),
+    #[error("ByteStream error: {0}")]
+    ByteStreamError(String),
 }
 
 impl ChromaError for S3GetError {
@@ -107,7 +111,7 @@ impl S3Storage {
     pub(crate) async fn get(
         &self,
         key: &str,
-    ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, S3GetError> {
+    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
         let res = self
             .client
             .get_object()
@@ -117,7 +121,8 @@ impl S3Storage {
             .await;
         match res {
             Ok(res) => {
-                return Ok(Box::new(res.body.into_async_read()));
+                let byte_stream = res.body;
+                return Ok(Box::new(S3ByteStream::new(byte_stream)));
             }
             Err(e) => {
                 tracing::error!("error: {}", e);

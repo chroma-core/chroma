@@ -2,6 +2,10 @@
 mod tests {
     use crate::{
         blockstore::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        cache::{
+            cache::Cache,
+            config::{CacheConfig, LruConfig},
+        },
         storage::{local::LocalStorage, Storage},
     };
     use rand::Rng;
@@ -9,15 +13,26 @@ mod tests {
 
     #[test]
     fn test_blockfile_shuttle() {
+        const BLOCK_CACHE_CAPACITY: usize = 1000;
+        const SPARSE_INDEX_CACHE_CAPACITY: usize = 1000;
         shuttle::check_random(
             || {
                 let tmp_dir = tempfile::tempdir().unwrap();
                 let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-                let blockfile_provider =
-                    ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+                let block_cache = Cache::new(&CacheConfig::Lru(LruConfig {
+                    capacity: BLOCK_CACHE_CAPACITY,
+                }));
+                let sparse_index_cache = Cache::new(&CacheConfig::Lru(LruConfig {
+                    capacity: SPARSE_INDEX_CACHE_CAPACITY,
+                }));
+                let blockfile_provider = ArrowBlockfileProvider::new(
+                    storage,
+                    TEST_MAX_BLOCK_SIZE_BYTES,
+                    block_cache,
+                    sparse_index_cache,
+                );
                 let writer = blockfile_provider.create::<&str, u32>().unwrap();
                 let id = writer.id();
-
                 // Generate N datapoints and then have T threads write them to the blockfile
                 let range_min = 10;
                 let range_max = 10000;
@@ -27,9 +42,9 @@ mod tests {
                 let t = shuttle::rand::thread_rng().gen_range(2..max_threads);
                 let mut join_handles = Vec::with_capacity(t);
                 for i in 0..t {
-                    let writer = writer.clone();
                     let range_start = i * n / t;
                     let range_end = (i + 1) * n / t;
+                    let writer = writer.clone();
                     let handle = thread::spawn(move || {
                         for j in range_start..range_end {
                             let key_string = format!("key{}", j);
@@ -37,7 +52,7 @@ mod tests {
                                 writer
                                     .set::<&str, u32>("", key_string.as_str(), j as u32)
                                     .await
-                                    .unwrap()
+                                    .unwrap();
                             });
                         }
                     });
@@ -48,12 +63,15 @@ mod tests {
                     handle.join().unwrap();
                 }
 
-                writer.commit::<&str, u32>().unwrap();
+                // commit the writer
+                future::block_on(async {
+                    let flusher = writer.commit::<&str, u32>().unwrap();
+                    flusher.flush::<&str, u32>().await.unwrap();
+                });
 
                 let reader = future::block_on(async {
                     blockfile_provider.open::<&str, u32>(&id).await.unwrap()
                 });
-
                 // Read the data back
                 for i in 0..n {
                     let key_string = format!("key{}", i);

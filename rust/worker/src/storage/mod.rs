@@ -1,11 +1,13 @@
 use self::config::StorageConfig;
 use self::s3::S3GetError;
+use self::stream::ByteStreamItem;
 use crate::config::Configurable;
 use crate::errors::{ChromaError, ErrorCodes};
-use tokio::io::AsyncBufRead;
 pub(crate) mod config;
 pub(crate) mod local;
 pub(crate) mod s3;
+pub(crate) mod stream;
+use futures::Stream;
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -55,7 +57,7 @@ impl Storage {
     pub(crate) async fn get(
         &self,
         key: &str,
-    ) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, GetError> {
+    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, GetError> {
         match self {
             Storage::S3(s3) => {
                 let res = s3.get(key).await;
@@ -71,7 +73,6 @@ impl Storage {
                 let res = local.get(key).await;
                 match res {
                     Ok(res) => Ok(res),
-                    // TODO: Special case no such key if possible
                     Err(e) => Err(GetError::LocalError(e)),
                 }
             }

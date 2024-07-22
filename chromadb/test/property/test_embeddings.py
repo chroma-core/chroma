@@ -1,5 +1,6 @@
 import hypothesis.stateful
 import hypothesis.strategies
+from overrides import overrides
 import pytest
 import logging
 import hypothesis
@@ -94,6 +95,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self.record_set_state = strategies.StateMachineRecordSet(
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
+
+    @overrides
+    def teardown(self) -> None:
+        self.client.delete_collection(self.collection.name)
 
     @rule(
         target=embedding_ids,
@@ -304,7 +309,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
         super().initialize(collection)
-        print("[test_embeddings] Reset")
+        print(
+            "[test_embeddings][initialize] Initialize collection id ",
+            self.collection._model["id"],
+        )
         self.log_operation_count = 0
         self.unique_ids_in_log: Set[ID] = set()
         self.collection_version = self.collection.get_model()["version"]
@@ -329,7 +337,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             self.log_operation_count = 0
             self.unique_ids_in_log = set()
         else:
-            print("[test_embeddings][wait_for_compaction] wait for version to increase")
+            print(
+                "[test_embeddings][wait_for_compaction] wait for version to increase from current version ",
+                current_version,
+            )
             new_version = wait_for_version_increase(
                 self.client, self.collection.name, current_version, additional_time=240
             )

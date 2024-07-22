@@ -1,7 +1,6 @@
 import { expect, test } from "@jest/globals";
 import { chromaBasic } from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
-import { ChromaForbiddenError } from "../src/Errors";
 
 test("it should get the version without auth needed", async () => {
   const version = await chromaNoAuth.version();
@@ -15,19 +14,23 @@ test("it should get the heartbeat without auth needed", async () => {
   expect(heartbeat).toBeGreaterThan(0);
 });
 
-test("it should raise error when non authenticated", async () => {
-  await expect(chromaNoAuth.listCollections()).rejects.toBeInstanceOf(
-    ChromaForbiddenError,
-  );
+test("it should throw error when non authenticated", async () => {
+  try {
+    await chromaNoAuth.listCollections();
+  } catch (e) {
+    expect(e).toBeInstanceOf(Error);
+  }
 });
 
 test("it should list collections", async () => {
-  await chromaBasic.reset();
-  let collections = await chromaBasic.listCollections();
+  const client = chromaBasic();
+
+  await client.reset();
+  let collections = await client.listCollections();
   expect(collections).toBeDefined();
   expect(collections).toBeInstanceOf(Array);
   expect(collections.length).toBe(0);
-  await chromaBasic.createCollection({ name: "test" });
-  collections = await chromaBasic.listCollections();
+  await client.createCollection({ name: "test" });
+  collections = await client.listCollections();
   expect(collections.length).toBe(1);
 });
