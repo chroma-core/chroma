@@ -17,18 +17,20 @@ This CIP addresses both issues.
 
 ## Proposed Changes
 
-After every write transaction, if `log:prune` is enabled, the `embeddings_queue` table will be pruned to remove rows that are no longer needed. Specifically, rows with a sequence ID less than the minimum sequence ID of any active subscriber will be deleted. (As long as this is done continuously, this is a relatively cheap operation.)
+After every write transaction, if log pruning is enabled, the `embeddings_queue` table will be pruned to remove rows that are no longer needed. Specifically, rows with a sequence ID less than the minimum sequence ID of any active subscriber will be deleted. (As long as this is done continuously, this is a relatively cheap operation.)
 
 This does not directly reduce the disk size of the database, but allows SQLite to reuse the space occupied by the deleted rows—thus effectively bounding the disk usage of the `embeddings_queue` table by `hnsw:sync_threshold`.
 
+To control log pruning, `SqlEmbeddingsQueue` will get a new configuration object with a single parameter: `automatically_prune`. This will default to `false` for systems with non-empty embedding queues, because:
+
+- The first pruning operation for a large embeddings queue can be very slow.
+- Some users may be relying on the WAL as a full backup.
+
+If the system's embedding queue is empty (a fresh system), `automatically_prune` will default to `true`.
+
+This configuration object will be stored in a new table, `embeddings_queue_config`.
+
 ## Public Interfaces
-
-### New collection configuration parameters
-
-**`log:prune`**:
-
-- Default: `true`
-- Usage: this exists mainly to ease migration. The only reason to set this to `false` is if your application is extremely latency-sensitive.
 
 ### New CLI command
 
@@ -44,12 +46,7 @@ We should clearly document that `chroma vacuum` is not intended to be run while 
 
 ## Compatibility, Deprecation, and Migration Plan
 
-The new `log:prune` parameter defaults to `false` on existing collections, because:
-
-- The first pruning operation for an existing collection can be very slow.
-- Some users may be relying on the WAL as a full backup.
-
-This means existing installations will not benefit from auto-pruning until they run `chroma vacuum`. During the vacuum, `log:prune` will automatically be set to `true` on all collections.
+Existing installations will not benefit from auto-pruning until they run `chroma vacuum`. During the vacuum, `automatically_prune` will be set to `true`.
 
 Users should see disk space freed immediately after upgrading and running `chroma vacuum` for the first time. Subsequent runs of `chroma vacuum` will likely free up no or very little disk space as the database will be continuously auto-pruned from that point forward.
 
