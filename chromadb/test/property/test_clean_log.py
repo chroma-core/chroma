@@ -1,5 +1,4 @@
 from typing import Generator, cast
-from chromadb.ingest import Producer
 from overrides import overrides
 import pytest
 from chromadb.api.client import Client
@@ -9,7 +8,7 @@ from chromadb.db.impl.sqlite import SqliteDB
 from pypika import Table, functions
 import hypothesis.strategies as st
 from hypothesis.stateful import (
-    rule,
+    invariant,
     run_state_machine_as_test,
     initialize,
 )
@@ -58,12 +57,10 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
         client = Client.from_system(system)
         super().__init__(client)
 
-    @rule()
-    def log_empty_after_cleaning(self) -> None:
-        producer = self.system.instance(Producer)
+    # todo: merge with main embedding state machine?
+    @invariant()
+    def log_size_below_max(self) -> None:
         sqlite = self.system.instance(SqliteDB)
-
-        producer.purge_log(self.collection.id)
 
         if self.has_collection_mutated:
             # Must always keep one entry to avoid reusing seq_ids

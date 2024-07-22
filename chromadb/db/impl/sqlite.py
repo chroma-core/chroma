@@ -100,6 +100,10 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
 
+        # Access cached property to initialize it
+        # todo: why here instead of embeddings queue?
+        _ = self._config
+
     @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
     @override
     def stop(self) -> None:

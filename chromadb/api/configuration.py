@@ -393,3 +393,18 @@ class CollectionConfigurationInterface(CollectionConfigurationInternal):
 
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'.
 CollectionConfiguration = CollectionConfigurationInterface
+
+
+class EmbeddingsQueueConfigurationInternal(ConfigurationInternal):
+    definitions = {
+        "automatically_prune": ConfigurationDefinition(
+            name="automatically_prune",
+            validator=lambda value: isinstance(value, bool),
+            is_static=True,
+            default_value=False,
+        ),
+    }
+
+    @override
+    def configuration_validator(self) -> None:
+        pass
