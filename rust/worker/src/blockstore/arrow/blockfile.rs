@@ -284,7 +284,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         join_all(futures).await;
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &Vec<&str>, keys: &Vec<K>) -> () {
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: Vec<K>) -> () {
         let mut composite_keys = Vec::new();
         let mut prefix_iter = prefixes.iter();
         let mut key_iter = keys.iter();
@@ -294,9 +294,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 composite_keys.push(composite_key);
             }
         }
-        let target_block_ids = self
-            .sparse_index
-            .get_all_target_block_ids(&mut composite_keys);
+        let target_block_ids = self.sparse_index.get_all_target_block_ids(composite_keys);
         self.load_blocks(target_block_ids).await;
     }
 

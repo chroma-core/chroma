@@ -99,10 +99,7 @@ impl SparseIndex {
         reverse.insert(block_id, SparseIndexDelimiter::Start);
     }
 
-    pub(super) fn get_all_target_block_ids(
-        &self,
-        search_keys: &mut Vec<CompositeKey>,
-    ) -> Vec<Uuid> {
+    pub(super) fn get_all_target_block_ids(&self, mut search_keys: Vec<CompositeKey>) -> Vec<Uuid> {
         // Sort so that we can search in one iteration.
         search_keys.sort();
         let mut result_uuids = Vec::new();
