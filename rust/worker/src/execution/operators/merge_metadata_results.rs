@@ -243,24 +243,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         }
                     }
                 };
-                // Prefetch data.
-                // Note: This will be moved to an operator.
-                let merged_ids_copy = merged_ids.clone();
-                let mut ids_to_hydrate = Vec::new();
-                for merged_id in merged_ids_copy {
-                    if visited_ids.contains(&merged_id) {
-                        continue;
-                    }
-                    ids_to_hydrate.push(merged_id);
-                }
-                record_segment_reader
-                    .prefetch_id_to_data(&ids_to_hydrate)
-                    .instrument(tracing::trace_span!(parent: Span::current(), "[MergeMetadataResults] Prefetch id to data"))
-                    .await;
-                record_segment_reader
-                    .prefetch_id_to_user_id(&ids_to_hydrate)
-                    .instrument(tracing::trace_span!(parent: Span::current(), "[MergeMetadataResults] Prefetch id to user id"))
-                    .await;
                 for merged_id in merged_ids {
                     // Skip already taken from log.
                     if visited_ids.contains(&merged_id) {

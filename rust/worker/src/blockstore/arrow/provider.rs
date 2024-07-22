@@ -218,7 +218,7 @@ impl BlockManager {
                     ).await;
                     match stream {
                         Ok(mut bytes) => {
-                            let read_block_span = tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end for block get");
+                            let read_block_span = tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end");
                             let buf = read_block_span.in_scope(|| async {
                                 let mut buf: Vec<u8> = Vec::new();
                                 while let Some(res) = bytes.next().await {
@@ -243,7 +243,7 @@ impl BlockManager {
                                     return None;
                                 }
                             };
-                            tracing::info!("Read {:?} bytes from s3 for block get", buf.len());
+                            tracing::info!("Read {:?} bytes from s3", buf.len());
                             let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
                             let block = deserialization_span.in_scope(|| Block::from_bytes(&buf, *id));
                             match block {

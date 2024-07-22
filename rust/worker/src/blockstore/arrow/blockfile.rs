@@ -276,6 +276,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     pub(super) async fn load_blocks(&self, block_ids: Vec<Uuid>) -> () {
+        // TODO: These need to be tasks enqueued onto dispatcher.
         let mut futures = Vec::new();
         for block_id in block_ids {
             futures.push(self.get_block(block_id));

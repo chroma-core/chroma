@@ -96,25 +96,6 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                     if input.include_vectors {
                         hnsw_result_vectors = Some(Vec::new());
                     }
-                    // Prefetch data.
-                    // Note: This will be moved to an operator.
-                    let offset_ids = input
-                        .hnsw_result_offset_ids
-                        .iter()
-                        .map(|x| *x as u32)
-                        .collect();
-                    reader
-                        .prefetch_id_to_user_id(&offset_ids)
-                        .instrument(
-                            tracing::trace_span!(parent: Span::current(), "[MergeKnnResultsOperator] Prefetch id to user id"),
-                        )
-                        .await;
-                    reader
-                        .prefetch_id_to_data(&offset_ids)
-                        .instrument(
-                            tracing::trace_span!(parent: Span::current(), "[MergeKnnResultsOperator] Prefetch id to data"),
-                        )
-                        .await;
                     for offset_id in &input.hnsw_result_offset_ids {
                         let user_id = reader.get_user_id_for_offset_id(*offset_id as u32).await;
                         match user_id {
