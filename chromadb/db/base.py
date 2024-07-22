@@ -119,8 +119,6 @@ class SqlDB(Component):
         """Return a PyPika Parameter object for the given index"""
         return pypika.Parameter(self.parameter_format().format(idx))
 
-    # todo: should the below two methods be somewhere else?
-    # todo: other areas should use these methods
     @staticmethod
     def decode_seq_id(seq_id_bytes: Union[bytes, int]) -> SeqId:
         """Decode a byte array into a SeqID"""

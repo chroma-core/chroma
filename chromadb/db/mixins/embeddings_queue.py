@@ -147,7 +147,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             cur.execute(sql, params)
             results = cur.fetchall()
             if results:
-                min_seq_id = min(SqlDB.decode_seq_id(row[0]) for row in results)
+                min_seq_id = min(self.decode_seq_id(row[0]) for row in results)
             else:
                 min_seq_id = -1
 
@@ -309,7 +309,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             """,
                 (
                     self.uuid_to_db(subscription.segment_id),
-                    SqlDB.encode_seq_id(up_to_seq_id),
+                    self.encode_seq_id(up_to_seq_id),
                 ),
             )
 

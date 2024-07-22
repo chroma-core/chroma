@@ -90,7 +90,7 @@ class SqliteMetadataSegment(MetadataReader):
             if result is None:
                 return self._consumer.min_seqid()
             else:
-                return _decode_seq_id(result[0])
+                return self._db.decode_seq_id(result[0])
 
     @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
@@ -270,7 +270,7 @@ class SqliteMetadataSegment(MetadataReader):
         ).insert(
             ParameterValue(self._db.uuid_to_db(self._id)),
             ParameterValue(record["record"]["id"]),
-            ParameterValue(_encode_seq_id(record["log_offset"])),
+            ParameterValue(self._db.encode_seq_id(record["log_offset"])),
         )
         sql, params = get_sql(q)
         sql = sql + "RETURNING id"
@@ -461,7 +461,7 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .update(t)
-            .set(t.seq_id, ParameterValue(_encode_seq_id(record["log_offset"])))
+            .set(t.seq_id, ParameterValue(self._db.encode_seq_id(record["log_offset"])))
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
             .where(t.embedding_id == ParameterValue(record["record"]["id"]))
         )
@@ -483,18 +483,6 @@ class SqliteMetadataSegment(MetadataReader):
         records are append-only (that is, that seq-ids should increase monotonically)"""
         with self._db.tx() as cur:
             for record in records:
-                q = (
-                    self._db.querybuilder()
-                    .into(Table("max_seq_id"))
-                    .columns("segment_id", "seq_id")
-                    .insert(
-                        ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(_encode_seq_id(record["log_offset"])),
-                    )
-                )
-                sql, params = get_sql(q)
-                sql = sql.replace("INSERT", "INSERT OR REPLACE")
-                cur.execute(sql, params)
                 if record["record"]["operation"] == Operation.ADD:
                     self._insert_record(cur, record, False)
                 elif record["record"]["operation"] == Operation.UPSERT:
@@ -650,26 +638,6 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(*get_sql(q_fts))
             cur.execute(*get_sql(q0))
             cur.execute(*get_sql(q))
-
-
-def _encode_seq_id(seq_id: SeqId) -> bytes:
-    """Encode a SeqID into a byte array"""
-    if seq_id.bit_length() <= 64:
-        return int.to_bytes(seq_id, 8, "big")
-    elif seq_id.bit_length() <= 192:
-        return int.to_bytes(seq_id, 24, "big")
-    else:
-        raise ValueError(f"Unsupported SeqID: {seq_id}")
-
-
-def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
-    """Decode a byte array into a SeqID"""
-    if len(seq_id_bytes) == 8:
-        return int.from_bytes(seq_id_bytes, "big")
-    elif len(seq_id_bytes) == 24:
-        return int.from_bytes(seq_id_bytes, "big")
-    else:
-        raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
 
 
 def _where_clause(

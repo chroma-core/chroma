@@ -118,6 +118,7 @@ class LogService(Producer, Consumer):
     def subscribe(
         self,
         collection_id: UUID,
+        segment_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,

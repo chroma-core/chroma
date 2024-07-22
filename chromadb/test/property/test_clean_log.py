@@ -78,7 +78,11 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
 class PersistentLogCleanEmbeddingStateMachine(
     LogCleanEmbeddingStateMachine, RestartablePersistedEmbeddingStateMachine
 ):
-    ...
+    def __init__(self, system: System) -> None:
+        super(RestartablePersistedEmbeddingStateMachine, self).__init__(
+            Client.from_system(system)
+        )
+        super(LogCleanEmbeddingStateMachine, self).__init__(system)
 
 
 @pytest.fixture(params=[sqlite_fixture, sqlite_persistent_fixture])
