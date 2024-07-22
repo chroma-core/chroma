@@ -215,12 +215,11 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         invariants.metadatas_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
         invariants.documents_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
 
+    @precondition(
+        lambda self: self.client.get_settings().chroma_server_http_port is None
+    )  # (Can't check the log size on HTTP clients)
     @invariant()
     def log_size_below_max(self) -> None:
-        if self.client.get_settings().chroma_server_http_port is not None:
-            # This is an HTTP client and we can't check the log size
-            return
-
         system: System = self.client._system  # type: ignore
         invariants.log_size_below_max(
             system, self.collection, self.has_collection_mutated

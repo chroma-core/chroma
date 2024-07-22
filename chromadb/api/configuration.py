@@ -401,7 +401,7 @@ class EmbeddingsQueueConfigurationInternal(ConfigurationInternal):
             name="automatically_prune",
             validator=lambda value: isinstance(value, bool),
             is_static=True,
-            default_value=False,
+            default_value=True,
         ),
     }
 
