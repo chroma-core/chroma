@@ -458,10 +458,13 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         with self.tx() as cur:
             cur.execute(
                 """
-                INSERT OR REPLACE INTO embeddings_queue_config (config_json_str)
-                VALUES (?)
+                INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str)
+                VALUES (?, ?)
             """,
-                (config.to_json_str(),),
+                (
+                    1,
+                    config.to_json_str(),
+                ),
             )
 
         # Invalidate the cached property
