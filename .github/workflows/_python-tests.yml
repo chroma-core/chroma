@@ -116,9 +116,9 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}"
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
           # Output the logs zip file path as a job output
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
