@@ -25,6 +25,7 @@
   },
   "type": "module",
   "main": "dist/cjs/chromadb.cjs",
+  "types": "dist/chromadb.d.ts",
   "module": "dist/chromadb.legacy-esm.js",
   "exports": {
     ".": {
