@@ -70,16 +70,13 @@ impl HnswIndexConfig {
                 // TODO: This should error, but the configuration is not stored correctly
                 // after the configuration is refactored to be always stored and doesn't rely on defaults we can fix this
                 return Ok(HnswIndexConfig {
-                    max_elements: 1000,
-                    m: 16,
-                    ef_construction: 100,
-                    ef_search: 10,
+                    max_elements: DEFAULT_MAX_ELEMENTS,
+                    m: DEFAULT_HNSW_M,
+                    ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
+                    ef_search: DEFAULT_HNSW_EF_SEARCH,
                     random_seed: 0,
                     persist_path: persist_path.to_string(),
                 });
-                // return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
-                //     "metadata".to_string(),
-                // )))
             }
         };
 
@@ -363,6 +360,8 @@ extern "C" {
 
 #[cfg(test)]
 pub mod test {
+    use std::collections::HashMap;
+
     use super::*;
 
     use crate::distance::DistanceFunction;
@@ -787,5 +786,51 @@ pub mod test {
             let data = &data[i * d..(i + 1) * d];
             index.add(ids[i], data);
         });
+    }
+
+    #[test]
+    fn parameter_defaults() {
+        let segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::HnswDistributed,
+            scope: crate::types::SegmentScope::VECTOR,
+            metadata: Some(HashMap::new()),
+            collection: Some(Uuid::new_v4()),
+            file_path: HashMap::new(),
+        };
+
+        let persist_path = tempdir().unwrap().path().to_owned();
+        let config = HnswIndexConfig::from_segment(&segment, &persist_path)
+            .expect("Failed to create config from segment");
+
+        assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
+        assert_eq!(config.m, DEFAULT_HNSW_M);
+        assert_eq!(config.ef_construction, DEFAULT_HNSW_EF_CONSTRUCTION);
+        assert_eq!(config.ef_search, DEFAULT_HNSW_EF_SEARCH);
+        assert_eq!(config.random_seed, 0);
+        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
+
+        // Try partial metadata
+        let mut metadata = HashMap::new();
+        metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10 as i32));
+
+        let segment = Segment {
+            id: Uuid::new_v4(),
+            r#type: crate::types::SegmentType::HnswDistributed,
+            scope: crate::types::SegmentScope::VECTOR,
+            metadata: Some(metadata),
+            collection: Some(Uuid::new_v4()),
+            file_path: HashMap::new(),
+        };
+
+        let config = HnswIndexConfig::from_segment(&segment, &persist_path)
+            .expect("Failed to create config from segment");
+
+        assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
+        assert_eq!(config.m, 10);
+        assert_eq!(config.ef_construction, DEFAULT_HNSW_EF_CONSTRUCTION);
+        assert_eq!(config.ef_search, DEFAULT_HNSW_EF_SEARCH);
+        assert_eq!(config.random_seed, 0);
+        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
     }
 }
