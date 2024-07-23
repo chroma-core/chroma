@@ -120,6 +120,8 @@ where
             Ok(result) => {
                 // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
                 // There are valid reasons for this to happen (e.g. the component was stopped) so we ignore the error.
+                // Another valid case is when the PrefetchIoOperator finishes
+                // after the orchestrator component was stopped.
                 match self
                     .reply_channel
                     .send(

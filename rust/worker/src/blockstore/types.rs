@@ -359,4 +359,20 @@ impl<
             }
         }
     }
+
+    pub(crate) async fn prefetch_block(&self, block_id: Uuid) -> () {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_block(block_id).await;
+            }
+        }
+    }
+
+    pub(crate) fn cached(&self, block_id: &Uuid) -> bool {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.cached(block_id),
+        }
+    }
 }

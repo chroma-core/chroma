@@ -206,6 +206,10 @@ impl BlockManager {
         block
     }
 
+    pub(super) fn cached(&self, id: &Uuid) -> bool {
+        self.block_cache.get(id).is_some()
+    }
+
     pub(super) async fn get(&self, id: &Uuid) -> Option<Block> {
         let block = self.block_cache.get(id);
         match block {
