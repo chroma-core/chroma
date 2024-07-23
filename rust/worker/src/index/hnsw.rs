@@ -10,6 +10,9 @@ use tracing::instrument;
 use uuid::Uuid;
 
 const DEFAULT_MAX_ELEMENTS: usize = 10000;
+const DEFAULT_HNSW_M: usize = 16;
+const DEFAULT_HNSW_EF_CONSTRUCTION: usize = 100;
+const DEFAULT_HNSW_EF_SEARCH: usize = 10;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
@@ -101,9 +104,11 @@ impl HnswIndexConfig {
             }
         }
 
-        let m = get_metadata_value_as::<i32>(metadata, "hnsw:M")?;
-        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:construction_ef")?;
-        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:search_ef")?;
+        let m = get_metadata_value_as::<i32>(metadata, "hnsw:M").unwrap_or(DEFAULT_HNSW_M as i32);
+        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:construction_ef")
+            .unwrap_or(DEFAULT_HNSW_EF_CONSTRUCTION as i32);
+        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:search_ef")
+            .unwrap_or(DEFAULT_HNSW_EF_SEARCH as i32);
         return Ok(HnswIndexConfig {
             max_elements: DEFAULT_MAX_ELEMENTS,
             m: m as usize,
