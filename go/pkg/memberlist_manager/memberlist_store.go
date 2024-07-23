@@ -6,6 +6,7 @@ import (
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -21,7 +22,23 @@ type Member struct {
 	id string
 }
 
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface
+func (m Member) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("id", m.id)
+	return nil
+}
+
 type Memberlist []Member
+
+// MarshalLogArray implements the zapcore.ArrayMarshaler interface
+func (ml Memberlist) MarshalLogArray(enc zapcore.ArrayEncoder) error {
+	for _, member := range ml {
+		if err := enc.AppendObject(member); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 type CRMemberlistStore struct {
 	dynamicClient            dynamic.Interface
