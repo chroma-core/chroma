@@ -5,13 +5,15 @@ import (
 )
 
 type Segment struct {
-	ID           types.UniqueID
-	Type         string
-	Scope        string
-	CollectionID types.UniqueID
-	Metadata     *SegmentMetadata[SegmentMetadataValueType]
-	Ts           types.Timestamp
-	FilePaths    map[string][]string
+	ID                types.UniqueID
+	Type              string
+	Scope             string
+	CollectionID      types.UniqueID
+	Metadata          *SegmentMetadata[SegmentMetadataValueType]
+	Ts                types.Timestamp
+	FilePaths         map[string][]string
+	LogPosition       int64
+	CollectionVersion int32
 }
 
 type CreateSegment struct {
