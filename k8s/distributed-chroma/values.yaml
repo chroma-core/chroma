@@ -32,6 +32,7 @@ frontendService:
         value: "http://jaeger:4317"
       - name: CHROMA_OTEL_GRANULARITY
         value: all
+  replicaCount: 2
 sysdb:
   image:
     repository: 'local'
