@@ -90,7 +90,7 @@ class LocalHnswSegment(VectorReader):
         if self._collection:
             seq_id = self.max_seqid()
             self._subscription = self._consumer.subscribe(
-                self._collection, self._id, self._write_records, start=seq_id
+                self._collection, self._write_records, start=seq_id
             )
 
     @trace_method("LocalHnswSegment.stop", OpenTelemetryGranularity.ALL)
@@ -319,9 +319,6 @@ class LocalHnswSegment(VectorReader):
                     batch.apply(record, label is not None)
 
             self._apply_batch(batch)
-
-        if self._subscription:
-            self._consumer.ack(self._subscription, self._max_seq_id)
 
     @override
     def delete(self) -> None:

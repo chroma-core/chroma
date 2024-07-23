@@ -60,7 +60,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     class Subscription:
         id: UUID
         topic_name: str
-        segment_id: UUID
         start: int
         end: int
         callback: ConsumerCallbackFn
@@ -69,14 +68,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             self,
             id: UUID,
             topic_name: str,
-            segment_id: UUID,
             start: int,
             end: int,
             callback: ConsumerCallbackFn,
         ):
             self.id = id
             self.topic_name = topic_name
-            self.segment_id = segment_id
             self.start = start
             self.end = end
             self.callback = callback
@@ -254,7 +251,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     def subscribe(
         self,
         collection_id: UUID,
-        segment_id: UUID,
         consume_fn: ConsumerCallbackFn,
         start: Optional[SeqId] = None,
         end: Optional[SeqId] = None,
@@ -271,7 +267,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         start, end = self._validate_range(start, end)
 
         subscription = self.Subscription(
-            subscription_id, topic_name, segment_id, start, end, consume_fn
+            subscription_id, topic_name, start, end, consume_fn
         )
 
         # Backfill first, so if it errors we do not add the subscription
@@ -290,28 +286,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     if len(subscriptions) == 0:
                         del self._subscriptions[topic_name]
                     return
-
-    @trace_method("SqlEmbeddingsQueue.ack", OpenTelemetryGranularity.ALL)
-    @override
-    def ack(self, subscription_id: UUID, up_to_seq_id: SeqId) -> None:
-        subscription = self._get_subscription_by_id(subscription_id)
-        if not subscription:
-            raise ValueError(f"Subscription {subscription_id} not found")
-
-        with self.tx() as cur:
-            cur.execute(
-                """
-                INSERT INTO max_seq_id (segment_id, seq_id)
-                VALUES (?, ?)
-                ON CONFLICT (segment_id)
-                DO
-                    UPDATE SET seq_id = MAX(seq_id, excluded.seq_id)
-            """,
-                (
-                    self.uuid_to_db(subscription.segment_id),
-                    self.encode_seq_id(up_to_seq_id),
-                ),
-            )
 
     @override
     def min_seqid(self) -> SeqId:

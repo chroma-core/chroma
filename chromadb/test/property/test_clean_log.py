@@ -7,18 +7,33 @@ from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from pypika import Table, functions
+import hypothesis.strategies as st
 from hypothesis.stateful import (
     rule,
     run_state_machine_as_test,
+    initialize,
 )
 
 from chromadb.test.conftest import sqlite_fixture, sqlite_persistent_fixture
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineBase,
     EmbeddingStateMachineStates,
+    trace,
 )
 from chromadb.test.property.test_restart_persist import (
     RestartablePersistedEmbeddingStateMachine,
+)
+import chromadb.test.property.strategies as strategies
+
+collection_persistent_st = st.shared(
+    # Set a small batch size, otherwise it's unlikely that .clean_log() will have any effect
+    strategies.collections(
+        with_hnsw_params=True,
+        with_persistent_hnsw_params=st.just(True),
+        max_hnsw_sync_threshold=5,
+        max_hnsw_batch_size=5,
+    ),
+    key="coll_persistent",
 )
 
 
@@ -54,18 +69,15 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
             # Must always keep one entry to avoid reusing seq_ids
             assert total_embedding_queue_log_size(sqlite) >= 1
 
-            if self.system.settings.is_persistent:
-                sync_threshold = self.collection.metadata.get("hnsw:sync_threshold", -1)
-                batch_size = self.collection.metadata.get("hnsw:batch_size", -1)
+            sync_threshold = self.collection.metadata.get("hnsw:sync_threshold", 1000)
+            batch_size = self.collection.metadata.get("hnsw:batch_size", 100)
 
-                # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
-                # And if the batch_size != sync_threshold, the queue can have up to batch_size - 1 more entries.
-                assert (
-                    total_embedding_queue_log_size(sqlite) - 1
-                    <= sync_threshold + batch_size - 1
-                )
-            else:
-                assert total_embedding_queue_log_size(sqlite) <= 1
+            # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
+            # And if the batch_size != sync_threshold, the queue can have up to batch_size - 1 more entries.
+            assert (
+                total_embedding_queue_log_size(sqlite) - 1
+                <= sync_threshold + batch_size - 1
+            )
         else:
             assert total_embedding_queue_log_size(sqlite) == 0
 
@@ -83,6 +95,24 @@ class PersistentLogCleanEmbeddingStateMachine(
             Client.from_system(system)
         )
         super(LogCleanEmbeddingStateMachine, self).__init__(system)
+
+    @initialize(collection=collection_persistent_st)  # type: ignore
+    @overrides
+    def initialize(self, collection: strategies.Collection):
+        self.client.reset()
+
+        self.collection = self.client.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,  # type: ignore
+            embedding_function=collection.embedding_function,
+        )
+        self.embedding_function = collection.embedding_function
+        trace("init")
+        self.on_state_change(EmbeddingStateMachineStates.initialize)
+
+        self.record_set_state = strategies.StateMachineRecordSet(
+            ids=[], metadatas=[], documents=[], embeddings=[]
+        )
 
 
 @pytest.fixture(params=[sqlite_fixture, sqlite_persistent_fixture])

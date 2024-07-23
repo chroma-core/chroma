@@ -4,6 +4,8 @@ from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
@@ -29,6 +31,7 @@ from chromadb.types import (
 )
 import hnswlib
 import logging
+from pypika import Table
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
@@ -86,6 +89,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_directory: str
     _allow_reset: bool
 
+    _db: SqliteDB
     _opentelemtry_client: OpenTelemetryClient
 
     _num_log_records_since_last_batch: int = 0
@@ -94,6 +98,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
 
+        self._db = system.instance(SqliteDB)
         self._opentelemtry_client = system.require(OpenTelemetryClient)
 
         self._params = PersistentHnswParams(segment["metadata"] or {})
@@ -219,8 +224,20 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         super()._apply_batch(batch)
         if self._num_log_records_since_last_persist >= self._sync_threshold:
             self._persist()
-            if self._subscription:
-                self._consumer.ack(self._subscription, self._max_seq_id)
+
+            with self._db.tx() as cur:
+                q = (
+                    self._db.querybuilder()
+                    .into(Table("max_seq_id"))
+                    .columns("segment_id", "seq_id")
+                    .insert(
+                        ParameterValue(self._db.uuid_to_db(self._id)),
+                        ParameterValue(self._db.encode_seq_id(self._max_seq_id)),
+                    )
+                )
+                sql, params = get_sql(q)
+                sql = sql.replace("INSERT", "INSERT OR REPLACE")
+                cur.execute(sql, params)
 
         self._num_log_records_since_last_batch = 0
 
