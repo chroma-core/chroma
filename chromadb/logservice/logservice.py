@@ -1,5 +1,6 @@
 import sys
 
+from chromadb.proto.utils import get_default_grpc_options
 import grpc
 import time
 from chromadb.ingest import (
@@ -49,7 +50,8 @@ class LogService(Producer, Consumer):
     @override
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
-            f"{self._log_service_url}:{self._log_service_port}"
+            f"{self._log_service_url}:{self._log_service_port}",
+            options=get_default_grpc_options(),
         )
         interceptors = [OtelInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
@@ -80,7 +82,7 @@ class LogService(Producer, Consumer):
         if not self._running:
             raise RuntimeError("Component not running")
 
-        return self.submit_embeddings(collection_id, [embedding])[0]  # type: ignore
+        return self.submit_embeddings(collection_id, [embedding])[0]
 
     @trace_method("LogService.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
