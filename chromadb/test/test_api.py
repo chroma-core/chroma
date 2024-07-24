@@ -526,14 +526,11 @@ def test_add_a_collection(client):
         collection = client.get_collection("testspace2")
 
 
-def test_error_includes_trace_id(client):
-    if client._system.settings.chroma_server_host is None:
-        pytest.skip("Trace IDs are only attached for HTTP requests")
-
-    client.reset()
+def test_error_includes_trace_id(http_client):
+    http_client.reset()
 
     with pytest.raises(ChromaError) as error:
-        client.get_collection("testspace2")
+        http_client.get_collection("testspace2")
 
     assert error.value.trace_id is not None
 
