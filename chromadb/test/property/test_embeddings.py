@@ -312,6 +312,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         print(
             "[test_embeddings][initialize] Initialize collection id ",
             self.collection._model["id"],
+            " hypothesis generated collection id ",
+            collection.id,
         )
         self.log_operation_count = 0
         self.unique_ids_in_log: Set[ID] = set()
