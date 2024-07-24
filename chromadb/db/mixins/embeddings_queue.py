@@ -403,7 +403,8 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             for sub in self._subscriptions[topic]:
                 self._notify_one(sub, embeddings)
 
-            self.purge_log()
+            if self._config.get_parameter("automatically_prune").value:
+                self.purge_log()
 
     @trace_method("SqlEmbeddingsQueue._notify_one", OpenTelemetryGranularity.ALL)
     def _notify_one(self, sub: Subscription, embeddings: Sequence[LogRecord]) -> None:
