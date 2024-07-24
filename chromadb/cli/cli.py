@@ -1,15 +1,14 @@
 from typing import Optional
 
-import rich.markdown
+from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing_extensions import Annotated
 import typer
-import rich
 import uvicorn
 import os
 import webbrowser
 
-from chromadb.cli.utils import set_log_file_path
+from chromadb.cli.utils import get_directory_size, set_log_file_path, sizeof_fmt
 from chromadb.config import Settings, System
 from chromadb.db.impl.sqlite import SqliteDB
 
@@ -98,14 +97,18 @@ def vacuum(
     force: bool = typer.Option(False, help="Force vacuuming without confirmation."),
 ) -> None:
     """Vacuum the database"""
+    console = Console(
+        highlight=False
+    )  # by default, rich highlights numbers which makes the output look weird when we try to color numbers ourselves
+
     if not os.path.exists(path):
-        rich.print(f"[bold red]Path {path} does not exist.[/bold red]")
+        console.print(f"[bold red]Path {path} does not exist.[/bold red]")
         raise typer.Exit(code=1)
 
     if not force and not typer.confirm(
         "Are you sure you want to vacuum the database? This will block both reads and writes to the database and may take a while."
     ):
-        rich.print("Vacuum cancelled.")
+        console.print("Vacuum cancelled.")
         raise typer.Exit(code=0)
 
     settings = Settings()
@@ -113,6 +116,8 @@ def vacuum(
     settings.persist_directory = path
     system = System(settings=settings)
     sqlite = system.instance(SqliteDB)
+
+    directory_size_before_vacuum = get_directory_size(path)
 
     with Progress(
         SpinnerColumn(),
@@ -123,10 +128,15 @@ def vacuum(
         try:
             sqlite.vacuum()
         except Exception as e:
-            rich.print(f"[bold red]Error vacuuming database:[/bold red] {e}")
+            console.print(f"[bold red]Error vacuuming database:[/bold red] {e}")
             raise typer.Exit(code=1)
 
-    rich.print(":soap: [bold]vacuum complete![/bold]")
+    directory_size_after_vacuum = get_directory_size(path)
+    size_diff = directory_size_before_vacuum - directory_size_after_vacuum
+
+    console.print(
+        f"\n:soap: [bold]vacuum complete![/bold] Database size reduced by [green]{sizeof_fmt(size_diff)}[/green] (:arrow_down: [bold green]{size_diff * 100 / directory_size_before_vacuum}%[/bold green])."
+    )
 
 
 @app.command()  # type: ignore
