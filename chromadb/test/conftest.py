@@ -590,8 +590,8 @@ def sqlite_persistent() -> Generator[System, None, None]:
             raise e
 
 
-def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, async_fastapi, fastapi_persistent]
+def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [fastapi, async_fastapi, fastapi_persistent, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
@@ -601,9 +601,12 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     return fixtures
 
 
-def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = system_http_server_fixtures()
-    fixtures.extend([sqlite, sqlite_persistent])
+def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [
+        fixture
+        for fixture in system_fixtures()
+        if fixture != sqlite and fixture != sqlite_persistent
+    ]
     return fixtures
 
 
