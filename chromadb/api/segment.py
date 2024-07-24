@@ -248,7 +248,7 @@ class SegmentAPI(ServerAPI):
         if existing:
             return existing[0]
         else:
-            raise ValueError(f"Collection {name} does not exist.")
+            raise InvalidCollectionException(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override

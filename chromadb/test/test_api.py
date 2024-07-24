@@ -3,6 +3,7 @@ import traceback
 import httpx
 
 import chromadb
+from chromadb.errors import ChromaError
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
@@ -523,6 +524,18 @@ def test_add_a_collection(client):
     # get collection should throw an error if collection does not exist
     with pytest.raises(Exception):
         collection = client.get_collection("testspace2")
+
+
+def test_error_includes_trace_id(client):
+    if client._system.settings.chroma_server_host is None:
+        pytest.skip("Trace IDs are only attached for HTTP requests")
+
+    client.reset()
+
+    with pytest.raises(ChromaError) as error:
+        client.get_collection("testspace2")
+
+    assert error.value.trace_id is not None
 
 
 def test_list_collections(client):
