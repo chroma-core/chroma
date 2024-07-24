@@ -14,6 +14,8 @@ from chromadb.config import Settings, System
 from chromadb.db.impl.sqlite import SqliteDB
 
 app = typer.Typer()
+utils_app = typer.Typer(short_help="Use maintenance utilities")
+app.add_typer(utils_app, name="utils")
 
 _logo = """
                 \033[38;5;069m(((((((((    \033[38;5;203m(((((\033[38;5;220m####
@@ -88,7 +90,7 @@ def run(
     uvicorn.run(**config)
 
 
-@app.command()  # type: ignore
+@utils_app.command()  # type: ignore
 def vacuum(
     path: str = typer.Option(
         help="The path to a Chroma data directory.",

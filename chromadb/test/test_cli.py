@@ -48,7 +48,9 @@ def test_vacuum(sqlite_persistent: System) -> None:
         assert cur.fetchall() == []
 
     result = runner.invoke(
-        app, ["vacuum", "--path", system.settings.persist_directory], input="y\n"
+        app,
+        ["utils", "vacuum", "--path", system.settings.persist_directory],
+        input="y\n",
     )
     assert result.exit_code == 0
 
@@ -94,6 +96,7 @@ def test_vacuum_errors_if_locked(sqlite_persistent: System) -> None:
         result = runner.invoke(
             app,
             [
+                "utils",
                 "vacuum",
                 "--path",
                 sqlite_persistent.settings.persist_directory,
