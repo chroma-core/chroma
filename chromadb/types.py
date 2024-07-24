@@ -96,7 +96,7 @@ class Collection(
         if key == "configuration":
             return self.get_configuration()
         # For the other model attributes we allow the user to access them directly
-        if key in self.model_fields:
+        if key in self.get_model_fields():
             return getattr(self, key)
         return None
 
@@ -106,16 +106,18 @@ class Collection(
         # For the model attributes we allow the user to access them directly
         if key == "configuration":
             self.set_configuration(value)
-        if key in self.model_fields:
+        if key in self.get_model_fields():
             setattr(self, key, value)
         else:
-            raise KeyError(f"No such key: {key}, valid keys are: {self.model_fields}")
+            raise KeyError(
+                f"No such key: {key}, valid keys are: {self.get_model_fields()}"
+            )
 
     def __eq__(self, __value: object) -> bool:
         # Check that all the model fields are equal
         if not isinstance(__value, Collection):
             return False
-        for field in self.model_fields:
+        for field in self.get_model_fields():
             if getattr(self, field) != getattr(__value, field):
                 return False
         return True
@@ -127,6 +129,13 @@ class Collection(
     def set_configuration(self, configuration: CollectionConfigurationInternal) -> None:
         """Sets the configuration of the collection"""
         self.configuration_json = configuration.to_json()
+
+    def get_model_fields(self) -> Dict[Any, Any]:
+        """Used for backward compatibility with Pydantic 1.x"""
+        try:
+            return self.model_fields  # pydantic 2.x
+        except AttributeError:
+            return self.__fields__  # pydantic 1.x
 
     @classmethod
     @override
