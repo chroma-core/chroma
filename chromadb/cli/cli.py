@@ -105,6 +105,12 @@ def vacuum(
         console.print(f"[bold red]Path {path} does not exist.[/bold red]")
         raise typer.Exit(code=1)
 
+    if not os.path.exists(f"{path}/chroma.sqlite3"):
+        console.print(
+            f"[bold red]Path {path} is not a Chroma data directory.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
     if not force and not typer.confirm(
         "Are you sure you want to vacuum the database? This will block both reads and writes to the database and may take a while."
     ):
