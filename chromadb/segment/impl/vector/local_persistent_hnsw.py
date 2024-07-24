@@ -114,7 +114,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
-            # self._max_seq_id = self._persist_data.max_seq_id
             self._id_to_label = self._persist_data.id_to_label
             self._label_to_id = self._persist_data.label_to_id
             self._id_to_seq_id = self._persist_data.id_to_seq_id

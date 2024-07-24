@@ -74,6 +74,11 @@ class LogService(Producer, Consumer):
     def delete_log(self, collection_id: UUID) -> None:
         raise NotImplementedError("Not implemented")
 
+    @trace_method("LogService.clean_log", OpenTelemetryGranularity.ALL)
+    @override
+    def clean_log(self, collection_id: UUID) -> None:
+        raise NotImplementedError("Not implemented")
+
     @trace_method("LogService.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
     def submit_embedding(
