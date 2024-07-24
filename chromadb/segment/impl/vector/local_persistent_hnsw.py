@@ -44,7 +44,6 @@ class PersistentData:
 
     dimensionality: Optional[int]
     total_elements_added: int
-    max_seq_id: SeqId
 
     id_to_label: Dict[str, int]
     label_to_id: Dict[int, str]
@@ -54,14 +53,12 @@ class PersistentData:
         self,
         dimensionality: Optional[int],
         total_elements_added: int,
-        max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
         id_to_seq_id: Dict[str, SeqId],
     ):
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
-        self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
         self.id_to_seq_id = id_to_seq_id
@@ -117,7 +114,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
-            self._max_seq_id = self._persist_data.max_seq_id
+            # self._max_seq_id = self._persist_data.max_seq_id
             self._id_to_label = self._persist_data.id_to_label
             self._label_to_id = self._persist_data.label_to_id
             self._id_to_seq_id = self._persist_data.id_to_seq_id
@@ -129,11 +126,29 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._persist_data = PersistentData(
                 self._dimensionality,
                 self._total_elements_added,
-                self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
                 self._id_to_seq_id,
             )
+
+        # Hydrate the max_seq_id
+        with self._db.tx() as cur:
+            t = Table("max_seq_id")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .select(t.seq_id)
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+                .limit(1)
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+            result = cur.fetchone()
+
+            if result:
+                self._max_seq_id = self._db.decode_seq_id(result[0])
+            else:
+                self._max_seq_id = self._consumer.min_seqid()
 
     @staticmethod
     @override
@@ -203,7 +218,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Persist the metadata
         self._persist_data.dimensionality = self._dimensionality
         self._persist_data.total_elements_added = self._total_elements_added
-        self._persist_data.max_seq_id = self._max_seq_id
 
         # TODO: This should really be stored in sqlite, the index itself, or a better
         # storage format
@@ -213,6 +227,20 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+
+        with self._db.tx() as cur:
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(self._db.encode_seq_id(self._max_seq_id)),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
 
         self._num_log_records_since_last_persist = 0
 
@@ -224,20 +252,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         super()._apply_batch(batch)
         if self._num_log_records_since_last_persist >= self._sync_threshold:
             self._persist()
-
-            with self._db.tx() as cur:
-                q = (
-                    self._db.querybuilder()
-                    .into(Table("max_seq_id"))
-                    .columns("segment_id", "seq_id")
-                    .insert(
-                        ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(self._db.encode_seq_id(self._max_seq_id)),
-                    )
-                )
-                sql, params = get_sql(q)
-                sql = sql.replace("INSERT", "INSERT OR REPLACE")
-                cur.execute(sql, params)
 
         self._num_log_records_since_last_batch = 0
 
