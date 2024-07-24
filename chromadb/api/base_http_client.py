@@ -100,7 +100,5 @@ class BaseHTTPClient:
         except httpx.HTTPStatusError:
             trace_id = resp.headers.get("chroma-trace-id")
             if trace_id:
-                raise Exception(
-                    f"Chroma request failed: {resp.text}. Trace ID: {trace_id}."
-                )
+                raise Exception(f"{resp.text} (trace ID: {trace_id})")
             raise (Exception(resp.text))
