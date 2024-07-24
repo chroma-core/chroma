@@ -85,6 +85,10 @@ class BaseHTTPClient:
                 if body["error"] in errors.error_types:
                     chroma_error = errors.error_types[body["error"]](body["message"])
 
+                    trace_id = resp.headers.get("chroma-trace-id")
+                    if trace_id:
+                        chroma_error.trace_id = trace_id
+
         except BaseException:
             pass
 
@@ -94,4 +98,7 @@ class BaseHTTPClient:
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError:
+            trace_id = resp.headers.get("chroma-trace-id")
+            if trace_id:
+                raise Exception(f"{resp.text} (trace ID: {trace_id})")
             raise (Exception(resp.text))

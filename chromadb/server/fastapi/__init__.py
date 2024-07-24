@@ -57,6 +57,7 @@ from starlette.datastructures import Headers
 import logging
 from chromadb.telemetry.product.events import ServerStartEvent
 from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
+from opentelemetry import trace
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -79,6 +80,15 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
     for route in app.routes:
         if isinstance(route, APIRoute):
             route.operation_id = route.name
+
+
+async def add_trace_id_to_response_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
+    trace_id = trace.get_current_span().get_span_context().trace_id
+    response = await call_next(request)
+    response.headers["Chroma-Trace-Id"] = format(trace_id, "x")
+    return response
 
 
 async def catch_exceptions_middleware(
@@ -105,7 +115,7 @@ async def check_http_version_middleware(
 D = TypeVar("D", bound=BaseModel, contravariant=True)
 
 
-def validate_model(model: Type[D], data: Any) -> D:
+def validate_model(model: Type[D], data: Any) -> D:  # type: ignore
     """Used for backward compatibility with Pydantic 1.x"""
     try:
         return model.model_validate(data)  # pydantic 2.x
@@ -156,6 +166,7 @@ class FastAPI(Server):
 
         self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
+        self._app.middleware("http")(add_trace_id_to_response_middleware)
         self._app.add_middleware(
             CORSMiddleware,
             allow_headers=["*"],

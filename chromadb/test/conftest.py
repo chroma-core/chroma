@@ -601,6 +601,15 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
+def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [
+        fixture
+        for fixture in system_fixtures()
+        if fixture != sqlite and fixture != sqlite_persistent
+    ]
+    return fixtures
+
+
 def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
         fastapi_server_basic_auth_valid_cred_single_user,
@@ -642,6 +651,13 @@ def system_wrong_auth(
 
 @pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
 def system_authn_rbac_authz(
+    request: pytest.FixtureRequest,
+) -> Generator[ServerAPI, None, None]:
+    yield from request.param()
+
+
+@pytest.fixture(scope="module", params=system_http_server_fixtures())
+def system_http_server(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
     yield from request.param()
@@ -754,6 +770,23 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
         client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
+        yield client
+        client.clear_system_cache()
+
+
+@pytest.fixture(scope="function")
+def http_client(system_http_server: System) -> Generator[ClientAPI, None, None]:
+    system_http_server.reset_state()
+
+    if (
+        system_http_server.settings.chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        client = cast(Any, AsyncClientCreatorSync.from_system_async(system_http_server))
+        yield client
+        client.clear_system_cache()
+    else:
+        client = ClientCreator.from_system(system_http_server)
         yield client
         client.clear_system_cache()
 

@@ -1,9 +1,11 @@
 from abc import abstractmethod
-from typing import Dict, Type
+from typing import Dict, Optional, Type
 from overrides import overrides, EnforceOverrides
 
 
 class ChromaError(Exception, EnforceOverrides):
+    trace_id: Optional[str] = None
+
     def code(self) -> int:
         """Return an appropriate HTTP response code for this error"""
         return 400  # Bad Request
