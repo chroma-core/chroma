@@ -131,10 +131,11 @@ class Collection(
         self.configuration_json = configuration.to_json()
 
     def get_model_fields(self) -> Dict[Any, Any]:
+        """Used for backward compatibility with Pydantic 1.x"""
         try:
-            return self.model_fields
+            return self.model_fields  # pydantic 2.x
         except AttributeError:
-            return self.__fields__
+            return self.__fields__  # pydantic 1.x
 
     @classmethod
     @override
