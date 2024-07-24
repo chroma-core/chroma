@@ -435,13 +435,3 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             )
             if _called_from_test:
                 raise e
-
-    @trace_method(
-        "SqlEmbeddingsQueue._get_subscription_by_id", OpenTelemetryGranularity.ALL
-    )
-    def _get_subscription_by_id(self, subscription_id: UUID) -> Optional[Subscription]:
-        for subscriptions in self._subscriptions.values():
-            for subscription in subscriptions:
-                if subscription.id == subscription_id:
-                    return subscription
-        return None
