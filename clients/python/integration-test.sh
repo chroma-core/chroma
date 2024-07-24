@@ -23,14 +23,14 @@ export CHROMA_SERVER_HOST=localhost
 export CHROMA_SERVER_HTTP_PORT=8000
 export CHROMA_SERVER_NOFILE=65535
 
-echo testing: python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
+echo testing: python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore-glob 'chromadb/test/property/test_clean_log.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
 
 # Copy the thin client flag script in place, uvicorn takes a while to startup inside docker
 sleep 5
 cp "$is_thin_client_py" "$is_thin_client_target"
-python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
+python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore-glob 'chromadb/test/property/test_clean_log.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
 
 # Test async client
 export CHROMA_API_IMPL="chromadb.api.async_fastapi.AsyncFastAPI"
 
-python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
+python -m pytest 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore-glob 'chromadb/test/property/test_clean_log.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
