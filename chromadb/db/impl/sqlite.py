@@ -259,4 +259,3 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             VALUES ('vacuum', CURRENT_TIMESTAMP)
             """
         )
-        conn.close_actual()

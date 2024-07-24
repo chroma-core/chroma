@@ -39,6 +39,11 @@ def test_vacuum(sqlite_persistent: System) -> None:
     system = sqlite_persistent
     sqlite = system.instance(SqliteDB)
 
+    # This is True because it's a fresh system, so let's set it to False to test that the vacuum command enables it
+    config = sqlite.config
+    config.set_parameter("automatically_prune", False)
+    sqlite.set_config(config)
+
     # Maintenance log should be empty
     with sqlite.tx() as cur:
         t = Table("maintenance_log")
@@ -63,6 +68,9 @@ def test_vacuum(sqlite_persistent: System) -> None:
         rows = cur.fetchall()
         assert len(rows) == 1
         assert rows[0][2] == "vacuum"
+
+    # Automatic pruning should have been enabled
+    assert sqlite.config.get_parameter("automatically_prune").value
 
 
 def simulate_transactional_write(

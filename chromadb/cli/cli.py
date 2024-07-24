@@ -125,23 +125,38 @@ def vacuum(
 
     directory_size_before_vacuum = get_directory_size(path)
 
+    console.print()  # Add a newline before the progress bar
+
     with Progress(
-        SpinnerColumn(),
+        SpinnerColumn(finished_text="[bold green]:heavy_check_mark:[/bold green]"),
         TextColumn("[progress.description]{task.description}"),
         transient=True,
     ) as progress:
-        progress.add_task("Vacuuming (this may take a while)...")
+        task = progress.add_task("Pruning the log...")
+        try:
+            sqlite.purge_log()
+        except Exception as e:
+            console.print(f"[bold red]Error pruning the log:[/bold red] {e}")
+            raise typer.Exit(code=1)
+        progress.update(task, advance=100)
+
+        task = progress.add_task("Vacuuming (this may take a while)...")
         try:
             sqlite.vacuum()
+            config = sqlite.config
+            config.set_parameter("automatically_prune", True)
+            sqlite.set_config(config)
         except Exception as e:
             console.print(f"[bold red]Error vacuuming database:[/bold red] {e}")
             raise typer.Exit(code=1)
+
+        progress.update(task, advance=100)
 
     directory_size_after_vacuum = get_directory_size(path)
     size_diff = directory_size_before_vacuum - directory_size_after_vacuum
 
     console.print(
-        f"\n:soap: [bold]vacuum complete![/bold] Database size reduced by [green]{sizeof_fmt(size_diff)}[/green] (:arrow_down: [bold green]{size_diff * 100 / directory_size_before_vacuum}%[/bold green])."
+        f":soap: [bold]vacuum complete![/bold] Database size reduced by [green]{sizeof_fmt(size_diff)}[/green] (:arrow_down: [bold green]{size_diff * 100 / directory_size_before_vacuum}%[/bold green])."
     )
 
 
