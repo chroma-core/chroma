@@ -456,15 +456,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             cur.execute(q.get_sql())
             result = cur.fetchone()
 
-            if result is None:
-                is_fresh_system = self._get_wal_size() == 0
-                config = EmbeddingsQueueConfigurationInternal(
-                    [ConfigurationParameter("automatically_prune", is_fresh_system)]
-                )
-                self._set_config(config)
-                return config
+        if result is None:
+            is_fresh_system = self._get_wal_size() == 0
+            config = EmbeddingsQueueConfigurationInternal(
+                [ConfigurationParameter("automatically_prune", is_fresh_system)]
+            )
+            self._set_config(config)
+            return config
 
-            return EmbeddingsQueueConfigurationInternal.from_json_str(result[0])
+        return EmbeddingsQueueConfigurationInternal.from_json_str(result[0])
 
     def _set_config(self, config: EmbeddingsQueueConfigurationInternal) -> None:
         with self.tx() as cur:
