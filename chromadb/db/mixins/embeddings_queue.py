@@ -104,6 +104,13 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         super().reset_state()
         self._subscriptions = defaultdict(set)
 
+        # Invalidate the cached property
+        try:
+            del self._config
+        except AttributeError:
+            # Cached property hasn't been accessed yet
+            pass
+
     @trace_method("SqlEmbeddingsQueue.delete_topic", OpenTelemetryGranularity.ALL)
     @override
     def delete_log(self, collection_id: UUID) -> None:
