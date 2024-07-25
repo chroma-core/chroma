@@ -98,6 +98,18 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         self._topic_namespace = system.settings.require("topic_namespace")
         super().__init__(system)
 
+    @override
+    def start(self) -> None:
+        super().start()
+
+        try:
+            # This creates the persisted configuration if it doesn't exist.
+            # It should be run as soon as possible (before any WAL mutations) since the default configuration depends on the WAL size.
+            _ = self._config
+        except Exception:
+            # It can't be loaded if migrations haven't been run
+            pass
+
     @trace_method("SqlEmbeddingsQueue.reset_state", OpenTelemetryGranularity.ALL)
     @override
     def reset_state(self) -> None:
