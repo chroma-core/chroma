@@ -45,6 +45,9 @@ class PersistentData:
     dimensionality: Optional[int]
     total_elements_added: int
 
+    max_seq_id: SeqId
+    "This is a legacy field. It is no longer mutated, but kept to allow automatic migration of the `max_seq_id` from the pickled file to the `max_seq_id` table in SQLite."
+
     id_to_label: Dict[str, int]
     label_to_id: Dict[int, str]
     id_to_seq_id: Dict[str, SeqId]
@@ -146,6 +149,23 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
             if result:
                 self._max_seq_id = self._db.decode_seq_id(result[0])
+            elif self._index_exists():
+                # Migrate the max_seq_id from the legacy field in the pickled file to the SQLite database
+                q = (
+                    self._db.querybuilder()
+                    .into(Table("max_seq_id"))
+                    .columns("segment_id", "seq_id")
+                    .insert(
+                        ParameterValue(self._db.uuid_to_db(self._id)),
+                        ParameterValue(
+                            self._db.encode_seq_id(self._persist_data.max_seq_id)
+                        ),
+                    )
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+
+                self._max_seq_id = self._persist_data.max_seq_id
             else:
                 self._max_seq_id = self._consumer.min_seqid()
 
