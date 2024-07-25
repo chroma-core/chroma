@@ -99,7 +99,7 @@ def vacuum(
     force: bool = typer.Option(False, help="Force vacuuming without confirmation."),
 ) -> None:
     """
-    Vacuum the database. This may result in a small performance increase.
+    Vacuum the database. This may result in a small increase in performance.
 
     If you recently upgraded Chroma from a version below 0.6 to 0.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
 
