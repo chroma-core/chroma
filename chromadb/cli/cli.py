@@ -2,6 +2,7 @@ from typing import Optional
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+import typer.rich_utils
 from typing_extensions import Annotated
 import typer
 import uvicorn
@@ -47,6 +48,7 @@ def run(
     test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
+    console = Console()
 
     print("\033[1m")  # Bold logo
     print(_logo)
@@ -54,12 +56,12 @@ def run(
     print("Running Chroma")
     print("\033[0m")  # Reset
 
-    typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
-    typer.echo(
-        f"\033[1mConnect to chroma at\033[0m: \033[32mhttp://{host}:{port}\033[0m"
+    console.print(f"[bold]Saving data to:[/bold] [green]{path}[/green]")
+    console.print(
+        f"[bold]Connect to chroma at:[/bold] [green]http://{host}:{port}[/green]"
     )
-    typer.echo(
-        "\033[1mGetting started guide\033[0m: https://docs.trychroma.com/getting-started\n\n"
+    console.print(
+        "[bold]Getting started guide[/bold]: [blue]https://docs.trychroma.com/getting-started[/blue]\n\n"
     )
 
     # set ENV variable for PERSIST_DIRECTORY to path
@@ -96,7 +98,13 @@ def vacuum(
     ),
     force: bool = typer.Option(False, help="Force vacuuming without confirmation."),
 ) -> None:
-    """Vacuum the database"""
+    """
+    Vacuum the database. This may result in a small performance increase.
+
+    If you recently upgraded Chroma from a version below 0.6 to 0.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
+
+    The execution time of this command scales with the size of your database. It block both reads and writes to the database while it is running.
+    """
     console = Console(
         highlight=False
     )  # by default, rich highlights numbers which makes the output look weird when we try to color numbers ourselves

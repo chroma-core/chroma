@@ -1,3 +1,4 @@
+import logging
 from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
@@ -20,6 +21,8 @@ from uuid import UUID
 from threading import local
 from importlib_resources import files
 from importlib_resources.abc import Traversable
+
+logger = logging.getLogger(__name__)
 
 
 class TxWrapper(base.TxWrapper):
@@ -99,6 +102,11 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
+
+        if self.config.get_parameter("automatically_prune").value is False:
+            logger.warn(
+                "⚠️ It looks like you upgraded from a version below 0.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
+            )
 
     @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
     @override
