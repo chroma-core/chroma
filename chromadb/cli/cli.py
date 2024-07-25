@@ -12,6 +12,8 @@ import webbrowser
 from chromadb.cli.utils import get_directory_size, set_log_file_path, sizeof_fmt
 from chromadb.config import Settings, System
 from chromadb.db.impl.sqlite import SqliteDB
+from chromadb.ingest.impl.utils import trigger_vector_segments_max_seq_id_migration
+from chromadb.segment import SegmentManager
 
 app = typer.Typer()
 utils_app = typer.Typer(short_help="Use maintenance utilities")
@@ -142,6 +144,11 @@ def vacuum(
     ) as progress:
         task = progress.add_task("Pruning the log...")
         try:
+            # Cleaning the log after upgrading to >=0.6 is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
+            # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
+            trigger_vector_segments_max_seq_id_migration(
+                sqlite, system.instance(SegmentManager)
+            )
             sqlite.purge_log()
         except Exception as e:
             console.print(f"[bold red]Error pruning the log:[/bold red] {e}")
@@ -164,7 +171,7 @@ def vacuum(
     size_diff = directory_size_before_vacuum - directory_size_after_vacuum
 
     console.print(
-        f":soap: [bold]vacuum complete![/bold] Database size reduced by [green]{sizeof_fmt(size_diff)}[/green] (:arrow_down: [bold green]{size_diff * 100 / directory_size_before_vacuum}%[/bold green])."
+        f":soap: [bold]vacuum complete![/bold] Database size reduced by [green]{sizeof_fmt(size_diff)}[/green] (:arrow_down: [bold green]{(size_diff * 100 / directory_size_before_vacuum):.1f}%[/bold green])."
     )
 
 
