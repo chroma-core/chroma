@@ -225,6 +225,22 @@ def test_add(client):
     assert collection.count() == 2
 
 
+def test_add_embeddings_without_ids(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    result = collection.add(embeddings=[[0, 0], [1, 1]])
+    assert len(result["ids"]) == 2
+    assert collection.count() == 2
+
+
+def test_add_documents_without_ids(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    result = collection.add(documents=["hello", "world"])
+    assert len(result["ids"]) == 2
+    assert collection.count() == 2
+
+
 def test_collection_add_with_invalid_collection_throws(client):
     client.reset()
     collection = client.create_collection("test")

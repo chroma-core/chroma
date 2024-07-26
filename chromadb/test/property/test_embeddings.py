@@ -134,12 +134,14 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 if normalized_record_set["embeddings"]
                 else None,
             }
-            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+            result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+            assert result["ids"] == normalized_record_set["ids"]
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
             return multiple(*filtered_record_set["ids"])
 
         else:
-            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+            result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+            assert result["ids"] == normalized_record_set["ids"]
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 

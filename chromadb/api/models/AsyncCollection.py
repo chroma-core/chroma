@@ -7,6 +7,7 @@ import numpy as np
 
 from chromadb.api.types import (
     URI,
+    AddResult,
     CollectionMetadata,
     Embedding,
     Include,
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]] = None,
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -42,10 +43,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+    ) -> AddResult:
         """Add embeddings to the data store.
         Args:
-            ids: The ids of the embeddings you wish to add
+            ids: The ids of the embeddings you wish to add. If None, ids will be generated for you. Optional.
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
             metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
@@ -74,6 +75,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
 
         await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        return {"ids": ids}
 
     async def count(self) -> int:
         """The total number of embeddings added to the database

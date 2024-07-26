@@ -165,6 +165,10 @@ Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
 
 
+class AddResult(TypedDict):
+    ids: List[ID]
+
+
 class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
