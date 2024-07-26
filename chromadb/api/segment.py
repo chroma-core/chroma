@@ -132,9 +132,14 @@ class SegmentAPI(ServerAPI):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @override
+    def start(self) -> None:
+        super().start()
+
     @trace_method("SegmentAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self._raise_for_running()
         if len(name) < 3:
             raise ValueError("Database name must be at least 3 characters long")
 
@@ -147,11 +152,13 @@ class SegmentAPI(ServerAPI):
     @trace_method("SegmentAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
+        self._raise_for_running()
         return self._sysdb.get_database(name=name, tenant=tenant)
 
     @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
+        self._raise_for_running()
         if len(name) < 3:
             raise ValueError("Tenant name must be at least 3 characters long")
 
@@ -162,6 +169,7 @@ class SegmentAPI(ServerAPI):
     @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> t.Tenant:
+        self._raise_for_running()
         return self._sysdb.get_tenant(name=name)
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
@@ -178,6 +186,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self._raise_for_running()
         if metadata is not None:
             validate_metadata(metadata)
 
@@ -243,6 +252,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self._raise_for_running()
         return self.create_collection(
             name=name,
             metadata=metadata,
@@ -264,6 +274,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self._raise_for_running()
         if id is None and name is None or (id is not None and name is not None):
             raise ValueError("Name or id must be specified, but not both")
         existing = self._sysdb.get_collections(
@@ -284,6 +295,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
+        self._raise_for_running()
         return self._sysdb.get_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
         )
@@ -295,6 +307,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
+        self._raise_for_running()
         collection_count = len(
             self._sysdb.get_collections(tenant=tenant, database=database)
         )
@@ -309,6 +322,7 @@ class SegmentAPI(ServerAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
+        self._raise_for_running()
         if new_name:
             # backwards compatibility in naming requirements (for now)
             check_index_name(new_name)
@@ -336,6 +350,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self._raise_for_running()
         existing = self._sysdb.get_collections(
             name=name, tenant=tenant, database=database
         )
@@ -360,6 +375,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._raise_for_running()
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
@@ -402,6 +418,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._raise_for_running()
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
@@ -446,6 +463,7 @@ class SegmentAPI(ServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._raise_for_running()
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
@@ -489,6 +507,7 @@ class SegmentAPI(ServerAPI):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
+        self._raise_for_running()
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection_id),
@@ -594,6 +613,7 @@ class SegmentAPI(ServerAPI):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> None:
+        self._raise_for_running()
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection_id),
@@ -669,6 +689,7 @@ class SegmentAPI(ServerAPI):
     )
     @override
     def _count(self, collection_id: UUID) -> int:
+        self._raise_for_running()
         add_attributes_to_current_span({"collection_id": str(collection_id)})
         coll = self._get_collection(collection_id)
         request_version_context = t.RequestVersionContext(
@@ -703,6 +724,7 @@ class SegmentAPI(ServerAPI):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
+        self._raise_for_running()
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection_id),
@@ -842,6 +864,7 @@ class SegmentAPI(ServerAPI):
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+        self._raise_for_running()
         add_attributes_to_current_span({"collection_id": str(collection_id)})
         return self._get(collection_id, limit=n)  # type: ignore
 
@@ -855,6 +878,7 @@ class SegmentAPI(ServerAPI):
 
     @override
     def reset(self) -> bool:
+        self._raise_for_running()
         self._system.reset_state()
         return True
 
@@ -864,6 +888,7 @@ class SegmentAPI(ServerAPI):
 
     @override
     def get_max_batch_size(self) -> int:
+        self._raise_for_running()
         return self._producer.max_batch_size
 
     # TODO: This could potentially cause race conditions in a distributed version of the
@@ -904,12 +929,19 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
     def _get_collection(self, collection_id: UUID) -> t.Collection:
+        self._raise_for_running()
         collections = self._sysdb.get_collections(id=collection_id)
         if not collections or len(collections) == 0:
             raise InvalidCollectionException(
                 f"Collection {collection_id} does not exist."
             )
         return collections[0]
+
+    @trace_method("SegmentAPI.close", OpenTelemetryGranularity.ALL)
+    @override
+    def close(self) -> None:
+        self._raise_for_running()
+        self._system.stop()
 
 
 def _records(

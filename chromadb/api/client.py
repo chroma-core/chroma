@@ -390,6 +390,11 @@ class Client(SharedSystemClient, ClientAPI):
 
     # endregion
 
+    @override
+    def close(self) -> None:
+        self._server.close()
+        self._admin_client.close()
+
 
 class AdminClient(SharedSystemClient, AdminAPI):
     _server: ServerAPI
@@ -413,6 +418,10 @@ class AdminClient(SharedSystemClient, AdminAPI):
     @override
     def get_tenant(self, name: str) -> Tenant:
         return self._server.get_tenant(name=name)
+
+    @override
+    def close(self) -> None:
+        self._server.close()
 
     @classmethod
     @override
