@@ -36,3 +36,6 @@ DELETE FROM record_log r using collection c where r.collection_id = c.id and r.o
 
 -- name: GetTotalUncompactedRecordsCount :one
 SELECT CAST(COALESCE(SUM(record_enumeration_offset_position - record_compaction_offset_position), 0) AS bigint) AS total_uncompacted_depth FROM collection;
+
+-- name: GarbageCollectCollections :exec
+DELETE FROM record_log r where r.collection_id = ANY(@collection_ids::string[]);

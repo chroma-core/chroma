@@ -6,6 +6,7 @@ import (
 	"time"
 
 	log "github.com/chroma-core/chroma/go/database/log/db"
+	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	trace_log "github.com/pingcap/log"
@@ -15,6 +16,7 @@ import (
 type LogRepository struct {
 	conn    *pgxpool.Pool
 	queries *log.Queries
+	sysDb   *sysdb.SysDB
 }
 
 func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, err error) {
@@ -128,9 +130,43 @@ func (r *LogRepository) GetTotalUncompactedRecordsCount(ctx context.Context) (to
 	return
 }
 
-func NewLogRepository(conn *pgxpool.Pool) *LogRepository {
+func (r *LogRepository) GarbageCollection(ctx context.Context) error {
+	collectionToCompact, err := r.GetAllCollectionInfoToCompact(ctx, 0)
+	if err != nil {
+		trace_log.Error("Error in getting collections to compact", zap.Error(err))
+		return err
+	} else {
+		trace_log.Info("Got collections to compact", zap.Int("collectionCount", len(collectionToCompact)))
+	}
+	if collectionToCompact == nil {
+		return nil
+	}
+	collectionsToGC := make([]string, 0)
+	for _, collection := range collectionToCompact {
+		exist, err := r.sysDb.CheckCollection(ctx, collection.CollectionID)
+		if err != nil {
+			trace_log.Error("Error in checking collection in sysdb", zap.Error(err), zap.String("collectionId", collection.CollectionID))
+			continue
+		}
+		if !exist {
+			collectionsToGC = append(collectionsToGC, collection.CollectionID)
+		}
+	}
+	if len(collectionsToGC) > 0 {
+		trace_log.Info("Collections to be garbage collected", zap.Strings("collections", collectionsToGC))
+		err = r.queries.GarbageCollectCollections(ctx, collectionsToGC)
+		if err != nil {
+			trace_log.Error("Error in purging records", zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
+func NewLogRepository(conn *pgxpool.Pool, sysDb *sysdb.SysDB) *LogRepository {
 	return &LogRepository{
 		conn:    conn,
 		queries: log.New(conn),
+		sysDb:   sysDb,
 	}
 }

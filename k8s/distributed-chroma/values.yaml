@@ -57,6 +57,8 @@ logService:
   env:
     - name: OPTL_TRACING_ENDPOINT
       value: 'value: "otel-collector:4317"'
+    - name: SYSDB_CONN
+      value: 'value: "sysdb.chroma:50051"'
   flags:
   replicaCount: 1
 

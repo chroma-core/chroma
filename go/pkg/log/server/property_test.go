@@ -54,7 +54,7 @@ func (suite *LogServerTestSuite) SetupSuite() {
 	assert.NoError(suite.t, err, "Failed to create new pg connection")
 	err = libs2.RunMigration(ctx, connectionString)
 	assert.NoError(suite.t, err, "Failed to run migration")
-	suite.lr = repository.NewLogRepository(conn)
+	suite.lr = repository.NewLogRepository(conn, nil)
 	suite.logServer = NewLogServer(suite.lr)
 	suite.model = ModelState{
 		CollectionEnumerationOffset: map[types.UniqueID]uint64{},
