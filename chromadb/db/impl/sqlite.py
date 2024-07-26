@@ -103,7 +103,11 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
 
-        if self.config.get_parameter("automatically_prune").value is False:
+        if (
+            # (don't attempt to access .config if migrations haven't been run)
+            self._settings.require("migrations") == "apply"
+            and self.config.get_parameter("automatically_prune").value is False
+        ):
             logger.warn(
                 "⚠️ It looks like you upgraded from a version below 0.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
             )
