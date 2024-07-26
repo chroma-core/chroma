@@ -1,15 +1,8 @@
-import shutil
 import os
-from typing import List, Hashable
 
-import hypothesis.strategies as st
-import onnxruntime
 import pytest
-from hypothesis import given, settings
 
-from chromadb.utils.embedding_functions import (
-    ONNXMiniLM_L6_V2,
-    _verify_sha256,
+from chromadb.utils.embedding_functions.openai_embedding_function import (
     OpenAIEmbeddingFunction,
 )
 
