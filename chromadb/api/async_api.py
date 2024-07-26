@@ -319,6 +319,11 @@ class AsyncBaseAPI(ABC):
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the client and release any resources."""
+        pass
+
 
 class AsyncClientAPI(AsyncBaseAPI, ABC):
     tenant: str

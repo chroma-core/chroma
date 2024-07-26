@@ -603,7 +603,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
     @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
     @override
-    def close(self) -> None:
+    async def close(self) -> None:
         self._raise_for_running()
         self.stop()
         self._system.stop()
