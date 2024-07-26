@@ -33,3 +33,6 @@ INSERT INTO collection (id, record_enumeration_offset_position, record_compactio
 
 -- name: PurgeRecords :exec
 DELETE FROM record_log r using collection c where r.collection_id = c.id and r.offset <= c.record_compaction_offset_position;
+
+-- name: GarbageCollectCollections :exec
+DELETE FROM record_log r where r.collection_id = ANY(@collection_ids::string[]);

@@ -9,6 +9,15 @@ import (
 	"context"
 )
 
+const garbageCollectCollections = `-- name: GarbageCollectCollections :exec
+DELETE FROM record_log r where r.collection_id = ANY($1::string[])
+`
+
+func (q *Queries) GarbageCollectCollections(ctx context.Context, collectionIds []string) error {
+	_, err := q.db.Exec(ctx, garbageCollectCollections, collectionIds)
+	return err
+}
+
 const getAllCollectionsToCompact = `-- name: GetAllCollectionsToCompact :many
 with summary as (
     select r.collection_id, r.offset, r.timestamp, row_number() over(partition by r.collection_id order by r.offset) as rank
