@@ -61,6 +61,7 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		return nil, "", err
 	}
 	cr := unstrucuted.UnstructuredContent()
+	log.Info("Got unstructured memberlist object", zap.Any("cr", cr))
 	members := cr["spec"].(map[string]interface{})["members"]
 	memberlist := Memberlist{}
 	if members == nil {
