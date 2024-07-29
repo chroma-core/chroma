@@ -92,7 +92,7 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    coll.add(**embeddings_strategy)
+    coll.add(**embeddings_strategy)  # type: ignore[arg-type]
 
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
@@ -153,37 +153,37 @@ def test_sync_threshold(settings: Settings) -> None:
 
     last_modified_at = get_index_last_modified_at()
 
-    collection.add(ids=["1", "2"], embeddings=[[1.0], [2.0]])
+    collection.add(ids=["1", "2"], embeddings=[[1.0], [2.0]])  # type: ignore[arg-type]
 
     # Should not have yet persisted
     assert get_index_last_modified_at() == last_modified_at
     last_modified_at = get_index_last_modified_at()
 
     # Now there's 3 additions, and the sync threshold is 3...
-    collection.add(ids=["3"], embeddings=[[3.0]])
+    collection.add(ids=["3"], embeddings=[[3.0]])  # type: ignore[arg-type]
 
     # ...so it should have persisted
     assert get_index_last_modified_at() > last_modified_at
     last_modified_at = get_index_last_modified_at()
 
     # The same thing should happen with upserts
-    collection.upsert(ids=["1", "2", "3"], embeddings=[[1.0], [2.0], [3.0]])
+    collection.upsert(ids=["1", "2", "3"], embeddings=[[1.0], [2.0], [3.0]])  # type: ignore[arg-type]
 
     # Should have persisted
     assert get_index_last_modified_at() > last_modified_at
     last_modified_at = get_index_last_modified_at()
 
     # Mixed usage should also trigger persistence
-    collection.add(ids=["4"], embeddings=[[4.0]])
-    collection.upsert(ids=["1", "2"], embeddings=[[1.0], [2.0]])
+    collection.add(ids=["4"], embeddings=[[4.0]])  # type: ignore[arg-type]
+    collection.upsert(ids=["1", "2"], embeddings=[[1.0], [2.0]])  # type: ignore[arg-type]
 
     # Should have persisted
     assert get_index_last_modified_at() > last_modified_at
     last_modified_at = get_index_last_modified_at()
 
     # Invalid updates should also trigger persistence
-    collection.add(ids=["5"], embeddings=[[5.0]])
-    collection.add(ids=["1", "2"], embeddings=[[1.0], [2.0]])
+    collection.add(ids=["5"], embeddings=[[5.0]])  # type: ignore[arg-type]
+    collection.add(ids=["1", "2"], embeddings=[[1.0], [2.0]])  # type: ignore[arg-type]
 
     # Should have persisted
     assert get_index_last_modified_at() > last_modified_at
@@ -286,6 +286,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         p.close()
 
     def on_state_change(self, new_state: str) -> None:
+        super().on_state_change(new_state)
         if new_state == PersistEmbeddingsStateMachineStates.persist:
             self.min_state_changes_left_before_persisting = (
                 MIN_STATE_CHANGES_BEFORE_PERSIST

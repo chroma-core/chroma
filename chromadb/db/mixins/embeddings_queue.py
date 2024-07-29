@@ -1,4 +1,9 @@
+from functools import cached_property
 import json
+from chromadb.api.configuration import (
+    ConfigurationParameter,
+    EmbeddingsQueueConfigurationInternal,
+)
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
 from chromadb.ingest import (
     Producer,
@@ -99,6 +104,13 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         super().reset_state()
         self._subscriptions = defaultdict(set)
 
+        # Invalidate the cached property
+        try:
+            del self._config
+        except AttributeError:
+            # Cached property hasn't been accessed yet
+            pass
+
     @trace_method("SqlEmbeddingsQueue.delete_topic", OpenTelemetryGranularity.ALL)
     @override
     def delete_log(self, collection_id: UUID) -> None:
@@ -118,22 +130,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     @trace_method("SqlEmbeddingsQueue.purge_log", OpenTelemetryGranularity.ALL)
     @override
-    def purge_log(self, collection_id: UUID) -> None:
-        topic_name = create_topic_name(
-            self._tenant, self._topic_namespace, collection_id
-        )
-
+    def purge_log(self) -> None:
         segments_t = Table("segments")
         segment_ids_q = (
             self.querybuilder()
             .from_(segments_t)
-            .where(
-                segments_t.collection == ParameterValue(self.uuid_to_db(collection_id))
-            )
-            # This coalesce prevents a correctness bug when two segments exist and:
-            # - one has written to the max_seq_id table
-            # - the other has not never written to the max_seq_id table
-            # In that case, we should not delete any WAL entries as we can't be sure that the second segment is caught up.
+            # This coalesce prevents a correctness bug when > 1 segments exist and:
+            # - > 1 has written to the max_seq_id table
+            # - > 1 has not never written to the max_seq_id table
+            # In that case, we should not delete any WAL entries as we can't be sure that the all segments are caught up.
             .select(functions.Coalesce(Table("max_seq_id").seq_id, -1))
             .left_join(Table("max_seq_id"))
             .on(segments_t.id == Table("max_seq_id").segment_id)
@@ -152,7 +157,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             q = (
                 self.querybuilder()
                 .from_(t)
-                .where(t.topic == ParameterValue(topic_name))
                 .where(t.seq_id < ParameterValue(min_seq_id))
                 .delete()
             )
@@ -189,6 +193,11 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     {self.max_batch_size:,} or less.
                     """
             )
+
+        # This creates the persisted configuration if it doesn't exist.
+        # It should be run as soon as possible (before any WAL mutations) since the default configuration depends on the WAL size.
+        # (We can't run this in __init__()/start() because the migrations have not been run at that point and the table may not be available.)
+        _ = self._config
 
         topic_name = create_topic_name(
             self._tenant, self._topic_namespace, collection_id
@@ -244,6 +253,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 )
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
+
+            if self._config.get_parameter("automatically_purge").value:
+                self.purge_log()
+
             return seq_ids
 
     @trace_method("SqlEmbeddingsQueue.subscribe", OpenTelemetryGranularity.ALL)
@@ -435,3 +448,50 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             )
             if _called_from_test:
                 raise e
+
+    @cached_property
+    def _config(self) -> EmbeddingsQueueConfigurationInternal:
+        t = Table("embeddings_queue_config")
+        q = self.querybuilder().from_(t).select(t.config_json_str).limit(1)
+
+        with self.tx() as cur:
+            cur.execute(q.get_sql())
+            result = cur.fetchone()
+
+        if result is None:
+            is_fresh_system = self._get_wal_size() == 0
+            config = EmbeddingsQueueConfigurationInternal(
+                [ConfigurationParameter("automatically_purge", is_fresh_system)]
+            )
+            self._set_config(config)
+            return config
+
+        return EmbeddingsQueueConfigurationInternal.from_json_str(result[0])
+
+    def _set_config(self, config: EmbeddingsQueueConfigurationInternal) -> None:
+        with self.tx() as cur:
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str)
+                VALUES (?, ?)
+            """,
+                (
+                    1,
+                    config.to_json_str(),
+                ),
+            )
+
+        # Invalidate the cached property
+        try:
+            del self._config
+        except AttributeError:
+            # Cached property hasn't been accessed yet
+            pass
+
+    def _get_wal_size(self) -> int:
+        t = Table("embeddings_queue")
+        q = self.querybuilder().from_(t).select(functions.Count("*"))
+
+        with self.tx() as cur:
+            cur.execute(q.get_sql())
+            return int(cur.fetchone()[0])

@@ -899,3 +899,8 @@ def produce_fns(
 
 def pytest_configure(config):  # type: ignore
     embeddings_queue._called_from_test = True
+
+
+def is_client_in_process(client: ClientAPI) -> bool:
+    """Returns True if the client is in-process (a SQLite client), False if it's out-of-process (a HTTP client)."""
+    return client.get_settings().chroma_server_http_port is None
