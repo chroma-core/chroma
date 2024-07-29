@@ -351,6 +351,7 @@ def test_cycle_versions(
     # Should be able to clean log immediately after updating
     embeddings_queue = system.instance(SqliteDB)
 
+    # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
     # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
     # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
     trigger_vector_segments_max_seq_id_migration(

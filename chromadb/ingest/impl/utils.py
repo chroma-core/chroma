@@ -33,7 +33,8 @@ def trigger_vector_segments_max_seq_id_migration(
             """
             SELECT collection
             FROM "segments"
-            WHERE "id" NOT IN (SELECT "segment_id" FROM "max_seq_id")
+            WHERE "id" NOT IN (SELECT "segment_id" FROM "max_seq_id") AND
+                  "type" = 'urn:chroma:segment/vector/hnsw-local-persisted'
         """
         )
         collection_ids_with_unmigrated_segments = [row[0] for row in cur.fetchall()]

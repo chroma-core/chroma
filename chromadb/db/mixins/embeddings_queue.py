@@ -146,7 +146,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             if results:
                 min_seq_id = min(self.decode_seq_id(row[0]) for row in results)
             else:
-                min_seq_id = -1
+                return
 
             t = Table("embeddings_queue")
             q = (

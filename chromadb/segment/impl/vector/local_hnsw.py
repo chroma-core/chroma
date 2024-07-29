@@ -278,7 +278,7 @@ class LocalHnswSegment(VectorReader):
             self._total_elements_added += batch.add_count
 
             # If that succeeds, finally the seq ID
-            self._max_seq_id = max(self._max_seq_id, batch.max_seq_id)
+            self._max_seq_id = batch.max_seq_id
 
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
     def _write_records(self, records: Sequence[LogRecord]) -> None:

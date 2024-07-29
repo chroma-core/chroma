@@ -1,5 +1,6 @@
 import gc
 import math
+from chromadb.api.configuration import HNSWConfigurationInternal
 from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
@@ -341,9 +342,15 @@ def log_size_below_max(
         # Must always keep one entry to avoid reusing seq_ids
         assert _total_embedding_queue_log_size(sqlite) >= 1
 
-        # todo: use new collection config API when available
-        sync_threshold = collection.metadata.get("hnsw:sync_threshold", 1000)
-        batch_size = collection.metadata.get("hnsw:batch_size", 100)
+        hnsw_config = cast(
+            HNSWConfigurationInternal,
+            collection.get_model()
+            .get_configuration()
+            .get_parameter("hnsw_configuration")
+            .value,
+        )
+        sync_threshold = cast(int, hnsw_config.get_parameter("sync_threshold").value)
+        batch_size = cast(int, hnsw_config.get_parameter("batch_size").value)
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
         # And if the batch_size != sync_threshold, the queue can have up to batch_size - 1 more entries.
