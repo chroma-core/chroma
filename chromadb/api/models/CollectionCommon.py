@@ -263,7 +263,10 @@ class CollectionCommon(Generic[ClientT]):
     ]:
         if ids is None:
             if embeddings:
-                set_size = len(embeddings)
+                if isinstance(embeddings[0], list) and len(embeddings[0]) > 1:
+                    set_size = len(embeddings)
+                else:
+                    set_size = 1
             elif documents:
                 set_size = len(documents)
             elif images:

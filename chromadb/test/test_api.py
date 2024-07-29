@@ -1,6 +1,8 @@
 # type: ignore
 import traceback
 import httpx
+from hypothesis import given
+import hypothesis.strategies as st
 
 import chromadb
 from chromadb.errors import ChromaError
@@ -8,6 +10,7 @@ from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
 from chromadb.errors import InvalidCollectionException
+import chromadb.test.property.strategies as strategies
 import chromadb.server.fastapi
 import pytest
 import tempfile
@@ -225,20 +228,17 @@ def test_add(client):
     assert collection.count() == 2
 
 
-def test_add_embeddings_without_ids(client):
-    client.reset()
-    collection = client.create_collection("testspace")
-    result = collection.add(embeddings=[[0, 0], [1, 1]])
-    assert len(result["ids"]) == 2
-    assert collection.count() == 2
+collection_st = st.shared(strategies.collections(), key="coll")
 
 
-def test_add_documents_without_ids(client):
+@given(
+    record_set=strategies.recordsets(collection_st, min_size=1, max_size=5),
+)
+def test_add_without_ids(client, record_set):
     client.reset()
     collection = client.create_collection("testspace")
-    result = collection.add(documents=["hello", "world"])
-    assert len(result["ids"]) == 2
-    assert collection.count() == 2
+    result = collection.add(**{k: v for k, v in record_set.items() if k != "ids"})
+    assert collection.count() == len(result["ids"])
 
 
 def test_collection_add_with_invalid_collection_throws(client):
