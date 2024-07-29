@@ -350,6 +350,10 @@ class FastAPI(Server):
     async def version(self) -> str:
         return self._api.get_version()
 
+    @trace_method(
+        "auth_and_get_tenant_and_database_for_request",
+        OpenTelemetryGranularity.OPERATION,
+    )
     def auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
