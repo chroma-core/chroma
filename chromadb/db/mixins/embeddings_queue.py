@@ -414,7 +414,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             for sub in self._subscriptions[topic]:
                 self._notify_one(sub, embeddings)
 
-            if self._config.get_parameter("automatically_prune").value:
+            if self._config.get_parameter("automatically_purge").value:
                 self.purge_log()
 
     @trace_method("SqlEmbeddingsQueue._notify_one", OpenTelemetryGranularity.ALL)
@@ -459,7 +459,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if result is None:
             is_fresh_system = self._get_wal_size() == 0
             config = EmbeddingsQueueConfigurationInternal(
-                [ConfigurationParameter("automatically_prune", is_fresh_system)]
+                [ConfigurationParameter("automatically_purge", is_fresh_system)]
             )
             self._set_config(config)
             return config

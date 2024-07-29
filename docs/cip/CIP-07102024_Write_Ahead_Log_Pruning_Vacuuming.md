@@ -21,12 +21,12 @@ After every write transaction, if log pruning is enabled, the `embeddings_queue`
 
 This does not directly reduce the disk size of the database, but allows SQLite to reuse the space occupied by the deleted rows—thus effectively bounding the disk usage of the `embeddings_queue` table by `hnsw:sync_threshold`.
 
-To control log pruning, `SqlEmbeddingsQueue` will get a new configuration object with a single parameter: `automatically_prune`. This will default to `false` for systems with non-empty embedding queues, because:
+To control log pruning, `SqlEmbeddingsQueue` will get a new configuration object with a single parameter: `automatically_purge`. This will default to `false` for systems with non-empty embedding queues, because:
 
 - The first pruning operation for a large embeddings queue can be very slow.
 - Some users may be relying on the WAL as a full backup.
 
-If the system's embedding queue is empty (a fresh system), `automatically_prune` will default to `true`.
+If the system's embedding queue is empty (a fresh system), `automatically_purge` will default to `true`.
 
 This configuration object will be stored in a new table, `embeddings_queue_config`.
 
@@ -46,7 +46,7 @@ We should clearly document that `chroma vacuum` is not intended to be run while 
 
 ## Compatibility, Deprecation, and Migration Plan
 
-Existing installations will not benefit from auto-pruning until they run `chroma vacuum`. During the vacuum, `automatically_prune` will be set to `true`.
+Existing installations will not benefit from auto-pruning until they run `chroma vacuum`. During the vacuum, `automatically_purge` will be set to `true`.
 
 Users should see disk space freed immediately after upgrading and running `chroma vacuum` for the first time. Subsequent runs of `chroma vacuum` will likely free up no or very little disk space as the database will be continuously auto-pruned from that point forward.
 

@@ -397,8 +397,8 @@ CollectionConfiguration = CollectionConfigurationInterface
 
 class EmbeddingsQueueConfigurationInternal(ConfigurationInternal):
     definitions = {
-        "automatically_prune": ConfigurationDefinition(
-            name="automatically_prune",
+        "automatically_purge": ConfigurationDefinition(
+            name="automatically_purge",
             validator=lambda value: isinstance(value, bool),
             is_static=True,
             default_value=True,
