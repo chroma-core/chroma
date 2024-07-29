@@ -196,6 +196,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
         # This creates the persisted configuration if it doesn't exist.
         # It should be run as soon as possible (before any WAL mutations) since the default configuration depends on the WAL size.
+        # (We can't run this in __init__()/start() because the migrations have not been run at that point and the table may not be available.)
         _ = self._config
 
         topic_name = create_topic_name(
@@ -252,6 +253,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 )
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
+
+            if self._config.get_parameter("automatically_purge").value:
+                self.purge_log()
+
             return seq_ids
 
     @trace_method("SqlEmbeddingsQueue.subscribe", OpenTelemetryGranularity.ALL)
@@ -413,9 +418,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if self._running:
             for sub in self._subscriptions[topic]:
                 self._notify_one(sub, embeddings)
-
-            if self._config.get_parameter("automatically_purge").value:
-                self.purge_log()
 
     @trace_method("SqlEmbeddingsQueue._notify_one", OpenTelemetryGranularity.ALL)
     def _notify_one(self, sub: Subscription, embeddings: Sequence[LogRecord]) -> None:

@@ -28,7 +28,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import is_client_in_process, reset, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
 from chromadb.test.utils.wait_for_version_increase import (
@@ -216,7 +216,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         invariants.documents_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
 
     @precondition(
-        lambda self: self.client.get_settings().chroma_server_http_port is None
+        lambda self: is_client_in_process(self.client)
     )  # (Can't check the log size on HTTP clients)
     @invariant()
     def log_size_below_max(self) -> None:
