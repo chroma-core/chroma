@@ -780,7 +780,7 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
-
+    system.start()
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
         yield client
