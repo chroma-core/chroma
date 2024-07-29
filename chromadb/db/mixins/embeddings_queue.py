@@ -52,7 +52,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     Note that this class is only suitable for use cases where the producer and consumer
     are in the same process.
 
-    This is because notifiaction of new embeddings happens solely in-process: this
+    This is because notification of new embeddings happens solely in-process: this
     implementation does not actively listen to the the database for new records added by
     other processes.
     """
@@ -113,6 +113,50 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .delete()
         )
         with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+    @trace_method("SqlEmbeddingsQueue.purge_log", OpenTelemetryGranularity.ALL)
+    @override
+    def purge_log(self, collection_id: UUID) -> None:
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
+
+        segments_t = Table("segments")
+        segment_ids_q = (
+            self.querybuilder()
+            .from_(segments_t)
+            .where(
+                segments_t.collection == ParameterValue(self.uuid_to_db(collection_id))
+            )
+            # This coalesce prevents a correctness bug when two segments exist and:
+            # - one has written to the max_seq_id table
+            # - the other has not never written to the max_seq_id table
+            # In that case, we should not delete any WAL entries as we can't be sure that the second segment is caught up.
+            .select(functions.Coalesce(Table("max_seq_id").seq_id, -1))
+            .left_join(Table("max_seq_id"))
+            .on(segments_t.id == Table("max_seq_id").segment_id)
+        )
+
+        with self.tx() as cur:
+            sql, params = get_sql(segment_ids_q, self.parameter_format())
+            cur.execute(sql, params)
+            results = cur.fetchall()
+            if results:
+                min_seq_id = min(self.decode_seq_id(row[0]) for row in results)
+            else:
+                return
+
+            t = Table("embeddings_queue")
+            q = (
+                self.querybuilder()
+                .from_(t)
+                .where(t.topic == ParameterValue(topic_name))
+                .where(t.seq_id < ParameterValue(min_seq_id))
+                .delete()
+            )
+
             sql, params = get_sql(q, self.parameter_format())
             cur.execute(sql, params)
 

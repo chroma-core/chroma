@@ -4,6 +4,8 @@ from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
@@ -29,6 +31,7 @@ from chromadb.types import (
 )
 import hnswlib
 import logging
+from pypika import Table
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
@@ -41,7 +44,9 @@ class PersistentData:
 
     dimensionality: Optional[int]
     total_elements_added: int
+
     max_seq_id: SeqId
+    "This is a legacy field. It is no longer mutated, but kept to allow automatic migration of the `max_seq_id` from the pickled file to the `max_seq_id` table in SQLite."
 
     id_to_label: Dict[str, int]
     label_to_id: Dict[int, str]
@@ -51,14 +56,12 @@ class PersistentData:
         self,
         dimensionality: Optional[int],
         total_elements_added: int,
-        max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
         id_to_seq_id: Dict[str, SeqId],
     ):
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
-        self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
         self.id_to_seq_id = id_to_seq_id
@@ -86,6 +89,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_directory: str
     _allow_reset: bool
 
+    _db: SqliteDB
     _opentelemtry_client: OpenTelemetryClient
 
     _num_log_records_since_last_batch: int = 0
@@ -94,6 +98,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
 
+        self._db = system.instance(SqliteDB)
         self._opentelemtry_client = system.require(OpenTelemetryClient)
 
         self._params = PersistentHnswParams(segment["metadata"] or {})
@@ -112,7 +117,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
-            self._max_seq_id = self._persist_data.max_seq_id
             self._id_to_label = self._persist_data.id_to_label
             self._label_to_id = self._persist_data.label_to_id
             self._id_to_seq_id = self._persist_data.id_to_seq_id
@@ -124,11 +128,46 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._persist_data = PersistentData(
                 self._dimensionality,
                 self._total_elements_added,
-                self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
                 self._id_to_seq_id,
             )
+
+        # Hydrate the max_seq_id
+        with self._db.tx() as cur:
+            t = Table("max_seq_id")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .select(t.seq_id)
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+                .limit(1)
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+            result = cur.fetchone()
+
+            if result:
+                self._max_seq_id = self._db.decode_seq_id(result[0])
+            elif self._index_exists():
+                # Migrate the max_seq_id from the legacy field in the pickled file to the SQLite database
+                q = (
+                    self._db.querybuilder()
+                    .into(Table("max_seq_id"))
+                    .columns("segment_id", "seq_id")
+                    .insert(
+                        ParameterValue(self._db.uuid_to_db(self._id)),
+                        ParameterValue(
+                            self._db.encode_seq_id(self._persist_data.max_seq_id)
+                        ),
+                    )
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+
+                self._max_seq_id = self._persist_data.max_seq_id
+            else:
+                self._max_seq_id = self._consumer.min_seqid()
 
     @staticmethod
     @override
@@ -198,7 +237,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Persist the metadata
         self._persist_data.dimensionality = self._dimensionality
         self._persist_data.total_elements_added = self._total_elements_added
-        self._persist_data.max_seq_id = self._max_seq_id
 
         # TODO: This should really be stored in sqlite, the index itself, or a better
         # storage format
@@ -208,6 +246,20 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+
+        with self._db.tx() as cur:
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(self._db.encode_seq_id(self._max_seq_id)),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
 
         self._num_log_records_since_last_persist = 0
 

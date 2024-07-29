@@ -42,6 +42,11 @@ class Producer(Component):
         pass
 
     @abstractmethod
+    def purge_log(self, collection_id: UUID) -> None:
+        """Truncates the log for the given collection, removing all seen records."""
+        pass
+
+    @abstractmethod
     def submit_embedding(
         self, collection_id: UUID, embedding: OperationRecord
     ) -> SeqId:
@@ -82,7 +87,7 @@ class Consumer(Component):
         end: Optional[SeqId] = None,
         id: Optional[UUID] = None,
     ) -> UUID:
-        """Register a function that will be called to recieve embeddings for a given
+        """Register a function that will be called to receive embeddings for a given
         collections log stream. The given function may be called any number of times, with any number of
         records, and may be called concurrently.
 

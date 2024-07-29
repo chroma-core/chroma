@@ -13,6 +13,9 @@ import json
 from urllib import request
 from chromadb import config
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from chromadb.db.impl.sqlite import SqliteDB
+from chromadb.ingest.impl.utils import trigger_vector_segments_max_seq_id_migration
+from chromadb.segment import SegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
@@ -344,6 +347,19 @@ def test_cycle_versions(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
     )
+
+    # Should be able to clean log immediately after updating
+    embeddings_queue = system.instance(SqliteDB)
+
+    # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
+    # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
+    # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
+    trigger_vector_segments_max_seq_id_migration(
+        embeddings_queue, system.instance(SegmentManager)
+    )
+
+    embeddings_queue.purge_log(coll.id)
+    invariants.log_size_below_max(system, coll, True)
 
     # Should be able to add embeddings
     coll.add(**embeddings_strategy)  # type: ignore
