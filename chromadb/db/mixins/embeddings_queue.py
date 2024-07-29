@@ -1,4 +1,10 @@
+import queue
+import threading
+import time
 import json
+
+from typing_extensions import Annotated
+
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
 from chromadb.ingest import (
     Producer,
@@ -22,7 +28,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from overrides import override
 from collections import defaultdict
-from typing import Sequence, Optional, Dict, Set, Tuple, cast
+from typing import Sequence, Optional, Dict, Set, Tuple, cast, Any
 from uuid import UUID
 from pypika import Table, functions
 import uuid
@@ -43,6 +49,8 @@ _operation_codes_inv = {v: k for k, v in _operation_codes.items()}
 # Set in conftest.py to rethrow errors in the "async" path during testing
 # https://doc.pytest.org/en/latest/example/simple.html#detect-if-running-from-within-a-pytest-run
 _called_from_test = False
+
+batch_queue: Annotated[Any, queue.Queue] = queue.Queue()
 
 
 class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
@@ -89,9 +97,24 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         self._subscriptions = defaultdict(set)
         self._max_batch_size = None
         self._opentelemetry_client = system.require(OpenTelemetryClient)
+        self._batch_ingestion = system.settings.require("background_ingest")
         self._tenant = system.settings.require("tenant_id")
         self._topic_namespace = system.settings.require("topic_namespace")
         super().__init__(system)
+        if self._batch_ingestion:
+            t = threading.Thread(target=self._batch_worker, daemon=True)
+            t.start()
+            logger.debug("Working in batch mode")
+
+    def _batch_worker(self) -> None:
+        while True:
+            item = batch_queue.get()
+            if item is None:
+                time.sleep(1)
+                continue
+            batch = self._get_backfill_batch(item[0], item[1], item[2])
+            self._notify_all(item[0], batch)
+            batch_queue.task_done()
 
     @trace_method("SqlEmbeddingsQueue.reset_state", OpenTelemetryGranularity.ALL)
     @override
@@ -243,7 +266,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     ),
                 )
                 embedding_records.append(embedding_record)
-            self._notify_all(topic_name, embedding_records)
+            if self._batch_ingestion:
+                seq_ids = [er["seq_id"] for er in embedding_records]
+                min_seq_id, max_seq_id = min(seq_ids) - 1, max(seq_ids)
+                batch_queue.put((topic_name, min_seq_id, max_seq_id))
+            else:
+                self._notify_all(topic_name, embedding_records)
             return seq_ids
 
     @trace_method("SqlEmbeddingsQueue.subscribe", OpenTelemetryGranularity.ALL)
@@ -334,6 +362,43 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             encoding = None
         metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
         return embedding_bytes, encoding, metadata
+
+    def _get_backfill_batch(
+        self, topic_name: str, min_seq_id: int, max_seq_id: int
+    ) -> Sequence[OperationRecord]:
+        """Backfill batch with data for the given topic and seq_id range"""
+        t = Table("embeddings_queue")
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .where(t.topic == ParameterValue(topic_name))
+            .where(t.seq_id > ParameterValue(min_seq_id))
+            .where(t.seq_id <= ParameterValue(max_seq_id))
+            .select(t.seq_id, t.operation, t.id, t.vector, t.encoding, t.metadata)
+            .orderby(t.seq_id)
+        )
+        embedding_records = []
+        with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            for row in rows:
+                if row[3]:
+                    encoding = ScalarEncoding(row[4])
+                    vector = decode_vector(row[3], encoding)
+                else:
+                    encoding = None
+                    vector = None
+                embedding_records.append(
+                    OperationRecord(
+                        operation=_operation_codes_inv[row[1]],
+                        id=row[2],
+                        embedding=vector,
+                        encoding=encoding,
+                        metadata=json.loads(row[5]) if row[5] else None,
+                    )  # type: ignore
+                )
+        return embedding_records
 
     @trace_method("SqlEmbeddingsQueue._backfill", OpenTelemetryGranularity.ALL)
     def _backfill(self, subscription: Subscription) -> None:
