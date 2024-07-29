@@ -122,7 +122,7 @@ def vacuum(
         raise typer.Exit(code=1)
 
     if not force and not typer.confirm(
-        "Are you sure you want to vacuum the database? This will block both reads and writes to the database and may take a while."
+        "Are you sure you want to vacuum the database? This will block both reads and writes to the database and may take a while. We recommend shutting down the server before running this command. Continue?",
     ):
         console.print("Vacuum cancelled.")
         raise typer.Exit(code=0)
@@ -142,7 +142,7 @@ def vacuum(
         TextColumn("[progress.description]{task.description}"),
         transient=True,
     ) as progress:
-        task = progress.add_task("Pruning the log...")
+        task = progress.add_task("Purging the log...")
         try:
             # Cleaning the log after upgrading to >=0.6 is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
             # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
@@ -151,7 +151,7 @@ def vacuum(
             )
             sqlite.purge_log()
         except Exception as e:
-            console.print(f"[bold red]Error pruning the log:[/bold red] {e}")
+            console.print(f"[bold red]Error purging the log:[/bold red] {e}")
             raise typer.Exit(code=1)
         progress.update(task, advance=100)
 
@@ -159,7 +159,7 @@ def vacuum(
         try:
             sqlite.vacuum()
             config = sqlite.config
-            config.set_parameter("automatically_prune", True)
+            config.set_parameter("automatically_purge", True)
             sqlite.set_config(config)
         except Exception as e:
             console.print(f"[bold red]Error vacuuming database:[/bold red] {e}")
