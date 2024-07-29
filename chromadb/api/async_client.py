@@ -399,6 +399,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_max_batch_size(self) -> int:
         return await self._server.get_max_batch_size()
 
+    @override
+    async def close(self) -> None:
+        await self._server.close()
+        await self._admin_client.close()
+
+
     # endregion
 
 
@@ -434,3 +440,7 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         SharedSystemClient._populate_data_from_system(system)
         instance = cls(settings=system.settings)
         return instance
+
+    @override
+    async def close(self) -> None:
+        await self._server.close()

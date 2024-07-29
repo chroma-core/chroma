@@ -305,6 +305,7 @@ def _fastapi_fixture(
         )
         system = System(settings)
         api = system.instance(ServerAPI)
+        api.start()
         system.start()
         _await_server(api if isinstance(api, FastAPI) else async_class_to_sync(api))
         yield system
