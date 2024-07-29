@@ -116,9 +116,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             sql, params = get_sql(q, self.parameter_format())
             cur.execute(sql, params)
 
-    @trace_method("SqlEmbeddingsQueue.clean_log", OpenTelemetryGranularity.ALL)
+    @trace_method("SqlEmbeddingsQueue.purge_log", OpenTelemetryGranularity.ALL)
     @override
-    def clean_log(self, collection_id: UUID) -> None:
+    def purge_log(self, collection_id: UUID) -> None:
         topic_name = create_topic_name(
             self._tenant, self._topic_namespace, collection_id
         )

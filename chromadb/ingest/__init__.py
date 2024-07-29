@@ -42,7 +42,8 @@ class Producer(Component):
         pass
 
     @abstractmethod
-    def clean_log(self, collection_id: UUID) -> None:
+    def purge_log(self, collection_id: UUID) -> None:
+        """Truncates the log for the given collection, removing all seen records."""
         pass
 
     @abstractmethod

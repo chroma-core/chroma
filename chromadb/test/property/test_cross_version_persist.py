@@ -357,7 +357,7 @@ def test_cycle_versions(
         embeddings_queue, system.instance(SegmentManager)
     )
 
-    embeddings_queue.clean_log(coll.id)
+    embeddings_queue.purge_log(coll.id)
     invariants.log_size_below_max(system, coll, True)
 
     # Should be able to add embeddings

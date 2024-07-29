@@ -63,7 +63,7 @@ class LogCleanEmbeddingStateMachine(EmbeddingStateMachineBase):
         producer = self.system.instance(Producer)
         sqlite = self.system.instance(SqliteDB)
 
-        producer.clean_log(self.collection.id)
+        producer.purge_log(self.collection.id)
 
         if self.has_collection_mutated:
             # Must always keep one entry to avoid reusing seq_ids
