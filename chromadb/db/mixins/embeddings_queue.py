@@ -106,7 +106,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
         # Invalidate the cached property
         try:
-            del self._config
+            del self.config
         except AttributeError:
             # Cached property hasn't been accessed yet
             pass
@@ -197,7 +197,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         # This creates the persisted configuration if it doesn't exist.
         # It should be run as soon as possible (before any WAL mutations) since the default configuration depends on the WAL size.
         # (We can't run this in __init__()/start() because the migrations have not been run at that point and the table may not be available.)
-        _ = self._config
+        _ = self.config
 
         topic_name = create_topic_name(
             self._tenant, self._topic_namespace, collection_id
@@ -254,7 +254,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
 
-            if self._config.get_parameter("automatically_purge").value:
+            if self.config.get_parameter("automatically_purge").value:
                 self.purge_log()
 
             return seq_ids
@@ -450,7 +450,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 raise e
 
     @cached_property
-    def _config(self) -> EmbeddingsQueueConfigurationInternal:
+    def config(self) -> EmbeddingsQueueConfigurationInternal:
         t = Table("embeddings_queue_config")
         q = self.querybuilder().from_(t).select(t.config_json_str).limit(1)
 
@@ -463,12 +463,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             config = EmbeddingsQueueConfigurationInternal(
                 [ConfigurationParameter("automatically_purge", is_fresh_system)]
             )
-            self._set_config(config)
+            self.set_config(config)
             return config
 
         return EmbeddingsQueueConfigurationInternal.from_json_str(result[0])
 
-    def _set_config(self, config: EmbeddingsQueueConfigurationInternal) -> None:
+    def set_config(self, config: EmbeddingsQueueConfigurationInternal) -> None:
         with self.tx() as cur:
             cur.execute(
                 """
@@ -483,7 +483,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
         # Invalidate the cached property
         try:
-            del self._config
+            del self.config
         except AttributeError:
             # Cached property hasn't been accessed yet
             pass

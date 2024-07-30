@@ -400,7 +400,7 @@ class EmbeddingsQueueConfigurationInternal(ConfigurationInternal):
         "automatically_purge": ConfigurationDefinition(
             name="automatically_purge",
             validator=lambda value: isinstance(value, bool),
-            is_static=True,
+            is_static=False,
             default_value=True,
         ),
     }

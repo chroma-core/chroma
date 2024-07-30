@@ -27,6 +27,8 @@ def trigger_vector_segments_max_seq_id_migration(
     Trigger the migration of vector segments' max_seq_id from the pickled metadata file to SQLite.
 
     Vector segments migrate this field automatically on init—so this should be used when we know segments are likely unmigrated and unloaded.
+
+    This is a no-op if all vector segments have already migrated their max_seq_id.
     """
     with db.tx() as cur:
         cur.execute(

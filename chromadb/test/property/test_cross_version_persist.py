@@ -354,10 +354,10 @@ def test_cycle_versions(
 
     # Automatic pruning should be disabled since embeddings_queue is non-empty
     embeddings_queue = system.instance(SqliteDB)
-    assert embeddings_queue._config.get_parameter("automatically_purge").value is False
+    assert embeddings_queue.config.get_parameter("automatically_purge").value is False
 
     # Update to True so log_size_below_max() invariant will pass
-    embeddings_queue._set_config(
+    embeddings_queue.set_config(
         EmbeddingsQueueConfigurationInternal(
             [ConfigurationParameter("automatically_purge", True)]
         )
