@@ -60,3 +60,6 @@ repos:
     hooks:
       - id: prettier
         files: "^clients/js/.+"
+        exclude: "^clients/js/src/generated/.+"
+        additional_dependencies:
+          - prettier@2.8.7

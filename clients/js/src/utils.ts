@@ -1,14 +1,21 @@
-import { Api } from "./generated";
-import Count200Response = Api.Count200Response;
 import { AdminClient } from "./AdminClient";
 import { ChromaConnectionError } from "./Errors";
+import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+import {
+  AddRecordsParams,
+  BaseRecordOperationParams,
+  Collection,
+  Metadata,
+  MultiRecordOperationParams,
+  UpdateRecordsParams,
+} from "./types";
 
 // a function to convert a non-Array object to an Array
-export function toArray<T>(obj: T | Array<T>): Array<T> {
+export function toArray<T>(obj: T | T[]): Array<T> {
   if (Array.isArray(obj)) {
     return obj;
   } else {
-    return [obj];
+    return [obj] as T[];
   }
 }
 
@@ -20,33 +27,6 @@ export function toArrayOfArrays<T>(
     return obj as Array<Array<T>>;
   } else {
     return [obj] as Array<Array<T>>;
-  }
-}
-
-// we need to override constructors to make it work with jest
-// https://stackoverflow.com/questions/76007003/jest-tobeinstanceof-expected-constructor-array-received-constructor-array
-export function repack(value: unknown): any {
-  if (Boolean(value) && typeof value === "object") {
-    if (Array.isArray(value)) {
-      return new Array(...value);
-    } else {
-      return { ...value };
-    }
-  } else {
-    return value;
-  }
-}
-
-export async function handleSuccess(
-  response: Response | string | Count200Response,
-) {
-  switch (true) {
-    case response instanceof Response:
-      return repack(await (response as Response).json());
-    case typeof response === "string":
-      return repack(response as string); // currently version is the only thing that return non-JSON
-    default:
-      return repack(response);
   }
 }
 
@@ -99,4 +79,101 @@ export function isBrowser() {
   return (
     typeof window !== "undefined" && typeof window.document !== "undefined"
   );
+}
+
+function arrayifyParams(
+  params: BaseRecordOperationParams,
+): MultiRecordOperationParams {
+  return {
+    ids: toArray(params.ids),
+    embeddings: params.embeddings
+      ? toArrayOfArrays(params.embeddings)
+      : undefined,
+    metadatas: params.metadatas
+      ? toArray<Metadata>(params.metadatas)
+      : undefined,
+    documents: params.documents ? toArray(params.documents) : undefined,
+  };
+}
+
+export async function prepareRecordRequest(
+  reqParams: AddRecordsParams | UpdateRecordsParams,
+  embeddingFunction: IEmbeddingFunction,
+  update?: true,
+): Promise<MultiRecordOperationParams> {
+  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
+
+  if (!embeddings && !documents && !update) {
+    throw new Error("embeddings and documents cannot both be undefined");
+  }
+
+  const embeddingsArray = embeddings
+    ? embeddings
+    : documents
+    ? await embeddingFunction.generate(documents)
+    : undefined;
+
+  if (!embeddingsArray && !update) {
+    throw new Error("Failed to generate embeddings for your request.");
+  }
+
+  for (let i = 0; i < ids.length; i += 1) {
+    if (typeof ids[i] !== "string") {
+      throw new Error(
+        `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
+      );
+    }
+  }
+
+  if (
+    (embeddingsArray !== undefined && ids.length !== embeddingsArray.length) ||
+    (metadatas !== undefined && ids.length !== metadatas.length) ||
+    (documents !== undefined && ids.length !== documents.length)
+  ) {
+    throw new Error(
+      "ids, embeddings, metadatas, and documents must all be the same length",
+    );
+  }
+
+  const uniqueIds = new Set(ids);
+  if (uniqueIds.size !== ids.length) {
+    const duplicateIds = ids.filter(
+      (item, index) => ids.indexOf(item) !== index,
+    );
+    throw new Error(
+      `ID's must be unique, found duplicates for: ${duplicateIds}`,
+    );
+  }
+
+  return {
+    ids,
+    metadatas,
+    documents,
+    embeddings: embeddingsArray,
+  };
+}
+
+function notifyUserOfLegacyMethod(newMethod: string) {
+  return async () => {
+    throw new Error(
+      `Collection methods have been moved to ChromaClient. Please use ${newMethod} instead.`,
+    );
+  };
+}
+
+/** This function adds some guards so that if a client is attempting to call
+ *  the legacy methods, it will fail with a nice error. */
+export function wrapCollection(collection: Collection): Collection {
+  return {
+    ...collection,
+    add: notifyUserOfLegacyMethod("ChromaClient.addRecords()"),
+    upsert: notifyUserOfLegacyMethod("ChromaClient.upsertRecords()"),
+    count: notifyUserOfLegacyMethod("ChromaClient.countRecords()"),
+    modify: notifyUserOfLegacyMethod("ChromaClient.updateCollection()"),
+    get: notifyUserOfLegacyMethod("ChromaClient.updateCollection()"),
+    update: notifyUserOfLegacyMethod("ChromaClient.updateRecords()"),
+    query: notifyUserOfLegacyMethod("ChromaClient.queryRecords()"),
+    peek: notifyUserOfLegacyMethod("ChromaClient.peekRecords()"),
+    delete: notifyUserOfLegacyMethod("ChromaClient.deleteRecords()"),
+  } as Collection;
 }

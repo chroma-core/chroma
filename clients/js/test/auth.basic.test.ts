@@ -28,8 +28,8 @@ test("it should list collections", async () => {
   await client.reset();
   let collections = await client.listCollections();
   expect(collections).toBeDefined();
-  expect(collections).toBeInstanceOf(Array);
-  expect(collections.length).toBe(0);
+  expect(Array.isArray(collections)).toBe(true);
+  expect(collections).toHaveLength(0);
   await client.createCollection({ name: "test" });
   collections = await client.listCollections();
   expect(collections.length).toBe(1);

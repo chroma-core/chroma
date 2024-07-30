@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+
 	"github.com/pingcap/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,7 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var tracer trace.Tracer
+var Tracer trace.Tracer
 
 func decodeTraceID(encodedSpanID string) (t trace.TraceID, err error) {
 	var spanBytes []byte
@@ -47,8 +48,8 @@ func decodeSpanID(encodedSpanID string) (s trace.SpanID, err error) {
 // ServerGrpcInterceptor is a gRPC server interceptor for tracing and optional metadata-based context enhancement.
 func ServerGrpcInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	// Init with a default tracer if not already set. (Unit test)
-	if tracer == nil {
-		tracer = otel.GetTracerProvider().Tracer("LOCAL")
+	if Tracer == nil {
+		Tracer = otel.GetTracerProvider().Tracer("LOCAL")
 	}
 	// Attempt to retrieve metadata, but proceed normally if not present.
 	md, _ := metadata.FromIncomingContext(ctx)
@@ -71,7 +72,7 @@ func ServerGrpcInterceptor(ctx context.Context, req interface{}, info *grpc.Unar
 		}
 	}
 	var span trace.Span
-	ctx, span = tracer.Start(ctx, "Request "+info.FullMethod)
+	ctx, span = Tracer.Start(ctx, "Request "+info.FullMethod)
 	defer span.End()
 	span.SetAttributes(attribute.String("rpc.method", info.FullMethod))
 
@@ -143,6 +144,6 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 	)
 
 	otel.SetTracerProvider(tp)
-	tracer = otel.Tracer(config.Service)
+	Tracer = otel.Tracer(config.Service)
 	return
 }

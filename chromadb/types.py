@@ -60,7 +60,9 @@ class Collection(
     id: UUID
     name: str
     configuration_json: Dict[str, Any]
-    metadata: Optional[Metadata]
+    metadata: Optional[
+        Dict[str, Any]
+    ]  # Dict[str, Any] needed by pydantic 1.x as it doesn't work well Union types and converts all types to str
     dimension: Optional[int]
     tenant: str
     database: str
