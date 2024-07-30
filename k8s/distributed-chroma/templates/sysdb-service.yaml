@@ -32,6 +32,13 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+          resouces:
+            limits:
+              cpu: {{ .Values.sysdb.resources.limits.cpu }}
+              memory: {{ .Values.sysdb.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.sysdb.resources.requests.cpu }}
+              memory: {{ .Values.sysdb.resources.requests.memory }}
 
 ---
 
