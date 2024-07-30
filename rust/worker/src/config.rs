@@ -184,6 +184,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -236,6 +237,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -314,6 +316,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -366,6 +369,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -462,6 +466,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -514,6 +519,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
