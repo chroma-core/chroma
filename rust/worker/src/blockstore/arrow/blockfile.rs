@@ -280,7 +280,15 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         // TODO: NAC register/deregister/validation goes here.
         let mut futures = Vec::new();
         for block_id in block_ids {
-            futures.push(self.get_block(block_id));
+            // Don't prefetch if already cached.
+            // We do not dispatch if block is present in the block manager's cache
+            // but not present in the reader's cache (i.e. loaded_blocks). The
+            // next read for this block using this reader instance will populate it.
+            if !self.block_manager.cached(&block_id)
+                && !self.loaded_blocks.lock().contains_key(&block_id)
+            {
+                futures.push(self.get_block(block_id));
+            }
         }
         join_all(futures).await;
     }
