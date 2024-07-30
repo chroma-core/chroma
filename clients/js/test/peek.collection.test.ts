@@ -6,10 +6,10 @@ import { InvalidCollectionError } from "../src/Errors";
 test("it should peek a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-  const results = await collection.peek({ limit: 2 });
+  await chroma.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
+  const results = await chroma.peekRecords(collection, { limit: 2 });
   expect(results).toBeDefined();
-  expect(results).toBeInstanceOf(Object);
+  expect(typeof results).toBe("object");
   expect(results.ids.length).toBe(2);
   expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
 });
@@ -19,6 +19,6 @@ test("should error on non existing collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
   await chroma.deleteCollection({ name: "test" });
   expect(async () => {
-    await collection.peek();
+    await chroma.peekRecords(collection);
   }).rejects.toThrow(InvalidCollectionError);
 });

@@ -1,5 +1,6 @@
 import { expect, test, beforeEach } from "@jest/globals";
 import chroma from "./initClient";
+import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
 
 beforeEach(async () => {
   await chroma.reset();
@@ -7,12 +8,11 @@ beforeEach(async () => {
 
 test("it should list collections", async () => {
   let collections = await chroma.listCollections();
-  expect(collections).toBeDefined();
-  expect(collections).toBeInstanceOf(Array);
-  expect(collections.length).toBe(0);
-  const collection = await chroma.createCollection({ name: "test" });
+  expect(Array.isArray(collections)).toBe(true);
+  expect(collections).toHaveLength(0);
+  await chroma.createCollection({ name: "test" });
   collections = await chroma.listCollections();
-  expect(collections.length).toBe(1);
+  expect(collections).toHaveLength(1);
 });
 
 test("it should create a collection", async () => {
@@ -22,22 +22,26 @@ test("it should create a collection", async () => {
   expect(collection).toHaveProperty("id");
   expect(collection.name).toBe("test");
   let collections = await chroma.listCollections();
+  expect(collections).toHaveLength(1);
 
-  expect([
+  const [returnedCollection] = collections;
+
+  expect({
+    ...returnedCollection,
+    configuration_json: undefined,
+    id: undefined,
+  }).toMatchInlineSnapshot(`
     {
-      name: "test",
-      metadata: null,
-      id: collection.id,
-      database: "default_database",
-      tenant: "default_tenant",
-      version: 0,
-      dimension: null,
-    },
-  ]).toEqual(
-    expect.arrayContaining(
-      collections.map(({ configuration_json, ...rest }) => rest),
-    ),
-  );
+      "configuration_json": undefined,
+      "database": "default_database",
+      "dimension": null,
+      "id": undefined,
+      "metadata": null,
+      "name": "test",
+      "tenant": "default_tenant",
+      "version": 0,
+    }
+  `);
 
   expect([{ name: "test2", metadata: null }]).not.toEqual(
     expect.arrayContaining(collections),
@@ -55,27 +59,35 @@ test("it should create a collection", async () => {
   expect(collection2).toHaveProperty("metadata");
   expect(collection2.metadata).toHaveProperty("test");
   expect(collection2.metadata).toEqual({ test: "test" });
-  let collections2 = await chroma.listCollections();
-  expect([
+  const collections2 = await chroma.listCollections();
+  expect(collections2).toHaveLength(1);
+  const [returnedCollection2] = collections2;
+  expect({
+    ...returnedCollection2,
+    configuration_json: undefined,
+    id: undefined,
+  }).toMatchInlineSnapshot(`
     {
-      name: "test2",
-      metadata: { test: "test" },
-      id: collection2.id,
-      database: "default_database",
-      tenant: "default_tenant",
-      dimension: null,
-      version: 0,
-    },
-  ]).toEqual(
-    expect.arrayContaining(
-      collections2.map(({ configuration_json, ...rest }) => rest),
-    ),
-  );
+      "configuration_json": undefined,
+      "database": "default_database",
+      "dimension": null,
+      "id": undefined,
+      "metadata": {
+        "test": "test",
+      },
+      "name": "test2",
+      "tenant": "default_tenant",
+      "version": 0,
+    }
+  `);
 });
 
 test("it should get a collection", async () => {
   const collection = await chroma.createCollection({ name: "test" });
-  const collection2 = await chroma.getCollection({ name: "test" });
+  const collection2 = await chroma.getCollection({
+    name: "test",
+    embeddingFunction: new DefaultEmbeddingFunction(),
+  });
   expect(collection).toBeDefined();
   expect(collection2).toBeDefined();
   expect(collection).toHaveProperty("name");
