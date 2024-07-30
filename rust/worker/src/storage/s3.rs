@@ -158,30 +158,12 @@ impl S3Storage {
         }
     }
 
-    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
-        let bytestream = ByteStream::from(bytes);
-        self.put_bytestream(key, bytestream).await
-    }
-
-    pub(crate) async fn put_file(
+    pub(crate) async fn put_bytes(
         &self,
         key: &str,
-        path: &str,
+        bytes: Vec<u8>,
         part_size_bytes: Option<u64>,
     ) -> Result<(), S3PutError> {
-        let part_size_bytes = part_size_bytes.unwrap_or(1024 * 1024 * 8); // 8MB
-
-        let file_size = tokio::fs::metadata(path)
-            .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
-            .len();
-        let mut chunk_count = (file_size / part_size_bytes) + 1;
-        let mut size_of_last_chunk = file_size % part_size_bytes;
-        if size_of_last_chunk == 0 {
-            size_of_last_chunk = part_size_bytes;
-            chunk_count -= 1;
-        }
-
         let upload_id = match self
             .client
             .create_multipart_upload()
@@ -201,23 +183,12 @@ impl S3Storage {
         };
 
         let mut upload_parts = Vec::new();
-        for chunk_index in 0..chunk_count {
-            let this_chunk = if chunk_count - 1 == chunk_index {
-                size_of_last_chunk
-            } else {
-                part_size_bytes
-            };
+        for (part_number, offset, length) in
+            S3Storage::part_number_offset_length_iter(bytes.len() as u64, part_size_bytes)
+        {
+            let stream =
+                ByteStream::from(bytes[offset as usize..(offset + length) as usize].to_vec());
 
-            let stream = ByteStream::read_from()
-                .path(path)
-                .offset(chunk_index * part_size_bytes)
-                .length(Length::Exact(this_chunk))
-                .build()
-                .await
-                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
-
-            //Chunk index needs to start at 0, but part numbers start at 1.
-            let part_number = (chunk_index as i32) + 1;
             let upload_part_res = self
                 .client
                 .upload_part()
@@ -255,41 +226,109 @@ impl S3Storage {
         Ok(())
     }
 
-    async fn put_bytestream(&self, key: &str, bytestream: ByteStream) -> Result<(), S3PutError> {
-        let res = self
+    pub(crate) async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        part_size_bytes: Option<u64>,
+    ) -> Result<(), S3PutError> {
+        let file_size = tokio::fs::metadata(path)
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
+            .len();
+
+        let upload_id = match self
             .client
-            .put_object()
-            .bucket(self.bucket.clone())
+            .create_multipart_upload()
+            .bucket(&self.bucket)
             .key(key)
-            .body(bytestream)
             .send()
-            .await;
-        match res {
-            Ok(_) => {
-                tracing::info!("put object {} to bucket {}", key, self.bucket);
-                return Ok(());
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
+            .upload_id
+        {
+            Some(upload_id) => upload_id,
+            None => {
+                return Err(S3PutError::S3PutError(
+                    "Multipart upload creation response missing upload ID".to_string(),
+                ));
             }
-            Err(e) => match e {
-                SdkError::ServiceError(err) => {
-                    let inner_err = err.into_err();
-                    let err_string = format!(
-                        "S3 service error with code: {:?} and message: {:?}",
-                        inner_err.code(),
-                        inner_err.message()
-                    );
-                    tracing::error!("{}", err_string);
-                    return Err(S3PutError::S3PutError(err_string));
-                }
-                SdkError::DispatchFailure(e) => {
-                    tracing::error!("S3 Dispatch failure error {:?}", e);
-                    return Err(S3PutError::S3DispatchFailure);
-                }
-                _ => {
-                    tracing::error!("S3 Put Error: {}", e);
-                    return Err(S3PutError::S3PutError(e.to_string()));
-                }
-            },
+        };
+
+        let mut upload_parts = Vec::new();
+        for (part_number, offset, length) in
+            S3Storage::part_number_offset_length_iter(file_size, part_size_bytes)
+        {
+            let stream = ByteStream::read_from()
+                .path(path)
+                .offset(offset)
+                .length(Length::Exact(length))
+                .build()
+                .await
+                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+
+            let upload_part_res = self
+                .client
+                .upload_part()
+                .key(key)
+                .bucket(&self.bucket)
+                .upload_id(&upload_id)
+                .body(stream)
+                .part_number(part_number)
+                .send()
+                .await
+                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+
+            upload_parts.push(
+                CompletedPart::builder()
+                    .e_tag(upload_part_res.e_tag.unwrap_or_default())
+                    .part_number(part_number)
+                    .build(),
+            );
         }
+
+        self.client
+            .complete_multipart_upload()
+            .bucket(&self.bucket)
+            .key(key)
+            .multipart_upload(
+                CompletedMultipartUpload::builder()
+                    .set_parts(Some(upload_parts))
+                    .build(),
+            )
+            .upload_id(&upload_id)
+            .send()
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+
+        Ok(())
+    }
+
+    fn part_number_offset_length_iter(
+        total_size_bytes: u64,
+        part_size_bytes: Option<u64>,
+    ) -> impl Iterator<Item = (i32, u64, u64)> {
+        let part_size_bytes = part_size_bytes.unwrap_or(1024 * 1024 * 8); // 8 MB
+        let mut part_count = (total_size_bytes / part_size_bytes) + 1;
+        let mut size_of_last_part = total_size_bytes % part_size_bytes;
+        if size_of_last_part == 0 {
+            size_of_last_part = part_size_bytes;
+            part_count -= 1;
+        }
+
+        (0..part_count).map(move |part_index| {
+            let this_part = if part_count - 1 == part_index {
+                size_of_last_part
+            } else {
+                part_size_bytes
+            };
+            (
+                // Part numbers start at 1
+                (part_index + 1) as i32,
+                part_index * part_size_bytes,
+                this_part,
+            )
+        })
     }
 }
 
@@ -416,7 +455,7 @@ mod tests {
 
         let test_data = "test data";
         storage
-            .put_bytes("test", test_data.as_bytes().to_vec())
+            .put_bytes("test", test_data.as_bytes().to_vec(), None)
             .await
             .unwrap();
 

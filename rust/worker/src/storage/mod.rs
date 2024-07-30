@@ -95,7 +95,7 @@ impl Storage {
     pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
         match self {
             Storage::S3(s3) => s3
-                .put_bytes(key, bytes)
+                .put_bytes(key, bytes, None)
                 .await
                 .map_err(|e| PutError::S3Error(e)),
             Storage::Local(local) => local
