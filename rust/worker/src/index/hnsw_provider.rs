@@ -355,6 +355,8 @@ impl HnswIndexProvider {
             match res {
                 Ok(_) => {
                     println!("Flushed hnsw index file: {}", file);
+                    std::fs::remove_file(file_path)
+                        .map_err(|e| Box::new(HnswIndexProviderFlushError::IOError(e)))?;
                 }
                 Err(e) => {
                     return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));
@@ -469,6 +471,8 @@ pub(crate) enum HnswIndexProviderFlushError {
     HnswSaveError(#[from] Box<dyn ChromaError>),
     #[error("Storage Put Error")]
     StoragePutError(#[from] crate::storage::PutError),
+    #[error("IO Error: {0}")]
+    IOError(#[from] std::io::Error),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -477,6 +481,7 @@ impl ChromaError for HnswIndexProviderFlushError {
             HnswIndexProviderFlushError::NoIndexFound(_) => ErrorCodes::NotFound,
             HnswIndexProviderFlushError::HnswSaveError(e) => e.code(),
             HnswIndexProviderFlushError::StoragePutError(e) => e.code(),
+            HnswIndexProviderFlushError::IOError(_) => ErrorCodes::Internal,
         }
     }
 }
