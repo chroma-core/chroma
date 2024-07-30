@@ -5,7 +5,6 @@ title: "🔑 Getting Started"
 
 
 
-
 {% tabs group="code-lang" hideContent=true %}
 
 {% tab label="Python" %}
