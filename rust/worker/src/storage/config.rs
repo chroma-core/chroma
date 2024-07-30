@@ -30,6 +30,7 @@ pub(crate) struct S3StorageConfig {
     pub(crate) credentials: S3CredentialsConfig,
     pub(crate) connect_timeout_ms: u64,
     pub(crate) request_timeout_ms: u64,
+    pub(crate) part_size_bytes: u64,
 }
 
 #[derive(Deserialize, Debug)]

@@ -17,7 +17,6 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
-use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::primitives::ByteStream;
@@ -33,6 +32,7 @@ use thiserror::Error;
 pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
+    part_size_bytes: u64,
 }
 
 #[derive(Error, Debug)]
@@ -66,10 +66,11 @@ impl ChromaError for S3GetError {
 }
 
 impl S3Storage {
-    fn new(bucket: &str, client: aws_sdk_s3::Client) -> S3Storage {
+    fn new(bucket: &str, client: aws_sdk_s3::Client, part_size_bytes: u64) -> S3Storage {
         return S3Storage {
             bucket: bucket.to_string(),
-            client: client,
+            client,
+            part_size_bytes,
         };
     }
 
@@ -158,12 +159,7 @@ impl S3Storage {
         }
     }
 
-    pub(crate) async fn put_bytes(
-        &self,
-        key: &str,
-        bytes: Vec<u8>,
-        part_size_bytes: Option<u64>,
-    ) -> Result<(), S3PutError> {
+    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let upload_id = match self
             .client
             .create_multipart_upload()
@@ -183,8 +179,7 @@ impl S3Storage {
         };
 
         let mut upload_parts = Vec::new();
-        for (part_number, offset, length) in
-            S3Storage::part_number_offset_length_iter(bytes.len() as u64, part_size_bytes)
+        for (part_number, offset, length) in self.part_number_offset_length_iter(bytes.len() as u64)
         {
             let stream =
                 ByteStream::from(bytes[offset as usize..(offset + length) as usize].to_vec());
@@ -226,12 +221,7 @@ impl S3Storage {
         Ok(())
     }
 
-    pub(crate) async fn put_file(
-        &self,
-        key: &str,
-        path: &str,
-        part_size_bytes: Option<u64>,
-    ) -> Result<(), S3PutError> {
+    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
         let file_size = tokio::fs::metadata(path)
             .await
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?
@@ -256,9 +246,7 @@ impl S3Storage {
         };
 
         let mut upload_parts = Vec::new();
-        for (part_number, offset, length) in
-            S3Storage::part_number_offset_length_iter(file_size, part_size_bytes)
-        {
+        for (part_number, offset, length) in self.part_number_offset_length_iter(file_size) {
             let stream = ByteStream::read_from()
                 .path(path)
                 .offset(offset)
@@ -305,10 +293,10 @@ impl S3Storage {
     }
 
     fn part_number_offset_length_iter(
+        &self,
         total_size_bytes: u64,
-        part_size_bytes: Option<u64>,
     ) -> impl Iterator<Item = (i32, u64, u64)> {
-        let part_size_bytes = part_size_bytes.unwrap_or(1024 * 1024 * 8); // 8 MB
+        let part_size_bytes = self.part_size_bytes.clone();
         let mut part_count = (total_size_bytes / part_size_bytes) + 1;
         let mut size_of_last_part = total_size_bytes % part_size_bytes;
         if size_of_last_part == 0 {
@@ -387,7 +375,7 @@ impl Configurable<StorageConfig> for S3Storage {
                         aws_sdk_s3::Client::new(&config)
                     }
                 };
-                let storage = S3Storage::new(&s3_config.bucket, client);
+                let storage = S3Storage::new(&s3_config.bucket, client, s3_config.part_size_bytes);
                 // for minio we create the bucket since it is only used for testing
                 match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio => {
@@ -450,12 +438,13 @@ mod tests {
         let storage = S3Storage {
             bucket: "test".to_string(),
             client,
+            part_size_bytes: 1024 * 1024 * 8,
         };
         storage.create_bucket().await.unwrap();
 
         let test_data = "test data";
         storage
-            .put_bytes("test", test_data.as_bytes().to_vec(), None)
+            .put_bytes("test", test_data.as_bytes().to_vec())
             .await
             .unwrap();
 
@@ -483,6 +472,7 @@ mod tests {
         let storage = S3Storage {
             bucket: "test".to_string(),
             client,
+            part_size_bytes,
         };
         storage.create_bucket().await.unwrap();
 
@@ -500,11 +490,7 @@ mod tests {
         }
 
         storage
-            .put_file(
-                "test",
-                &temp_file.path().to_str().unwrap(),
-                Some(part_size_bytes),
-            )
+            .put_file("test", &temp_file.path().to_str().unwrap())
             .await
             .unwrap();
 
