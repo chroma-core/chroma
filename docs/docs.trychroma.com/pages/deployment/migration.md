@@ -42,7 +42,7 @@ const collection = await client.getOrCreateCollection({
 const records = await client.getRecords(collection, { ids: ["id1"] });
 ```
 
-Finally, the `modify()` method on Collection has been moved to Chroma Client as `updateCollection(collection: Collection)`
+Finally, the `modify()` method on Collection has been moved to Chroma Client as `updateCollection(collection: Collection)`.
 
 ### v0.5.1
 
