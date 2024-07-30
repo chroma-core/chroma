@@ -604,6 +604,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
     @override
     async def close(self) -> None:
-        self._raise_for_running()
+        await self._cleanup()  # this is a bit hacky but when running close in a loop the async to sync cleanup doesn't work
         self.stop()
         self._system.stop()

@@ -64,6 +64,7 @@ class Client(SharedSystemClient, ClientAPI):
         self._server = self._system.instance(ServerAPI)
 
         self._submit_client_start_event()
+        self._server.start()
 
     @classmethod
     @override
@@ -402,6 +403,7 @@ class AdminClient(SharedSystemClient, AdminAPI):
     def __init__(self, settings: Settings = Settings()) -> None:
         super().__init__(settings)
         self._server = self._system.instance(ServerAPI)
+        self._server.start()
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
