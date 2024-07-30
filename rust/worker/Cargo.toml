@@ -66,6 +66,7 @@ rayon = "1.8.0"
 criterion = "0.3"
 random-port = "0.1.1"
 serial_test = "3.1.1"
+rand_xorshift = "0.3.0"
 
 [build-dependencies]
 tonic-build = "0.10"
