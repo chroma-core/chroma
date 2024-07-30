@@ -20,6 +20,12 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.6.0
+
+Chroma internally uses a write-ahead log. In all versions prior to v0.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
+
+In v0.6.0 the write-ahead log is pruned automatically. However, this is not enabled by default for existing databases. After upgrading, you should run `chroma utils vacuum` once to reduce your database size and enable continuous pruning. See the [CLI reference](/reference/cli#vacuuming) for more details.
+
 ### v0.5.1
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
