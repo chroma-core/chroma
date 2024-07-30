@@ -1,4 +1,4 @@
-from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast, Generator
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
@@ -195,6 +195,16 @@ class IndexMetadata(TypedDict):
     # Assume cannot overflow
     total_elements_added: int
     time_created: float
+
+
+@runtime_checkable
+class IDGenerator(Protocol[D]):
+    def generator(
+        self,
+        documents: Optional[OneOrMany[Embeddable]] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+    ) -> Generator[ID, None, None]:
+        ...
 
 
 @runtime_checkable

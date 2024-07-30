@@ -17,9 +17,14 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
+    IDGenerator,
+    Embeddable,
 )
 
 import logging
+
+from chromadb.config import get_fqn, get_class
+from chromadb.utils.ids import get_id_generator_instance
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +44,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]] = None,
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -71,6 +76,15 @@ class Collection(CollectionCommon["ServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
+        if ids is None:
+            _gen = get_id_generator_instance(
+                self._client.get_settings().id_generator_impl
+            )
+            generator = _gen.generator(documents=documents, metadatas=metadatas)
+            ids = [
+                next(generator)
+                for _ in range(len(documents) if documents else len(embeddings))
+            ]
         (
             ids,
             embeddings,

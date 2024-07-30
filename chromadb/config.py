@@ -11,6 +11,7 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
+from chromadb.api.types import IDGenerator
 
 in_pydantic_v2 = False
 try:
@@ -126,6 +127,9 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_api_default_path: Optional[str] = "/api/v1"
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
+    # for dumb generators str is enough, for generators with state or logic we can pass an instance
+    # instances are not serializable but maybe that is ok for client-side implementations
+    id_generator_impl: Optional[Union[str, Any]] = "chromadb.utils.ids.UUIDGenerator"
 
     # ==================
     # Server config
