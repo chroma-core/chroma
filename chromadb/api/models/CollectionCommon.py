@@ -261,6 +261,11 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Documents],
         Optional[URIs],
     ]:
+        def count_one_or_many(value: OneOrMany[Any]) -> int:
+            if isinstance(value, list):
+                return len(value)
+            return 1
+
         if ids is None:
             if embeddings:
                 if isinstance(embeddings[0], list) and len(embeddings[0]) > 1:
@@ -268,11 +273,11 @@ class CollectionCommon(Generic[ClientT]):
                 else:
                     set_size = 1
             elif documents:
-                set_size = len(documents)
+                set_size = count_one_or_many(documents)
             elif images:
-                set_size = len(images)
+                set_size = count_one_or_many(images)
             elif uris:
-                set_size = len(uris)
+                set_size = count_one_or_many(uris)
             else:
                 raise ValueError(
                     "You must provide either ids, embeddings, documents, images, or uris."
