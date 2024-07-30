@@ -12,4 +12,5 @@ pytest
 pytest-asyncio
 pytest-xdist
 setuptools_scm
+testcontainers[chroma]
 types-protobuf
