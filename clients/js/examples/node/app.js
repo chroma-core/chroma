@@ -1,8 +1,17 @@
-var fs = require("fs");
-var path = require("path");
-
 var express = require("express");
 var chroma = require("chromadb");
+var dotenv = require("dotenv");
+
+dotenv.config();
+
+if (!process.env.GOOGLE_API_KEY) {
+  console.error(
+    "GOOGLE_API_KEY is not set. Please create a .env file and set it there."
+  );
+  process.exit(0);
+}
+
+const googleApiKey = process.env.GOOGLE_API_KEY;
 
 var app = express();
 app.get("/", async (req, res) => {
@@ -10,7 +19,7 @@ app.get("/", async (req, res) => {
   await cc.reset();
 
   const google = new chroma.GoogleGenerativeAiEmbeddingFunction({
-    googleApiKey: "<APIKEY>",
+    googleApiKey,
   });
 
   const collection = await cc.createCollection({
@@ -27,7 +36,7 @@ app.get("/", async (req, res) => {
   console.log("count", count);
 
   const googleQuery = new chroma.GoogleGenerativeAiEmbeddingFunction({
-    googleApiKey: "<APIKEY>",
+    googleApiKey,
     taskType: "RETRIEVAL_QUERY",
   });
 
