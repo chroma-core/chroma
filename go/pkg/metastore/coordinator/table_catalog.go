@@ -313,8 +313,10 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	tracer := otel.Tracer
-	ctx, span := tracer.Start(ctx, "Catalog.GetCollections")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollections")
+		defer span.End()
+	}
 
 	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
@@ -474,8 +476,10 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 
 func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error) {
 	tracer := otel.Tracer
-	ctx, span := tracer.Start(ctx, "Catalog.GetSegments")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetSegments")
+		defer span.End()
+	}
 
 	segmentAndMetadataList, err := tc.metaDomain.SegmentDb(ctx).GetSegments(segmentID, segmentType, scope, collectionID)
 	if err != nil {
