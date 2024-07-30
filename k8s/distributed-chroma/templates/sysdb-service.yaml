@@ -32,7 +32,7 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
-          resouces:
+          resources:
             limits:
               cpu: {{ .Values.sysdb.resources.limits.cpu }}
               memory: {{ .Values.sysdb.resources.limits.memory }}
