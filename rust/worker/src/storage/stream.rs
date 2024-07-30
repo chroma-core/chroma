@@ -128,27 +128,3 @@ impl Stream for S3ByteStream {
         }
     }
 }
-
-// impl AsyncRead for S3ByteStream {
-//     fn poll_read(
-//         self: Pin<&mut Self>,
-//         cx: &mut Context<'_>,
-//         buf: &mut tokio::io::ReadBuf,
-//     ) -> Poll<std::io::Result<()>> {
-//         let me = self.get_mut();
-//         let mut buffer = vec![0; buf.remaining()];
-//         match Pin::new(&mut me.inner).poll_next(cx) {
-//             Poll::Ready(Some(Ok(chunk))) => {
-//                 buffer[..chunk.len()].copy_from_slice(&chunk);
-//                 buf.put_slice(&buffer[..chunk.len()]);
-//                 Poll::Ready(Ok(()))
-//             }
-//             Poll::Ready(Some(Err(e))) => Poll::Ready(Err(std::io::Error::new(
-//                 std::io::ErrorKind::Other,
-//                 e.to_string(),
-//             ))),
-//             Poll::Ready(None) => Poll::Ready(Ok(())),
-//             Poll::Pending => Poll::Pending,
-//         }
-//     }
-// }

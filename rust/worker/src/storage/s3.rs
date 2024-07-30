@@ -434,9 +434,7 @@ mod tests {
         assert_eq!(buf, test_data);
     }
 
-    #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_put_file() {
+    async fn test_put_file(file_size: usize) {
         let client = get_s3_client();
 
         let storage = S3Storage {
@@ -448,7 +446,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
 
         let mut rng = rand_xorshift::XorShiftRng::seed_from_u64(0);
-        let mut remaining_file_size = ((MULTIPART_UPLOAD_CHUNK_SIZE as f64) * 2.5) as usize;
+        let mut remaining_file_size = file_size;
 
         while remaining_file_size > 0 {
             let chunk_size = std::cmp::min(remaining_file_size, 4096);
@@ -479,5 +477,16 @@ mod tests {
 
         let file_contents = std::fs::read(temp_file.path()).unwrap();
         assert_eq!(buf, file_contents);
+    }
+
+    #[tokio::test]
+    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
+    async fn test_put_file_scenarios() {
+        // Under chunk size
+        test_put_file(1024).await;
+        // At chunk size
+        test_put_file(MULTIPART_UPLOAD_CHUNK_SIZE as usize).await;
+        // Over chunk size
+        test_put_file((MULTIPART_UPLOAD_CHUNK_SIZE as f64 * 2.5) as usize).await;
     }
 }
