@@ -1,6 +1,5 @@
 use thiserror::Error;
 use tonic::async_trait;
-use uuid::Uuid;
 
 use crate::{
     blockstore::provider::BlockfileProvider,
@@ -11,44 +10,95 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) enum RecordSegmentBlockId {
-    // Block id.
-    OffsetIdToDataBlockId(Uuid),
-    UserIdToOffsetIdBlockId(Uuid),
-    OffsetIdToUserIdBlockId(Uuid),
+pub(crate) struct OffsetIdToDataKeys {
+    pub(crate) keys: Vec<u32>,
 }
 
 #[derive(Debug)]
-pub(crate) enum MetadataBlockId {
-    // Block id.
-    StringMetadataBlockId(Uuid),
-    F32MetadataBlockId(Uuid),
-    BoolMetadataBlockId(Uuid),
-    U32MetadataBlockId(Uuid),
+pub(crate) struct UserIdToOffsetIdKeys {
+    pub(crate) keys: Vec<String>,
 }
 
 #[derive(Debug)]
-pub(crate) enum FullTextBlockId {
-    PostingsListBlockId(Uuid),
-    FrequenciesBlockId(Uuid),
+pub(crate) struct OffsetIdToUserIdKeys {
+    pub(crate) keys: Vec<u32>,
 }
 
 #[derive(Debug)]
-pub(crate) enum MetadataSegmentBlockId {
-    MetadataBlockId(MetadataBlockId),
-    FullTextBlockId(FullTextBlockId),
+pub(crate) enum RecordSegmentKeys {
+    OffsetIdToDataKeys(OffsetIdToDataKeys),
+    UserIdToOffsetIdKeys(UserIdToOffsetIdKeys),
+    OffsetIdToUserIdKeys(OffsetIdToUserIdKeys),
+}
+
+#[derive(Debug)]
+pub(crate) struct StringMetadataKeys {
+    pub(crate) prefixes: Vec<String>,
+    pub(crate) keys: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct F32MetadataKeys {
+    pub(crate) prefixes: Vec<String>,
+    pub(crate) keys: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct BoolMetadataKeys {
+    pub(crate) prefixes: Vec<String>,
+    pub(crate) keys: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct U32MetadataKeys {
+    pub(crate) prefixes: Vec<String>,
+    pub(crate) keys: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(crate) enum MetadataKeys {
+    StringMetadataKeys(StringMetadataKeys),
+    F32MetadataKeys(F32MetadataKeys),
+    BoolMetadataKeys(BoolMetadataKeys),
+    U32MetadataKeys(U32MetadataKeys),
+}
+
+#[derive(Debug)]
+pub(crate) struct PostingsListKeys {
+    pub(crate) prefixes: Vec<String>,
+    // Doc Id.
+    pub(crate) keys: Vec<u32>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FrequenciesKeys {
+    pub(crate) prefixes: Vec<String>,
+    // Frequency.
+    pub(crate) keys: Vec<u32>,
+}
+
+#[derive(Debug)]
+pub(crate) enum FullTextKeys {
+    PostingsListKeys(PostingsListKeys),
+    FrequenciesKeys(FrequenciesKeys),
+}
+
+#[derive(Debug)]
+pub(crate) enum MetadataSegmentKeys {
+    MetadataKeys(MetadataKeys),
+    FullTextKeys(FullTextKeys),
 }
 
 #[derive(Debug)]
 pub(crate) struct RecordSegmentInfo {
-    pub(crate) block_id: RecordSegmentBlockId,
+    pub(crate) keys: RecordSegmentKeys,
     pub(crate) segment: Segment,
     pub(crate) provider: BlockfileProvider,
 }
 
 #[derive(Debug)]
 pub(crate) struct MetadataSegmentInfo {
-    block_id: MetadataSegmentBlockId,
+    keys: MetadataSegmentKeys,
     segment: Segment,
     provider: BlockfileProvider,
 }
@@ -121,20 +171,19 @@ impl Operator<PrefetchIoInput, PrefetchIoOutput> for PrefetchIoOperator {
                         return Err(PrefetchIoOperatorError::RecordSegmentReaderCreationError);
                     }
                 };
-                match &prefetch_info.block_id {
-                    RecordSegmentBlockId::OffsetIdToDataBlockId(block_id) => {
+                match &prefetch_info.keys {
+                    // TODO: Remove clone.
+                    RecordSegmentKeys::OffsetIdToDataKeys(keys) => {
+                        record_segment_reader.prefetch_id_to_data(&keys.keys).await;
+                    }
+                    RecordSegmentKeys::OffsetIdToUserIdKeys(keys) => {
                         record_segment_reader
-                            .prefetch_block_for_id_to_data(*block_id)
+                            .prefetch_id_to_user_id(&keys.keys)
                             .await;
                     }
-                    RecordSegmentBlockId::OffsetIdToUserIdBlockId(block_id) => {
+                    RecordSegmentKeys::UserIdToOffsetIdKeys(keys) => {
                         record_segment_reader
-                            .prefetch_block_for_id_to_user_id(*block_id)
-                            .await;
-                    }
-                    RecordSegmentBlockId::UserIdToOffsetIdBlockId(block_id) => {
-                        record_segment_reader
-                            .prefetch_block_for_user_id_to_id(*block_id)
+                            .prefetch_user_id_to_id(keys.keys.iter().map(|x| x.as_str()).collect())
                             .await;
                     }
                 }

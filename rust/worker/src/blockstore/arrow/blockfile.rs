@@ -276,7 +276,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     pub(super) async fn load_blocks(&self, block_ids: Vec<Uuid>) -> () {
-        // TODO: These need to be tasks enqueued onto dispatcher.
+        // TODO: These need to be separate tasks enqueued onto dispatcher.
+        // TODO: NAC register/deregister/validation goes here.
         let mut futures = Vec::new();
         for block_id in block_ids {
             futures.push(self.get_block(block_id));
@@ -284,7 +285,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         join_all(futures).await;
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: Vec<K>) -> () {
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: &[K]) -> () {
         let mut composite_keys = Vec::new();
         let mut prefix_iter = prefixes.iter();
         let mut key_iter = keys.iter();

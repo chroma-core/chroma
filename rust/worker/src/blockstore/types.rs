@@ -351,28 +351,12 @@ impl<
         }
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: Vec<K>) -> () {
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: &[K]) -> () {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(prefixes, keys).await
             }
-        }
-    }
-
-    pub(crate) async fn prefetch_block(&self, block_id: Uuid) -> () {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
-            BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.get_block(block_id).await;
-            }
-        }
-    }
-
-    pub(crate) fn cached(&self, block_id: &Uuid) -> bool {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.cached(block_id),
         }
     }
 }
