@@ -20,9 +20,7 @@ We will aim to provide:
 
 ## Migration Log
 
-### v0.6.0
-
-#### JavaScript Client Refactor
+### Javascript Client Refactor (v2.0.0) - July 2024
 
 We've moved to a flat client on the JS/TS client. Whereas previously, you would construct a Collection object that you would then call methods on, Collections are now data objects which are passed into methods on the ChromaClient object.
 
