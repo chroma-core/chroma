@@ -82,7 +82,7 @@ impl Storage {
     pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
         match self {
             Storage::S3(s3) => s3
-                .put_file(key, path)
+                .put_file(key, path, None)
                 .await
                 .map_err(|e| PutError::S3Error(e)),
             Storage::Local(local) => local

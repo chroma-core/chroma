@@ -29,9 +29,6 @@ use std::clone::Clone;
 use std::time::Duration;
 use thiserror::Error;
 
-// todo: make this more principled
-const MULTIPART_UPLOAD_CHUNK_SIZE: u64 = 1024 * 1024 * 32;
-
 #[derive(Clone)]
 pub(crate) struct S3Storage {
     bucket: String,
@@ -166,15 +163,22 @@ impl S3Storage {
         self.put_bytestream(key, bytestream).await
     }
 
-    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+    pub(crate) async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        part_size_bytes: Option<u64>,
+    ) -> Result<(), S3PutError> {
+        let part_size_bytes = part_size_bytes.unwrap_or(1024 * 1024 * 8); // 8MB
+
         let file_size = tokio::fs::metadata(path)
             .await
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?
             .len();
-        let mut chunk_count = (file_size / MULTIPART_UPLOAD_CHUNK_SIZE) + 1;
-        let mut size_of_last_chunk = file_size % MULTIPART_UPLOAD_CHUNK_SIZE;
+        let mut chunk_count = (file_size / part_size_bytes) + 1;
+        let mut size_of_last_chunk = file_size % part_size_bytes;
         if size_of_last_chunk == 0 {
-            size_of_last_chunk = MULTIPART_UPLOAD_CHUNK_SIZE;
+            size_of_last_chunk = part_size_bytes;
             chunk_count -= 1;
         }
 
@@ -201,12 +205,12 @@ impl S3Storage {
             let this_chunk = if chunk_count - 1 == chunk_index {
                 size_of_last_chunk
             } else {
-                MULTIPART_UPLOAD_CHUNK_SIZE
+                part_size_bytes
             };
 
             let stream = ByteStream::read_from()
                 .path(path)
-                .offset(chunk_index * MULTIPART_UPLOAD_CHUNK_SIZE)
+                .offset(chunk_index * part_size_bytes)
                 .length(Length::Exact(this_chunk))
                 .build()
                 .await
@@ -434,7 +438,7 @@ mod tests {
         assert_eq!(buf, test_data);
     }
 
-    async fn test_put_file(file_size: usize) {
+    async fn test_put_file(file_size: usize, part_size_bytes: u64) {
         let client = get_s3_client();
 
         let storage = S3Storage {
@@ -457,7 +461,11 @@ mod tests {
         }
 
         storage
-            .put_file("test", &temp_file.path().to_str().unwrap())
+            .put_file(
+                "test",
+                &temp_file.path().to_str().unwrap(),
+                Some(part_size_bytes),
+            )
             .await
             .unwrap();
 
@@ -482,11 +490,17 @@ mod tests {
     #[tokio::test]
     #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
     async fn test_put_file_scenarios() {
-        // Under chunk size
-        test_put_file(1024).await;
-        // At chunk size
-        test_put_file(MULTIPART_UPLOAD_CHUNK_SIZE as usize).await;
-        // Over chunk size
-        test_put_file((MULTIPART_UPLOAD_CHUNK_SIZE as f64 * 2.5) as usize).await;
+        let test_part_size_bytes = 1024 * 1024 * 8; // 8MB
+
+        // Under part size
+        test_put_file(1024, test_part_size_bytes).await;
+        // At part size
+        test_put_file(test_part_size_bytes as usize, test_part_size_bytes).await;
+        // Over part size
+        test_put_file(
+            (test_part_size_bytes as f64 * 2.5) as usize,
+            test_part_size_bytes,
+        )
+        .await;
     }
 }
