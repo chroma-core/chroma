@@ -1,5 +1,5 @@
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, validateTenantDatabase } from "./utils";
+import { validateTenantDatabase } from "./utils";
 import { ConfigOptions } from "./types";
 import {
   AuthOptions,
@@ -149,16 +149,9 @@ export class AdminClient {
    * ```
    */
   public async createTenant({ name }: { name: string }): Promise<Tenant> {
-    const newTenant = await this.api
-      .createTenant({ name }, this.api.options)
-      .then(handleSuccess);
+    await this.api.createTenant({ name }, this.api.options);
 
-    // newTenant is null if successful
-    if (newTenant && newTenant.error) {
-      throw new Error(newTenant.error);
-    }
-
-    return { name: name } as Tenant;
+    return { name };
   }
 
   /**
@@ -178,15 +171,12 @@ export class AdminClient {
    * ```
    */
   public async getTenant({ name }: { name: string }): Promise<Tenant> {
-    const getTenant = await this.api
-      .getTenant(name, this.api.options)
-      .then(handleSuccess);
+    const getTenant = (await this.api.getTenant(
+      name,
+      this.api.options,
+    )) as Tenant;
 
-    if (getTenant.error) {
-      throw new Error(getTenant.error);
-    }
-
-    return { name: getTenant.name } as Tenant;
+    return { name: getTenant.name };
   }
 
   /**
@@ -214,16 +204,9 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<Database> {
-    const newDatabase = await this.api
-      .createDatabase(tenantName, { name }, this.api.options)
-      .then(handleSuccess);
+    await this.api.createDatabase(tenantName, { name }, this.api.options);
 
-    // newDatabase is null if successful
-    if (newDatabase && newDatabase.error) {
-      throw new Error(newDatabase.error);
-    }
-
-    return { name: name } as Database;
+    return { name };
   }
 
   /**
@@ -251,13 +234,11 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<Database> {
-    const getDatabase = await this.api
-      .getDatabase(name, tenantName, this.api.options)
-      .then(handleSuccess);
-
-    if (getDatabase.error) {
-      throw new Error(getDatabase.error);
-    }
+    const getDatabase = (await this.api.getDatabase(
+      name,
+      tenantName,
+      this.api.options,
+    )) as Database;
 
     return { name: getDatabase.name } as Database;
   }

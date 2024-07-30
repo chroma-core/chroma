@@ -76,7 +76,7 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       if (_a.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the chromadb-default-embed package to use the DefaultEmbeddingFunction, `npm install -S chromadb-default-embed`",
+          "Please install the chromadb-default-embed package to use the DefaultEmbeddingFunction, `npm install chromadb-default-embed`",
         );
       }
       throw _a; // Re-throw other errors
@@ -111,7 +111,7 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
       return { pipeline };
     } catch (e) {
       throw new Error(
-        "Please install chromadb-default-embed as a dependency with, e.g. `yarn add chromadb-default-embed`",
+        "Please install chromadb-default-embed as a dependency with, e.g. `npm install chromadb-default-embed`",
       );
     }
   }

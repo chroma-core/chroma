@@ -75,7 +75,7 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       if (_a.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`",
+          "Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install @xenova/transformers`",
         );
       }
       throw _a; // Re-throw other errors
@@ -94,7 +94,7 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
       return { pipeline };
     } catch (e) {
       throw new Error(
-        "Please install @xenova/transformers as a dependency with, e.g. `yarn add @xenova/transformers`",
+        "Please install @xenova/transformers as a dependency with, e.g. `npm install @xenova/transformers`",
       );
     }
   }
