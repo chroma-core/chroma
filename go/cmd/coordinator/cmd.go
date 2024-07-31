@@ -48,7 +48,7 @@ func init() {
 
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
-	Cmd.Flags().DurationVar(&conf.ReconcileInterval, "reconcile-interval", 100*time.Millisecond, "Reconcile interval")
+	Cmd.Flags().DurationVar(&conf.ReconcileInterval, "reconcile-interval", 5*time.Second, "Reconcile interval")
 	Cmd.Flags().UintVar(&conf.ReconcileCount, "reconcile-count", 10, "Reconcile count")
 
 	// Query service memberlist
