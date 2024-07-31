@@ -24,8 +24,12 @@ use aws_sdk_s3::types::CompletedMultipartUpload;
 use aws_sdk_s3::types::CompletedPart;
 use aws_smithy_types::byte_stream::Length;
 use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures::Stream;
 use std::clone::Clone;
+use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -33,7 +37,7 @@ use thiserror::Error;
 pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
-    upload_part_size_bytes: u64,
+    upload_part_size_bytes: usize,
 }
 
 #[derive(Error, Debug)]
@@ -67,7 +71,7 @@ impl ChromaError for S3GetError {
 }
 
 impl S3Storage {
-    fn new(bucket: &str, client: aws_sdk_s3::Client, upload_part_size_bytes: u64) -> S3Storage {
+    fn new(bucket: &str, client: aws_sdk_s3::Client, upload_part_size_bytes: usize) -> S3Storage {
         return S3Storage {
             bucket: bucket.to_string(),
             client,
@@ -161,66 +165,13 @@ impl S3Storage {
     }
 
     pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
-        let upload_id = match self
-            .client
-            .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
-            .upload_id
-        {
-            Some(upload_id) => upload_id,
-            None => {
-                return Err(S3PutError::S3PutError(
-                    "Multipart upload creation response missing upload ID".to_string(),
-                ));
-            }
-        };
+        let bytes = Arc::new(Bytes::from(bytes));
 
-        let bytes = Bytes::from(bytes);
-
-        let mut upload_parts = Vec::new();
-        for (part_number, offset, length) in self.part_number_offset_length_iter(bytes.len() as u64)
-        {
-            let stream = ByteStream::from(bytes.slice(offset as usize..(offset + length) as usize));
-
-            let upload_part_res = self
-                .client
-                .upload_part()
-                .key(key)
-                .bucket(&self.bucket)
-                .upload_id(&upload_id)
-                .body(stream)
-                .part_number(part_number)
-                .send()
-                .await
-                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
-
-            upload_parts.push(
-                CompletedPart::builder()
-                    .e_tag(upload_part_res.e_tag.unwrap_or_default())
-                    .part_number(part_number)
-                    .build(),
-            );
-        }
-
-        self.client
-            .complete_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
-            .multipart_upload(
-                CompletedMultipartUpload::builder()
-                    .set_parts(Some(upload_parts))
-                    .build(),
-            )
-            .upload_id(&upload_id)
-            .send()
-            .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
-
-        Ok(())
+        self.multipart_upload(key, bytes.len(), move |range| {
+            let bytes = bytes.clone();
+            async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
+        })
+        .await
     }
 
     pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
@@ -229,6 +180,40 @@ impl S3Storage {
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?
             .len();
 
+        let path = path.to_string();
+
+        self.multipart_upload(key, file_size as usize, move |range| {
+            let path = path.clone();
+
+            async move {
+                ByteStream::read_from()
+                    .path(path)
+                    .offset(range.start as u64)
+                    .length(Length::Exact(range.len() as u64))
+                    .build()
+                    .await
+                    .map_err(|err| S3PutError::S3PutError(err.to_string()))
+            }
+            .boxed()
+        })
+        .await
+    }
+
+    async fn multipart_upload(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        create_bytestream_fn: impl Fn(
+            Range<usize>,
+        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+    ) -> Result<(), S3PutError> {
+        let mut part_count = (total_size_bytes / self.upload_part_size_bytes) + 1;
+        let mut size_of_last_part = total_size_bytes % self.upload_part_size_bytes;
+        if size_of_last_part == 0 {
+            size_of_last_part = self.upload_part_size_bytes;
+            part_count -= 1;
+        }
+
         let upload_id = match self
             .client
             .create_multipart_upload()
@@ -248,14 +233,17 @@ impl S3Storage {
         };
 
         let mut upload_parts = Vec::new();
-        for (part_number, offset, length) in self.part_number_offset_length_iter(file_size) {
-            let stream = ByteStream::read_from()
-                .path(path)
-                .offset(offset)
-                .length(Length::Exact(length))
-                .build()
-                .await
-                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+        for part_index in 0..part_count {
+            let this_part = if part_count - 1 == part_index {
+                size_of_last_part
+            } else {
+                self.upload_part_size_bytes
+            };
+            let part_number = part_index as i32 + 1; // Part numbers start at 1
+            let offset = part_index * self.upload_part_size_bytes;
+            let length = this_part;
+
+            let stream = create_bytestream_fn(offset..(offset + length)).await?;
 
             let upload_part_res = self
                 .client
@@ -292,33 +280,6 @@ impl S3Storage {
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
 
         Ok(())
-    }
-
-    fn part_number_offset_length_iter(
-        &self,
-        total_size_bytes: u64,
-    ) -> impl Iterator<Item = (i32, u64, u64)> {
-        let upload_part_size_bytes = self.upload_part_size_bytes.clone();
-        let mut part_count = (total_size_bytes / upload_part_size_bytes) + 1;
-        let mut size_of_last_part = total_size_bytes % upload_part_size_bytes;
-        if size_of_last_part == 0 {
-            size_of_last_part = upload_part_size_bytes;
-            part_count -= 1;
-        }
-
-        (0..part_count).map(move |part_index| {
-            let this_part = if part_count - 1 == part_index {
-                size_of_last_part
-            } else {
-                upload_part_size_bytes
-            };
-            (
-                // Part numbers start at 1
-                (part_index + 1) as i32,
-                part_index * upload_part_size_bytes,
-                this_part,
-            )
-        })
     }
 }
 
@@ -469,7 +430,7 @@ mod tests {
         assert_eq!(buf, test_data);
     }
 
-    async fn test_put_file(file_size: usize, upload_part_size_bytes: u64) {
+    async fn test_put_file(file_size: usize, upload_part_size_bytes: usize) {
         let client = get_s3_client();
 
         let storage = S3Storage {
