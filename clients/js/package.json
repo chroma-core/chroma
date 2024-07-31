@@ -47,7 +47,7 @@
   "scripts": {
     "test": "jest --runInBand",
     "test:noauth": "jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
-    "test:auth": "jest --runInBand --testPathPatterns=test/auth.*.test.ts",
+    "test:auth": "jest --testPathPattern=test/auth.*.test.ts",
     "test:update": "jest --runInBand --updateSnapshot",
     "prebuild": "rimraf dist",
     "build": "tsup",
