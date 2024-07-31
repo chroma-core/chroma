@@ -3,7 +3,8 @@ from chromadb.api import ClientAPI
 import numpy as np
 from rich.progress import track
 
-T = TypeVar("T", bound=Tuple[Union[List[Any], np.ndarray[Any, Any], None], ...])
+# (Can't provide type arguments to ndarray < 3.9.)
+T = TypeVar("T", bound=Tuple[Union[List[Any], np.ndarray, None], ...])  # type: ignore[type-arg]
 
 
 def create_batches(
