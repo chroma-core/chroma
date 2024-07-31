@@ -1,3 +1,4 @@
+use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
 use crate::{
@@ -95,21 +96,30 @@ impl Dispatcher {
     /// # Parameters
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, task: TaskMessage) {
-        // If a worker is waiting for a task, send it to the worker in FIFO order
-        // Otherwise, add it to the task queue
-        match self.waiters.pop() {
-            Some(channel) => match channel
-                .reply_to
-                .send(task, Some(Span::current().clone()))
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("Error sending task to worker: {:?}", e);
+        match task.get_type() {
+            OperatorType::IoOperatorType => {
+                tokio::spawn(async move {
+                    task.run().await;
+                });
+            }
+            OperatorType::OtherType => {
+                // If a worker is waiting for a task, send it to the worker in FIFO order
+                // Otherwise, add it to the task queue
+                match self.waiters.pop() {
+                    Some(channel) => match channel
+                        .reply_to
+                        .send(task, Some(Span::current().clone()))
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("Error sending task to worker: {:?}", e);
+                        }
+                    },
+                    None => {
+                        self.task_queue.push(task);
+                    }
                 }
-            },
-            None => {
-                self.task_queue.push(task);
             }
         }
     }
@@ -206,6 +216,11 @@ impl Handler<TaskRequestMessage> for Dispatcher {
 #[cfg(test)]
 mod tests {
     use parking_lot::Mutex;
+    use rand::{distributions::Alphanumeric, Rng};
+    use tokio::{
+        fs::File,
+        io::{AsyncReadExt, AsyncWriteExt},
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -247,6 +262,39 @@ mod tests {
             ))
             .await;
             Ok(input.to_string())
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockIoOperator {}
+    #[async_trait]
+    impl Operator<String, String> for MockIoOperator {
+        type Error = ();
+
+        fn get_name(&self) -> &'static str {
+            "MockIoOperator"
+        }
+
+        async fn run(&self, input: &String) -> Result<String, Self::Error> {
+            // perform some io to simulate work.
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let file_path = tmp_dir.path().join(input);
+            let mut tmp_file = File::create(file_path.clone()).await.unwrap();
+            tmp_file.write(b"Test write").await.unwrap();
+            tmp_file.flush().await.unwrap();
+            let mut read_fs = File::open(file_path)
+                .await
+                .expect("Error opening file previously created");
+            let mut buffer = [0; 10];
+            read_fs.read(&mut buffer[..]).await.unwrap();
+            let read_value =
+                String::from_utf8(buffer.to_vec()).expect("Error creating string from utf8");
+            assert_eq!(read_value, String::from("Test write"));
+            Ok(input.to_string())
+        }
+
+        fn get_type(&self) -> OperatorType {
+            OperatorType::IoOperatorType
         }
     }
 
@@ -298,7 +346,29 @@ mod tests {
         type Result = ();
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
+            // Randomly choose between IO task and other task.
+            let should_io;
+            let mut filename = String::from("dummy");
+            {
+                let mut rng = rand::thread_rng();
+                should_io = rng.gen_bool(1.0 / 2.0);
+                // Generate a random filename for writing and reading.
+                if should_io {
+                    filename = rng
+                        .sample_iter(&Alphanumeric)
+                        .take(5)
+                        .map(char::from)
+                        .collect();
+                }
+            }
+            let task;
+            if should_io {
+                println!("Scheduling mock io operator with filename {}", filename);
+                task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
+            } else {
+                println!("Scheduling mock cpu operator with input {}", 42.0);
+                task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
+            }
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let res = self.dispatcher.send(task, None).await;
