@@ -99,6 +99,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80 // indirect
 	gorm.io/driver/mysql v1.5.2 // indirect
 	gorm.io/driver/sqlserver v1.5.2 // indirect
+	gorm.io/plugin/opentelemetry v0.1.4 // indirect
 )
 
 require (
