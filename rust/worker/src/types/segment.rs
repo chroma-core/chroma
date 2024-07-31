@@ -173,6 +173,9 @@ mod tests {
                 value: Some(chroma_proto::update_metadata_value::Value::IntValue(42)),
             },
         );
+
+        let configuration_json = r#"{"M": 16, "ef_construction": 200, "ef_search": 200}"#;
+
         let proto_segment = chroma_proto::Segment {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
@@ -180,7 +183,7 @@ mod tests {
             collection: Some("00000000-0000-0000-0000-000000000000".to_string()),
             metadata: Some(metadata),
             file_paths: HashMap::new(),
-            configuration_json_str: None,
+            configuration_json_str: Some(configuration_json.to_string()),
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
         assert_eq!(converted_segment.id, Uuid::nil());
@@ -190,6 +193,9 @@ mod tests {
         let metadata = converted_segment.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &MetadataValue::Int(42));
-        assert_eq!(converted_segment.configuration_json, None);
+        assert_eq!(
+            converted_segment.configuration_json.unwrap(),
+            serde_json::from_str(configuration_json).unwrap()
+        );
     }
 }
