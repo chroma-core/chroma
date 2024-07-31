@@ -405,6 +405,12 @@ mod tests {
             _ => panic!("Invalid sysdb type"),
         }
 
+        let hnsw_configuration = r#"{
+            "M": 16,
+            "construction_ef": 100,
+            "search_ef": 100
+        }"#;
+
         let collection_1_record_segment = Segment {
             id: Uuid::new_v4(),
             r#type: crate::types::SegmentType::BlockfileRecord,
@@ -412,6 +418,7 @@ mod tests {
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
 
         let collection_2_record_segment = Segment {
@@ -421,6 +428,7 @@ mod tests {
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
 
         let collection_1_hnsw_segment = Segment {
@@ -430,6 +438,7 @@ mod tests {
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: serde_json::from_str(hnsw_configuration).unwrap(),
         };
 
         let collection_2_hnsw_segment = Segment {
@@ -439,6 +448,7 @@ mod tests {
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: serde_json::from_str(hnsw_configuration).unwrap(),
         };
 
         let collection_1_metadata_segment = Segment {
@@ -448,6 +458,7 @@ mod tests {
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
 
         let collection_2_metadata_segment = Segment {
@@ -457,6 +468,7 @@ mod tests {
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
 
         match *sysdb {

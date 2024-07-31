@@ -10,9 +10,6 @@ use tracing::instrument;
 use uuid::Uuid;
 
 const DEFAULT_MAX_ELEMENTS: usize = 10000;
-const DEFAULT_HNSW_M: usize = 16;
-const DEFAULT_HNSW_EF_CONSTRUCTION: usize = 100;
-const DEFAULT_HNSW_EF_SEARCH: usize = 10;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
@@ -41,8 +38,8 @@ pub(crate) struct HnswIndexConfig {
 pub(crate) enum HnswIndexFromSegmentError {
     #[error("Missing config `{0}`")]
     MissingConfig(String),
-    #[error("Invalid metadata value")]
-    MetadataValueError(#[from] MetadataValueConversionError),
+    #[error("Invalid configuration value type for key `{0}`")]
+    ConfigurationValueError(String),
 }
 
 impl ChromaError for HnswIndexFromSegmentError {
@@ -64,48 +61,86 @@ impl HnswIndexConfig {
                 )))
             }
         };
-        let metadata = match &segment.metadata {
-            Some(metadata) => metadata,
-            None => {
-                // TODO: This should error, but the configuration is not stored correctly
-                // after the configuration is refactored to be always stored and doesn't rely on defaults we can fix this
-                return Ok(HnswIndexConfig {
-                    max_elements: DEFAULT_MAX_ELEMENTS,
-                    m: DEFAULT_HNSW_M,
-                    ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
-                    ef_search: DEFAULT_HNSW_EF_SEARCH,
-                    random_seed: 0,
-                    persist_path: persist_path.to_string(),
-                });
+
+        let configuration =
+            match &segment.configuration_json {
+                Some(configuration) => configuration,
+                None => return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                    "No configuration stored in segment, but hnsw segment requires configuration"
+                        .to_string(),
+                ))),
+            };
+
+        // READ M
+        let m = match &configuration["M"] {
+            serde_json::Value::Null => {
+                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                    "M".to_string(),
+                )))
+            }
+            serde_json::Value::Number(n) => match n.as_u64() {
+                Some(n) => n as usize,
+                None => {
+                    return Err(Box::new(
+                        HnswIndexFromSegmentError::ConfigurationValueError("M".to_string()),
+                    ))
+                }
+            },
+            _ => {
+                return Err(Box::new(
+                    HnswIndexFromSegmentError::ConfigurationValueError("M".to_string()),
+                ))
             }
         };
 
-        fn get_metadata_value_as<'a, T>(
-            metadata: &'a Metadata,
-            key: &str,
-        ) -> Result<T, Box<HnswIndexFromSegmentError>>
-        where
-            T: TryFrom<&'a MetadataValue, Error = MetadataValueConversionError>,
-        {
-            let res = match metadata.get(key) {
-                Some(value) => T::try_from(value),
-                None => {
-                    return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
-                        key.to_string(),
-                    )))
-                }
-            };
-            match res {
-                Ok(value) => Ok(value),
-                Err(e) => Err(Box::new(HnswIndexFromSegmentError::MetadataValueError(e))),
+        // READ EF_CONSTRUCTION
+        let ef_construction = match &configuration["construction_ef"] {
+            serde_json::Value::Null => {
+                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                    "construction_ef".to_string(),
+                )))
             }
-        }
+            serde_json::Value::Number(n) => match n.as_u64() {
+                Some(n) => n as usize,
+                None => {
+                    return Err(Box::new(
+                        HnswIndexFromSegmentError::ConfigurationValueError(
+                            "construction_ef".to_string(),
+                        ),
+                    ))
+                }
+            },
+            _ => {
+                return Err(Box::new(
+                    HnswIndexFromSegmentError::ConfigurationValueError(
+                        "construction_ef".to_string(),
+                    ),
+                ))
+            }
+        };
 
-        let m = get_metadata_value_as::<i32>(metadata, "hnsw:M").unwrap_or(DEFAULT_HNSW_M as i32);
-        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:construction_ef")
-            .unwrap_or(DEFAULT_HNSW_EF_CONSTRUCTION as i32);
-        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:search_ef")
-            .unwrap_or(DEFAULT_HNSW_EF_SEARCH as i32);
+        // READ EF_SEARCH
+        let ef_search = match &configuration["search_ef"] {
+            serde_json::Value::Null => {
+                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                    "search_ef".to_string(),
+                )))
+            }
+            serde_json::Value::Number(n) => match n.as_u64() {
+                Some(n) => n as usize,
+                None => {
+                    return Err(Box::new(
+                        HnswIndexFromSegmentError::ConfigurationValueError("search_ef".to_string()),
+                    ))
+                }
+            },
+            _ => {
+                return Err(Box::new(
+                    HnswIndexFromSegmentError::ConfigurationValueError("search_ef".to_string()),
+                ))
+            }
+        };
+
         return Ok(HnswIndexConfig {
             max_elements: DEFAULT_MAX_ELEMENTS,
             m: m as usize,
@@ -789,7 +824,13 @@ pub mod test {
     }
 
     #[test]
-    fn parameter_defaults() {
+    fn configuration_reading() {
+        let configuration = r#"{
+            "M": 16,
+            "construction_ef": 100,
+            "search_ef": 100
+        }"#;
+
         let segment = Segment {
             id: Uuid::new_v4(),
             r#type: crate::types::SegmentType::HnswDistributed,
@@ -797,6 +838,7 @@ pub mod test {
             metadata: Some(HashMap::new()),
             collection: Some(Uuid::new_v4()),
             file_path: HashMap::new(),
+            configuration_json: Some(serde_json::from_str(configuration).unwrap()),
         };
 
         let persist_path = tempdir().unwrap().path().to_owned();
@@ -804,15 +846,20 @@ pub mod test {
             .expect("Failed to create config from segment");
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
-        assert_eq!(config.m, DEFAULT_HNSW_M);
-        assert_eq!(config.ef_construction, DEFAULT_HNSW_EF_CONSTRUCTION);
-        assert_eq!(config.ef_search, DEFAULT_HNSW_EF_SEARCH);
+        assert_eq!(config.m, 16);
+        assert_eq!(config.ef_construction, 100);
+        assert_eq!(config.ef_search, 100);
         assert_eq!(config.random_seed, 0);
         assert_eq!(config.persist_path, persist_path.to_str().unwrap());
 
-        // Try partial metadata
+        // If not all configuration is provided, expect an error
+        // Metadata is inserted for legacy reasons, configuration should be used instead
         let mut metadata = HashMap::new();
         metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10 as i32));
+        let partial_configuration_json = r#"{
+            "construction_ef": 100,
+            "search_ef": 100
+        }"#;
 
         let segment = Segment {
             id: Uuid::new_v4(),
@@ -821,16 +868,15 @@ pub mod test {
             metadata: Some(metadata),
             collection: Some(Uuid::new_v4()),
             file_path: HashMap::new(),
+            configuration_json: Some(serde_json::from_str(partial_configuration_json).unwrap()),
         };
 
-        let config = HnswIndexConfig::from_segment(&segment, &persist_path)
-            .expect("Failed to create config from segment");
+        let config = HnswIndexConfig::from_segment(&segment, &persist_path);
 
-        assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
-        assert_eq!(config.m, 10);
-        assert_eq!(config.ef_construction, DEFAULT_HNSW_EF_CONSTRUCTION);
-        assert_eq!(config.ef_search, DEFAULT_HNSW_EF_SEARCH);
-        assert_eq!(config.random_seed, 0);
-        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
+        assert!(config.is_err());
+        assert!(config
+            .unwrap_err()
+            .to_string()
+            .contains("Missing config `M`"));
     }
 }
