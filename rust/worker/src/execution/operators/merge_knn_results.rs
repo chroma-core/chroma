@@ -7,7 +7,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use thiserror::Error;
-use tracing::{Instrument, Span};
 
 #[derive(Debug)]
 pub struct MergeKnnResultsOperator {}

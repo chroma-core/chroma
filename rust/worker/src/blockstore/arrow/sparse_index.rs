@@ -2,14 +2,14 @@ use crate::blockstore::key::{CompositeKey, KeyWrapper};
 use crate::errors::ChromaError;
 use core::panic;
 use parking_lot::Mutex;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::block::delta::BlockDelta;
 use super::block::Block;
-use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
+use super::types::{ArrowReadableKey, ArrowWriteableKey};
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range
 /// # Note
@@ -637,5 +637,42 @@ mod tests {
             let new_key = new_reverse.get(old_block_id).unwrap();
             assert_eq!(old_key, new_key);
         }
+    }
+
+    #[test]
+    fn test_get_all_block_ids() {
+        let file_id = uuid::Uuid::new_v4();
+        let block_id_1 = uuid::Uuid::new_v4();
+        let mut sparse_index = SparseIndex::new(file_id);
+        sparse_index.add_initial_block(block_id_1);
+        let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
+        sparse_index.add_block(blockfile_key.clone(), block_id_1);
+
+        // Split the range into two blocks (start, c), and (c, end)
+        let block_id_2 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("prefix".to_string(), "d");
+        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+
+        // Split the second block into (c, f) and (f, end)
+        let block_id_3 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("prefix".to_string(), "f");
+        sparse_index.add_block(blockfile_key.clone(), block_id_3);
+        let mut composite_keys = Vec::new();
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "b"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "c"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "d"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "e"));
+        let blocks = sparse_index.get_all_target_block_ids(composite_keys);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks.contains(&block_id_1));
+        assert!(blocks.contains(&block_id_2));
+        composite_keys = Vec::new();
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "f"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "g"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "h"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "i"));
+        let blocks = sparse_index.get_all_target_block_ids(composite_keys);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks.contains(&block_id_3));
     }
 }
