@@ -1,4 +1,11 @@
-import { expect, test, describe, beforeAll, afterAll } from "@jest/globals";
+import {
+  expect,
+  test,
+  describe,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
 import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
@@ -6,23 +13,20 @@ import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFuncti
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
 import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
 import { InvalidCollectionError } from "../src/Errors";
-import { startChromaContainer } from "./environmentSetup";
 import { ChromaClient } from "../src/ChromaClient";
-import { StartedTestContainer } from "testcontainers";
 
 describe("add collections", () => {
-  let client: ChromaClient;
-  let container: StartedTestContainer;
+  // connects to the unauthenticated chroma instance started in
+  // the global jest setup file.
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
-  beforeAll(async () => {
-    ({ client, container } = await startChromaContainer());
-  }, 120_000);
-  afterAll(async () => {
-    await container.stop();
+  beforeEach(async () => {
+    await client.reset();
   });
 
   test("it should add single embeddings to a collection", async () => {
-    await client.reset();
     const collection = await client.createCollection({ name: "test" });
     const id = "test1";
     const embedding = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -42,7 +46,6 @@ describe("add collections", () => {
   });
 
   test("it should add batch embeddings to a collection", async () => {
-    await client.reset();
     const collection = await client.createCollection({ name: "test" });
     await client.addRecords(collection, {
       ids: IDS,
@@ -61,7 +64,6 @@ describe("add collections", () => {
     test.skip("it should add OpenAI embeddings", async () => {});
   } else {
     test("it should add OpenAI embeddings", async () => {
-      await client.reset();
       const embedder = new OpenAIEmbeddingFunction({
         openai_api_key: process.env.OPENAI_API_KEY || "",
       });
@@ -85,7 +87,6 @@ describe("add collections", () => {
     test.skip("it should add Cohere embeddings", async () => {});
   } else {
     test("it should add Cohere embeddings", async () => {
-      await client.reset();
       const embedder = new CohereEmbeddingFunction({
         cohere_api_key: process.env.COHERE_API_KEY || "",
       });
@@ -106,7 +107,6 @@ describe("add collections", () => {
   }
 
   test("add documents", async () => {
-    await client.reset();
     const collection = await client.createCollection({ name: "test" });
     await client.addRecords(collection, {
       ids: IDS,
@@ -118,7 +118,6 @@ describe("add collections", () => {
   });
 
   test("should error on non existing collection", async () => {
-    await client.reset();
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
@@ -127,7 +126,6 @@ describe("add collections", () => {
   });
 
   test("It should return an error when inserting duplicate IDs in the same batch", async () => {
-    await client.reset();
     const collection = await client.createCollection({ name: "test" });
     const ids = IDS.concat(["test1"]);
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
@@ -140,7 +138,6 @@ describe("add collections", () => {
   });
 
   test("should error on empty embedding", async () => {
-    await client.reset();
     const collection = await client.createCollection({ name: "test" });
     const ids = ["id1"];
     const embeddings = [[]];
@@ -156,7 +153,6 @@ describe("add collections", () => {
     test.skip("it should use ollama EF, OLLAMA_SERVER_URL not defined", async () => {});
   } else {
     test("it should use ollama EF", async () => {
-      await client.reset();
       const embedder = new OllamaEmbeddingFunction({
         url:
           process.env.OLLAMA_SERVER_URL ||

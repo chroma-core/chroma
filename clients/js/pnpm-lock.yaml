@@ -37,9 +37,6 @@ devDependencies:
   "@types/node":
     specifier: ^20.8.10
     version: 20.14.2
-  ci-info:
-    specifier: ^4.0.0
-    version: 4.0.0
   jest:
     specifier: ^29.5.0
     version: 29.7.0(@types/node@20.14.2)(ts-node@10.9.2)
@@ -3963,14 +3960,6 @@ packages:
     resolution:
       {
         integrity: sha512-NIxF55hv4nSqQswkAeiOi1r83xy8JldOFDTWiug55KBu9Jnblncd2U6ViHmYgHf01TPZS77NJBhBMKdWj9HQMQ==,
-      }
-    engines: { node: ">=8" }
-    dev: true
-
-  /ci-info@4.0.0:
-    resolution:
-      {
-        integrity: sha512-TdHqgGf9odd8SXNuxtUBVx8Nv+qZOejE6qyqiy5NtbYYQOeFa6zmHkxlPzmaLxWWHsU6nJmB7AETdVPi+2NBUg==,
       }
     engines: { node: ">=8" }
     dev: true
