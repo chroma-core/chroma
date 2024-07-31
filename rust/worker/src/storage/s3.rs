@@ -23,6 +23,7 @@ use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::CompletedMultipartUpload;
 use aws_sdk_s3::types::CompletedPart;
 use aws_smithy_types::byte_stream::Length;
+use bytes::Bytes;
 use futures::Stream;
 use std::clone::Clone;
 use std::time::Duration;
@@ -178,11 +179,12 @@ impl S3Storage {
             }
         };
 
+        let bytes = Bytes::from(bytes);
+
         let mut upload_parts = Vec::new();
         for (part_number, offset, length) in self.part_number_offset_length_iter(bytes.len() as u64)
         {
-            let stream =
-                ByteStream::from(bytes[offset as usize..(offset + length) as usize].to_vec());
+            let stream = ByteStream::from(bytes.slice(offset as usize..(offset + length) as usize));
 
             let upload_part_res = self
                 .client
