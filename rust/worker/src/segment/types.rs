@@ -927,6 +927,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -937,6 +938,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -1221,6 +1223,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -1231,6 +1234,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -1507,6 +1511,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -1517,6 +1522,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -1812,6 +1818,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =

@@ -509,6 +509,13 @@ mod tests {
         // Create the directories needed
         std::fs::create_dir_all(&hnsw_tmp_path).unwrap();
 
+        // create the config
+        let configuration = r#"{
+            "M": 16,
+            "construction_ef": 100,
+            "search_ef": 100
+        }"#;
+
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache);
@@ -519,6 +526,7 @@ mod tests {
             collection: Some(Uuid::new_v4()),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: serde_json::from_str(configuration).unwrap(),
         };
 
         let dimensionality = 128;
