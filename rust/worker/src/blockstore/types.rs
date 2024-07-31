@@ -351,7 +351,7 @@ impl<
         }
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: &[K]) -> () {
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {

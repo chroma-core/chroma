@@ -21,11 +21,12 @@ use crate::execution::operators::merge_knn_results::{
     MergeKnnResultsOperator, MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput,
 };
 use crate::execution::operators::normalize_vectors::normalize;
-use crate::execution::operators::prefetch::{
-    OffsetIdToDataKeys, OffsetIdToUserIdKeys, PrefetchData, PrefetchIoInput, PrefetchIoOperator,
-    PrefetchIoOperatorError, PrefetchIoOutput, RecordSegmentInfo, RecordSegmentKeys,
-};
 use crate::execution::operators::pull_log::PullLogsOutput;
+use crate::execution::operators::record_segment_prefetch::{
+    Keys, OffsetIdToDataKeys, OffsetIdToUserIdKeys, RecordSegmentPrefetchIoInput,
+    RecordSegmentPrefetchIoOperator, RecordSegmentPrefetchIoOperatorError,
+    RecordSegmentPrefetchIoOutput,
+};
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::index::IndexConfig;
 use crate::log::log::PullLogsError;
@@ -383,17 +384,13 @@ impl HnswQueryOrchestrator {
             .expect("Invariant violation. Record Segment is not set");
         // TODO: Divide this into multiple tasks based on some criteria.
         let offsetid_to_data_keys =
-            RecordSegmentKeys::OffsetIdToDataKeys(OffsetIdToDataKeys { keys: offset_ids });
-        let record_segment_info = RecordSegmentInfo {
+            Keys::OffsetIdToDataKeys(OffsetIdToDataKeys { keys: offset_ids });
+        let prefetch_input = RecordSegmentPrefetchIoInput {
             keys: offsetid_to_data_keys,
             segment: record_segment.clone(),
             provider: self.blockfile_provider.clone(),
         };
-        // TODO: Tag IO.
-        let prefetch_input = PrefetchIoInput {
-            data: PrefetchData::RecordSegmentPrefetch(record_segment_info),
-        };
-        let operator: Box<PrefetchIoOperator> = PrefetchIoOperator::new();
+        let operator = RecordSegmentPrefetchIoOperator::new();
         let prefetch_task = wrap(operator, prefetch_input, ctx.receiver());
         match self
             .dispatcher
@@ -403,7 +400,7 @@ impl HnswQueryOrchestrator {
             Ok(_) => (),
             Err(e) => {
                 // Log an error
-                tracing::error!("Error sending Prefetch data task: {:?}", e);
+                tracing::error!("Error sending record segment Prefetch data task: {:?}", e);
             }
         }
     }
@@ -415,17 +412,13 @@ impl HnswQueryOrchestrator {
             .expect("Invariant violation. Record Segment is not set");
         // TODO: Divide this into multiple tasks based on some criteria.
         let offsetid_to_userid_keys =
-            RecordSegmentKeys::OffsetIdToUserIdKeys(OffsetIdToUserIdKeys { keys: offset_ids });
-        let record_segment_info = RecordSegmentInfo {
+            Keys::OffsetIdToUserIdKeys(OffsetIdToUserIdKeys { keys: offset_ids });
+        let prefetch_input = RecordSegmentPrefetchIoInput {
             keys: offsetid_to_userid_keys,
             segment: record_segment.clone(),
             provider: self.blockfile_provider.clone(),
         };
-        // TODO: Tag IO.
-        let prefetch_input = PrefetchIoInput {
-            data: PrefetchData::RecordSegmentPrefetch(record_segment_info),
-        };
-        let operator: Box<PrefetchIoOperator> = PrefetchIoOperator::new();
+        let operator = RecordSegmentPrefetchIoOperator::new();
         let prefetch_task = wrap(operator, prefetch_input, ctx.receiver());
         match self
             .dispatcher
@@ -846,12 +839,14 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<PrefetchIoOutput, PrefetchIoOperatorError>> for HnswQueryOrchestrator {
+impl Handler<TaskResult<RecordSegmentPrefetchIoOutput, RecordSegmentPrefetchIoOperatorError>>
+    for HnswQueryOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        _message: TaskResult<PrefetchIoOutput, PrefetchIoOperatorError>,
+        _message: TaskResult<RecordSegmentPrefetchIoOutput, RecordSegmentPrefetchIoOperatorError>,
         _ctx: &ComponentContext<Self>,
     ) {
         // Nothing to do.

@@ -215,6 +215,7 @@ impl BlockManager {
         match block {
             Some(block) => Some(block.clone()),
             None => {
+                // TODO: NAC register/deregister/validation goes here.
                 async {
                     let key = format!("block/{}", id);
                     let stream = self.storage.get(&key).instrument(
