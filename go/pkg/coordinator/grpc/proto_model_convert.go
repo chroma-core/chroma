@@ -165,12 +165,13 @@ func convertSegmentToProto(segment *model.Segment) *coordinatorpb.Segment {
 		}
 	}
 	segmentpb := &coordinatorpb.Segment{
-		Id:         segment.ID.String(),
-		Type:       segment.Type,
-		Scope:      segmentSceope,
-		Collection: nil,
-		Metadata:   nil,
-		FilePaths:  filePaths,
+		Id:                   segment.ID.String(),
+		Type:                 segment.Type,
+		Scope:                segmentSceope,
+		Collection:           nil,
+		Metadata:             nil,
+		FilePaths:            filePaths,
+		ConfigurationJsonStr: segment.ConfigurationJsonStr,
 	}
 
 	collectionID := segment.CollectionID
@@ -240,10 +241,11 @@ func convertSegmentToModel(segmentpb *coordinatorpb.Segment) (*model.CreateSegme
 	}
 
 	return &model.CreateSegment{
-		ID:           segmentID,
-		Type:         segmentpb.Type,
-		Scope:        segmentpb.Scope.String(),
-		CollectionID: collectionID,
-		Metadata:     metadata,
+		ID:                   segmentID,
+		Type:                 segmentpb.Type,
+		Scope:                segmentpb.Scope.String(),
+		CollectionID:         collectionID,
+		Metadata:             metadata,
+		ConfigurationJsonStr: segmentpb.ConfigurationJsonStr,
 	}, nil
 }

@@ -434,11 +434,12 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 		// insert segment
 		collectionString := createSegment.CollectionID.String()
 		dbSegment := &dbmodel.Segment{
-			ID:           createSegment.ID.String(),
-			CollectionID: &collectionString,
-			Type:         createSegment.Type,
-			Scope:        createSegment.Scope,
-			Ts:           ts,
+			ID:                   createSegment.ID.String(),
+			CollectionID:         &collectionString,
+			Type:                 createSegment.Type,
+			Scope:                createSegment.Scope,
+			ConfigurationJsonStr: createSegment.ConfigurationJsonStr,
+			Ts:                   ts,
 		}
 		err := tc.metaDomain.SegmentDb(txCtx).Insert(dbSegment)
 		if err != nil {
@@ -488,11 +489,12 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	segments := make([]*model.Segment, 0, len(segmentAndMetadataList))
 	for _, segmentAndMetadata := range segmentAndMetadataList {
 		segment := &model.Segment{
-			ID:        types.MustParse(segmentAndMetadata.Segment.ID),
-			Type:      segmentAndMetadata.Segment.Type,
-			Scope:     segmentAndMetadata.Segment.Scope,
-			Ts:        segmentAndMetadata.Segment.Ts,
-			FilePaths: segmentAndMetadata.Segment.FilePaths,
+			ID:                   types.MustParse(segmentAndMetadata.Segment.ID),
+			Type:                 segmentAndMetadata.Segment.Type,
+			Scope:                segmentAndMetadata.Segment.Scope,
+			Ts:                   segmentAndMetadata.Segment.Ts,
+			FilePaths:            segmentAndMetadata.Segment.FilePaths,
+			ConfigurationJsonStr: segmentAndMetadata.Segment.ConfigurationJsonStr,
 		}
 
 		if segmentAndMetadata.Segment.CollectionID != nil {

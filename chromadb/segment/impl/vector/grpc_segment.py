@@ -1,6 +1,10 @@
+from chromadb.api.configuration import (
+    CollectionConfigurationInternal,
+    HNSWConfigurationInternal,
+)
 from chromadb.proto.utils import get_default_grpc_options
 from overrides import EnforceOverrides, override
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, cast
 from chromadb.config import System
 from chromadb.proto.convert import (
     from_proto_vector_embedding_record,
@@ -101,6 +105,19 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         # Great example of why language sharing is nice.
         segment_metadata = PersistentHnswParams.extract(metadata)
         return segment_metadata
+
+    @staticmethod
+    @override
+    def configuration_from_collection_configuration(
+        collection_configuration: CollectionConfigurationInternal,
+    ) -> HNSWConfigurationInternal:
+        print(
+            "HAMMAD DDEBUG IN GRPC_SEGMENT, configuration_from_collection_configuration"
+        )
+        return cast(
+            HNSWConfigurationInternal,
+            collection_configuration.get_parameter("hnsw_configuration").value,
+        )
 
     @override
     def delete(self) -> None:

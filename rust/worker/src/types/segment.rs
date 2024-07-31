@@ -3,6 +3,7 @@ use crate::{
     chroma_proto,
     errors::{ChromaError, ErrorCodes},
 };
+use serde_json::Value;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
@@ -50,6 +51,13 @@ pub(crate) struct Segment {
     pub(crate) collection: Option<Uuid>,
     pub(crate) metadata: Option<Metadata>,
     pub(crate) file_path: HashMap<String, Vec<String>>,
+    // Configuration is currently transported as json, in the future
+    // we should have a more structured way to transport and represent
+    // configuration
+    // This was an explicit shortcut to avoid having to define a new
+    // proto message for configuration and per segment type configuration
+    // https://github.com/chroma-core/chroma/issues/2598
+    pub(crate) configuration_json: Option<Value>,
 }
 
 #[derive(Error, Debug)]
@@ -62,6 +70,8 @@ pub(crate) enum SegmentConversionError {
     SegmentScopeConversionError(#[from] SegmentScopeConversionError),
     #[error("Invalid segment type")]
     InvalidSegmentType,
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 impl ChromaError for SegmentConversionError {
@@ -71,6 +81,7 @@ impl ChromaError for SegmentConversionError {
             SegmentConversionError::InvalidSegmentType => ErrorCodes::InvalidArgument,
             SegmentConversionError::SegmentScopeConversionError(e) => e.code(),
             SegmentConversionError::MetadataValueConversionError(e) => e.code(),
+            SegmentConversionError::SerdeJsonError(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -111,7 +122,6 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             "urn:chroma:segment/metadata/sqlite" => SegmentType::Sqlite,
             "urn:chroma:segment/metadata/blockfile" => SegmentType::BlockfileMetadata,
             _ => {
-                println!("Invalid segment type: {}", proto_segment.r#type);
                 return Err(SegmentConversionError::InvalidSegmentType);
             }
         };
@@ -122,6 +132,18 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             file_paths.insert(key, value.paths);
         }
 
+        let configuration_json = match proto_segment.configuration_json_str {
+            Some(json_str) => match serde_json::from_str(&json_str) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    return Err(SegmentConversionError::SerdeJsonError(e));
+                }
+            },
+            None => None,
+        };
+
+        println!("HAMMAD CONFIGURATION JSON: {:?}", configuration_json);
+
         Ok(Segment {
             id: segment_uuid,
             r#type: segment_type,
@@ -129,6 +151,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             collection: collection_uuid,
             metadata: segment_metadata,
             file_path: file_paths,
+            configuration_json,
         })
     }
 }
@@ -157,6 +180,7 @@ mod tests {
             collection: Some("00000000-0000-0000-0000-000000000000".to_string()),
             metadata: Some(metadata),
             file_paths: HashMap::new(),
+            configuration_json_str: None,
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
         assert_eq!(converted_segment.id, Uuid::nil());
@@ -166,5 +190,6 @@ mod tests {
         let metadata = converted_segment.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &MetadataValue::Int(42));
+        assert_eq!(converted_segment.configuration_json, None);
     }
 }
