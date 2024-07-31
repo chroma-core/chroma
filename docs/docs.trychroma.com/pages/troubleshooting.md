@@ -57,3 +57,31 @@ Chroma requires SQLite > 3.35, if you encounter issues with having too low of a 
 ##  Illegal instruction (core dumped)
 
 If you encounter an error like this during setup and are using Docker - you may have built the library on a machine with a different CPU architecture than the one you are running it on. Try rebuilding the Docker image on the machine you are running it on.
+
+## Error: batch size exceeds maximum batch size
+
+There is a limit to the number of mutations you can perform in one call, depending on a combination of factors like your operating system and Python version. If you encounter this error you need to split your set of mutations into smaller batches.
+
+To do this manually, call `client.get_max_batch_size()` to get the maximum batch size and then split your mutations into batches of that size or smaller.
+
+We provide a small utility to simplify this (which can also optionally show a progress bar):
+
+```python
+import chromadb
+from chromadb.utils.batch_utils import create_batches
+import numpy as np
+
+client = chromadb.Client()
+collection = client.create_collection("foo")
+
+ids = [str(i) for i in range(100_000)]
+embeddings = np.random.rand(100_000, 128)
+
+# Add 100,000 records
+for (ids, embeddings) in create_batches(client, (ids, embeddings), print_progress_description="Adding documents..."):
+   collection.add(ids=ids, embeddings=embeddings)
+
+# Delete added records
+for (ids,) in create_batches(client, (ids,), print_progress_description="Deleting documents..."):
+   collection.delete(ids=ids)
+```

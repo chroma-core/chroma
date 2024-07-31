@@ -114,7 +114,7 @@ def _test_add(
         and len(normalized_record_set["ids"]) > 10
     ):
         # Wait for the model to be updated
-        wait_for_version_increase(client, collection.name, initial_version)
+        wait_for_version_increase(client, collection.name, cast(int, initial_version))
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
@@ -181,14 +181,18 @@ def test_add_large(
     normalized_record_set = invariants.wrap_all(record_set)
     initial_version = coll.get_model()["version"]
 
-    for batch in create_batches(
-        api=client,
-        ids=cast(List[str], record_set["ids"]),
-        embeddings=cast(Embeddings, record_set["embeddings"]),
-        metadatas=cast(Metadatas, record_set["metadatas"]),
-        documents=cast(List[str], record_set["documents"]),
+    for ids, embeddings, metadatas, documents in create_batches(
+        client,
+        (
+            cast(List[str], record_set["ids"]),
+            cast(Embeddings, record_set["embeddings"]),
+            cast(Metadatas, record_set["metadatas"]),
+            cast(List[str], record_set["documents"]),
+        ),
     ):
-        coll.add(*batch)
+        coll.add(
+            ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents
+        )
 
     if (
         not NOT_CLUSTER_ONLY
@@ -197,7 +201,7 @@ def test_add_large(
     ):
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
-            client, collection.name, initial_version, additional_time=240
+            client, collection.name, cast(int, initial_version), additional_time=240
         )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
