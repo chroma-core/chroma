@@ -33,7 +33,7 @@ use thiserror::Error;
 pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
-    part_size_bytes: u64,
+    upload_part_size_bytes: u64,
 }
 
 #[derive(Error, Debug)]
@@ -67,11 +67,11 @@ impl ChromaError for S3GetError {
 }
 
 impl S3Storage {
-    fn new(bucket: &str, client: aws_sdk_s3::Client, part_size_bytes: u64) -> S3Storage {
+    fn new(bucket: &str, client: aws_sdk_s3::Client, upload_part_size_bytes: u64) -> S3Storage {
         return S3Storage {
             bucket: bucket.to_string(),
             client,
-            part_size_bytes,
+            upload_part_size_bytes,
         };
     }
 
@@ -298,11 +298,11 @@ impl S3Storage {
         &self,
         total_size_bytes: u64,
     ) -> impl Iterator<Item = (i32, u64, u64)> {
-        let part_size_bytes = self.part_size_bytes.clone();
-        let mut part_count = (total_size_bytes / part_size_bytes) + 1;
-        let mut size_of_last_part = total_size_bytes % part_size_bytes;
+        let upload_part_size_bytes = self.upload_part_size_bytes.clone();
+        let mut part_count = (total_size_bytes / upload_part_size_bytes) + 1;
+        let mut size_of_last_part = total_size_bytes % upload_part_size_bytes;
         if size_of_last_part == 0 {
-            size_of_last_part = part_size_bytes;
+            size_of_last_part = upload_part_size_bytes;
             part_count -= 1;
         }
 
@@ -310,12 +310,12 @@ impl S3Storage {
             let this_part = if part_count - 1 == part_index {
                 size_of_last_part
             } else {
-                part_size_bytes
+                upload_part_size_bytes
             };
             (
                 // Part numbers start at 1
                 (part_index + 1) as i32,
-                part_index * part_size_bytes,
+                part_index * upload_part_size_bytes,
                 this_part,
             )
         })
@@ -377,7 +377,8 @@ impl Configurable<StorageConfig> for S3Storage {
                         aws_sdk_s3::Client::new(&config)
                     }
                 };
-                let storage = S3Storage::new(&s3_config.bucket, client, s3_config.part_size_bytes);
+                let storage =
+                    S3Storage::new(&s3_config.bucket, client, s3_config.upload_part_size_bytes);
                 // for minio we create the bucket since it is only used for testing
                 match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio => {
@@ -440,7 +441,7 @@ mod tests {
         let storage = S3Storage {
             bucket: "test".to_string(),
             client,
-            part_size_bytes: 1024 * 1024 * 8,
+            upload_part_size_bytes: 1024 * 1024 * 8,
         };
         storage.create_bucket().await.unwrap();
 
@@ -468,13 +469,13 @@ mod tests {
         assert_eq!(buf, test_data);
     }
 
-    async fn test_put_file(file_size: usize, part_size_bytes: u64) {
+    async fn test_put_file(file_size: usize, upload_part_size_bytes: u64) {
         let client = get_s3_client();
 
         let storage = S3Storage {
             bucket: "test".to_string(),
             client,
-            part_size_bytes,
+            upload_part_size_bytes,
         };
         storage.create_bucket().await.unwrap();
 
@@ -517,16 +518,20 @@ mod tests {
     #[tokio::test]
     #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
     async fn test_put_file_scenarios() {
-        let test_part_size_bytes = 1024 * 1024 * 8; // 8MB
+        let test_upload_part_size_bytes = 1024 * 1024 * 8; // 8MB
 
         // Under part size
-        test_put_file(1024, test_part_size_bytes).await;
+        test_put_file(1024, test_upload_part_size_bytes).await;
         // At part size
-        test_put_file(test_part_size_bytes as usize, test_part_size_bytes).await;
+        test_put_file(
+            test_upload_part_size_bytes as usize,
+            test_upload_part_size_bytes,
+        )
+        .await;
         // Over part size
         test_put_file(
-            (test_part_size_bytes as f64 * 2.5) as usize,
-            test_part_size_bytes,
+            (test_upload_part_size_bytes as f64 * 2.5) as usize,
+            test_upload_part_size_bytes,
         )
         .await;
     }
