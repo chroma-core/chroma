@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(metadata.get("foo").unwrap(), &MetadataValue::Int(42));
         assert_eq!(
             converted_segment.configuration_json.unwrap(),
-            serde_json::from_str(configuration_json).unwrap()
+            serde_json::from_str::<serde_json::Value>(configuration_json).unwrap(),
         );
     }
 }
