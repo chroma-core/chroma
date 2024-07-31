@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub(super) enum GetHnswSegmentByIdError {
     #[error("Hnsw segment with id: {0} not found")]
     HnswSegmentNotFound(Uuid),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
 
@@ -100,7 +100,7 @@ pub(super) async fn get_collection_by_id(
 pub(super) enum GetRecordSegmentByCollectionIdError {
     #[error("Record segment for collection with id: {0} not found")]
     RecordSegmentNotFound(Uuid),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
 
