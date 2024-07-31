@@ -97,7 +97,6 @@ class DistributedSegmentManager(SegmentManager):
             known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
             # Get the first segment of a known type
             segment = next(filter(lambda s: s["type"] in known_types, segments))
-            print("HAMMAD QUERYING SEGMENT", segment)
             grpc_url = self._segment_directory.get_segment_endpoint(segment)
             if segment["metadata"] is not None:
                 segment["metadata"]["grpc_url"] = grpc_url  # type: ignore
