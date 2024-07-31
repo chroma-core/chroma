@@ -7,7 +7,6 @@ from chromadb.config import System
 from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment.impl.vector.batch import Batch
-from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
     DEFAULT_CAPACITY,
     LocalHnswSegment,
@@ -20,7 +19,6 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.types import (
     LogRecord,
-    Metadata,
     Operation,
     Segment,
     SeqId,
@@ -159,13 +157,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._max_seq_id = self._persist_data.max_seq_id
             else:
                 self._max_seq_id = self._consumer.min_seqid()
-
-    @staticmethod
-    @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Extract relevant metadata
-        segment_metadata = PersistentHnswParams.extract(metadata)
-        return segment_metadata
 
     def _index_exists(self) -> bool:
         """Check if the index exists via the metadata file"""
