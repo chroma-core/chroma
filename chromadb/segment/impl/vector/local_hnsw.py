@@ -9,7 +9,6 @@ from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
-from chromadb.segment.impl.vector.hnsw_params import HnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
@@ -22,7 +21,6 @@ from chromadb.types import (
     VectorQueryResult,
     SeqId,
     Segment,
-    Metadata,
     Operation,
     Vector,
 )
@@ -79,13 +77,6 @@ class LocalHnswSegment(VectorReader):
 
         self._lock = ReadWriteLock()
         self._opentelemtry_client = system.require(OpenTelemetryClient)
-
-    @staticmethod
-    @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Extract relevant metadata
-        segment_metadata = HnswParams.extract(metadata)
-        return segment_metadata
 
     @staticmethod
     @override

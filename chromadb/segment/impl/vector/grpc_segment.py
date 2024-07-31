@@ -12,14 +12,12 @@ from chromadb.proto.convert import (
     to_proto_vector,
 )
 from chromadb.segment import VectorReader
-from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
-    Metadata,
     ScalarEncoding,
     Segment,
     VectorEmbeddingRecord,
@@ -98,13 +96,6 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
     @override
     def max_seqid(self) -> int:
         return 0
-
-    @staticmethod
-    @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Great example of why language sharing is nice.
-        segment_metadata = PersistentHnswParams.extract(metadata)
-        return segment_metadata
 
     @staticmethod
     @override
