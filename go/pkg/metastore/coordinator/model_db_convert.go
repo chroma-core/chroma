@@ -99,10 +99,11 @@ func convertSegmentToModel(segmentAndMetadataList []*dbmodel.SegmentAndMetadata)
 	segments := make([]*model.Segment, 0, len(segmentAndMetadataList))
 	for _, segmentAndMetadata := range segmentAndMetadataList {
 		segment := &model.Segment{
-			ID:    types.MustParse(segmentAndMetadata.Segment.ID),
-			Type:  segmentAndMetadata.Segment.Type,
-			Scope: segmentAndMetadata.Segment.Scope,
-			Ts:    segmentAndMetadata.Segment.Ts,
+			ID:                   types.MustParse(segmentAndMetadata.Segment.ID),
+			Type:                 segmentAndMetadata.Segment.Type,
+			Scope:                segmentAndMetadata.Segment.Scope,
+			Ts:                   segmentAndMetadata.Segment.Ts,
+			ConfigurationJsonStr: segmentAndMetadata.Segment.ConfigurationJsonStr,
 		}
 		if segmentAndMetadata.Segment.CollectionID != nil {
 			segment.CollectionID = types.MustParse(*segmentAndMetadata.Segment.CollectionID)
