@@ -1,11 +1,16 @@
 import path from "node:path";
 import { GenericContainer, Wait } from "testcontainers";
+import bcrypt from "bcrypt";
 
 const CHROMADB_PORT = 8000;
 
 const BUILD_CONTEXT_DIR = path.join(__dirname, "../../..");
 
-const BASIC_AUTH_FILE = path.join(__dirname, "test.htpasswd");
+/** See [this page](https://httpd.apache.org/docs/2.4/misc/password_encryptions.html) for more information about the format of this file. */
+const BASIC_AUTH_PASSWORD_FILE_CONTENTS = `admin:${bcrypt.hashSync(
+  "admin",
+  1,
+)}`;
 
 export async function startChromaContainer({
   authType,
@@ -22,9 +27,9 @@ export async function startChromaContainer({
         deleteOnExit: false,
       },
     );
-    container = container.withCopyFilesToContainer([
+    container = container.withCopyContentToContainer([
       {
-        source: BASIC_AUTH_FILE,
+        content: BASIC_AUTH_PASSWORD_FILE_CONTENTS,
         target: "/chromadb/test.htpasswd",
       },
     ]);
