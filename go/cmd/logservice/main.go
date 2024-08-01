@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net"
+
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
 	"github.com/chroma-core/chroma/go/pkg/log/purging"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
@@ -15,7 +17,6 @@ import (
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"net"
 )
 
 func main() {

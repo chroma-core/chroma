@@ -18,6 +18,7 @@ proto_go:
     	--plugin protoc-gen-go-grpc="${GOPATH}/bin/protoc-gen-go-grpc" \
 	    chromadb/proto/*.proto
 	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/logservice*.go ../go/pkg/proto/logservicepb/
+	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/debug*.go ../go/pkg/proto/debugpb/
 	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/*.go ../go/pkg/proto/coordinatorpb/
 	@rm -rf ../go/pkg/proto/coordinatorpb/chromadb
 	@echo "Done"
