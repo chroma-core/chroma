@@ -111,6 +111,6 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
     }
 
     fn get_type(&self) -> OperatorType {
-        OperatorType::IoOperatorType
+        OperatorType::IoOperator
     }
 }

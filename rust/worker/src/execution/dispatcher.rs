@@ -97,12 +97,12 @@ impl Dispatcher {
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, task: TaskMessage) {
         match task.get_type() {
-            OperatorType::IoOperatorType => {
+            OperatorType::IoOperator => {
                 tokio::spawn(async move {
                     task.run().await;
                 });
             }
-            OperatorType::OtherType => {
+            OperatorType::Other => {
                 // If a worker is waiting for a task, send it to the worker in FIFO order
                 // Otherwise, add it to the task queue
                 match self.waiters.pop() {
@@ -113,7 +113,7 @@ impl Dispatcher {
                     {
                         Ok(_) => {}
                         Err(e) => {
-                            println!("Error sending task to worker: {:?}", e);
+                            tracing::error!("Error sending task to worker: {:?}", e);
                         }
                     },
                     None => {
@@ -294,7 +294,70 @@ mod tests {
         }
 
         fn get_type(&self) -> OperatorType {
-            OperatorType::IoOperatorType
+            OperatorType::IoOperator
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockIoDispatchUser {
+        pub dispatcher: ComponentHandle<Dispatcher>,
+        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
+        received_tasks: Arc<Mutex<HashSet<Uuid>>>,
+    }
+    #[async_trait]
+    impl Component for MockIoDispatchUser {
+        fn get_name() -> &'static str {
+            "Mock Io dispatcher"
+        }
+
+        fn queue_size(&self) -> usize {
+            1000
+        }
+
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+            // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
+            let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
+            ctx.scheduler
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
+        }
+    }
+    #[async_trait]
+    impl Handler<TaskResult<String, ()>> for MockIoDispatchUser {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            _message: TaskResult<String, ()>,
+            ctx: &ComponentContext<MockIoDispatchUser>,
+        ) {
+            self.counter.fetch_add(1, Ordering::SeqCst);
+            let curr_count = self.counter.load(Ordering::SeqCst);
+            // Cancel self
+            if curr_count == DISPATCH_COUNT {
+                ctx.cancellation_token.cancel();
+            }
+            self.received_tasks.lock().insert(_message.id());
+        }
+    }
+
+    #[async_trait]
+    impl Handler<()> for MockIoDispatchUser {
+        type Result = ();
+
+        async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockIoDispatchUser>) {
+            let rng = rand::thread_rng();
+            // Generate a random filename for writing and reading.
+            let filename = rng
+                .sample_iter(&Alphanumeric)
+                .take(5)
+                .map(char::from)
+                .collect();
+            println!("Scheduling mock io operator with filename {}", filename);
+            let task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
+            let task_id = task.id();
+            self.sent_tasks.lock().insert(task_id);
+            let res = self.dispatcher.send(task, None).await;
         }
     }
 
@@ -346,29 +409,8 @@ mod tests {
         type Result = ();
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
-            // Randomly choose between IO task and other task.
-            let should_io;
-            let mut filename = String::from("dummy");
-            {
-                let mut rng = rand::thread_rng();
-                should_io = rng.gen_bool(1.0 / 2.0);
-                // Generate a random filename for writing and reading.
-                if should_io {
-                    filename = rng
-                        .sample_iter(&Alphanumeric)
-                        .take(5)
-                        .map(char::from)
-                        .collect();
-                }
-            }
-            let task;
-            if should_io {
-                println!("Scheduling mock io operator with filename {}", filename);
-                task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
-            } else {
-                println!("Scheduling mock cpu operator with input {}", 42.0);
-                task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
-            }
+            println!("Scheduling mock cpu operator with input {}", 42.0);
+            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let res = self.dispatcher.send(task, None).await;
@@ -376,7 +418,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dispatcher() {
+    async fn test_dispatcher_io_tasks() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let dispatch_user = MockIoDispatchUser {
+            dispatcher: dispatcher_handle,
+            counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
+        };
+        let mut dispatch_user_handle = system.start_component(dispatch_user);
+        // yield to allow the component to process the messages
+        tokio::task::yield_now().await;
+        // Join on the dispatch user, since it will kill itself after DISPATCH_COUNT messages
+        dispatch_user_handle.join().await;
+        // We should have received DISPATCH_COUNT messages
+        assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
+        // The sent tasks should be equal to the received tasks
+        assert_eq!(*sent_tasks.lock(), *received_tasks.lock());
+        // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
+        assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
+        assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
         let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);

@@ -10,8 +10,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub(crate) enum OperatorType {
-    IoOperatorType,
-    OtherType,
+    IoOperator,
+    Other,
 }
 
 /// An operator takes a generic input and returns a generic output.
@@ -28,7 +28,7 @@ where
     async fn run(&self, input: &I) -> Result<O, Self::Error>;
     fn get_name(&self) -> &'static str;
     fn get_type(&self) -> OperatorType {
-        OperatorType::OtherType
+        OperatorType::Other
     }
 }
 
