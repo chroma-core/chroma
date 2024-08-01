@@ -673,14 +673,6 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 			Metadata:     metadata2,
 			FilePaths:    map[string][]string{},
 		},
-		{
-			ID:           types.MustParse("22222222-d7d7-413b-92e1-731098a6e492"),
-			Type:         "test_type_b",
-			Scope:        "METADATA",
-			CollectionID: types.NilUniqueID(),
-			Metadata:     metadata3, // This segment is not assigned to any collection
-			FilePaths:    map[string][]string{},
-		},
 	}
 	return sampleSegments
 }
@@ -703,7 +695,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	var results []*model.Segment
 	for _, segment := range sampleSegments {
-		result, err := c.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
+		result, err := c.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 		suite.NoError(err)
 		suite.Equal([]*model.Segment{segment}, result)
 		results = append(results, result...)
@@ -725,19 +717,19 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	// Find by id
 	for _, segment := range sampleSegments {
-		result, err := c.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
+		result, err := c.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 		suite.NoError(err)
 		suite.Equal([]*model.Segment{segment}, result)
 	}
 
 	// Find by type
 	testTypeA := "test_type_a"
-	result, err := c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, types.NilUniqueID())
+	result, err := c.GetSegments(ctx, types.NilUniqueID(), &testTypeA, nil, suite.sampleCollections[0].ID)
 	suite.NoError(err)
 	suite.Equal(sampleSegments[:1], result)
 
 	testTypeB := "test_type_b"
-	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, types.NilUniqueID())
+	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, suite.sampleCollections[1].ID)
 	suite.NoError(err)
 	suite.ElementsMatch(sampleSegments[1:], result)
 
@@ -761,11 +753,10 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	err = c.DeleteSegment(ctx, s1.ID, s1.CollectionID)
 	suite.NoError(err)
 
-	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, types.NilUniqueID())
+	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, s1.CollectionID)
 	suite.NoError(err)
 	suite.NotContains(results, s1)
-	suite.Len(results, len(sampleSegments)-1)
-	suite.ElementsMatch(results, sampleSegments[1:])
+	suite.Len(results, 0)
 
 	// Duplicate delete throws an exception
 	err = c.DeleteSegment(ctx, s1.ID, s1.CollectionID)
@@ -834,7 +825,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ID:         segment.ID,
 		Metadata:   segment.Metadata})
 	suite.NoError(err)
-	result, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
+	result, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 
@@ -845,7 +836,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ID:         segment.ID,
 		Metadata:   segment.Metadata})
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
+	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 
@@ -858,7 +849,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ID:         segment.ID,
 		Metadata:   newMetadata})
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
+	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 
@@ -871,7 +862,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 		ResetMetadata: true},
 	)
 	suite.NoError(err)
-	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, types.NilUniqueID())
+	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
 }
