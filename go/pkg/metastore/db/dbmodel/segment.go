@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/model"
-
 	"github.com/chroma-core/chroma/go/pkg/types"
 )
 
@@ -13,15 +12,16 @@ type Segment struct {
 	   This requires us to push down CollectionID from the caller. We don't think there is
 	   need to modify CollectionID in the near future. Each Segment should always have a
 	   collection as a parent and cannot be modified. */
-	CollectionID *string             `gorm:"collection_id;primaryKey"`
-	ID           string              `gorm:"id;primaryKey"`
-	Type         string              `gorm:"type;type:string;not null"`
-	Scope        string              `gorm:"scope"`
-	Ts           types.Timestamp     `gorm:"ts;type:bigint;default:0"`
-	IsDeleted    bool                `gorm:"is_deleted;type:bool;default:false"`
-	CreatedAt    time.Time           `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
-	UpdatedAt    time.Time           `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
-	FilePaths    map[string][]string `gorm:"file_paths;serializer:json;default:'{}'"`
+	CollectionID         *string             `gorm:"collection_id;primaryKey"`
+	ID                   string              `gorm:"id;primaryKey"`
+	Type                 string              `gorm:"type;type:string;not null"`
+	Scope                string              `gorm:"scope"`
+	ConfigurationJsonStr *string             `gorm:"configuration_json_str"`
+	Ts                   types.Timestamp     `gorm:"ts;type:bigint;default:0"`
+	IsDeleted            bool                `gorm:"is_deleted;type:bool;default:false"`
+	CreatedAt            time.Time           `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt            time.Time           `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
+	FilePaths            map[string][]string `gorm:"file_paths;serializer:json;default:'{}'"`
 }
 
 func (s Segment) TableName() string {

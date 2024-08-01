@@ -1,4 +1,5 @@
 from threading import Lock
+from chromadb.api.configuration import ConfigurationInternal
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
@@ -139,17 +140,21 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
 
     metadata: Optional[Metadata] = None
+    configuration: Optional[ConfigurationInternal] = None
     # For the segment types with python implementations, we can propagate metadata
     if type in SEGMENT_TYPE_IMPLS:
         cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
         collection_metadata = collection.metadata
         if collection_metadata:
             metadata = cls.propagate_collection_metadata(collection_metadata)
-
+        configuration = cls.configuration_from_collection_configuration(
+            collection.get_configuration()
+        )
     return Segment(
         id=uuid4(),
         type=type.value,
         scope=scope,
         collection=collection.id,
         metadata=metadata,
+        configuration=configuration,
     )

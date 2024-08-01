@@ -12,7 +12,7 @@ data "external_schema" "gorm" {
 
 env "dev" {
   src = data.external_schema.gorm.url
-  dev = "postgres://localhost:5432/chroma?sslmode=disable"
+  dev = "postgres://chroma:chroma@localhost:5432/chroma?sslmode=disable"
   migration {
     dir = "file://migrations"
   }

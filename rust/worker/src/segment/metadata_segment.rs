@@ -14,7 +14,6 @@ use uuid::Uuid;
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
-use crate::blockstore::key::KeyWrapper;
 use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
@@ -1908,6 +1907,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -1918,6 +1918,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -2199,6 +2200,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -2209,6 +2211,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -2456,6 +2459,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -2466,6 +2470,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -2682,6 +2687,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         let mut metadata_segment = crate::types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
@@ -2692,6 +2698,7 @@ mod test {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =

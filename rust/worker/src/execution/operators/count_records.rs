@@ -224,6 +224,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         {
             let segment_writer =
@@ -365,6 +366,7 @@ mod tests {
             ),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
 
         // Add 1, 2. Delete 1. Add 3. Upsert 3. Expected count is 2.

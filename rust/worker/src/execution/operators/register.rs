@@ -202,6 +202,7 @@ mod tests {
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: file_path_1.clone(),
+            configuration_json: None,
         };
 
         let mut file_path_2 = HashMap::new();
@@ -214,6 +215,7 @@ mod tests {
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: file_path_2.clone(),
+            configuration_json: None,
         };
         match *sysdb {
             SysDb::Test(ref mut sysdb) => {

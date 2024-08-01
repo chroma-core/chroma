@@ -6,19 +6,15 @@ use crate::execution::operators::normalize_vectors::normalize;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
-use crate::segment::MaterializedLogRecord;
 use crate::types::LogRecord;
 use crate::types::MaterializedLogOperation;
-use crate::types::Operation;
 use crate::types::Segment;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::trace;
 use tracing::Instrument;
 use tracing::Span;
 
@@ -251,6 +247,7 @@ mod tests {
             collection: Some(uuid!("00000000-0000-0000-0000-000000000000")),
             metadata: None,
             file_path: HashMap::new(),
+            configuration_json: None,
         };
         return (blockfile_provider, record_segment_definition);
     }

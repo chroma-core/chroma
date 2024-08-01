@@ -5,22 +5,24 @@ import (
 )
 
 type Segment struct {
-	ID           types.UniqueID
-	Type         string
-	Scope        string
-	CollectionID types.UniqueID
-	Metadata     *SegmentMetadata[SegmentMetadataValueType]
-	Ts           types.Timestamp
-	FilePaths    map[string][]string
+	ID                   types.UniqueID
+	Type                 string
+	Scope                string
+	CollectionID         types.UniqueID
+	Metadata             *SegmentMetadata[SegmentMetadataValueType]
+	ConfigurationJsonStr *string
+	Ts                   types.Timestamp
+	FilePaths            map[string][]string
 }
 
 type CreateSegment struct {
-	ID           types.UniqueID
-	Type         string
-	Scope        string
-	CollectionID types.UniqueID
-	Metadata     *SegmentMetadata[SegmentMetadataValueType]
-	Ts           types.Timestamp
+	ID                   types.UniqueID
+	Type                 string
+	Scope                string
+	CollectionID         types.UniqueID
+	Metadata             *SegmentMetadata[SegmentMetadataValueType]
+	ConfigurationJsonStr *string
+	Ts                   types.Timestamp
 }
 
 type UpdateSegment struct {

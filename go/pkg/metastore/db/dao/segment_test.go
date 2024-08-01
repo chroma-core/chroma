@@ -59,6 +59,7 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_GetSegments() {
 	suite.Equal(segment.CollectionID, segments[0].Segment.CollectionID)
 	suite.Equal(segment.Type, segments[0].Segment.Type)
 	suite.Equal(segment.Scope, segments[0].Segment.Scope)
+	suite.Equal(segment.ConfigurationJsonStr, segments[0].Segment.ConfigurationJsonStr)
 	suite.Len(segments[0].SegmentMetadata, 1)
 	suite.Equal(metadata.Key, segments[0].SegmentMetadata[0].Key)
 	suite.Equal(metadata.StrValue, segments[0].SegmentMetadata[0].StrValue)
@@ -86,6 +87,51 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_GetSegments() {
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
+
+	// clean up
+	err = suite.db.Delete(segment).Error
+	suite.NoError(err)
+	err = suite.db.Delete(metadata).Error
+	suite.NoError(err)
+}
+
+func (suite *SegmentDbTestSuite) TestSegmentDb_GetSegments_WithConfiguration() {
+	uniqueID := types.NewUniqueID()
+	collectionID := uniqueID.String()
+	// From the perspective of the sysdb any json string is valid
+	configurationJsonStr := `{"test_key": "test_value"}`
+
+	segment := &dbmodel.Segment{
+		ID:                   uniqueID.String(),
+		CollectionID:         &collectionID,
+		Type:                 "test_type",
+		Scope:                "test_scope",
+		ConfigurationJsonStr: &configurationJsonStr,
+	}
+	err := suite.db.Create(segment).Error
+	suite.NoError(err)
+
+	testKey := "test"
+	testValue := "test"
+	metadata := &dbmodel.SegmentMetadata{
+		SegmentID: segment.ID,
+		Key:       &testKey,
+		StrValue:  &testValue,
+	}
+	err = suite.db.Create(metadata).Error
+	suite.NoError(err)
+
+	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.NilUniqueID())
+	suite.NoError(err)
+	suite.Len(segments, 1)
+	suite.Equal(segment.ID, segments[0].Segment.ID)
+	suite.Equal(segment.CollectionID, segments[0].Segment.CollectionID)
+	suite.Equal(segment.Type, segments[0].Segment.Type)
+	suite.Equal(segment.Scope, segments[0].Segment.Scope)
+	suite.Equal(segment.ConfigurationJsonStr, segments[0].Segment.ConfigurationJsonStr)
+	suite.Len(segments[0].SegmentMetadata, 1)
+	suite.Equal(metadata.Key, segments[0].SegmentMetadata[0].Key)
+	suite.Equal(metadata.StrValue, segments[0].SegmentMetadata[0].StrValue)
 
 	// clean up
 	err = suite.db.Delete(segment).Error

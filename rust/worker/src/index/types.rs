@@ -14,12 +14,15 @@ pub(crate) struct IndexConfig {
 pub(crate) enum IndexConfigFromSegmentError {
     #[error("Invalid distance function")]
     InvalidDistanceFunction(#[from] DistanceFunctionError),
+    #[error("Missing space in configuration")]
+    MissingSpace,
 }
 
 impl ChromaError for IndexConfigFromSegmentError {
     fn code(&self) -> ErrorCodes {
         match self {
             IndexConfigFromSegmentError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
+            IndexConfigFromSegmentError::MissingSpace => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -29,12 +32,12 @@ impl IndexConfig {
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<Self, Box<IndexConfigFromSegmentError>> {
-        let space = match segment.metadata {
-            Some(ref metadata) => match metadata.get("hnsw:space") {
-                Some(MetadataValue::Str(space)) => space,
+        let space = match segment.configuration_json {
+            Some(ref configuration) => match configuration["space"] {
+                serde_json::Value::String(ref space) => space,
                 _ => "l2",
             },
-            None => "l2",
+            None => return Err(Box::new(IndexConfigFromSegmentError::MissingSpace)),
         };
         match DistanceFunction::try_from(space) {
             Ok(distance_function) => Ok(IndexConfig {
