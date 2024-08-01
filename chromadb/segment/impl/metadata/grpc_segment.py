@@ -79,6 +79,7 @@ class GrpcMetadataSegment(MetadataReader):
 
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
             where=self._where_to_proto(where)
             if where is not None and len(where) > 0
             else None,
