@@ -512,8 +512,8 @@ mod tests {
         // create the config
         let configuration = r#"{
             "M": 16,
-            "construction_ef": 100,
-            "search_ef": 100
+            "ef_construction": 100,
+            "ef_search": 100
         }"#;
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));

@@ -407,8 +407,8 @@ mod tests {
 
         let hnsw_configuration = r#"{
             "M": 16,
-            "construction_ef": 100,
-            "search_ef": 100
+            "ef_construction": 100,
+            "ef_search": 100
         }"#;
 
         let collection_1_record_segment = Segment {

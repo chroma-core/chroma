@@ -94,10 +94,10 @@ impl HnswIndexConfig {
         };
 
         // READ EF_CONSTRUCTION
-        let ef_construction = match &configuration["construction_ef"] {
+        let ef_construction = match &configuration["ef_construction"] {
             serde_json::Value::Null => {
                 return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
-                    "construction_ef".to_string(),
+                    "ef_construction".to_string(),
                 )))
             }
             serde_json::Value::Number(n) => match n.as_u64() {
@@ -105,7 +105,7 @@ impl HnswIndexConfig {
                 None => {
                     return Err(Box::new(
                         HnswIndexFromSegmentError::ConfigurationValueError(
-                            "construction_ef".to_string(),
+                            "ef_construction".to_string(),
                         ),
                     ))
                 }
@@ -113,30 +113,30 @@ impl HnswIndexConfig {
             _ => {
                 return Err(Box::new(
                     HnswIndexFromSegmentError::ConfigurationValueError(
-                        "construction_ef".to_string(),
+                        "ef_construction".to_string(),
                     ),
                 ))
             }
         };
 
         // READ EF_SEARCH
-        let ef_search = match &configuration["search_ef"] {
+        let ef_search = match &configuration["ef_search"] {
             serde_json::Value::Null => {
                 return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
-                    "search_ef".to_string(),
+                    "ef_search".to_string(),
                 )))
             }
             serde_json::Value::Number(n) => match n.as_u64() {
                 Some(n) => n as usize,
                 None => {
                     return Err(Box::new(
-                        HnswIndexFromSegmentError::ConfigurationValueError("search_ef".to_string()),
+                        HnswIndexFromSegmentError::ConfigurationValueError("ef_search".to_string()),
                     ))
                 }
             },
             _ => {
                 return Err(Box::new(
-                    HnswIndexFromSegmentError::ConfigurationValueError("search_ef".to_string()),
+                    HnswIndexFromSegmentError::ConfigurationValueError("ef_search".to_string()),
                 ))
             }
         };
@@ -827,8 +827,8 @@ pub mod test {
     fn configuration_reading() {
         let configuration = r#"{
             "M": 16,
-            "construction_ef": 100,
-            "search_ef": 100
+            "ef_construction": 100,
+            "ef_search": 100
         }"#;
 
         let segment = Segment {
@@ -857,8 +857,8 @@ pub mod test {
         let mut metadata = HashMap::new();
         metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10 as i32));
         let partial_configuration_json = r#"{
-            "construction_ef": 100,
-            "search_ef": 100
+            "ef_construction": 100,
+            "ef_search": 100
         }"#;
 
         let segment = Segment {
