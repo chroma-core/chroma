@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from chromadb.api.configuration import CollectionConfigurationInternal
 import chromadb.test.property.strategies as strategies
 from unittest.mock import patch
 import random
@@ -19,7 +20,7 @@ from typing import Dict, List
 from chromadb.segment import VectorReader
 from chromadb.segment import SegmentManager
 
-from chromadb.types import SegmentScope
+from chromadb.types import Collection, SegmentScope
 from chromadb.db.system import SysDB
 from chromadb.config import System
 
@@ -100,8 +101,16 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     def create_segment(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
-        # TODO: Convert collection views used in tests into actual Collections / Collection models
-        segments = self.segment_manager.create_segments(coll)  # type: ignore[arg-type]
+        collection_model = Collection(
+            id=coll.id,
+            name=coll.name,
+            tenant="default_tenant",
+            database="default_database",
+            metadata=None,
+            dimension=None,
+            configuration=CollectionConfigurationInternal(),
+        )
+        segments = self.segment_manager.create_segments(collection_model)
         for segment in segments:
             self.sysdb.create_segment(segment)
             self.segment_collection[segment["id"]] = coll.id
