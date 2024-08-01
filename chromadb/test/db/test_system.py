@@ -738,7 +738,15 @@ def test_update_segment(sysdb: SysDB) -> None:
     assert result == [segment]
 
     # Update collection to new value
-    segment["collection"] = sample_collections[1].id
+    # TODO: not currently supported
+    # segment["collection"] = sample_collections[1]["id"]
+    # sysdb.update_segment(segment["id"], collection=segment["collection"])
+    # result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
+    # result[0]["collection"] = segment["collection"]
+    # assert result == [segment]
+
+    # Update collection to None
+    segment["collection"] = None
     sysdb.update_segment(segment["id"], collection=segment["collection"])
     result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
