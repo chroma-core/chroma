@@ -1,24 +1,43 @@
-import { expect, test } from "@jest/globals";
-import chroma from "./initClient";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "@jest/globals";
 import { IDS, EMBEDDINGS } from "./data";
 import { InvalidCollectionError } from "../src/Errors";
+import { StartedTestContainer } from "testcontainers";
+import { ChromaClient } from "../src/ChromaClient";
+import { startChromaContainer } from "./startChromaContainer";
 
-test("it should peek a collection", async () => {
-  await chroma.reset();
-  const collection = await chroma.createCollection({ name: "test" });
-  await chroma.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
-  const results = await chroma.peekRecords(collection, { limit: 2 });
-  expect(results).toBeDefined();
-  expect(typeof results).toBe("object");
-  expect(results.ids.length).toBe(2);
-  expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
-});
+describe("peek records", () => {
+  // connects to the unauthenticated chroma instance started in
+  // the global jest setup file.
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
-test("should error on non existing collection", async () => {
-  await chroma.reset();
-  const collection = await chroma.createCollection({ name: "test" });
-  await chroma.deleteCollection({ name: "test" });
-  expect(async () => {
-    await chroma.peekRecords(collection);
-  }).rejects.toThrow(InvalidCollectionError);
+  beforeEach(async () => {
+    await client.reset();
+  });
+
+  test("it should peek a collection", async () => {
+    const collection = await client.createCollection({ name: "test" });
+    await client.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
+    const results = await client.peekRecords(collection, { limit: 2 });
+    expect(results).toBeDefined();
+    expect(typeof results).toBe("object");
+    expect(results.ids.length).toBe(2);
+    expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
+  });
+
+  test("should error on non existing collection", async () => {
+    const collection = await client.createCollection({ name: "test" });
+    await client.deleteCollection({ name: "test" });
+    expect(async () => {
+      await client.peekRecords(collection);
+    }).rejects.toThrow(InvalidCollectionError);
+  });
 });

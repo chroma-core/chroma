@@ -1,19 +1,29 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import { chromaTokenDefault, chromaTokenBearer } from "./initClientWithAuth";
+import { chromaTokenXToken, cloudClient } from "./initClientWithAuth";
 import { ChromaClient } from "../src/ChromaClient";
 import { StartedTestContainer } from "testcontainers";
 import { startChromaContainer } from "./startChromaContainer";
 
-describe("token auth", () => {
+describe("xtoken auth", () => {
   let chromaUrl: string;
+  let chromaHost: string;
+  let chromaPort: number;
   let noAuthClient: ChromaClient;
   let container: StartedTestContainer;
 
   beforeAll(async () => {
-    const { url, container: chromaContainer } = await startChromaContainer({
-      authType: "token",
+    const {
+      url,
+      container: chromaContainer,
+      host,
+      port,
+    } = await startChromaContainer({
+      authType: "xtoken",
     });
+
     chromaUrl = url;
+    chromaHost = `http://${host}`;
+    chromaPort = port;
     noAuthClient = new ChromaClient({ path: url });
     container = chromaContainer;
   }, 120_000);
@@ -38,11 +48,25 @@ describe("token auth", () => {
     await expect(noAuthClient.listCollections()).rejects.toBeInstanceOf(Error);
   });
 
-  test.each([
-    ["default token", chromaTokenDefault],
-    ["bearer token", chromaTokenBearer],
-  ])(`it should list collections with %s`, async (_, clientBuilder) => {
-    const client = clientBuilder(chromaUrl);
+  test("it should list collections with xtoken", async () => {
+    const client = chromaTokenXToken(chromaUrl);
+    await client.reset();
+    let collections = await client.listCollections();
+    expect(collections).toBeDefined();
+    expect(Array.isArray(collections)).toBe(true);
+    expect(collections).toHaveLength(0);
+    await client.createCollection({
+      name: "test",
+    });
+    collections = await client.listCollections();
+    expect(collections).toHaveLength(1);
+  });
+
+  test("it should list collections with cloud client", async () => {
+    const client = cloudClient({
+      host: chromaHost,
+      port: chromaPort.toString(),
+    });
     await client.reset();
     let collections = await client.listCollections();
     expect(collections).toBeDefined();
