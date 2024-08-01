@@ -729,46 +729,46 @@ def test_update_segment(sysdb: SysDB) -> None:
 
     # TODO: revisit update segment - push collection id
 
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Update collection to new value
     segment["collection"] = sample_collections[1].id
     sysdb.update_segment(segment["id"], collection=segment["collection"])
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Add a new metadata key
     metadata["test_str2"] = "str2"
     sysdb.update_segment(segment["id"], metadata={"test_str2": "str2"})
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Update a metadata key
     metadata["test_str"] = "str3"
     sysdb.update_segment(segment["id"], metadata={"test_str": "str3"})
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Delete a metadata key
     del metadata["test_str"]
     sysdb.update_segment(segment["id"], metadata={"test_str": None})
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Delete all metadata keys
     segment["metadata"] = None
     sysdb.update_segment(segment["id"], metadata=None)
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 

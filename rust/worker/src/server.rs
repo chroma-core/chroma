@@ -139,10 +139,15 @@ impl WorkerServer {
             }
         };
 
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
+        let collection_uuid = match request.collection_id {
+            Some(collection_id) => match Uuid::parse_str(&collection_id) {
+                Ok(uuid) => uuid,
+                Err(_) => {
+                    return Err(Status::invalid_argument("Invalid Collection UUID"));
+                }
+            },
+            None => {
+                return Err(Status::invalid_argument("Collection UUID is required"));
             }
         };
 
@@ -249,10 +254,15 @@ impl WorkerServer {
             }
         };
 
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
+        let collection_uuid = match request.collection_id {
+            Some(collection_id) => match Uuid::parse_str(&collection_id) {
+                Ok(uuid) => uuid,
+                Err(_) => {
+                    return Err(Status::invalid_argument("Invalid Collection UUID"));
+                }
+            },
+            None => {
+                return Err(Status::invalid_argument("Collection UUID is required"));
             }
         };
 
@@ -328,11 +338,15 @@ impl WorkerServer {
             }
         };
 
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                tracing::error!("Invalid Collection UUID");
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
+        let collection_uuid = match request.collection_id {
+            Some(collection_id) => match Uuid::parse_str(&collection_id) {
+                Ok(uuid) => uuid,
+                Err(_) => {
+                    return Err(Status::invalid_argument("Invalid Collection UUID"));
+                }
+            },
+            None => {
+                return Err(Status::invalid_argument("Collection UUID is required"));
             }
         };
 
@@ -499,12 +513,18 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
+        let collection_uuid = match request.collection_id {
+            Some(collection_id) => match Uuid::parse_str(&collection_id) {
+                Ok(uuid) => uuid,
+                Err(_) => {
+                    return Err(Status::invalid_argument("Invalid Collection UUID"));
+                }
+            },
+            None => {
+                return Err(Status::invalid_argument("Collection UUID is required"));
             }
         };
+
         println!("Querying count for segment {}", segment_uuid);
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,

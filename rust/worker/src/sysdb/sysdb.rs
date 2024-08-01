@@ -270,7 +270,7 @@ impl GrpcSysDb {
                 } else {
                     None
                 },
-                collection: collection.to_string(),
+                collection: Some(collection.to_string()),
             })
             .await;
         match res {
