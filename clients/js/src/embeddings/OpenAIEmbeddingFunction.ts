@@ -9,6 +9,7 @@ interface OpenAIAPI {
     model: string;
     input: string[];
     user?: string;
+    dimensions?: number;
   }) => Promise<number[][]>;
 }
 
@@ -28,6 +29,7 @@ class OpenAIAPIv3 implements OpenAIAPI {
     model: string;
     input: string[];
     user?: string;
+    dimensions?: number;
   }): Promise<number[][]> {
     const embeddings: number[][] = [];
     const response = await this.openai
@@ -62,6 +64,7 @@ class OpenAIAPIv4 implements OpenAIAPI {
     model: string;
     input: string[];
     user?: string;
+    dimensions?: number;
   }): Promise<number[][]> {
     const embeddings: number[][] = [];
     const response = await this.openai.embeddings.create(params);
@@ -78,21 +81,25 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   private org_id: string;
   private model: string;
   private openaiApi?: OpenAIAPI;
+  private dimensions?: number;
 
   constructor({
     openai_api_key,
     openai_model,
     openai_organization_id,
+    openai_embedding_dimensions,
   }: {
     openai_api_key: string;
     openai_model?: string;
     openai_organization_id?: string;
+    openai_embedding_dimensions?: number;
   }) {
     // we used to construct the client here, but we need to async import the types
     // for the openai npm package, and the constructor can not be async
     this.api_key = openai_api_key;
     this.org_id = openai_organization_id || "";
     this.model = openai_model || "text-embedding-ada-002";
+    this.dimensions = openai_embedding_dimensions;
   }
 
   private async loadClient() {
@@ -131,6 +138,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     return await this.openaiApi!.createEmbedding({
       model: this.model,
       input: texts,
+      dimensions: this.dimensions,
     }).catch((error: any) => {
       throw error;
     });
