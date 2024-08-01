@@ -195,7 +195,7 @@ def test_get_vectors(
     sync(segment, seq_ids[-1])
 
     # Get all items
-    vectors = segment.get_vectors(collection_id=collection_id)
+    vectors = segment.get_vectors()
     assert len(vectors) == len(embeddings)
     vectors = sorted(vectors, key=lambda v: v["id"])
     for actual, expected, seq_id in zip(vectors, embeddings, seq_ids):
@@ -206,7 +206,7 @@ def test_get_vectors(
 
     # Get selected IDs
     ids = [e["id"] for e in embeddings[5:]]
-    vectors = segment.get_vectors(collection_id=collection_id, ids=ids)
+    vectors = segment.get_vectors(ids=ids)
     assert len(vectors) == 5
     vectors = sorted(vectors, key=lambda v: v["id"])
     for actual, expected, seq_id in zip(vectors, embeddings[5:], seq_ids[5:]):
@@ -330,11 +330,8 @@ def test_delete(
     assert segment.count() == 4
 
     # Assert that the record is gone using `get`
-    assert (
-        segment.get_vectors(collection_id=collection_id, ids=[embeddings[0]["id"]])
-        == []
-    )
-    results = segment.get_vectors(collection_id=collection_id)
+    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
+    results = segment.get_vectors()
     assert len(results) == 4
     # get_vectors returns results in arbitrary order
     results = sorted(results, key=lambda v: v["id"])
@@ -403,11 +400,9 @@ def _test_update(
 
     # Test new data from get_vectors
     assert segment.count() == 3
-    results = segment.get_vectors(collection_id=collection_id)
+    results = segment.get_vectors()
     assert len(results) == 3
-    results = segment.get_vectors(
-        collection_id=collection_id, ids=[embeddings[0]["id"]]
-    )
+    results = segment.get_vectors(ids=[embeddings[0]["id"]])
     assert results[0]["embedding"] == [10.0, 10.0]
 
     # Test querying at the old location
@@ -465,9 +460,7 @@ def test_update(
     sync(segment, seq_id)
 
     assert segment.count() == 3
-    assert (
-        segment.get_vectors(collection_id=collection_id, ids=["no_such_record"]) == []
-    )
+    assert segment.get_vectors(ids=["no_such_record"]) == []
 
 
 def test_upsert(
@@ -504,7 +497,7 @@ def test_upsert(
     sync(segment, seq_id)
 
     assert segment.count() == 4
-    result = segment.get_vectors(collection_id=collection_id, ids=["no_such_record"])
+    result = segment.get_vectors(ids=["no_such_record"])
     assert len(result) == 1
     assert approx_equal_vector(result[0]["embedding"], [42, 42])
 
@@ -584,11 +577,8 @@ def test_delete_with_local_segment_storage(
     assert segment.count() == 4
 
     # Assert that the record is gone using `get`
-    assert (
-        segment.get_vectors(collection_id=collection_id, ids=[embeddings[0]["id"]])
-        == []
-    )
-    results = segment.get_vectors(collection_id=collection_id)
+    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
+    results = segment.get_vectors()
     assert len(results) == 4
     # get_vectors returns results in arbitrary order
     results = sorted(results, key=lambda v: v["id"])
@@ -665,11 +655,8 @@ def test_reset_state_ignored_for_allow_reset_false(
     assert segment.count() == 4
 
     # Assert that the record is gone using `get`
-    assert (
-        segment.get_vectors(collection_id=collection_id, ids=[embeddings[0]["id"]])
-        == []
-    )
-    results = segment.get_vectors(collection_id=collection_id)
+    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
+    results = segment.get_vectors()
     assert len(results) == 4
     # get_vectors returns results in arbitrary order
     results = sorted(results, key=lambda v: v["id"])

@@ -1,4 +1,3 @@
-from uuid import UUID
 from chromadb.proto.utils import get_default_grpc_options
 from overrides import EnforceOverrides, override
 from typing import List, Optional, Sequence
@@ -54,10 +53,12 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
     @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
-        self, collection_id: UUID, ids: Optional[Sequence[str]] = None
+        self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         request = GetVectorsRequest(
-            ids=ids, segment_id=self._segment["id"].hex, collection_id=collection_id.hex
+            ids=ids,
+            segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
         )
         response: GetVectorsResponse = self._vector_reader_stub.GetVectors(request)
         results: List[VectorEmbeddingRecord] = []
@@ -80,6 +81,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             allowed_ids=query["allowed_ids"],
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
         )
         response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(request)
         results: List[List[VectorQueryResult]] = []

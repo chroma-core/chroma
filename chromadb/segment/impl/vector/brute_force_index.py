@@ -1,5 +1,4 @@
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
-from uuid import UUID
 import numpy as np
 import numpy.typing as npt
 from chromadb.types import (
@@ -106,7 +105,7 @@ class BruteForceIndex:
         return id in self.id_to_index and id not in self.deleted_ids
 
     def get_vectors(
-        self, collection_id: UUID, ids: Optional[Sequence[str]] = None
+        self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         target_ids = ids or self.id_to_index.keys()
 

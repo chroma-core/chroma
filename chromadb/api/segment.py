@@ -510,9 +510,7 @@ class SegmentAPI(ServerAPI):
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
             vector_segment = self._manager.get_segment(collection_id, VectorReader)
-            vectors = vector_segment.get_vectors(
-                collection_id=collection_id, ids=vector_ids
-            )
+            vectors = vector_segment.get_vectors(ids=vector_ids)
 
         # TODO: Fix type so we don't need to ignore
         # It is possible to have a set of records, some with metadata and some without

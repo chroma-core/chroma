@@ -1,6 +1,5 @@
 import os
 import shutil
-from uuid import UUID
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
@@ -354,7 +353,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     )
     @override
     def get_vectors(
-        self, collection_id: UUID, ids: Optional[Sequence[str]] = None
+        self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         """Get the embeddings from the HNSW index and layered brute force
         batch index."""
@@ -375,9 +374,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         id_to_index: Dict[str, int] = {}
         for i, id in enumerate(target_ids):
             if id in ids_bf:
-                results.append(
-                    self._brute_force_index.get_vectors(collection_id, [id])[0]
-                )
+                results.append(self._brute_force_index.get_vectors([id])[0])
             elif id in ids_hnsw and id not in self._curr_batch._deleted_ids:
                 hnsw_labels.append(self._id_to_label[id])
                 # Placeholder for hnsw results to be filled in down below so we
