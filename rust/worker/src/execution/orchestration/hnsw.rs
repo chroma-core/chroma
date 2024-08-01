@@ -73,11 +73,11 @@ enum ExecutionState {
 enum HnswSegmentQueryError {
     #[error(transparent)]
     HnswSegmentQueryError(#[from] super::common::GetHnswSegmentByIdError),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Collection: {0} not found")]
     CollectionNotFound(Uuid),
-    #[error("Get collection error")]
+    #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Record segment not found for collection: {0}")]
     RecordSegmentNotFound(Uuid),

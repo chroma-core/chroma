@@ -1,5 +1,5 @@
 ---
-title: 'Google Generative AI'
+title: "Google Generative AI"
 ---
 
 {% tabs group="code-lang" hideContent=true %}
@@ -38,18 +38,26 @@ For more info - please visit the [official Google python docs](https://ai.google
 {% /tab %}
 {% tab label="Javascript" %}
 
-This embedding function relies on the `@google/generative-ai` npm package, which you can install with `yarn add @google/generative-ai`.
+This embedding function relies on the `@google/generative-ai` npm package, which you can install with e.g. `npm install @google/generative-ai`.
 
 ```javascript
-import { ChromaClient, GoogleGenerativeAiEmbeddingFunction } from 'chromadb'
-const embedder = new GoogleGenerativeAiEmbeddingFunction({googleApiKey: "<YOUR API KEY>"})
+import { ChromaClient, GoogleGenerativeAiEmbeddingFunction } from "chromadb";
+const embedder = new GoogleGenerativeAiEmbeddingFunction({
+  googleApiKey: "<YOUR API KEY>",
+});
 
 // use directly
-const embeddings = await embedder.generate(["document1","document2"])
+const embeddings = await embedder.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
-const collection = await client.createCollection({name: "name", embeddingFunction: embedder})
-const collectionGet = await client.getCollection({name:"name", embeddingFunction: embedder})
+const collection = await client.createCollection({
+  name: "name",
+  embeddingFunction: embedder,
+});
+const collectionGet = await client.getCollection({
+  name: "name",
+  embeddingFunction: embedder,
+});
 ```
 
 You can view a more [complete example using Node](https://github.com/chroma-core/chroma/blob/main/clients/js/examples/node/app.js).

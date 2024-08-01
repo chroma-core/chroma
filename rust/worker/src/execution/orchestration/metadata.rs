@@ -90,7 +90,7 @@ pub(crate) struct CountQueryOrchestrator {
 enum MetadataSegmentQueryError {
     #[error("Blockfile metadata segment with id: {0} not found")]
     BlockfileMetadataSegmentNotFound(Uuid),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Record segment not found for collection: {0}")]
     RecordSegmentNotFound(Uuid),
@@ -100,7 +100,7 @@ enum MetadataSegmentQueryError {
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Collection not found for id: {0}")]
     CollectionNotFound(Uuid),
-    #[error("Get collection error")]
+    #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
 }
 

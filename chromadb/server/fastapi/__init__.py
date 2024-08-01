@@ -1,4 +1,15 @@
-from typing import Any, Callable, cast, Dict, List, Sequence, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Sequence,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
 import fastapi
 import orjson
 from anyio import (
@@ -13,6 +24,7 @@ from fastapi import HTTPException, status
 from uuid import UUID
 
 from chromadb.api.configuration import CollectionConfigurationInternal
+from pydantic import BaseModel
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzAction,
@@ -45,6 +57,7 @@ from starlette.datastructures import Headers
 import logging
 from chromadb.telemetry.product.events import ServerStartEvent
 from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
+from opentelemetry import trace
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -69,6 +82,15 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
             route.operation_id = route.name
 
 
+async def add_trace_id_to_response_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
+    trace_id = trace.get_current_span().get_span_context().trace_id
+    response = await call_next(request)
+    response.headers["Chroma-Trace-Id"] = format(trace_id, "x")
+    return response
+
+
 async def catch_exceptions_middleware(
     request: Request, call_next: Callable[[Request], Any]
 ) -> Response:
@@ -88,6 +110,17 @@ async def check_http_version_middleware(
     if http_version not in ["1.1", "2"]:
         raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
     return await call_next(request)
+
+
+D = TypeVar("D", bound=BaseModel, contravariant=True)
+
+
+def validate_model(model: Type[D], data: Any) -> D:  # type: ignore
+    """Used for backward compatibility with Pydantic 1.x"""
+    try:
+        return model.model_validate(data)  # pydantic 2.x
+    except AttributeError:
+        return model.parse_obj(data)  # pydantic 1.x
 
 
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
@@ -133,6 +166,7 @@ class FastAPI(Server):
 
         self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
+        self._app.middleware("http")(add_trace_id_to_response_middleware)
         self._app.add_middleware(
             CORSMiddleware,
             allow_headers=["*"],
@@ -316,6 +350,10 @@ class FastAPI(Server):
     async def version(self) -> str:
         return self._api.get_version()
 
+    @trace_method(
+        "auth_and_get_tenant_and_database_for_request",
+        OpenTelemetryGranularity.OPERATION,
+    )
     def auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
@@ -375,7 +413,8 @@ class FastAPI(Server):
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
         ) -> None:
-            db = CreateDatabase.model_validate(orjson.loads(raw_body))
+            db = validate_model(CreateDatabase, orjson.loads(raw_body))
+
             (
                 maybe_tenant,
                 maybe_database,
@@ -438,7 +477,7 @@ class FastAPI(Server):
         self, request: Request, body: CreateTenant = Body(...)
     ) -> None:
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
-            tenant = CreateTenant.model_validate(orjson.loads(raw_body))
+            tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
             maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -565,7 +604,7 @@ class FastAPI(Server):
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
-            create = CreateCollection.model_validate(orjson.loads(raw_body))
+            create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
                 CollectionConfigurationInternal()
                 if not create.configuration
@@ -652,7 +691,7 @@ class FastAPI(Server):
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
-            update = UpdateCollection.model_validate(orjson.loads(raw_body))
+            update = validate_model(UpdateCollection, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
@@ -712,7 +751,7 @@ class FastAPI(Server):
         try:
 
             def process_add(request: Request, raw_body: bytes) -> bool:
-                add = AddEmbedding.model_validate(orjson.loads(raw_body))
+                add = validate_model(AddEmbedding, orjson.loads(raw_body))
                 self.auth_and_get_tenant_and_database_for_request(
                     request.headers,
                     AuthzAction.ADD,
@@ -746,7 +785,7 @@ class FastAPI(Server):
         self, request: Request, collection_id: str, body: UpdateEmbedding = Body(...)
     ) -> None:
         def process_update(request: Request, raw_body: bytes) -> bool:
-            update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
+            update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -777,7 +816,7 @@ class FastAPI(Server):
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
     ) -> None:
         def process_upsert(request: Request, raw_body: bytes) -> bool:
-            upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
+            upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -808,7 +847,7 @@ class FastAPI(Server):
         self, collection_id: str, request: Request, body: GetEmbedding = Body(...)
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
-            get = GetEmbedding.model_validate(orjson.loads(raw_body))
+            get = validate_model(GetEmbedding, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
@@ -842,7 +881,7 @@ class FastAPI(Server):
         self, collection_id: str, request: Request, body: DeleteEmbedding = Body(...)
     ) -> List[UUID]:
         def process_delete(request: Request, raw_body: bytes) -> List[str]:
-            delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
+            delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
@@ -919,7 +958,7 @@ class FastAPI(Server):
         body: QueryEmbedding = Body(...),
     ) -> QueryResult:
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
-            query = QueryEmbedding.model_validate(orjson.loads(raw_body))
+            query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,

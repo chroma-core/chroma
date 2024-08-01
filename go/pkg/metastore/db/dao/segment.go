@@ -48,8 +48,6 @@ func (s *segmentDb) Insert(in *dbmodel.Segment) error {
 		return err
 	}
 	return nil
-
-	return nil
 }
 
 func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error) {
@@ -73,9 +71,24 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 		query = query.Where("collection_id = ?", collectionID.String())
 	}
 
+	if query.Error != nil {
+		log.Error("get segments failed", zap.Error(query.Error))
+		return nil, query.Error
+	}
+
 	rows, err := query.Rows()
 	if err != nil {
-		log.Error("get segments failed", zap.String("segmentID", id.String()), zap.String("segmentType", *segmentType), zap.String("scope", *scope), zap.Error(err))
+		segmentTypeStr := "nil"
+		scopeStr := "nil"
+
+		if segmentType != nil {
+			segmentTypeStr = *segmentType
+		}
+		if scope != nil {
+			scopeStr = *scope
+		}
+
+		log.Error("get segments failed", zap.String("segmentID", id.String()), zap.String("segmentType", segmentTypeStr), zap.String("scope", scopeStr), zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
