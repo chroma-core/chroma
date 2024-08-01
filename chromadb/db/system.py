@@ -58,10 +58,10 @@ class SysDB(Component):
     @abstractmethod
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, type, scope or collection."""
         pass

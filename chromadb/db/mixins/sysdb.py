@@ -288,10 +288,10 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         add_attributes_to_current_span(
             {

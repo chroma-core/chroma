@@ -143,10 +143,10 @@ class GrpcSysDB(SysDB):
     @overrides
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         request = GetSegmentsRequest(
             id=id.hex if id else None,
