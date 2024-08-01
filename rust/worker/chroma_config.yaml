@@ -28,6 +28,7 @@ query_service:
             credentials: "Minio"
             connect_timeout_ms: 5000
             request_timeout_ms: 30000 # 1 minute
+            upload_part_size_bytes: 8388608 # 8MB
     log:
         Grpc:
             host: "logservice.chroma"
@@ -80,6 +81,7 @@ compaction_service:
             credentials: "Minio"
             connect_timeout_ms: 5000
             request_timeout_ms: 60000 # 1 minute
+            upload_part_size_bytes: 8388608 # 8MB
     log:
         Grpc:
             host: "logservice.chroma"

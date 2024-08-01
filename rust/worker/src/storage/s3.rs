@@ -17,12 +17,19 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
-use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::CompletedMultipartUpload;
+use aws_sdk_s3::types::CompletedPart;
+use aws_smithy_types::byte_stream::Length;
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures::Stream;
 use std::clone::Clone;
+use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -30,6 +37,7 @@ use thiserror::Error;
 pub(crate) struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
+    upload_part_size_bytes: usize,
 }
 
 #[derive(Error, Debug)]
@@ -63,10 +71,11 @@ impl ChromaError for S3GetError {
 }
 
 impl S3Storage {
-    fn new(bucket: &str, client: aws_sdk_s3::Client) -> S3Storage {
+    fn new(bucket: &str, client: aws_sdk_s3::Client, upload_part_size_bytes: usize) -> S3Storage {
         return S3Storage {
             bucket: bucket.to_string(),
-            client: client,
+            client,
+            upload_part_size_bytes,
         };
     }
 
@@ -156,55 +165,121 @@ impl S3Storage {
     }
 
     pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
-        let bytestream = ByteStream::from(bytes);
-        self.put_bytestream(key, bytestream).await
+        let bytes = Arc::new(Bytes::from(bytes));
+
+        self.multipart_upload(key, bytes.len(), move |range| {
+            let bytes = bytes.clone();
+            async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
+        })
+        .await
     }
 
     pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
-        let bytestream = ByteStream::from_path(path).await;
-        match bytestream {
-            Ok(bytestream) => return self.put_bytestream(key, bytestream).await,
-            Err(e) => {
-                return Err(S3PutError::S3PutError(e.to_string()));
+        let file_size = tokio::fs::metadata(path)
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
+            .len();
+
+        let path = path.to_string();
+
+        self.multipart_upload(key, file_size as usize, move |range| {
+            let path = path.clone();
+
+            async move {
+                ByteStream::read_from()
+                    .path(path)
+                    .offset(range.start as u64)
+                    .length(Length::Exact(range.len() as u64))
+                    .build()
+                    .await
+                    .map_err(|err| S3PutError::S3PutError(err.to_string()))
             }
-        }
+            .boxed()
+        })
+        .await
     }
 
-    async fn put_bytestream(&self, key: &str, bytestream: ByteStream) -> Result<(), S3PutError> {
-        let res = self
-            .client
-            .put_object()
-            .bucket(self.bucket.clone())
-            .key(key)
-            .body(bytestream)
-            .send()
-            .await;
-        match res {
-            Ok(_) => {
-                tracing::info!("put object {} to bucket {}", key, self.bucket);
-                return Ok(());
-            }
-            Err(e) => match e {
-                SdkError::ServiceError(err) => {
-                    let inner_err = err.into_err();
-                    let err_string = format!(
-                        "S3 service error with code: {:?} and message: {:?}",
-                        inner_err.code(),
-                        inner_err.message()
-                    );
-                    tracing::error!("{}", err_string);
-                    return Err(S3PutError::S3PutError(err_string));
-                }
-                SdkError::DispatchFailure(e) => {
-                    tracing::error!("S3 Dispatch failure error {:?}", e);
-                    return Err(S3PutError::S3DispatchFailure);
-                }
-                _ => {
-                    tracing::error!("S3 Put Error: {}", e);
-                    return Err(S3PutError::S3PutError(e.to_string()));
-                }
-            },
+    async fn multipart_upload(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        create_bytestream_fn: impl Fn(
+            Range<usize>,
+        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+    ) -> Result<(), S3PutError> {
+        let mut part_count = (total_size_bytes / self.upload_part_size_bytes) + 1;
+        let mut size_of_last_part = total_size_bytes % self.upload_part_size_bytes;
+        if size_of_last_part == 0 {
+            size_of_last_part = self.upload_part_size_bytes;
+            part_count -= 1;
         }
+
+        let upload_id = match self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
+            .upload_id
+        {
+            Some(upload_id) => upload_id,
+            None => {
+                return Err(S3PutError::S3PutError(
+                    "Multipart upload creation response missing upload ID".to_string(),
+                ));
+            }
+        };
+
+        let mut upload_parts = Vec::new();
+        for part_index in 0..part_count {
+            let this_part = if part_count - 1 == part_index {
+                size_of_last_part
+            } else {
+                self.upload_part_size_bytes
+            };
+            let part_number = part_index as i32 + 1; // Part numbers start at 1
+            let offset = part_index * self.upload_part_size_bytes;
+            let length = this_part;
+
+            let stream = create_bytestream_fn(offset..(offset + length)).await?;
+
+            let upload_part_res = self
+                .client
+                .upload_part()
+                .key(key)
+                .bucket(&self.bucket)
+                .upload_id(&upload_id)
+                .body(stream)
+                .part_number(part_number)
+                .send()
+                .await
+                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+
+            upload_parts.push(
+                CompletedPart::builder()
+                    .e_tag(upload_part_res.e_tag.unwrap_or_default())
+                    .part_number(part_number)
+                    .build(),
+            );
+        }
+
+        self.client
+            .complete_multipart_upload()
+            .bucket(&self.bucket)
+            .key(key)
+            .multipart_upload(
+                CompletedMultipartUpload::builder()
+                    .set_parts(Some(upload_parts))
+                    .build(),
+            )
+            .upload_id(&upload_id)
+            .send()
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+
+        Ok(())
     }
 }
 
@@ -263,7 +338,8 @@ impl Configurable<StorageConfig> for S3Storage {
                         aws_sdk_s3::Client::new(&config)
                     }
                 };
-                let storage = S3Storage::new(&s3_config.bucket, client);
+                let storage =
+                    S3Storage::new(&s3_config.bucket, client, s3_config.upload_part_size_bytes);
                 // for minio we create the bucket since it is only used for testing
                 match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio => {
@@ -289,13 +365,14 @@ impl Configurable<StorageConfig> for S3Storage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use tempfile::tempdir;
-    use tokio::io::AsyncReadExt;
+    use std::io::Write;
 
-    #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_get() {
+    use super::*;
+    use futures::StreamExt;
+    use rand::{Rng, SeedableRng};
+    use tempfile::{tempdir, NamedTempFile};
+
+    fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
         let cred = aws_sdk_s3::config::Credentials::new(
             "minio",
@@ -313,26 +390,110 @@ mod tests {
             .region(aws_sdk_s3::config::Region::new("us-east-1"))
             .force_path_style(true)
             .build();
-        let client = aws_sdk_s3::Client::from_conf(config);
+
+        aws_sdk_s3::Client::from_conf(config)
+    }
+
+    #[tokio::test]
+    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
+    async fn test_put_get_key() {
+        let client = get_s3_client();
 
         let storage = S3Storage {
             bucket: "test".to_string(),
             client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
         };
         storage.create_bucket().await.unwrap();
 
-        // Write some data to a test file, put it in s3, get it back and verify its contents
-        let tmp_dir = tempdir().unwrap();
-        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
-
         let test_data = "test data";
-        let test_file_in = format!("{}/test_file_in", persist_path);
-        std::fs::write(&test_file_in, test_data).unwrap();
-        storage.put_file("test", &test_file_in).await.unwrap();
-        let mut bytes = storage.get("test").await.unwrap();
+        storage
+            .put_bytes("test", test_data.as_bytes().to_vec())
+            .await
+            .unwrap();
 
-        let mut buf = String::new();
-        bytes.read_to_string(&mut buf).await.unwrap();
+        let mut stream = storage.get("test").await.unwrap();
+
+        let mut buf = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(data) => {
+                    buf.extend_from_slice(&data);
+                }
+                Err(e) => {
+                    panic!("Error reading stream: {}", e);
+                }
+            }
+        }
+
+        let buf = String::from_utf8(buf).unwrap();
         assert_eq!(buf, test_data);
+    }
+
+    async fn test_put_file(file_size: usize, upload_part_size_bytes: usize) {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: "test".to_string(),
+            client,
+            upload_part_size_bytes,
+        };
+        storage.create_bucket().await.unwrap();
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+
+        let mut rng = rand_xorshift::XorShiftRng::seed_from_u64(0);
+        let mut remaining_file_size = file_size;
+
+        while remaining_file_size > 0 {
+            let chunk_size = std::cmp::min(remaining_file_size, 4096);
+            let mut chunk = vec![0u8; chunk_size];
+            rng.try_fill(&mut chunk[..]).unwrap();
+            temp_file.write_all(&chunk).unwrap();
+            remaining_file_size -= chunk_size;
+        }
+
+        storage
+            .put_file("test", &temp_file.path().to_str().unwrap())
+            .await
+            .unwrap();
+
+        let mut stream = storage.get("test").await.unwrap();
+
+        let mut buf = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(data) => {
+                    buf.extend_from_slice(&data);
+                }
+                Err(e) => {
+                    panic!("Error reading stream: {}", e);
+                }
+            }
+        }
+
+        let file_contents = std::fs::read(temp_file.path()).unwrap();
+        assert_eq!(buf, file_contents);
+    }
+
+    #[tokio::test]
+    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
+    async fn test_put_file_scenarios() {
+        let test_upload_part_size_bytes = 1024 * 1024 * 8; // 8MB
+
+        // Under part size
+        test_put_file(1024, test_upload_part_size_bytes).await;
+        // At part size
+        test_put_file(
+            test_upload_part_size_bytes as usize,
+            test_upload_part_size_bytes,
+        )
+        .await;
+        // Over part size
+        test_put_file(
+            (test_upload_part_size_bytes as f64 * 2.5) as usize,
+            test_upload_part_size_bytes,
+        )
+        .await;
     }
 }

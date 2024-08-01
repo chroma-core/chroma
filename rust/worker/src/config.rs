@@ -184,6 +184,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -236,6 +237,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -314,6 +316,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -366,6 +369,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -462,6 +466,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -514,6 +519,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -571,6 +577,10 @@ mod tests {
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
             let _ = jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__upload_part_size_bytes",
+                format!("{}", 1024 * 1024 * 8),
+            );
+            let _ = jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__CONNECT_TIMEOUT_MS",
                 5000,
             );
@@ -604,6 +614,7 @@ mod tests {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -698,6 +709,7 @@ mod tests {
                     );
                     assert_eq!(s.connect_timeout_ms, 5000);
                     assert_eq!(s.request_timeout_ms, 1000);
+                    assert_eq!(s.upload_part_size_bytes, 1024 * 1024 * 8);
                 }
                 _ => panic!("Invalid storage config"),
             }
