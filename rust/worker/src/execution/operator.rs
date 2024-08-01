@@ -9,6 +9,11 @@ use std::{fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub(crate) enum OperatorType {
+    IoOperator,
+    Other,
+}
+
 /// An operator takes a generic input and returns a generic output.
 /// It is a definition of a function.
 #[async_trait]
@@ -22,6 +27,9 @@ where
     // but that's not stable in rust yet.
     async fn run(&self, input: &I) -> Result<O, Self::Error>;
     fn get_name(&self) -> &'static str;
+    fn get_type(&self) -> OperatorType {
+        OperatorType::Other
+    }
 }
 
 #[derive(Debug, Error)]
@@ -95,6 +103,7 @@ pub(crate) trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
     async fn run(&self);
     fn id(&self) -> Uuid;
+    fn get_type(&self) -> OperatorType;
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -178,6 +187,10 @@ where
 
     fn id(&self) -> Uuid {
         self.task_id
+    }
+
+    fn get_type(&self) -> OperatorType {
+        self.operator.get_type()
     }
 }
 

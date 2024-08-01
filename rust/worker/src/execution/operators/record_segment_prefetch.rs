@@ -4,7 +4,7 @@ use tonic::async_trait;
 use crate::{
     blockstore::provider::BlockfileProvider,
     errors::{ChromaError, ErrorCodes},
-    execution::operator::Operator,
+    execution::operator::{Operator, OperatorType},
     segment::record_segment::RecordSegmentReader,
     types::Segment,
 };
@@ -108,5 +108,9 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
             }
         }
         Ok(RecordSegmentPrefetchIoOutput {})
+    }
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IoOperator
     }
 }
