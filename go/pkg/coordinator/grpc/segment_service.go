@@ -92,7 +92,14 @@ func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSeg
 		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
 		return res, nil
 	}
-	err = s.coordinator.DeleteSegment(ctx, parsedSegmentID)
+	collectionID := req.GetCollection()
+	parsedCollectionID, err := types.Parse(collectionID)
+	if err != nil {
+		log.Error(err.Error(), zap.String("collection.id", collectionID))
+		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
+		return res, nil
+	}
+	err = s.coordinator.DeleteSegment(ctx, parsedSegmentID, parsedCollectionID)
 	if err != nil {
 		if err == common.ErrSegmentDeleteNonExistingSegment {
 			log.Error(err.Error(), zap.String("segment.id", segmentID))

@@ -678,7 +678,7 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
 
     # Delete
     s1 = sample_segments[0]
-    sysdb.delete_segment(s1["id"])
+    sysdb.delete_segment(s1["collection"], s1["id"])
 
     results = []
     for collection in sample_collections:
@@ -689,7 +689,7 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
 
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
-        sysdb.delete_segment(s1["id"])
+        sysdb.delete_segment(s1["collection"], s1["id"])
 
 
 def test_update_segment(sysdb: SysDB) -> None:

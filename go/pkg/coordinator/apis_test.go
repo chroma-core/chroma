@@ -758,7 +758,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	// Delete
 	s1 := sampleSegments[0]
-	err = c.DeleteSegment(ctx, s1.ID)
+	err = c.DeleteSegment(ctx, s1.ID, s1.CollectionID)
 	suite.NoError(err)
 
 	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, types.NilUniqueID())
@@ -768,12 +768,12 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	suite.ElementsMatch(results, sampleSegments[1:])
 
 	// Duplicate delete throws an exception
-	err = c.DeleteSegment(ctx, s1.ID)
+	err = c.DeleteSegment(ctx, s1.ID, s1.CollectionID)
 	suite.Error(err)
 
 	// clean up segments
 	for _, segment := range sampleSegments {
-		_ = c.DeleteSegment(ctx, segment.ID)
+		_ = c.DeleteSegment(ctx, segment.ID, segment.CollectionID)
 	}
 }
 

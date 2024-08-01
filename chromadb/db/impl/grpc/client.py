@@ -132,9 +132,10 @@ class GrpcSysDB(SysDB):
             raise UniqueConstraintError()
 
     @overrides
-    def delete_segment(self, id: UUID) -> None:
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
         request = DeleteSegmentRequest(
             id=id.hex,
+            collection=collection.hex,
         )
         response = self._sys_db_stub.DeleteSegment(request)
         if response.status.code == 404:

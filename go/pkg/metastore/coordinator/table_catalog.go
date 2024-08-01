@@ -506,9 +506,9 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
-func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
+func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, types.NilUniqueID())
+		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, collectionID)
 		if err != nil {
 			return err
 		}

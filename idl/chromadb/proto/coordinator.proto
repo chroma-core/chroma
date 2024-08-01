@@ -54,6 +54,8 @@ message CreateSegmentResponse {
 
 message DeleteSegmentRequest {
   string id = 1;
+  // required
+  optional string collection = 2;
 }
 
 message DeleteSegmentResponse {

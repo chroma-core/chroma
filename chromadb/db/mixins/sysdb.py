@@ -474,7 +474,7 @@ class SqlSysDB(SqlDB, SysDB):
 
     @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override
-    def delete_segment(self, id: UUID) -> None:
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
         """Delete a segment from the SysDB"""
         add_attributes_to_current_span(
             {

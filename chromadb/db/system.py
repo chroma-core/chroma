@@ -51,8 +51,8 @@ class SysDB(Component):
         pass
 
     @abstractmethod
-    def delete_segment(self, id: UUID) -> None:
-        """Create a new segment in the System database."""
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
+        """Delete a segment from the System database."""
         pass
 
     @abstractmethod

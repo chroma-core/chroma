@@ -319,7 +319,7 @@ class SegmentAPI(ServerAPI):
                 existing[0].id, tenant=tenant, database=database
             )
             for s in self._manager.delete_segments(existing[0].id):
-                self._sysdb.delete_segment(s)
+                self._sysdb.delete_segment(existing[0].id, s)
             if existing and existing[0].id in self._collection_cache:
                 del self._collection_cache[existing[0].id]
         else:
