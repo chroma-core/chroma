@@ -814,22 +814,22 @@ impl RecordSegmentReader<'_> {
         self.id_to_data.count().await
     }
 
-    pub(crate) async fn prefetch_id_to_data(&self, keys: Vec<u32>) -> () {
+    pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) -> () {
         let prefixes = vec![""; keys.len()];
-        self.id_to_data.load_blocks_for_keys(prefixes, keys).await
+        self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
     }
 
     pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) -> () {
         let prefixes = vec![""; keys.len()];
         self.user_id_to_id
-            .load_blocks_for_keys(prefixes, keys)
+            .load_blocks_for_keys(&prefixes, &keys)
             .await
     }
 
-    pub(crate) async fn prefetch_id_to_user_id(&self, keys: Vec<u32>) -> () {
+    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) -> () {
         let prefixes = vec![""; keys.len()];
         self.id_to_user_id
-            .load_blocks_for_keys(prefixes, keys)
+            .load_blocks_for_keys(&prefixes, keys)
             .await
     }
 }

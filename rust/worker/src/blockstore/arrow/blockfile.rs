@@ -276,15 +276,23 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     pub(super) async fn load_blocks(&self, block_ids: Vec<Uuid>) -> () {
-        // TODO: These need to be tasks enqueued onto dispatcher.
+        // TODO: These need to be separate tasks enqueued onto dispatcher.
         let mut futures = Vec::new();
         for block_id in block_ids {
-            futures.push(self.get_block(block_id));
+            // Don't prefetch if already cached.
+            // We do not dispatch if block is present in the block manager's cache
+            // but not present in the reader's cache (i.e. loaded_blocks). The
+            // next read for this block using this reader instance will populate it.
+            if !self.block_manager.cached(&block_id)
+                && !self.loaded_blocks.lock().contains_key(&block_id)
+            {
+                futures.push(self.get_block(block_id));
+            }
         }
         join_all(futures).await;
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: Vec<K>) -> () {
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
         let mut composite_keys = Vec::new();
         let mut prefix_iter = prefixes.iter();
         let mut key_iter = keys.iter();

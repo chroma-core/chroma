@@ -206,11 +206,16 @@ impl BlockManager {
         block
     }
 
+    pub(super) fn cached(&self, id: &Uuid) -> bool {
+        self.block_cache.get(id).is_some()
+    }
+
     pub(super) async fn get(&self, id: &Uuid) -> Option<Block> {
         let block = self.block_cache.get(id);
         match block {
             Some(block) => Some(block.clone()),
             None => {
+                // TODO: NAC register/deregister/validation goes here.
                 async {
                     let key = format!("block/{}", id);
                     let stream = self.storage.get(&key).instrument(
