@@ -47,7 +47,8 @@ class GrpcMetadataSegment(MetadataReader):
     @override
     def count(self) -> int:
         request: pb.CountRecordsRequest = pb.CountRecordsRequest(
-            segment_id=self._segment["id"].hex
+            segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
         )
         response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
             request
