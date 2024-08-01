@@ -350,4 +350,13 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
         }
     }
+
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: Vec<K>) -> () {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.load_blocks_for_keys(prefixes, keys).await
+            }
+        }
+    }
 }

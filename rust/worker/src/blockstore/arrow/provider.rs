@@ -19,7 +19,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use core::panic;
-use futures::StreamExt;
+use futures::{future::join_all, StreamExt};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::block::delta::BlockDelta;
 use super::block::Block;
-use super::types::{ArrowReadableKey, ArrowWriteableKey, ArrowWriteableValue};
+use super::types::{ArrowReadableKey, ArrowWriteableKey};
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range
 /// # Note
@@ -97,6 +97,44 @@ impl SparseIndex {
         forward.insert(SparseIndexDelimiter::Start, block_id);
         let mut reverse = self.reverse.lock();
         reverse.insert(block_id, SparseIndexDelimiter::Start);
+    }
+
+    pub(super) fn get_all_target_block_ids(&self, mut search_keys: Vec<CompositeKey>) -> Vec<Uuid> {
+        // Sort so that we can search in one iteration.
+        search_keys.sort();
+        let mut result_uuids = Vec::new();
+        let forward = self.forward.lock();
+        let mut curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
+        let mut search_iter = search_keys.iter().peekable();
+        while let Some((curr_key, curr_block_id)) = curr_iter.next() {
+            let search_key = match search_iter.peek() {
+                Some(key) => SparseIndexDelimiter::Key((**key).clone()),
+                None => {
+                    break;
+                }
+            };
+            if let Some((next_key, _)) = next_iter.next() {
+                if search_key >= *curr_key && search_key < *next_key {
+                    result_uuids.push(*curr_block_id);
+                    // Move forward all search keys that match this block.
+                    search_iter.next();
+                    while let Some(key) = search_iter.peek() {
+                        let search_key = SparseIndexDelimiter::Key((**key).clone());
+                        if search_key >= *curr_key && search_key < *next_key {
+                            search_iter.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // last block. All the remaining keys should be satisfied by this.
+                result_uuids.push(*curr_block_id);
+                break;
+            }
+        }
+        result_uuids
     }
 
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
@@ -599,5 +637,42 @@ mod tests {
             let new_key = new_reverse.get(old_block_id).unwrap();
             assert_eq!(old_key, new_key);
         }
+    }
+
+    #[test]
+    fn test_get_all_block_ids() {
+        let file_id = uuid::Uuid::new_v4();
+        let block_id_1 = uuid::Uuid::new_v4();
+        let mut sparse_index = SparseIndex::new(file_id);
+        sparse_index.add_initial_block(block_id_1);
+        let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
+        sparse_index.add_block(blockfile_key.clone(), block_id_1);
+
+        // Split the range into two blocks (start, c), and (c, end)
+        let block_id_2 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("prefix".to_string(), "d");
+        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+
+        // Split the second block into (c, f) and (f, end)
+        let block_id_3 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("prefix".to_string(), "f");
+        sparse_index.add_block(blockfile_key.clone(), block_id_3);
+        let mut composite_keys = Vec::new();
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "b"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "c"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "d"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "e"));
+        let blocks = sparse_index.get_all_target_block_ids(composite_keys);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks.contains(&block_id_1));
+        assert!(blocks.contains(&block_id_2));
+        composite_keys = Vec::new();
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "f"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "g"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "h"));
+        composite_keys.push(CompositeKey::new("prefix".to_string(), "i"));
+        let blocks = sparse_index.get_all_target_block_ids(composite_keys);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks.contains(&block_id_3));
     }
 }

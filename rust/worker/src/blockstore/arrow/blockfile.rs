@@ -10,6 +10,7 @@ use crate::blockstore::key::KeyWrapper;
 use crate::blockstore::BlockfileError;
 use crate::errors::ErrorCodes;
 use crate::{blockstore::key::CompositeKey, errors::ChromaError};
+use futures::future::join_all;
 use parking_lot::Mutex;
 use std::mem::transmute;
 use std::{collections::HashMap, sync::Arc};
@@ -272,6 +273,29 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
 
         None
+    }
+
+    pub(super) async fn load_blocks(&self, block_ids: Vec<Uuid>) -> () {
+        // TODO: These need to be tasks enqueued onto dispatcher.
+        let mut futures = Vec::new();
+        for block_id in block_ids {
+            futures.push(self.get_block(block_id));
+        }
+        join_all(futures).await;
+    }
+
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: Vec<&str>, keys: Vec<K>) -> () {
+        let mut composite_keys = Vec::new();
+        let mut prefix_iter = prefixes.iter();
+        let mut key_iter = keys.iter();
+        while let Some(prefix) = prefix_iter.next() {
+            if let Some(key) = key_iter.next() {
+                let composite_key = CompositeKey::new(prefix.to_string(), key.clone());
+                composite_keys.push(composite_key);
+            }
+        }
+        let target_block_ids = self.sparse_index.get_all_target_block_ids(composite_keys);
+        self.load_blocks(target_block_ids).await;
     }
 
     pub(crate) async fn get(&'me self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
