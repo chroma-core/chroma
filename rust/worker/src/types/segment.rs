@@ -142,8 +142,6 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             None => None,
         };
 
-        println!("HAMMAD CONFIGURATION JSON: {:?}", configuration_json);
-
         Ok(Segment {
             id: segment_uuid,
             r#type: segment_type,
