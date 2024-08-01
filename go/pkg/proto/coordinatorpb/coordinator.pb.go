@@ -630,10 +630,11 @@ type GetSegmentsRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id         *string       `protobuf:"bytes,1,opt,name=id,proto3,oneof" json:"id,omitempty"`
-	Type       *string       `protobuf:"bytes,2,opt,name=type,proto3,oneof" json:"type,omitempty"`
-	Scope      *SegmentScope `protobuf:"varint,3,opt,name=scope,proto3,enum=chroma.SegmentScope,oneof" json:"scope,omitempty"`
-	Collection *string       `protobuf:"bytes,5,opt,name=collection,proto3,oneof" json:"collection,omitempty"` // Collection ID
+	Id    *string       `protobuf:"bytes,1,opt,name=id,proto3,oneof" json:"id,omitempty"`
+	Type  *string       `protobuf:"bytes,2,opt,name=type,proto3,oneof" json:"type,omitempty"`
+	Scope *SegmentScope `protobuf:"varint,3,opt,name=scope,proto3,enum=chroma.SegmentScope,oneof" json:"scope,omitempty"`
+	// required
+	Collection *string `protobuf:"bytes,5,opt,name=collection,proto3,oneof" json:"collection,omitempty"` // Collection ID
 }
 
 func (x *GetSegmentsRequest) Reset() {
