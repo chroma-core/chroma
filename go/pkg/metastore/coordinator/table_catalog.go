@@ -542,7 +542,7 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 
 	var result *model.Segment
 
-	tx_err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+	err = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		{
 			results, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, parsedCollectionID)
 			if err != nil {
@@ -614,9 +614,9 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 		result = convertSegmentToModel(segmentList)[0]
 		return nil
 	})
-	if tx_err != nil {
-		log.Error("error updating segment", zap.Error(tx_err))
-		return nil, tx_err
+	if err != nil {
+		log.Error("error updating segment", zap.Error(err))
+		return nil, err
 	}
 	log.Debug("segment updated", zap.Any("segment", result))
 	return result, nil
