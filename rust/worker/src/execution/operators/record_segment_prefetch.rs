@@ -16,6 +16,8 @@ pub(crate) struct OffsetIdToDataKeys {
 
 #[derive(Debug)]
 pub(crate) struct UserIdToOffsetIdKeys {
+    // TODO: Can we avoid full copies here as it
+    // might turn out to be expensive.
     pub(crate) keys: Vec<String>,
 }
 
