@@ -269,7 +269,9 @@ mod tests {
         let collection = collection[0].clone();
         assert_eq!(collection.log_position, log_position);
 
-        let segments = sysdb.get_segments(None, None, None, None).await;
+        let segments = sysdb
+            .get_segments(None, None, None, collection_uuid_1)
+            .await;
         assert!(segments.is_ok());
         let segments = segments.unwrap();
         assert_eq!(segments.len(), 2);

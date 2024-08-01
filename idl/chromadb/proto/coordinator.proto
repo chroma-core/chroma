@@ -64,7 +64,7 @@ message GetSegmentsRequest {
   optional string id = 1;
   optional string type = 2;
   optional SegmentScope scope = 3;
-  optional string collection = 5; // Collection ID
+  string collection = 5; // Collection ID
 }
 
 message GetSegmentsResponse {

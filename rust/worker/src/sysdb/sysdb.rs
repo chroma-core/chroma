@@ -56,7 +56,7 @@ impl SysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -253,7 +253,7 @@ impl GrpcSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
             .client
@@ -270,11 +270,7 @@ impl GrpcSysDb {
                 } else {
                     None
                 },
-                collection: if collection.is_some() {
-                    Some(collection.unwrap().to_string())
-                } else {
-                    None
-                },
+                collection: collection.to_string(),
             })
             .await;
         match res {
