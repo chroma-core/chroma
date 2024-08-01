@@ -69,8 +69,8 @@ class SysDB(Component):
     @abstractmethod
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         """Update a segment. Unspecified fields will be left unchanged. For the

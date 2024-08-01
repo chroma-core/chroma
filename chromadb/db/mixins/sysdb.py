@@ -540,8 +540,8 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         add_attributes_to_current_span(
@@ -557,13 +557,8 @@ class SqlSysDB(SqlDB, SysDB):
             self.querybuilder()
             .update(segments_t)
             .where(segments_t.id == ParameterValue(self.uuid_to_db(id)))
+            .set(segments_t.collection, ParameterValue(self.uuid_to_db(collection)))
         )
-
-        if not collection == Unspecified():
-            collection = cast(Optional[UUID], collection)
-            q = q.set(
-                segments_t.collection, ParameterValue(self.uuid_to_db(collection))
-            )
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
