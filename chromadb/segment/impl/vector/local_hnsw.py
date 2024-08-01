@@ -88,16 +88,6 @@ class LocalHnswSegment(VectorReader):
             collection_configuration.get_parameter("hnsw_configuration").value,
         )
 
-    @staticmethod
-    @override
-    def configuration_from_collection_configuration(
-        collection_configuration: CollectionConfigurationInternal,
-    ) -> HNSWConfigurationInternal:
-        return cast(
-            HNSWConfigurationInternal,
-            collection_configuration.get_parameter("hnsw_configuration").value,
-        )
-
     @trace_method("LocalHnswSegment.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
