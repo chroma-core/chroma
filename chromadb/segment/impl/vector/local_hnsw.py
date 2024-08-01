@@ -103,7 +103,7 @@ class LocalHnswSegment(VectorReader):
     @trace_method("LocalHnswSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self, collection_id: UUID, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         if ids is None:
             labels = list(self._label_to_id.keys())

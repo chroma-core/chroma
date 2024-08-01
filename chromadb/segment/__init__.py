@@ -79,7 +79,7 @@ class VectorReader(SegmentImplementation):
 
     @abstractmethod
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self, collection_id: UUID, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         """Get embeddings from the segment. If no IDs are provided, all embeddings are
         returned."""
