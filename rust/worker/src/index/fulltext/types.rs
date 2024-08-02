@@ -1,14 +1,13 @@
-use crate::blockstore::positional_posting_list_value::{
-    PositionalPostingListBuilder, PositionalPostingListBuilderError,
-};
-use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
-use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::tokenizer::ChromaTokenizer;
 use crate::index::metadata::types::MetadataIndexError;
-use crate::types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
-
 use arrow::array::Int32Array;
+use chroma_blockstore::positional_posting_list_value::{
+    PositionalPostingListBuilder, PositionalPostingListBuilderError,
+};
+use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -633,8 +632,8 @@ pub(crate) fn process_where_document_clause_with_callback<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockstore::provider::BlockfileProvider;
     use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
+    use chroma_blockstore::provider::BlockfileProvider;
     use tantivy::tokenizer::NgramTokenizer;
 
     #[test]

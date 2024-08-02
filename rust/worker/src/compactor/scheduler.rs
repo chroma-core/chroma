@@ -200,10 +200,7 @@ mod tests {
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::types::Collection;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
+    use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
     use std::str::FromStr;
 
     #[tokio::test]

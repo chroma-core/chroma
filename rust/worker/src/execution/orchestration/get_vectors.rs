@@ -2,10 +2,7 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
 };
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::{ChromaError, ErrorCodes},
     execution::{
-        data::data_chunk::Chunk,
         dispatcher::Dispatcher,
         operator::{wrap, TaskResult},
         operators::{
@@ -23,9 +20,11 @@ use crate::{
         ChannelError, Component, ComponentContext, ComponentHandle, Handler, ReceiverForMessage,
         System,
     },
-    types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, Collection, GetVectorsResult, LogRecord, Segment};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};

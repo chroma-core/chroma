@@ -1,16 +1,16 @@
 use super::record_segment::ApplyMaterializedLogError;
 use super::{SegmentFlusher, SegmentWriter};
-use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::hnsw_provider::{
-    HnswIndexProvider, HnswIndexProviderCommitError, HnswIndexProviderCreateError,
-    HnswIndexProviderFlushError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
+    HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
+    HnswIndexProviderOpenError,
 };
 use crate::index::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use crate::types::{LogRecord, MaterializedLogOperation, Operation, Segment};
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{MaterializedLogOperation, Segment};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -54,7 +54,7 @@ pub enum DistributedHNSWSegmentFromSegmentError {
 }
 
 impl ChromaError for DistributedHNSWSegmentFromSegmentError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             DistributedHNSWSegmentFromSegmentError::NoHnswFileFound => ErrorCodes::NotFound,
             DistributedHNSWSegmentFromSegmentError::InvalidUUID => ErrorCodes::InvalidArgument,
@@ -176,7 +176,7 @@ impl DistributedHNSWSegmentWriter {
 impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<super::MaterializedLogRecord<'a>>,
+        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         for (record, _) in records.iter() {
             match record.final_operation {

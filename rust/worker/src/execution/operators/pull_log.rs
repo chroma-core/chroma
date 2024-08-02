@@ -1,9 +1,9 @@
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
-use crate::types::LogRecord;
 use async_trait::async_trait;
+use chroma_types::Chunk;
+use chroma_types::LogRecord;
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.
@@ -149,9 +149,7 @@ mod tests {
     use super::*;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
+    use chroma_types::{LogRecord, Operation, OperationRecord};
     use std::str::FromStr;
 
     #[tokio::test]

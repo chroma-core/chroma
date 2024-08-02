@@ -1,10 +1,10 @@
 use crate::{
-    blockstore::provider::{BlockfileProvider, OpenError},
-    errors::{ChromaError, ErrorCodes},
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    types::{LogRecord, Operation, Segment},
 };
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
 use thiserror::Error;
 use tonic::async_trait;
@@ -197,17 +197,14 @@ mod tests {
     use crate::segment::types::SegmentFlusher;
     use crate::segment::LogMaterializer;
     use crate::{
-        blockstore::provider::BlockfileProvider,
         execution::{
-            data::data_chunk::Chunk,
             operator::Operator,
             operators::count_records::{CountRecordsInput, CountRecordsOperator},
         },
         segment::{record_segment::RecordSegmentWriter, SegmentWriter},
-        types::{LogRecord, Operation, OperationRecord},
     };
-    use std::sync::atomic::AtomicU32;
-    use std::sync::Arc;
+    use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
     use uuid::Uuid;
@@ -215,10 +212,10 @@ mod tests {
     #[tokio::test]
     async fn test_merge_log_and_storage() {
         let in_memory_provider = BlockfileProvider::new_memory();
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),
@@ -356,10 +353,10 @@ mod tests {
     #[tokio::test]
     async fn test_no_compaction_log_only() {
         let in_memory_provider = BlockfileProvider::new_memory();
-        let record_segment = crate::types::Segment {
+        let record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),

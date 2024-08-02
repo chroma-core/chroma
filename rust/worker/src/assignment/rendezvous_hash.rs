@@ -3,7 +3,7 @@
 // The go implementation is located go/internal/utils/rendezvous_hash.go
 // The python implementation is located chromadb/utils/rendezvous_hash.py
 
-use crate::errors::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes};
 use std::io::Cursor;
 use thiserror::Error;
 

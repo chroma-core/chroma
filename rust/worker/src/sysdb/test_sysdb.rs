@@ -1,10 +1,7 @@
-use crate::types::Collection;
-use crate::types::FlushCompactionResponse;
-use crate::types::Segment;
-use crate::types::SegmentFlushInfo;
-use crate::types::SegmentScope;
-use crate::types::SegmentType;
-use crate::types::Tenant;
+use chroma_types::{
+    Collection, FlushCompactionResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType,
+    Tenant,
+};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;

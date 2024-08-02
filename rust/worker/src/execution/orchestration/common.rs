@@ -1,9 +1,9 @@
 use crate::{
-    errors::{ChromaError, ErrorCodes},
     sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb},
     system::{Component, ComponentContext},
-    types::{Collection, Segment, SegmentType},
 };
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Collection, Segment, SegmentType};
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;

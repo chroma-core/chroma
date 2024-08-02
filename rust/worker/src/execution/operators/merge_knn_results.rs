@@ -1,11 +1,11 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::ChromaError,
     execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    types::Segment,
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Segment;
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -61,8 +61,8 @@ pub struct MergeKnnResultsOperatorOutput {
 pub enum MergeKnnResultsOperatorError {}
 
 impl ChromaError for MergeKnnResultsOperatorError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        return crate::errors::ErrorCodes::UNKNOWN;
+    fn code(&self) -> ErrorCodes {
+        return ErrorCodes::UNKNOWN;
     }
 }
 

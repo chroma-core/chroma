@@ -3,14 +3,16 @@ use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use crate::cache;
-use crate::cache::cache::Cache;
-use crate::config::Configurable;
-use crate::errors::ErrorCodes;
 use crate::index::types::PersistentIndex;
-use crate::storage::stream::ByteStreamItem;
-use crate::{errors::ChromaError, storage::Storage, types::Segment};
 use async_trait::async_trait;
+use chroma_cache::cache;
+use chroma_cache::cache::Cache;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
+use chroma_error::ErrorCodes;
+use chroma_storage::stream::ByteStreamItem;
+use chroma_storage::Storage;
+use chroma_types::Segment;
 use futures::stream;
 use futures::stream::StreamExt;
 use parking_lot::RwLock;
@@ -55,7 +57,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
         config: &(HnswProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
-        let cache = cache::from_config(&hnsw_config.hnsw_cache_config).await?;
+        let cache = chroma_cache::from_config(&hnsw_config.hnsw_cache_config).await?;
         Ok(Self {
             cache,
             storage: storage.clone(),
@@ -468,7 +470,7 @@ pub(crate) enum HnswIndexProviderFlushError {
     #[error("HNSW Save Error")]
     HnswSaveError(#[from] Box<dyn ChromaError>),
     #[error("Storage Put Error")]
-    StoragePutError(#[from] crate::storage::PutError),
+    StoragePutError(#[from] chroma_storage::PutError),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -486,19 +488,17 @@ pub(crate) enum HnswIndexProviderFileError {
     #[error("IO Error")]
     IOError(#[from] std::io::Error),
     #[error("Storage Get Error")]
-    StorageGetError(#[from] crate::storage::GetError),
+    StorageGetError(#[from] chroma_storage::GetError),
     #[error("Storage Put Error")]
-    StoragePutError(#[from] crate::storage::PutError),
+    StoragePutError(#[from] chroma_storage::PutError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        cache::config::{CacheConfig, UnboundedCacheConfig},
-        storage::{local::LocalStorage, Storage},
-        types::SegmentType,
-    };
+    use chroma_cache::config::{CacheConfig, UnboundedCacheConfig};
+    use chroma_storage::local::LocalStorage;
+    use chroma_types::SegmentType;
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -515,7 +515,7 @@ mod tests {
         let segment = Segment {
             id: Uuid::new_v4(),
             r#type: SegmentType::HnswDistributed,
-            scope: crate::types::SegmentScope::VECTOR,
+            scope: chroma_types::SegmentScope::VECTOR,
             collection: Some(Uuid::new_v4()),
             metadata: None,
             file_path: HashMap::new(),
