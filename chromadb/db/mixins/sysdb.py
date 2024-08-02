@@ -342,14 +342,14 @@ class SqlSysDB(SqlDB, SysDB):
                 rows = list(segment_rows)
                 type = str(rows[0][1])
                 scope = SegmentScope(str(rows[0][2]))
-                collection = self.uuid_from_db(rows[0][3]) if rows[0][3] else None
+                collection = self.uuid_from_db(rows[0][3])
                 metadata = self._metadata_from_rows(rows)
                 segments.append(
                     Segment(
                         id=cast(UUID, id),
                         type=type,
                         scope=scope,
-                        collection=collection,
+                        collection=cast(UUID, collection),
                         metadata=metadata,
                     )
                 )
