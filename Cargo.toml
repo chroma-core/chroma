@@ -1,5 +1,9 @@
 [workspace]
 
 members = [
-   "rust/worker/"
+   "rust/blockstore",
+   "rust/worker"
 ]
+
+[workspace.dependencies]
+chroma-blockstore = { path = "rust/blockstore" }

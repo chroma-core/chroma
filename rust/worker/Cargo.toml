@@ -58,6 +58,8 @@ regex = "1.10.5"
 flatbuffers = "24.3.25"
 foyer = "0.8"
 
+chroma-blockstore = { workspace = true }
+
 [dev-dependencies]
 proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
