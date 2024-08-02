@@ -3,6 +3,9 @@ name = "chroma-storage"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 bytes = "1.5.0"
 aws-sdk-s3 = "1.5.0"

@@ -84,8 +84,6 @@ impl S3Storage {
         // Creates a public bucket with default settings in the region.
         // This should only be used for testing and in production
         // the bucket should be provisioned ahead of time.
-        println!("Hello, world!");
-
         let res = self
             .client
             .create_bucket()
