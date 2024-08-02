@@ -1,6 +1,6 @@
 use crate::distance::{DistanceFunction, DistanceFunctionError};
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::types::{MetadataValue, Segment};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{MetadataValue, Segment};
 use thiserror::Error;
 use uuid::Uuid;
 

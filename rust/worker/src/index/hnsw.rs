@@ -1,10 +1,8 @@
+use super::{Index, IndexConfig, PersistentIndex};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
-
-use crate::errors::{ChromaError, ErrorCodes};
-
-use super::{Index, IndexConfig, PersistentIndex};
-use crate::types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
 use thiserror::Error;
 use tracing::instrument;
 use uuid::Uuid;
@@ -47,7 +45,7 @@ pub(crate) enum HnswIndexFromSegmentError {
 
 impl ChromaError for HnswIndexFromSegmentError {
     fn code(&self) -> ErrorCodes {
-        crate::errors::ErrorCodes::InvalidArgument
+        ErrorCodes::InvalidArgument
     }
 }
 
@@ -147,7 +145,7 @@ pub(crate) enum HnswIndexInitError {
 
 impl ChromaError for HnswIndexInitError {
     fn code(&self) -> ErrorCodes {
-        crate::errors::ErrorCodes::InvalidArgument
+        ErrorCodes::InvalidArgument
     }
 }
 
@@ -792,8 +790,8 @@ pub mod test {
     fn parameter_defaults() {
         let segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::HnswDistributed,
-            scope: crate::types::SegmentScope::VECTOR,
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(HashMap::new()),
             collection: Some(Uuid::new_v4()),
             file_path: HashMap::new(),
@@ -816,8 +814,8 @@ pub mod test {
 
         let segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::HnswDistributed,
-            scope: crate::types::SegmentScope::VECTOR,
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(metadata),
             collection: Some(Uuid::new_v4()),
             file_path: HashMap::new(),

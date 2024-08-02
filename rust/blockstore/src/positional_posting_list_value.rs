@@ -7,17 +7,17 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
-pub(crate) struct PositionalPostingList {
-    pub(crate) doc_ids: Int32Array,
-    pub(crate) positions: ListArray,
+pub struct PositionalPostingList {
+    pub doc_ids: Int32Array,
+    pub positions: ListArray,
 }
 
 impl PositionalPostingList {
-    pub(crate) fn get_doc_ids(&self) -> Int32Array {
+    pub fn get_doc_ids(&self) -> Int32Array {
         return self.doc_ids.clone();
     }
 
-    pub(crate) fn get_positions_for_doc_id(&self, doc_id: i32) -> Option<Int32Array> {
+    pub fn get_positions_for_doc_id(&self, doc_id: i32) -> Option<Int32Array> {
         let index = self.doc_ids.values().binary_search(&doc_id).ok();
         match index {
             Some(index) => {
@@ -30,7 +30,7 @@ impl PositionalPostingList {
         }
     }
 
-    pub(crate) fn size_in_bytes(&self) -> usize {
+    pub fn size_in_bytes(&self) -> usize {
         let mut size = 0;
         size += self.doc_ids.len() * std::mem::size_of::<i32>();
         size += self.positions.len() * std::mem::size_of::<i32>();
@@ -39,7 +39,7 @@ impl PositionalPostingList {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum PositionalPostingListBuilderError {
+pub enum PositionalPostingListBuilderError {
     #[error("Doc ID already exists in the list")]
     DocIdAlreadyExists,
     #[error("Doc ID does not exist in the list")]
@@ -59,20 +59,20 @@ impl ChromaError for PositionalPostingListBuilderError {
 }
 
 #[derive(Debug)]
-pub(crate) struct PositionalPostingListBuilder {
+pub struct PositionalPostingListBuilder {
     doc_ids: HashSet<i32>,
     positions: HashMap<i32, Vec<i32>>,
 }
 
 impl PositionalPostingListBuilder {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         PositionalPostingListBuilder {
             doc_ids: HashSet::new(),
             positions: HashMap::new(),
         }
     }
 
-    pub(crate) fn add_doc_id_and_positions(
+    pub fn add_doc_id_and_positions(
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
@@ -86,20 +86,17 @@ impl PositionalPostingListBuilder {
         Ok(())
     }
 
-    pub(crate) fn delete_doc_id(
-        &mut self,
-        doc_id: i32,
-    ) -> Result<(), PositionalPostingListBuilderError> {
+    pub fn delete_doc_id(&mut self, doc_id: i32) -> Result<(), PositionalPostingListBuilderError> {
         self.doc_ids.remove(&doc_id);
         self.positions.remove(&doc_id);
         Ok(())
     }
 
-    pub(crate) fn contains_doc_id(&self, doc_id: i32) -> bool {
+    pub fn contains_doc_id(&self, doc_id: i32) -> bool {
         self.doc_ids.contains(&doc_id)
     }
 
-    pub(crate) fn add_positions_for_doc_id(
+    pub fn add_positions_for_doc_id(
         &mut self,
         doc_id: i32,
         positions: Vec<i32>,
@@ -114,7 +111,7 @@ impl PositionalPostingListBuilder {
         Ok(())
     }
 
-    pub(crate) fn build(&mut self) -> PositionalPostingList {
+    pub fn build(&mut self) -> PositionalPostingList {
         let mut doc_ids_builder = Int32Builder::new();
         let mut positions_builder = ListBuilder::new(Int32Builder::new());
 

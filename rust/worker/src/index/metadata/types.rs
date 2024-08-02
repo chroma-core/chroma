@@ -1,13 +1,12 @@
-use crate::blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
-use crate::errors::{ChromaError, ErrorCodes};
 use crate::index::fulltext::types::FullTextIndexError;
-use crate::types::{BooleanOperator, MetadataType, Where, WhereClauseComparator, WhereComparison};
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
+use chroma_blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{BooleanOperator, MetadataType, Where, WhereClauseComparator, WhereComparison};
 use thiserror::Error;
 use uuid::Uuid;
 
 use core::ops::BitOr;
-use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -24,7 +23,7 @@ pub(crate) enum MetadataIndexError {
 }
 
 impl ChromaError for MetadataIndexError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> chroma_error::ErrorCodes {
         ErrorCodes::InvalidArgument
     }
 }
@@ -1035,7 +1034,7 @@ impl<'me> MetadataIndexReader<'me> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::blockstore::provider::BlockfileProvider;
+    use chroma_blockstore::provider::BlockfileProvider;
 
     #[tokio::test]
     async fn test_new_string_writer() {

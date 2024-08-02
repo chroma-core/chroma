@@ -1,13 +1,12 @@
 use super::types::{MaterializedLogRecord, SegmentWriter};
-use super::{DataRecord, SegmentFlusher};
-use crate::blockstore::arrow::types::ArrowReadableKey;
-use crate::blockstore::key::KeyWrapper;
-use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
-use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter, Key};
-use crate::errors::{ChromaError, ErrorCodes};
+use super::SegmentFlusher;
 use crate::execution::data::data_chunk::Chunk;
-use crate::types::{MaterializedLogOperation, Operation, Segment, SegmentType};
 use async_trait::async_trait;
+use chroma_blockstore::arrow::types::ArrowReadableKey;
+use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
+use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -310,7 +309,7 @@ pub enum ApplyMaterializedLogError {
 }
 
 impl ChromaError for ApplyMaterializedLogError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             ApplyMaterializedLogError::BlockfileSetError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,

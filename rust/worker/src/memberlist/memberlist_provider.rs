@@ -2,12 +2,10 @@ use std::{fmt::Debug, sync::RwLock};
 
 use super::config::MemberlistProviderConfig;
 use crate::system::ReceiverForMessage;
-use crate::{
-    config::Configurable,
-    errors::{ChromaError, ErrorCodes},
-    system::{Component, ComponentContext, Handler, StreamHandler},
-};
+use crate::system::{Component, ComponentContext, Handler, StreamHandler};
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
 use kube::runtime::watcher::Config;
 use kube::{
@@ -76,7 +74,7 @@ pub(crate) enum CustomResourceMemberlistProviderConfigurationError {
 }
 
 impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(_e) => {
                 ErrorCodes::Internal
