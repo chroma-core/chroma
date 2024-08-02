@@ -130,7 +130,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     @trace_method("SqlEmbeddingsQueue.purge_log", OpenTelemetryGranularity.ALL)
     @override
-    def purge_log(self) -> None:
+    def purge_log(self, collection_id: UUID) -> None:
         segments_t = Table("segments")
         segment_ids_q = (
             self.querybuilder()
@@ -140,6 +140,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             # - > 1 has not never written to the max_seq_id table
             # In that case, we should not delete any WAL entries as we can't be sure that the all segments are caught up.
             .select(functions.Coalesce(Table("max_seq_id").seq_id, -1))
+            .where(
+                segments_t.collection == ParameterValue(self.uuid_to_db(collection_id))
+            )
             .left_join(Table("max_seq_id"))
             .on(segments_t.id == Table("max_seq_id").segment_id)
         )
@@ -255,7 +258,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             self._notify_all(topic_name, embedding_records)
 
             if self.config.get_parameter("automatically_purge").value:
-                self.purge_log()
+                self.purge_log(collection_id)
 
             return seq_ids
 
