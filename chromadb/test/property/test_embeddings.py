@@ -222,7 +222,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
     def log_size_below_max(self) -> None:
         system: System = self.client._system  # type: ignore
         invariants.log_size_below_max(
-            system, self.collection, self.has_collection_mutated
+            system, [self.collection], self.has_collection_mutated
         )
 
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:

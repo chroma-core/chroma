@@ -131,6 +131,8 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @trace_method("SqlEmbeddingsQueue.purge_log", OpenTelemetryGranularity.ALL)
     @override
     def purge_log(self, collection_id: UUID) -> None:
+        # (We need to purge on a per topic/collection basis, because the maximum sequence ID is tracked on a per topic/collection basis.)
+
         segments_t = Table("segments")
         segment_ids_q = (
             self.querybuilder()
