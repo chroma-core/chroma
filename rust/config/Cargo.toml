@@ -1,0 +1,8 @@
+[package]
+name = "chroma-config"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+chroma-error = { workspace = true }

@@ -1,8 +1,7 @@
+use crate::errors::ChromaError;
 use async_trait::async_trait;
 use figment::providers::{Env, Format, Serialized, Yaml};
 use serde::Deserialize;
-
-use crate::errors::ChromaError;
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 const ENV_PREFIX: &str = "CHROMA_";
@@ -132,18 +131,6 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
     pub(crate) blockfile_provider: crate::blockstore::config::BlockfileProviderConfig,
     pub(crate) hnsw_provider: crate::index::config::HnswProviderConfig,
-}
-
-/// # Description
-/// A trait for configuring a struct from a config object.
-/// # Notes
-/// This trait is used to configure structs from the config object.
-/// Components that need to be configured from the config object should implement this trait.
-#[async_trait]
-pub(crate) trait Configurable<T> {
-    async fn try_from_config(worker_config: &T) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
 }
 
 #[cfg(test)]

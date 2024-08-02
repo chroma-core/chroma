@@ -17,34 +17,13 @@ path = "src/benches/distance_metrics.rs"
 harness = false
 
 [dependencies]
-tonic = "0.10"
-prost = "0.12"
-prost-types = "0.12"
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-tokio-util = "0.7.10"
 rand = "0.8.5"
-async-trait = "0.1.74"
-uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
-figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
-serde = { version = "1.0.193", features = ["derive"] }
-serde_json = "1.0.108"
-futures = "0.3"
 num_cpus = "1.16.0"
 murmur3 = "0.5.2"
-thiserror = "1.0.50"
-tempfile = "3.8.1"
 schemars = "0.8.16"
 kube = { version = "0.87.1", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
-bytes = "1.5.0"
-parking_lot = "0.12.1"
-aws-sdk-s3 = "1.5.0"
-aws-smithy-types = "1.1.0"
-aws-config = { version = "1.1.2", features = ["behavior-version-latest"] }
-arrow = "52.0.0"
-roaring = "0.10.3"
 tantivy = "0.21.1"
-tracing = "0.1"
 tracing-bunyan-formatter = "0.3.3"
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -53,23 +32,43 @@ opentelemetry = { version = "0.19.0", default-features = false, features = [
   "rt-tokio",
 ] }
 opentelemetry-otlp = "0.12.0"
-shuttle = "0.7.1"
 regex = "1.10.5"
 flatbuffers = "24.3.25"
 foyer = "0.8"
 
+serde = { workspace = true }
+serde_json = { workspace = true }
+arrow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+roaring = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
 chroma-blockstore = { workspace = true }
+chroma-error = { workspace = true }
+chroma-config = { workspace = true }
+chroma-storage = { workspace = true }
 
 [dev-dependencies]
 proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
-"rand" = "0.8.5"
 rayon = "1.8.0"
 criterion = "0.3"
 random-port = "0.1.1"
 serial_test = "3.1.1"
-rand_xorshift = "0.3.0"
+
+"rand" = { workspace = true }
+rand_xorshift = { workspace = true }
+tempfile = { workspace = true }
+shuttle = { workspace = true }
 
 [build-dependencies]
-tonic-build = "0.10"
 cc = "1.0"
