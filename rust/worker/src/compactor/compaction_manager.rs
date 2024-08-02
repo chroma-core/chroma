@@ -1,27 +1,22 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
 use crate::config::CompactionServiceConfig;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::storage::Storage;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::Component;
-use crate::system::ComponentContext;
-use crate::system::ComponentHandle;
-use crate::system::Handler;
-use crate::system::System;
+use crate::system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::Storage;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
@@ -189,7 +184,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             }
         };
 
-        let storage = match crate::storage::from_config(&config.storage).await {
+        let storage = match chroma_storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
                 return Err(err);
@@ -301,20 +296,14 @@ mod tests {
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
-    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    use crate::cache::cache::Cache;
-    use crate::cache::config::CacheConfig;
-    use crate::cache::config::UnboundedCacheConfig;
     use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::storage::local::LocalStorage;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::types::Collection;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
-    use crate::types::Segment;
+    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
+    use chroma_storage::local::LocalStorage;
+    use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -407,8 +396,8 @@ mod tests {
 
         let collection_1_record_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: HashMap::new(),
@@ -416,8 +405,8 @@ mod tests {
 
         let collection_2_record_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: HashMap::new(),
@@ -425,8 +414,8 @@ mod tests {
 
         let collection_1_hnsw_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::HnswDistributed,
-            scope: crate::types::SegmentScope::VECTOR,
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: HashMap::new(),
@@ -434,8 +423,8 @@ mod tests {
 
         let collection_2_hnsw_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::HnswDistributed,
-            scope: crate::types::SegmentScope::VECTOR,
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: HashMap::new(),
@@ -443,8 +432,8 @@ mod tests {
 
         let collection_1_metadata_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
             collection: Some(collection_uuid_1),
             metadata: None,
             file_path: HashMap::new(),
@@ -452,8 +441,8 @@ mod tests {
 
         let collection_2_metadata_segment = Segment {
             id: Uuid::new_v4(),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
             collection: Some(collection_uuid_2),
             metadata: None,
             file_path: HashMap::new(),

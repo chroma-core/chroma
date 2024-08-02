@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
-pub(crate) enum CacheConfig {
+pub enum CacheConfig {
     // case-insensitive
     #[serde(alias = "unbounded")]
     Unbounded(UnboundedCacheConfig),
@@ -12,14 +12,14 @@ pub(crate) enum CacheConfig {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub(crate) struct UnboundedCacheConfig {}
+pub struct UnboundedCacheConfig {}
 
 #[derive(Deserialize, Debug, Clone)]
-pub(crate) struct LruConfig {
-    pub(crate) capacity: usize,
+pub struct LruConfig {
+    pub capacity: usize,
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub(crate) struct LfuConfig {
-    pub(crate) capacity: usize,
+pub struct LfuConfig {
+    pub capacity: usize,
 }

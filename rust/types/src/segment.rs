@@ -1,14 +1,12 @@
 use super::{Metadata, MetadataValueConversionError, SegmentScope, SegmentScopeConversionError};
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum SegmentType {
+pub enum SegmentType {
     HnswDistributed,
     BlockfileMetadata,
     BlockfileRecord,
@@ -43,17 +41,17 @@ impl TryFrom<&str> for SegmentType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Segment {
-    pub(crate) id: Uuid,
-    pub(crate) r#type: SegmentType,
-    pub(crate) scope: SegmentScope,
-    pub(crate) collection: Option<Uuid>,
-    pub(crate) metadata: Option<Metadata>,
-    pub(crate) file_path: HashMap<String, Vec<String>>,
+pub struct Segment {
+    pub id: Uuid,
+    pub r#type: SegmentType,
+    pub scope: SegmentScope,
+    pub collection: Option<Uuid>,
+    pub metadata: Option<Metadata>,
+    pub file_path: HashMap<String, Vec<String>>,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum SegmentConversionError {
+pub enum SegmentConversionError {
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -65,7 +63,7 @@ pub(crate) enum SegmentConversionError {
 }
 
 impl ChromaError for SegmentConversionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             SegmentConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             SegmentConversionError::InvalidSegmentType => ErrorCodes::InvalidArgument,
@@ -137,7 +135,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
 mod tests {
 
     use super::*;
-    use crate::types::MetadataValue;
+    use crate::MetadataValue;
 
     #[test]
     fn test_segment_try_from() {

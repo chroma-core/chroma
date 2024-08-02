@@ -6,7 +6,7 @@ use crate::{key::KeyWrapper, Key, Value};
 use arrow::array::Array;
 use std::sync::Arc;
 
-pub(crate) trait ArrowWriteableKey: Key + Default {
+pub trait ArrowWriteableKey: Key + Default {
     type ReadableKey<'referred_data>: ArrowReadableKey<'referred_data>;
 
     fn offset_size(item_count: usize) -> usize;
@@ -17,7 +17,7 @@ pub(crate) trait ArrowWriteableKey: Key + Default {
     ) -> BlockKeyArrowBuilder;
 }
 
-pub(crate) trait ArrowWriteableValue: Value {
+pub trait ArrowWriteableValue: Value {
     type ReadableValue<'referred_data>: ArrowReadableValue<'referred_data>;
 
     fn offset_size(item_count: usize) -> usize;
@@ -27,7 +27,7 @@ pub(crate) trait ArrowWriteableValue: Value {
     fn get_delta_builder() -> BlockStorage;
 }
 
-pub(crate) trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
+pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(
         prefix: &str,
@@ -37,7 +37,7 @@ pub(crate) trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
     );
 }
 
-pub(crate) trait ArrowReadableValue<'referred_data>: Sized {
+pub trait ArrowReadableValue<'referred_data>: Sized {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,

@@ -1,0 +1,15 @@
+[package]
+name = "chroma-cache"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+foyer = "0.8"
+
+thiserror = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }

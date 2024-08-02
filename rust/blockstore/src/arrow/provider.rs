@@ -5,7 +5,6 @@ use super::{
     sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
-use crate::cache::cache::Cache;
 use crate::{
     key::KeyWrapper,
     memory::storage::Readable,
@@ -13,6 +12,7 @@ use crate::{
     BlockfileReader, BlockfileWriter, Key, Value,
 };
 use async_trait::async_trait;
+use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -25,13 +25,13 @@ use uuid::Uuid;
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
 #[derive(Clone)]
-pub(crate) struct ArrowBlockfileProvider {
+pub struct ArrowBlockfileProvider {
     block_manager: BlockManager,
     sparse_index_manager: SparseIndexManager,
 }
 
 impl ArrowBlockfileProvider {
-    pub(crate) fn new(
+    pub fn new(
         storage: Storage,
         max_block_size_bytes: usize,
         block_cache: Cache<Uuid, Block>,
@@ -43,7 +43,7 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub(crate) async fn open<
+    pub async fn open<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
@@ -62,13 +62,13 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub(crate) fn create<
+    pub fn create<
         'new,
         K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
-        V: Value + crate::blockstore::memory::storage::Writeable + ArrowWriteableValue + 'new,
+        V: Value + crate::memory::storage::Writeable + ArrowWriteableValue + 'new,
     >(
         &self,
-    ) -> Result<crate::blockstore::BlockfileWriter, Box<CreateError>> {
+    ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
         // Create a new blockfile and return a writer
         let new_id = Uuid::new_v4();
         let file = ArrowBlockfileWriter::new::<K, V>(
@@ -79,10 +79,10 @@ impl ArrowBlockfileProvider {
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
-    pub(crate) async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,
-    ) -> Result<crate::blockstore::BlockfileWriter, Box<CreateError>> {
+    ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
         tracing::info!("Forking blockfile from {:?}", id);
         let new_id = Uuid::new_v4();
         let new_sparse_index = self.sparse_index_manager.fork::<K>(id, new_id).await;
@@ -102,7 +102,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         config: &(ArrowBlockfileProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
-        let block_cache = match crate::cache::from_config(
+        let block_cache = match chroma_cache::from_config(
             &blockfile_config.block_manager_config.block_cache_config,
         )
         .await
@@ -112,7 +112,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
                 return Err(e);
             }
         };
-        let sparse_index_cache = match crate::cache::from_config(
+        let sparse_index_cache = match chroma_cache::from_config(
             &blockfile_config
                 .sparse_index_manager_config
                 .sparse_index_cache_config,

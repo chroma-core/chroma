@@ -1,9 +1,6 @@
-use crate::{
-    errors::{ChromaError, ErrorCodes},
-    system::ReceiverForMessage,
-    utils::get_panic_message,
-};
+use crate::{system::ReceiverForMessage, utils::get_panic_message};
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
 use std::{fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;

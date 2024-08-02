@@ -118,7 +118,7 @@ impl S3Storage {
         }
     }
 
-    pub(crate) async fn get(
+    pub async fn get(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
@@ -165,7 +165,7 @@ impl S3Storage {
         }
     }
 
-    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.multipart_upload(key, bytes.len(), move |range| {
@@ -175,7 +175,7 @@ impl S3Storage {
         .await
     }
 
-    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
         let file_size = tokio::fs::metadata(path)
             .await
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?

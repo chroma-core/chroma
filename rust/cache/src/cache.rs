@@ -1,19 +1,16 @@
-use crate::cache::config::CacheConfig;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
+use crate::config::CacheConfig;
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
 use core::hash::Hash;
-use foyer::Cache as FoyerCache;
-use foyer::CacheBuilder;
-use foyer::LfuConfig;
-use foyer::LruConfig;
+use foyer::{Cache as FoyerCache, CacheBuilder, LfuConfig, LruConfig};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Clone)]
-pub(crate) enum Cache<K, V>
+pub enum Cache<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
@@ -169,8 +166,8 @@ where
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {
         match config {
-            CacheConfig::Lru(lru) => Ok(FoyerCacheWrapper::new(config)),
-            CacheConfig::Lfu(lfu) => Ok(FoyerCacheWrapper::new(config)),
+            CacheConfig::Lru(_lru) => Ok(FoyerCacheWrapper::new(config)),
+            CacheConfig::Lfu(_lfu) => Ok(FoyerCacheWrapper::new(config)),
             _ => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
         }
     }
@@ -183,9 +180,9 @@ pub enum CacheConfigError {
 }
 
 impl ChromaError for CacheConfigError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
-            CacheConfigError::InvalidCacheConfig => crate::errors::ErrorCodes::InvalidArgument,
+            CacheConfigError::InvalidCacheConfig => ErrorCodes::InvalidArgument,
         }
     }
 }

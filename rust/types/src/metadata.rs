@@ -1,12 +1,10 @@
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum UpdateMetadataValue {
+pub enum UpdateMetadataValue {
     Int(i32),
     Float(f64),
     Str(String),
@@ -15,13 +13,13 @@ pub(crate) enum UpdateMetadataValue {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum UpdateMetadataValueConversionError {
+pub enum UpdateMetadataValueConversionError {
     #[error("Invalid metadata value, valid values are: Int, Float, Str, Bool, None")]
     InvalidValue,
 }
 
 impl ChromaError for UpdateMetadataValueConversionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             UpdateMetadataValueConversionError::InvalidValue => ErrorCodes::InvalidArgument,
         }
@@ -100,7 +98,7 @@ MetadataValue
 */
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum MetadataValue {
+pub enum MetadataValue {
     Int(i32),
     Float(f64),
     Str(String),
@@ -152,13 +150,13 @@ impl TryFrom<&MetadataValue> for String {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum MetadataValueConversionError {
+pub enum MetadataValueConversionError {
     #[error("Invalid metadata value, valid values are: Int, Float, Str")]
     InvalidValue,
 }
 
 impl ChromaError for MetadataValueConversionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             MetadataValueConversionError::InvalidValue => ErrorCodes::InvalidArgument,
         }
@@ -218,7 +216,7 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
 UpdateMetadata
 ===========================================
 */
-pub(crate) type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
+pub type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
 
 impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
     type Error = UpdateMetadataValueConversionError;
@@ -270,8 +268,8 @@ Metadata
 ===========================================
 */
 
-pub(crate) type Metadata = HashMap<String, MetadataValue>;
-pub(crate) type DeletedMetadata = HashSet<String>;
+pub type Metadata = HashMap<String, MetadataValue>;
+pub type DeletedMetadata = HashSet<String>;
 
 impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     type Error = MetadataValueConversionError;
@@ -290,17 +288,17 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     }
 }
 
-pub(crate) struct MetadataDelta<'referred_data> {
-    pub(crate) metadata_to_update: HashMap<
+pub struct MetadataDelta<'referred_data> {
+    pub metadata_to_update: HashMap<
         &'referred_data str,
         (&'referred_data MetadataValue, &'referred_data MetadataValue),
     >,
-    pub(crate) metadata_to_delete: HashMap<&'referred_data str, &'referred_data MetadataValue>,
-    pub(crate) metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+    pub metadata_to_delete: HashMap<&'referred_data str, &'referred_data MetadataValue>,
+    pub metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
 }
 
 impl<'referred_data> MetadataDelta<'referred_data> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             metadata_to_update: HashMap::new(),
             metadata_to_delete: HashMap::new(),
@@ -316,19 +314,19 @@ Metadata queries
 */
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Where {
+pub enum Where {
     DirectWhereComparison(DirectComparison),
     WhereChildren(WhereChildren),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct DirectComparison {
+pub struct DirectComparison {
     pub key: String,
     pub comparison: WhereComparison,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum WhereComparison {
+pub enum WhereComparison {
     SingleStringComparison(String, WhereClauseComparator),
     SingleIntComparison(u32, WhereClauseComparator),
     SingleDoubleComparison(f64, WhereClauseComparator),
@@ -340,7 +338,7 @@ pub(crate) enum WhereComparison {
 }
 
 #[derive(Debug)]
-pub(crate) enum MetadataType {
+pub enum MetadataType {
     StringType,
     IntType,
     DoubleType,
@@ -352,7 +350,7 @@ pub(crate) enum MetadataType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum WhereClauseComparator {
+pub enum WhereClauseComparator {
     Equal,
     NotEqual,
     GreaterThan,
@@ -362,49 +360,49 @@ pub(crate) enum WhereClauseComparator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum WhereClauseListOperator {
+pub enum WhereClauseListOperator {
     In,
     NotIn,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct WhereChildren {
+pub struct WhereChildren {
     pub children: Vec<Where>,
     pub operator: BooleanOperator,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum BooleanOperator {
+pub enum BooleanOperator {
     And,
     Or,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum WhereDocument {
+pub enum WhereDocument {
     DirectWhereDocumentComparison(DirectDocumentComparison),
     WhereDocumentChildren(WhereDocumentChildren),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct DirectDocumentComparison {
+pub struct DirectDocumentComparison {
     pub document: String,
     pub operator: WhereDocumentOperator,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum WhereDocumentOperator {
+pub enum WhereDocumentOperator {
     Contains,
     NotContains,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct WhereDocumentChildren {
+pub struct WhereDocumentChildren {
     pub children: Vec<WhereDocument>,
     pub operator: BooleanOperator,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum WhereConversionError {
+pub enum WhereConversionError {
     InvalidWhere,
     InvalidWhereComparison,
     InvalidWhereChildren,

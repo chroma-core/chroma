@@ -1,8 +1,8 @@
 pub(crate) mod block;
 pub(crate) mod blockfile;
 mod concurrency_test;
-pub(crate) mod config;
+pub mod config;
 pub(crate) mod flusher;
-pub(crate) mod provider;
-pub(crate) mod sparse_index;
-pub(crate) mod types;
+pub mod provider;
+pub mod sparse_index;
+pub mod types;

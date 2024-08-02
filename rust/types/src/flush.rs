@@ -1,16 +1,16 @@
 use super::ConversionError;
-use crate::chroma_proto::FilePaths;
-use crate::chroma_proto::FlushCollectionCompactionResponse;
-use crate::chroma_proto::FlushSegmentCompactionInfo;
-use crate::errors::ChromaError;
+use crate::chroma_proto::{
+    FilePaths, FlushCollectionCompactionResponse, FlushSegmentCompactionInfo,
+};
+use chroma_error::{ChromaError, ErrorCodes};
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub(crate) struct SegmentFlushInfo {
-    pub(crate) segment_id: Uuid,
-    pub(crate) file_paths: HashMap<String, Vec<String>>,
+pub struct SegmentFlushInfo {
+    pub segment_id: Uuid,
+    pub file_paths: HashMap<String, Vec<String>>,
 }
 
 impl TryInto<FlushSegmentCompactionInfo> for &SegmentFlushInfo {
@@ -30,7 +30,7 @@ impl TryInto<FlushSegmentCompactionInfo> for &SegmentFlushInfo {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum SegmentFlushInfoConversionError {
+pub enum SegmentFlushInfoConversionError {
     #[error("Invalid segment id, valid UUID required")]
     InvalidSegmentId,
     #[error(transparent)]
@@ -38,18 +38,14 @@ pub(crate) enum SegmentFlushInfoConversionError {
 }
 
 #[derive(Debug)]
-pub(crate) struct FlushCompactionResponse {
-    pub(crate) collection_id: Uuid,
-    pub(crate) collection_version: i32,
-    pub(crate) last_compaction_time: i64,
+pub struct FlushCompactionResponse {
+    pub collection_id: Uuid,
+    pub collection_version: i32,
+    pub last_compaction_time: i64,
 }
 
 impl FlushCompactionResponse {
-    pub(crate) fn new(
-        collection_id: Uuid,
-        collection_version: i32,
-        last_compaction_time: i64,
-    ) -> Self {
+    pub fn new(collection_id: Uuid, collection_version: i32, last_compaction_time: i64) -> Self {
         FlushCompactionResponse {
             collection_id,
             collection_version,
@@ -73,7 +69,7 @@ impl TryFrom<FlushCollectionCompactionResponse> for FlushCompactionResponse {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum FlushCompactionResponseConversionError {
+pub enum FlushCompactionResponseConversionError {
     #[error(transparent)]
     DecodeError(#[from] ConversionError),
     #[error("Invalid collection id, valid UUID required")]
@@ -81,11 +77,9 @@ pub(crate) enum FlushCompactionResponseConversionError {
 }
 
 impl ChromaError for FlushCompactionResponseConversionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
-            FlushCompactionResponseConversionError::InvalidUuid => {
-                crate::errors::ErrorCodes::InvalidArgument
-            }
+            FlushCompactionResponseConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             FlushCompactionResponseConversionError::DecodeError(e) => e.code(),
         }
     }

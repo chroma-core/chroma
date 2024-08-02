@@ -2,8 +2,11 @@
 
 members = [
    "rust/blockstore",
+   "rust/cache",
    "rust/config",
-   "rust/error", "rust/proto", "rust/storage",
+   "rust/error",
+   "rust/storage",
+   "rust/types",
    "rust/worker"
 ]
 
@@ -23,12 +26,15 @@ tokio-util = "0.7.10"
 tonic = "0.10"
 prost = "0.12"
 prost-types = "0.12"
+num_cpus = "1.16.0"
+flatbuffers = "24.3.25"
 
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-error = { path = "rust/error" }
 chroma-config = { path = "rust/config" }
 chroma-storage = { path = "rust/storage" }
-chroma-proto = { path = "rust/proto" }
+chroma-cache = { path = "rust/cache" }
+chroma-types = { path = "rust/types" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
@@ -36,3 +42,5 @@ worker = { path = "rust/worker" }
 rand_xorshift = "0.3.0"
 tempfile = "3.8.1"
 shuttle = "0.7.1"
+proptest = "1.4.0"
+proptest-state-machine = "0.1.0"

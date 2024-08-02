@@ -208,8 +208,7 @@ impl<
 mod tests {
     use super::*;
     use crate::execution::data::data_chunk::Chunk;
-    use crate::segment::DataRecord;
-    use crate::types::{LogRecord, Operation, OperationRecord};
+    use chroma_types::{DataRecord, LogRecord, Operation, OperationRecord};
 
     #[test]
     fn test_blockfile_string() {

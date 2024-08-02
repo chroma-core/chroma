@@ -1,4 +1,4 @@
-use crate::errors::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 /// A macro for easily implementing match arms for a base error type with common errors.
@@ -19,13 +19,13 @@ macro_rules! impl_base_convert_error {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum ConversionError {
+pub enum ConversionError {
     #[error("Error decoding protobuf message")]
     DecodeError,
 }
 
 impl ChromaError for ConversionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             ConversionError::DecodeError => ErrorCodes::Internal,
         }

@@ -846,28 +846,6 @@ impl<'me> LogMaterializer<'me> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct DataRecord<'a> {
-    pub(crate) id: &'a str,
-    pub(crate) embedding: &'a [f32],
-    pub(crate) metadata: Option<Metadata>,
-    pub(crate) document: Option<&'a str>,
-}
-
-impl DataRecord<'_> {
-    pub(crate) fn get_size(&self) -> usize {
-        let id_size = self.id.len();
-        let embedding_size = self.embedding.len() * std::mem::size_of::<f32>();
-        // TODO: use serialized_metadata size to calculate the size
-        let metadata_size = 0;
-        let document_size = match self.document {
-            Some(document) => document.len(),
-            None => 0,
-        };
-        id_size + embedding_size + metadata_size + document_size
-    }
-}
-
 pub(crate) trait SegmentWriter<'a> {
     async fn apply_materialized_log_chunk(
         &self,

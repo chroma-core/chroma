@@ -1,12 +1,10 @@
 use super::ConversionError;
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Operation {
+pub enum Operation {
     Add,
     Update,
     Upsert,
@@ -14,7 +12,7 @@ pub(crate) enum Operation {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum MaterializedLogOperation {
+pub enum MaterializedLogOperation {
     // Set when the record is initially read from the segment
     // before it is processed based on state of the log.
     Initial,
@@ -35,7 +33,7 @@ pub(crate) enum MaterializedLogOperation {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum OperationConversionError {
+pub enum OperationConversionError {
     #[error("Invalid operation, valid operations are: Add, Upsert, Update, Delete")]
     InvalidOperation,
     #[error(transparent)]

@@ -12,14 +12,14 @@ pub struct LocalStorage {
 }
 
 impl LocalStorage {
-    pub(crate) fn new(root: &str) -> LocalStorage {
+    pub fn new(root: &str) -> LocalStorage {
         // Create the local storage with the root path.
         return LocalStorage {
             root: root.to_string(),
         };
     }
 
-    pub(crate) async fn get(
+    pub async fn get(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, String> {
@@ -36,7 +36,7 @@ impl LocalStorage {
         }
     }
 
-    pub(crate) async fn put_bytes(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
+    pub async fn put_bytes(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
         let path = format!("{}/{}", self.root, key);
         tracing::debug!("Writing to path: {}", path);
         // Create the path if it doesn't exist, we unwrap since this should only be used in tests
@@ -54,7 +54,7 @@ impl LocalStorage {
         }
     }
 
-    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
         let file = std::fs::read(path);
         match file {
             Ok(bytes_u8) => {

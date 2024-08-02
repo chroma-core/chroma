@@ -5,14 +5,13 @@ use super::{
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
-    segment::DataRecord,
 };
 use arrow::array::BinaryArray;
 use arrow::{
     array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray},
     util::bit_util,
 };
-use chroma_proto::UpdateMetadata;
+use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use prost::Message;
 use std::sync::Arc;
 

@@ -1,9 +1,5 @@
-use std::sync::Arc;
-
-use crate::errors::ChromaError;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::SegmentFlusher;
-use crate::types::SegmentFlushInfo;
 use crate::{
     execution::operator::Operator,
     segment::{
@@ -12,6 +8,9 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use chroma_error::ChromaError;
+use chroma_types::SegmentFlushInfo;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct FlushS3Operator {}

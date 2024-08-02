@@ -567,16 +567,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::cache::Cache;
-    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::{
-        blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES,
-        blockstore::arrow::provider::ArrowBlockfileProvider,
-        segment::DataRecord,
-        storage::{local::LocalStorage, Storage},
-        types::MetadataValue,
+        arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
     use arrow::array::Int32Array;
+    use chroma_cache::{
+        cache::Cache,
+        config::{CacheConfig, UnboundedCacheConfig},
+    };
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{DataRecord, MetadataValue};
     use proptest::prelude::*;
     use proptest::test_runner::Config;
     use rand::seq::IteratorRandom;
@@ -881,7 +881,7 @@ mod tests {
 
         // Sparse index should have 3 blocks
         match &reader {
-            crate::blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
+            crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.sparse_index.len(), 3);
                 assert!(reader.sparse_index.is_valid());
             }
@@ -916,7 +916,7 @@ mod tests {
 
         // Sparse index should still have 3 blocks
         match &reader {
-            crate::blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
+            crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.sparse_index.len(), 3);
                 assert!(reader.sparse_index.is_valid());
             }
@@ -949,7 +949,7 @@ mod tests {
 
         // Sparse index should have 6 blocks
         match &reader {
-            crate::blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
+            crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.sparse_index.len(), 6);
                 assert!(reader.sparse_index.is_valid());
             }

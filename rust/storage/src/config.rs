@@ -26,11 +26,11 @@ pub enum S3CredentialsConfig {
 /// # Fields
 /// - bucket: The name of the bucket to use.
 pub struct S3StorageConfig {
-    pub(crate) bucket: String,
-    pub(crate) credentials: S3CredentialsConfig,
-    pub(crate) connect_timeout_ms: u64,
-    pub(crate) request_timeout_ms: u64,
-    pub(crate) upload_part_size_bytes: usize,
+    pub bucket: String,
+    pub credentials: S3CredentialsConfig,
+    pub connect_timeout_ms: u64,
+    pub request_timeout_ms: u64,
+    pub upload_part_size_bytes: usize,
 }
 
 #[derive(Deserialize, Debug)]
@@ -41,5 +41,5 @@ pub struct S3StorageConfig {
 /// The root directory is the directory where files will be stored.
 /// This is not intended to be used in production.
 pub struct LocalStorageConfig {
-    pub(crate) root: String,
+    pub root: String,
 }

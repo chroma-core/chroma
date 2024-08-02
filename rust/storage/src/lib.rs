@@ -3,10 +3,11 @@ use self::s3::S3GetError;
 use self::stream::ByteStreamItem;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
+
 pub mod config;
-pub(crate) mod local;
-pub(crate) mod s3;
-pub(crate) mod stream;
+pub mod local;
+pub mod s3;
+pub mod stream;
 use futures::Stream;
 use thiserror::Error;
 
@@ -54,7 +55,7 @@ impl ChromaError for PutError {
 }
 
 impl Storage {
-    pub(crate) async fn get(
+    pub async fn get(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, GetError> {
@@ -79,7 +80,7 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
         match self {
             Storage::S3(s3) => s3
                 .put_file(key, path)
@@ -92,7 +93,7 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
         match self {
             Storage::S3(s3) => s3
                 .put_bytes(key, bytes)
@@ -106,7 +107,7 @@ impl Storage {
     }
 }
 
-pub(crate) async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn ChromaError>> {
+pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn ChromaError>> {
     match &config {
         StorageConfig::S3(_) => Ok(Storage::S3(s3::S3Storage::try_from_config(config).await?)),
         StorageConfig::Local(_) => Ok(Storage::Local(

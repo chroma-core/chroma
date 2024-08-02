@@ -10,8 +10,8 @@ use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
-use crate::cache::cache::Cache;
 use async_trait::async_trait;
+use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::config::StorageConfig;
@@ -22,7 +22,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub(crate) enum BlockfileProvider {
+pub enum BlockfileProvider {
     HashMapBlockfileProvider(MemoryBlockfileProvider),
     ArrowBlockfileProvider(ArrowBlockfileProvider),
 }
@@ -41,11 +41,11 @@ impl Debug for BlockfileProvider {
 }
 
 impl BlockfileProvider {
-    pub(crate) fn new_memory() -> Self {
+    pub fn new_memory() -> Self {
         BlockfileProvider::HashMapBlockfileProvider(MemoryBlockfileProvider::new())
     }
 
-    pub(crate) fn new_arrow(
+    pub fn new_arrow(
         storage: Storage,
         max_block_size_bytes: usize,
         block_cache: Cache<Uuid, Block>,
@@ -59,7 +59,7 @@ impl BlockfileProvider {
         ))
     }
 
-    pub(crate) async fn open<
+    pub async fn open<
         'new,
         K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
@@ -73,7 +73,7 @@ impl BlockfileProvider {
         }
     }
 
-    pub(crate) fn create<
+    pub fn create<
         'new,
         K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
         V: Value + Writeable + ArrowWriteableValue + 'new,
@@ -86,7 +86,7 @@ impl BlockfileProvider {
         }
     }
 
-    pub(crate) async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
@@ -124,7 +124,7 @@ impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
 
 // =================== Errors ===================
 #[derive(Error, Debug)]
-pub(crate) enum OpenError {
+pub enum OpenError {
     #[error("Blockfile not found")]
     NotFound,
 }
@@ -136,7 +136,7 @@ impl ChromaError for OpenError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum CreateError {
+pub enum CreateError {
     #[error("Blockfile already exists")]
     AlreadyExists,
 }

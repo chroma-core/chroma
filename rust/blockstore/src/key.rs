@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use super::Key;
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
-pub(crate) enum KeyWrapper {
+pub enum KeyWrapper {
     String(String),
     Float32(f32),
     Bool(bool),

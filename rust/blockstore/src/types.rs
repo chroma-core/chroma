@@ -9,15 +9,15 @@ use super::memory::reader_writer::{
 };
 use super::memory::storage::{Readable, Writeable};
 use super::positional_posting_list_value::PositionalPostingList;
-use crate::segment::DataRecord;
 use arrow::array::{Array, Int32Array};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::DataRecord;
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(crate) enum BlockfileError {
+pub enum BlockfileError {
     #[error("Key not found")]
     NotFoundError,
     #[error("Invalid Key Type")]
@@ -47,7 +47,7 @@ impl ChromaError for BlockfileError {
 }
 
 // ===== Key Types =====
-pub(crate) trait Key: PartialEq + Debug + Display + Into<KeyWrapper> + Clone {
+pub trait Key: PartialEq + Debug + Display + Into<KeyWrapper> + Clone {
     fn get_size(&self) -> usize;
 }
 
@@ -75,7 +75,7 @@ impl Key for u32 {
     }
 }
 
-pub(crate) trait Value: Clone {
+pub trait Value: Clone {
     fn get_size(&self) -> usize;
 }
 
@@ -136,13 +136,13 @@ impl<'a> Value for &DataRecord<'a> {
 }
 
 #[derive(Clone)]
-pub(crate) enum BlockfileWriter {
+pub enum BlockfileWriter {
     MemoryBlockfileWriter(MemoryBlockfileWriter),
     ArrowBlockfileWriter(ArrowBlockfileWriter),
 }
 
 impl BlockfileWriter {
-    pub(crate) fn commit<
+    pub fn commit<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
@@ -160,7 +160,7 @@ impl BlockfileWriter {
         }
     }
 
-    pub(crate) async fn set<
+    pub async fn set<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
@@ -175,7 +175,7 @@ impl BlockfileWriter {
         }
     }
 
-    pub(crate) async fn delete<
+    pub async fn delete<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
@@ -191,7 +191,7 @@ impl BlockfileWriter {
         }
     }
 
-    pub(crate) fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
             BlockfileWriter::ArrowBlockfileWriter(writer) => writer.id(),
@@ -199,13 +199,13 @@ impl BlockfileWriter {
     }
 }
 
-pub(crate) enum BlockfileFlusher {
+pub enum BlockfileFlusher {
     MemoryBlockfileFlusher(MemoryBlockfileFlusher),
     ArrowBlockfileFlusher(ArrowBlockfileFlusher),
 }
 
 impl BlockfileFlusher {
-    pub(crate) async fn flush<
+    pub async fn flush<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
@@ -217,7 +217,7 @@ impl BlockfileFlusher {
         }
     }
 
-    pub(crate) fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.id(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
@@ -226,7 +226,7 @@ impl BlockfileFlusher {
 }
 
 #[derive(Clone)]
-pub(crate) enum BlockfileReader<
+pub enum BlockfileReader<
     'me,
     K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,
     V: Value + ArrowReadableValue<'me>,
@@ -244,7 +244,7 @@ impl<
         V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
     > BlockfileReader<'referred_data, K, V>
 {
-    pub(crate) async fn get(
+    pub async fn get(
         &'referred_data self,
         prefix: &str,
         key: K,
@@ -255,14 +255,14 @@ impl<
         }
     }
 
-    pub(crate) async fn contains(&'referred_data self, prefix: &str, key: K) -> bool {
+    pub async fn contains(&'referred_data self, prefix: &str, key: K) -> bool {
         match self {
             BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
             BlockfileReader::MemoryBlockfileReader(reader) => reader.contains(prefix, key),
         }
     }
 
-    pub(crate) async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
+    pub async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
@@ -280,7 +280,7 @@ impl<
     }
 
     // TODO: make prefix &str
-    pub(crate) async fn get_by_prefix(
+    pub async fn get_by_prefix(
         &'referred_data self,
         prefix: &str,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
@@ -290,7 +290,7 @@ impl<
         }
     }
 
-    pub(crate) async fn get_gt(
+    pub async fn get_gt(
         &'referred_data self,
         prefix: &str,
         key: K,
@@ -301,7 +301,7 @@ impl<
         }
     }
 
-    pub(crate) async fn get_lt(
+    pub async fn get_lt(
         &'referred_data self,
         prefix: &str,
         key: K,
@@ -312,7 +312,7 @@ impl<
         }
     }
 
-    pub(crate) async fn get_gte(
+    pub async fn get_gte(
         &'referred_data self,
         prefix: &str,
         key: K,
@@ -323,7 +323,7 @@ impl<
         }
     }
 
-    pub(crate) async fn get_lte(
+    pub async fn get_lte(
         &'referred_data self,
         prefix: &str,
         key: K,
@@ -334,7 +334,7 @@ impl<
         }
     }
 
-    pub(crate) async fn get_at_index(
+    pub async fn get_at_index(
         &'referred_data self,
         index: usize,
     ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
@@ -344,14 +344,14 @@ impl<
         }
     }
 
-    pub(crate) fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
         }
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
+    pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {

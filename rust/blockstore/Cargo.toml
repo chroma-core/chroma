@@ -15,8 +15,20 @@ futures = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 shuttle = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tokio = { workspace = true }
+num_cpus = { workspace = true }
+flatbuffers = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
-chroma-proto = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-types = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+tempfile = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }

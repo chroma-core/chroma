@@ -1,25 +1,23 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Collection {
-    pub(crate) id: Uuid,
-    pub(crate) name: String,
-    pub(crate) metadata: Option<Metadata>,
-    pub(crate) dimension: Option<i32>,
-    pub(crate) tenant: String,
-    pub(crate) database: String,
-    pub(crate) log_position: i64,
-    pub(crate) version: i32,
+pub struct Collection {
+    pub id: Uuid,
+    pub name: String,
+    pub metadata: Option<Metadata>,
+    pub dimension: Option<i32>,
+    pub tenant: String,
+    pub database: String,
+    pub log_position: i64,
+    pub version: i32,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum CollectionConversionError {
+pub enum CollectionConversionError {
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -27,7 +25,7 @@ pub(crate) enum CollectionConversionError {
 }
 
 impl ChromaError for CollectionConversionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),

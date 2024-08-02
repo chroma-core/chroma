@@ -107,9 +107,7 @@ impl<'a, T> Iterator for DataChunkIteraror<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
+    use chroma_types::{LogRecord, Operation, OperationRecord};
 
     #[test]
     fn test_data_chunk() {

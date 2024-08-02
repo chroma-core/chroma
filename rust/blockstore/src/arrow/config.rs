@@ -1,9 +1,8 @@
-use crate::cache::config::CacheConfig;
+use chroma_cache::config::CacheConfig;
 use serde::Deserialize;
 
-#[cfg(test)]
 // A small block size for testing, so that triggering splits etc is easier
-pub(crate) const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
+pub const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ArrowBlockfileProviderConfig {

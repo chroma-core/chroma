@@ -1,6 +1,4 @@
 use crate::{
-    blockstore::{key::KeyWrapper, provider::BlockfileProvider},
-    errors::{ChromaError, ErrorCodes},
     execution::{data::data_chunk::Chunk, operator::Operator},
     index::{
         fulltext::types::process_where_document_clause_with_callback,
@@ -11,11 +9,13 @@ use crate::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    types::{
-        LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
-        WhereClauseComparator, WhereDocument, WhereDocumentOperator,
-    },
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
+};
+use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{
+    LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use core::panic;
 use roaring::RoaringBitmap;
@@ -177,11 +177,11 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             ids_to_metadata.insert(records.offset_id, records.merged_metadata_ref());
         }
         let clo = |metadata_key: &str,
-                   metadata_value: &crate::blockstore::key::KeyWrapper,
-                   metadata_type: crate::types::MetadataType,
+                   metadata_value: &chroma_blockstore::key::KeyWrapper,
+                   metadata_type: chroma_types::MetadataType,
                    comparator: WhereClauseComparator| {
             match metadata_type {
-                crate::types::MetadataType::StringType => match comparator {
+                chroma_types::MetadataType::StringType => match comparator {
                     WhereClauseComparator::Equal => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
@@ -219,7 +219,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         unimplemented!();
                     }
                 },
-                crate::types::MetadataType::BoolType => match comparator {
+                chroma_types::MetadataType::BoolType => match comparator {
                     WhereClauseComparator::Equal => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
@@ -257,7 +257,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         unimplemented!();
                     }
                 },
-                crate::types::MetadataType::IntType => match comparator {
+                chroma_types::MetadataType::IntType => match comparator {
                     WhereClauseComparator::Equal => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
@@ -362,7 +362,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         return result;
                     }
                 },
-                crate::types::MetadataType::DoubleType => match comparator {
+                chroma_types::MetadataType::DoubleType => match comparator {
                     WhereClauseComparator::Equal => {
                         let mut result = RoaringBitmap::new();
                         // Construct a bitmap consisting of all offset ids
@@ -467,16 +467,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         return result;
                     }
                 },
-                crate::types::MetadataType::StringListType => {
+                chroma_types::MetadataType::StringListType => {
                     todo!();
                 }
-                crate::types::MetadataType::IntListType => {
+                chroma_types::MetadataType::IntListType => {
                     todo!();
                 }
-                crate::types::MetadataType::DoubleListType => {
+                chroma_types::MetadataType::DoubleListType => {
                     todo!();
                 }
-                crate::types::MetadataType::BoolListType => {
+                chroma_types::MetadataType::BoolListType => {
                     todo!();
                 }
             }
@@ -732,22 +732,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::HashMap,
-        str::FromStr,
-        sync::{atomic::AtomicU32, Arc},
-    };
-
-    use uuid::Uuid;
-
-    use crate::cache::cache::Cache;
-    use crate::cache::config::CacheConfig;
-    use crate::cache::config::UnboundedCacheConfig;
     use crate::{
-        blockstore::{
-            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-            provider::BlockfileProvider,
-        },
         execution::{
             data::data_chunk::Chunk,
             operator::Operator,
@@ -761,12 +746,19 @@ mod test {
             types::SegmentFlusher,
             LogMaterializer, SegmentWriter,
         },
-        storage::{local::LocalStorage, Storage},
-        types::{
-            DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
-            UpdateMetadataValue, Where, WhereComparison, WhereDocument,
-        },
     };
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{
+        DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
+        UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+    };
+    use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn where_and_where_document_from_log() {
@@ -782,20 +774,20 @@ mod test {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),
@@ -948,13 +940,13 @@ mod test {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("new_world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("about dogs"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let input = MetadataFilteringInput::new(
             data.clone(),
@@ -1001,20 +993,20 @@ mod test {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),
@@ -1143,7 +1135,7 @@ mod test {
             key: String::from("bye"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let input = MetadataFilteringInput::new(
@@ -1191,20 +1183,20 @@ mod test {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
             collection: Some(
                 Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             ),

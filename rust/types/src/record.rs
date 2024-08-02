@@ -3,33 +3,31 @@ use super::{
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
     UpdateMetadataValueConversionError,
 };
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
-pub(crate) struct OperationRecord {
-    pub(crate) id: String,
-    pub(crate) embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now so this ignores the encoding
-    pub(crate) encoding: Option<ScalarEncoding>,
-    pub(crate) metadata: Option<UpdateMetadata>,
+pub struct OperationRecord {
+    pub id: String,
+    pub embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now so this ignores the encoding
+    pub encoding: Option<ScalarEncoding>,
+    pub metadata: Option<UpdateMetadata>,
     // Document is implemented in the python code as a special key "chroma:document" in the metadata
     // This is ugly and clunky. In the rust code we choose to make it a separate field and
     // only let that concept live in the transport layer
-    pub(crate) document: Option<String>,
-    pub(crate) operation: Operation,
+    pub document: Option<String>,
+    pub operation: Operation,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct LogRecord {
-    pub(crate) log_offset: i64,
-    pub(crate) record: OperationRecord,
+pub struct LogRecord {
+    pub log_offset: i64,
+    pub record: OperationRecord,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum RecordConversionError {
+pub enum RecordConversionError {
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -148,7 +146,7 @@ impl TryFrom<chroma_proto::Vector> for (Vec<f32>, ScalarEncoding) {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum VectorConversionError {
+pub enum VectorConversionError {
     #[error("Invalid byte length, must be divisible by 4")]
     InvalidByteLength,
     #[error(transparent)]
@@ -219,9 +217,9 @@ Vector Embedding Record
 */
 
 #[derive(Debug)]
-pub(crate) struct VectorEmbeddingRecord {
-    pub(crate) id: String,
-    pub(crate) vector: Vec<f32>,
+pub struct VectorEmbeddingRecord {
+    pub id: String,
+    pub vector: Vec<f32>,
 }
 
 /*
@@ -231,10 +229,10 @@ Vector Query Result
  */
 
 #[derive(Debug)]
-pub(crate) struct VectorQueryResult {
-    pub(crate) id: String,
-    pub(crate) distance: f32,
-    pub(crate) vector: Option<Vec<f32>>,
+pub struct VectorQueryResult {
+    pub id: String,
+    pub distance: f32,
+    pub vector: Option<Vec<f32>>,
 }
 
 /*
@@ -244,9 +242,9 @@ Get Vector Results
 */
 
 #[derive(Debug)]
-pub(crate) struct GetVectorsResult {
-    pub(crate) ids: Vec<String>,
-    pub(crate) vectors: Vec<Vec<f32>>,
+pub struct GetVectorsResult {
+    pub ids: Vec<String>,
+    pub vectors: Vec<Vec<f32>>,
 }
 
 /*
@@ -256,9 +254,9 @@ Metadata Embedding Record
 */
 
 #[derive(Debug)]
-pub(crate) struct MetadataEmbeddingRecord {
-    pub(crate) id: String,
-    pub(crate) metadata: UpdateMetadata,
+pub struct MetadataEmbeddingRecord {
+    pub id: String,
+    pub metadata: UpdateMetadata,
 }
 
 impl From<MetadataEmbeddingRecord> for chroma_proto::MetadataEmbeddingRecord {
@@ -273,7 +271,7 @@ impl From<MetadataEmbeddingRecord> for chroma_proto::MetadataEmbeddingRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{chroma_proto, types::UpdateMetadataValue};
+    use crate::{chroma_proto, UpdateMetadataValue};
     use std::collections::HashMap;
     use uuid::Uuid;
 

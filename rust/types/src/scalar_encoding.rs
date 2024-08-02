@@ -1,18 +1,16 @@
 use super::ConversionError;
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum ScalarEncoding {
+pub enum ScalarEncoding {
     FLOAT32,
     INT32,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum ScalarEncodingConversionError {
+pub enum ScalarEncodingConversionError {
     #[error("Invalid encoding, valid encodings are: Float32, Int32")]
     InvalidEncoding,
     #[error(transparent)]

@@ -1,12 +1,11 @@
 use super::ConversionError;
-use crate::{
-    chroma_proto,
-    errors::{ChromaError, ErrorCodes},
-};
+use crate::chroma_proto;
+use chroma_error::{ChromaError, ErrorCodes};
+
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum SegmentScope {
+pub enum SegmentScope {
     VECTOR,
     METADATA,
     RECORD,
@@ -14,7 +13,7 @@ pub(crate) enum SegmentScope {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum SegmentScopeConversionError {
+pub enum SegmentScopeConversionError {
     #[error("Invalid segment scope, valid scopes are: Vector, Metadata")]
     InvalidScope,
     #[error(transparent)]

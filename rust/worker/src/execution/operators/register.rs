@@ -1,13 +1,11 @@
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::UpdateCollectionLogOffsetError;
 use crate::sysdb::sysdb::FlushCompactionError;
 use crate::sysdb::sysdb::SysDb;
-use crate::types::FlushCompactionResponse;
-use crate::types::SegmentFlushInfo;
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -144,10 +142,7 @@ mod tests {
     use super::*;
     use crate::log::log::InMemoryLog;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::types::Collection;
-    use crate::types::Segment;
-    use crate::types::SegmentScope;
-    use crate::types::SegmentType;
+    use chroma_types::{Collection, Segment, SegmentScope, SegmentType};
     use std::collections::HashMap;
     use std::str::FromStr;
     use uuid::Uuid;

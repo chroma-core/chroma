@@ -1,9 +1,7 @@
 mod assignment;
-mod cache;
 mod compactor;
 mod config;
 pub mod distance;
-mod errors;
 mod execution;
 mod index;
 mod log;
@@ -13,10 +11,9 @@ mod server;
 mod sysdb;
 mod system;
 mod tracing;
-mod types;
 mod utils;
 
-use config::Configurable;
+use chroma_config::Configurable;
 use memberlist::MemberlistProvider;
 
 use tokio::select;

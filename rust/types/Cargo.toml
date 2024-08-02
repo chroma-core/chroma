@@ -1,5 +1,5 @@
 [package]
-name = "chroma-proto"
+name = "chroma-types"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,6 +7,10 @@ edition = "2021"
 tonic = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+chroma-error = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"

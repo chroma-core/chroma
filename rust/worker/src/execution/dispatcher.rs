@@ -1,12 +1,10 @@
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
-use crate::{
-    config::Configurable,
-    errors::ChromaError,
-    system::{Component, ComponentContext, Handler, ReceiverForMessage, System},
-};
+use crate::system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
 use std::fmt::Debug;
 use tracing::Span;
 

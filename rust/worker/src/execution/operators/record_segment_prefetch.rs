@@ -1,13 +1,12 @@
-use thiserror::Error;
-use tonic::async_trait;
-
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::{ChromaError, ErrorCodes},
     execution::operator::{Operator, OperatorType},
     segment::record_segment::RecordSegmentReader,
-    types::Segment,
 };
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Segment;
+use thiserror::Error;
+use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct OffsetIdToDataKeys {

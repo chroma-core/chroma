@@ -200,7 +200,7 @@ copyright Qdrant, licensed under the Apache 2.0 license.
    limitations under the License.
 */
 
-use crate::errors::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 /// The distance function enum.

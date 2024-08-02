@@ -1,12 +1,4 @@
-use crate::blockstore::provider::BlockfileProvider;
-use crate::chroma_proto::{
-    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
-};
-use crate::chroma_proto::{
-    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
-};
-use crate::config::{Configurable, QueryServiceConfig};
-use crate::errors::ChromaError;
+use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
@@ -17,9 +9,17 @@ use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
-use crate::types::MetadataValue;
-use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
+use chroma_types::chroma_proto::{
+    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+};
+use chroma_types::chroma_proto::{
+    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
+};
+use chroma_types::{MetadataValue, ScalarEncoding};
 use std::collections::HashMap;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
@@ -59,7 +59,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
                 return Err(err);
             }
         };
-        let storage = match crate::storage::from_config(&config.storage).await {
+        let storage = match chroma_storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
                 tracing::error!("Failed to create storage component: {:?}", err);
@@ -561,16 +561,14 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    use crate::cache::cache::Cache;
-    use crate::cache::config::{CacheConfig, UnboundedCacheConfig};
     use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
-    use crate::storage::local::LocalStorage;
-    use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
+    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
     use chroma_proto::debug_client::DebugClient;
+    use chroma_storage::{local::LocalStorage, Storage};
     use tempfile::tempdir;
 
     #[tokio::test]

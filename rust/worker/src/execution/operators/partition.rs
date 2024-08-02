@@ -1,8 +1,8 @@
-use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
-use crate::types::LogRecord;
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::LogRecord;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -141,7 +141,7 @@ impl Operator<PartitionInput, PartitionOutput> for PartitionOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{LogRecord, Operation, OperationRecord};
+    use chroma_types::{LogRecord, Operation, OperationRecord};
     use std::sync::Arc;
 
     #[tokio::test]

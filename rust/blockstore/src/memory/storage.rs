@@ -1,9 +1,7 @@
-use crate::{
-    key::{CompositeKey, KeyWrapper},
-    segment::DataRecord,
-};
+use crate::key::{CompositeKey, KeyWrapper};
 use arrow::array::Int32Array;
 use chroma_error::ChromaError;
+use chroma_types::DataRecord;
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
 use std::{

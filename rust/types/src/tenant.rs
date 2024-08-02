@@ -1,8 +1,8 @@
 use crate::chroma_proto::TenantLastCompactionTime;
 
-pub(crate) struct Tenant {
-    pub(crate) id: String,
-    pub(crate) last_compaction_time: i64,
+pub struct Tenant {
+    pub id: String,
+    pub last_compaction_time: i64,
 }
 
 impl TryFrom<TenantLastCompactionTime> for Tenant {

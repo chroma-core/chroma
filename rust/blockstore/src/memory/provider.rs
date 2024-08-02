@@ -59,11 +59,8 @@ impl MemoryBlockfileProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        execution::data::data_chunk::Chunk,
-        segment::DataRecord,
-        types::{LogRecord, Operation, OperationRecord},
-    };
+    use crate::execution::data::data_chunk::Chunk;
+    use chroma_types::{DataRecord, LogRecord, Operation, OperationRecord};
 
     use super::*;
 

@@ -190,18 +190,14 @@ impl BlockDelta {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::cache::cache::Cache;
-    use crate::cache::config::CacheConfig;
-    use crate::cache::config::UnboundedCacheConfig;
-    use crate::{
-        blockstore::arrow::{
-            block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager,
-        },
-        segment::DataRecord,
-        storage::{local::LocalStorage, Storage},
-        types::MetadataValue,
-    };
+    use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
     use arrow::array::Int32Array;
+    use chroma_cache::{
+        cache::Cache,
+        config::{CacheConfig, UnboundedCacheConfig},
+    };
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{DataRecord, MetadataValue, UpdateMetadata};
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
     use std::collections::HashMap;

@@ -1,13 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-        cache::{
-            cache::Cache,
-            config::{CacheConfig, LruConfig},
-        },
-        storage::{local::LocalStorage, Storage},
+    use crate::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider};
+    use chroma_cache::{
+        cache::Cache,
+        config::{CacheConfig, LruConfig},
     };
+    use chroma_storage::{local::LocalStorage, Storage};
     use rand::Rng;
     use shuttle::{future, thread};
 
