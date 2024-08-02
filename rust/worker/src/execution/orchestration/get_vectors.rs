@@ -226,17 +226,7 @@ impl Component for GetVectorsOrchestrator {
                 }
             };
 
-        let collection_id = match &hnsw_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(GetVectorsError::HnswSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = &hnsw_segment.collection;
 
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,
