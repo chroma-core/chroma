@@ -110,9 +110,8 @@ func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSeg
 func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSegmentRequest) (*coordinatorpb.UpdateSegmentResponse, error) {
 	res := &coordinatorpb.UpdateSegmentResponse{}
 	updateSegment := &model.UpdateSegment{
-		ID:              types.MustParse(req.Id),
-		ResetCollection: req.GetResetCollection(),
-		ResetMetadata:   req.GetResetMetadata(),
+		ID:            types.MustParse(req.Id),
+		ResetMetadata: req.GetResetMetadata(),
 	}
 
 	collection := req.GetCollection()
