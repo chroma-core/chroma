@@ -5,7 +5,6 @@ use super::common::{
     terminate_with_error,
 };
 use crate::distance::DistanceFunction;
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
@@ -40,7 +39,7 @@ use crate::{
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, LogRecord, Segment, VectorQueryResult};
+use chroma_types::{Chunk, Collection, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;

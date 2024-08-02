@@ -3,7 +3,6 @@ use super::common::{
 };
 use crate::{
     execution::{
-        data::data_chunk::Chunk,
         dispatcher::Dispatcher,
         operator::{wrap, TaskResult},
         operators::{
@@ -25,7 +24,7 @@ use crate::{
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, GetVectorsResult, LogRecord, Segment};
+use chroma_types::{Chunk, Collection, GetVectorsResult, LogRecord, Segment};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};

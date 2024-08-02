@@ -17,7 +17,7 @@ use chroma_blockstore::key::KeyWrapper;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    BooleanOperator, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    BooleanOperator, Chunk, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
     WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use chroma_types::{SegmentType, WhereComparison};
@@ -572,7 +572,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
     async fn apply_materialized_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<MaterializedLogRecord<'log_records>>,
+        records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         for record in records.iter() {
             let segment_offset_id = record.0.offset_id;
@@ -1855,15 +1855,12 @@ impl MetadataSegmentReader<'_> {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        execution::data::data_chunk::Chunk,
-        segment::{
-            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-            record_segment::{
-                RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
-            },
-            LogMaterializer, SegmentFlusher, SegmentWriter,
+    use crate::segment::{
+        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+        record_segment::{
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
+        LogMaterializer, SegmentFlusher, SegmentWriter,
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
@@ -1875,7 +1872,7 @@ mod test {
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
+        Chunk, DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
         OperationRecord, UpdateMetadataValue, Where, WhereComparison, WhereDocument,
     };
     use std::{collections::HashMap, str::FromStr};

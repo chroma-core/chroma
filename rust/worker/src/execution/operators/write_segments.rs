@@ -7,7 +7,7 @@ use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
 use crate::segment::SegmentWriter;
 use crate::{
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::{
         distributed_hnsw_segment::DistributedHNSWSegmentWriter, record_segment::RecordSegmentWriter,
     },
@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_types::Chunk;
 use chroma_types::LogRecord;
 use chroma_types::Segment;
 use std::sync::atomic::AtomicU32;

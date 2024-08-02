@@ -1,12 +1,11 @@
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
-use crate::execution::data::data_chunk::Chunk;
 use async_trait::async_trait;
 use chroma_blockstore::arrow::types::ArrowReadableKey;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType};
+use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;

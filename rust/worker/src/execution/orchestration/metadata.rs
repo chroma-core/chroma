@@ -1,4 +1,3 @@
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
 use crate::execution::operators::count_records::{
@@ -21,7 +20,7 @@ use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Segment;
+use chroma_types::{Chunk, Segment};
 use chroma_types::{Collection, LogRecord, Metadata, SegmentType};
 use chroma_types::{Where, WhereDocument};
 use std::time::{SystemTime, UNIX_EPOCH};

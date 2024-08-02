@@ -1,6 +1,5 @@
-use super::super::operator::{wrap, TaskMessage};
+use super::super::operator::wrap;
 use crate::compactor::CompactionJob;
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::flush_s3::FlushS3Input;
@@ -41,6 +40,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_types::Chunk;
 use chroma_types::{LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
 use std::sync::atomic::AtomicU32;

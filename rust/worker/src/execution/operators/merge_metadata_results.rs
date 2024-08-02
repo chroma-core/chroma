@@ -1,5 +1,5 @@
 use crate::{
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
+    Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
 };
 use std::collections::HashSet;
 use thiserror::Error;
@@ -369,7 +369,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 mod test {
     use crate::{
         execution::{
-            data::data_chunk::Chunk,
             operator::Operator,
             operators::merge_metadata_results::{
                 MergeMetadataResultsOperator, MergeMetadataResultsOperatorInput,
@@ -389,7 +388,9 @@ mod test {
     };
     use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue};
+    use chroma_types::{
+        Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
+    };
     use std::{
         collections::HashMap,
         str::FromStr,

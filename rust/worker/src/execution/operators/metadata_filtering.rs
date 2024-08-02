@@ -1,5 +1,5 @@
 use crate::{
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     index::{
         fulltext::types::process_where_document_clause_with_callback,
         metadata::types::{process_where_clause_with_callback, MetadataIndexError},
@@ -14,7 +14,7 @@ use crate::{
 use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
     WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use core::panic;
@@ -734,7 +734,6 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
 mod test {
     use crate::{
         execution::{
-            data::data_chunk::Chunk,
             operator::Operator,
             operators::metadata_filtering::{MetadataFilteringInput, MetadataFilteringOperator},
         },
@@ -754,7 +753,7 @@ mod test {
     use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
+        Chunk, DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
         UpdateMetadataValue, Where, WhereComparison, WhereDocument,
     };
     use std::{collections::HashMap, str::FromStr};

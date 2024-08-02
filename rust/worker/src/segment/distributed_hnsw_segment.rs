@@ -176,7 +176,7 @@ impl DistributedHNSWSegmentWriter {
 impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<super::MaterializedLogRecord<'a>>,
+        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         for (record, _) in records.iter() {
             match record.final_operation {

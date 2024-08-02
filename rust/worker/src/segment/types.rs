@@ -1,10 +1,9 @@
-use crate::execution::data::data_chunk::Chunk;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata, MetadataDelta,
-    MetadataValue, MetadataValueConversionError, Operation, OperationRecord, UpdateMetadata,
-    UpdateMetadataValue,
+    Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
+    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, OperationRecord,
+    UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;

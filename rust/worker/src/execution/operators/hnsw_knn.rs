@@ -1,4 +1,3 @@
-use crate::execution::data::data_chunk::Chunk;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::{LogMaterializer, LogMaterializerError, MaterializedLogRecord};
 use crate::{
@@ -11,7 +10,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Segment;
-use chroma_types::{LogRecord, MaterializedLogOperation};
+use chroma_types::{Chunk, LogRecord, MaterializedLogOperation};
 use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;

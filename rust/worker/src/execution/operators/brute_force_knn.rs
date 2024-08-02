@@ -1,20 +1,17 @@
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
-use crate::segment::MaterializedLogRecord;
 use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{LogRecord, MaterializedLogOperation, Operation, Segment};
+use chroma_types::Chunk;
+use chroma_types::{LogRecord, MaterializedLogOperation, Segment};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::trace;
 use tracing::Instrument;
 use tracing::Span;
 

@@ -1,10 +1,10 @@
 use crate::{
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
 };
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{LogRecord, Operation, Segment};
+use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
 use thiserror::Error;
 use tonic::async_trait;
@@ -198,14 +198,13 @@ mod tests {
     use crate::segment::LogMaterializer;
     use crate::{
         execution::{
-            data::data_chunk::Chunk,
             operator::Operator,
             operators::count_records::{CountRecordsInput, CountRecordsOperator},
         },
         segment::{record_segment::RecordSegmentWriter, SegmentWriter},
     };
     use chroma_blockstore::provider::BlockfileProvider;
-    use chroma_types::{LogRecord, Operation, OperationRecord};
+    use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
     use uuid::Uuid;

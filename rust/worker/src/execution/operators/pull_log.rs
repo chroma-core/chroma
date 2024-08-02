@@ -1,8 +1,8 @@
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use async_trait::async_trait;
+use chroma_types::Chunk;
 use chroma_types::LogRecord;
 use uuid::Uuid;
 

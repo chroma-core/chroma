@@ -1,8 +1,7 @@
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::LogRecord;
+use chroma_types::{Chunk, LogRecord};
 use std::collections::HashMap;
 use thiserror::Error;
 

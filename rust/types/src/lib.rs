@@ -1,6 +1,7 @@
 #[macro_use]
 mod types;
 mod collection;
+mod data_chunk;
 mod data_record;
 mod flush;
 mod metadata;
@@ -13,6 +14,7 @@ mod tenant;
 
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub use collection::*;
+pub use data_chunk::*;
 pub use data_record::*;
 pub use flush::*;
 pub use metadata::*;

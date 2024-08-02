@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub(crate) struct Chunk<T> {
+pub struct Chunk<T> {
     data: Arc<[T]>,
     visibility: Arc<[bool]>,
 }
@@ -76,7 +76,7 @@ impl<T> Chunk<T> {
     }
 }
 
-pub(crate) struct DataChunkIteraror<'a, T> {
+pub struct DataChunkIteraror<'a, T> {
     chunk: &'a Chunk<T>,
     index: usize,
 }
@@ -107,7 +107,7 @@ impl<'a, T> Iterator for DataChunkIteraror<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_types::{LogRecord, Operation, OperationRecord};
+    use crate::{LogRecord, Operation, OperationRecord};
 
     #[test]
     fn test_data_chunk() {
