@@ -4,7 +4,9 @@ members = [
    "rust/blockstore",
    "rust/cache",
    "rust/config",
+   "rust/distance",
    "rust/error",
+   "rust/index",
    "rust/storage",
    "rust/types",
    "rust/worker"
@@ -28,6 +30,8 @@ prost = "0.12"
 prost-types = "0.12"
 num_cpus = "1.16.0"
 flatbuffers = "24.3.25"
+tantivy = "0.21.1"
+criterion = "0.3"
 
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-error = { path = "rust/error" }
@@ -35,11 +39,14 @@ chroma-config = { path = "rust/config" }
 chroma-storage = { path = "rust/storage" }
 chroma-cache = { path = "rust/cache" }
 chroma-types = { path = "rust/types" }
+chroma-index = { path = "rust/index" }
+chroma-distance = { path = "rust/distance" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
 "rand" = "0.8.5"
 rand_xorshift = "0.3.0"
+rayon = "1.8.0"
 tempfile = "3.8.1"
 shuttle = "0.7.1"
 proptest = "1.4.0"

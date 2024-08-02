@@ -229,7 +229,7 @@ impl DistanceFunction {
                 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
                 {
                     if std::arch::is_aarch64_feature_detected!("neon") {
-                        return unsafe { crate::distance::distance_neon::euclidean_distance(a, b) };
+                        return unsafe { crate::distance_neon::euclidean_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -238,7 +238,7 @@ impl DistanceFunction {
                 ))]
                 {
                     if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance::distance_sse::euclidean_distance(a, b) };
+                        return unsafe { crate::distance_sse::euclidean_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -249,7 +249,7 @@ impl DistanceFunction {
                     if std::arch::is_x86_feature_detected!("avx")
                         && std::arch::is_x86_feature_detected!("fma")
                     {
-                        return unsafe { crate::distance::distance_avx::euclidean_distance(a, b) };
+                        return unsafe { crate::distance_avx::euclidean_distance(a, b) };
                     }
                 }
                 let mut sum = 0.0;
@@ -262,7 +262,7 @@ impl DistanceFunction {
                 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
                 {
                     if std::arch::is_aarch64_feature_detected!("neon") {
-                        return unsafe { crate::distance::distance_neon::cosine_distance(a, b) };
+                        return unsafe { crate::distance_neon::cosine_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -271,7 +271,7 @@ impl DistanceFunction {
                 ))]
                 {
                     if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance::distance_sse::cosine_distance(a, b) };
+                        return unsafe { crate::distance_sse::cosine_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -282,7 +282,7 @@ impl DistanceFunction {
                     if std::arch::is_x86_feature_detected!("avx")
                         && std::arch::is_x86_feature_detected!("fma")
                     {
-                        return unsafe { crate::distance::distance_avx::cosine_distance(a, b) };
+                        return unsafe { crate::distance_avx::cosine_distance(a, b) };
                     }
                 }
                 // For cosine we just assume the vectors have been normalized, since that
@@ -297,7 +297,7 @@ impl DistanceFunction {
                 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
                 {
                     if std::arch::is_aarch64_feature_detected!("neon") {
-                        return unsafe { crate::distance::distance_neon::inner_product(a, b) };
+                        return unsafe { crate::distance_neon::inner_product(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -306,7 +306,7 @@ impl DistanceFunction {
                 ))]
                 {
                     if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance::distance_sse::inner_product(a, b) };
+                        return unsafe { crate::distance_sse::inner_product(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -317,7 +317,7 @@ impl DistanceFunction {
                     if std::arch::is_x86_feature_detected!("avx")
                         && std::arch::is_x86_feature_detected!("fma")
                     {
-                        return unsafe { crate::distance::distance_avx::inner_product(a, b) };
+                        return unsafe { crate::distance_avx::inner_product(a, b) };
                     }
                 }
                 let mut sum = 0.0;

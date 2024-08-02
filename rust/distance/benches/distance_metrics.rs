@@ -1,5 +1,5 @@
+use chroma_distance::DistanceFunction;
 use criterion::{criterion_group, criterion_main, Criterion};
-use worker::distance::DistanceFunction;
 
 fn distance_metrics(c: &mut Criterion) {
     c.bench_function("distance_metrics", |b| {

@@ -4,7 +4,6 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
     terminate_with_error,
 };
-use crate::distance::DistanceFunction;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
@@ -24,8 +23,6 @@ use crate::execution::operators::record_segment_prefetch::{
     RecordSegmentPrefetchIoOperator, RecordSegmentPrefetchIoOperatorError,
     RecordSegmentPrefetchIoOutput,
 };
-use crate::index::hnsw_provider::HnswIndexProvider;
-use crate::index::IndexConfig;
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
@@ -38,7 +35,10 @@ use crate::{
 };
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::IndexConfig;
 use chroma_types::{Chunk, Collection, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;

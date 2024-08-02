@@ -1,0 +1,21 @@
+[package]
+name = "chroma-distance"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bench]]
+name = "distance_metrics"
+path = "benches/distance_metrics.rs"
+harness = false
+
+[dependencies]
+thiserror = { workspace = true }
+
+chroma-error = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+rand = { workspace = true }

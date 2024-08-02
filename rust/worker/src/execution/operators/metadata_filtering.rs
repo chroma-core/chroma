@@ -1,18 +1,18 @@
 use crate::{
     execution::operator::Operator,
-    index::{
-        fulltext::types::process_where_document_clause_with_callback,
-        metadata::types::{process_where_clause_with_callback, MetadataIndexError},
-    },
     segment::{
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::{
+    fulltext::types::process_where_document_clause_with_callback,
+    metadata::types::{process_where_clause_with_callback, MetadataIndexError},
+    utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
+};
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
     WhereClauseComparator, WhereDocument, WhereDocumentOperator,

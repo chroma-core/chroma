@@ -26,17 +26,17 @@ struct IndexPtrFFI {
 // - TODO: HNSWIndex should store a ref to the config so it can look up the config values.
 //   deferring this for a config pass
 #[derive(Clone, Debug)]
-pub(crate) struct HnswIndexConfig {
-    pub(crate) max_elements: usize,
-    pub(crate) m: usize,
-    pub(crate) ef_construction: usize,
-    pub(crate) ef_search: usize,
-    pub(crate) random_seed: usize,
-    pub(crate) persist_path: String,
+pub struct HnswIndexConfig {
+    pub max_elements: usize,
+    pub m: usize,
+    pub ef_construction: usize,
+    pub ef_search: usize,
+    pub random_seed: usize,
+    pub persist_path: String,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexFromSegmentError {
+pub enum HnswIndexFromSegmentError {
     #[error("Missing config `{0}`")]
     MissingConfig(String),
     #[error("Invalid metadata value")]
@@ -50,7 +50,7 @@ impl ChromaError for HnswIndexFromSegmentError {
 }
 
 impl HnswIndexConfig {
-    pub(crate) fn from_segment(
+    pub fn from_segment(
         segment: &Segment,
         persist_path: &std::path::Path,
     ) -> Result<HnswIndexConfig, Box<HnswIndexFromSegmentError>> {
@@ -122,10 +122,10 @@ impl HnswIndexConfig {
 /// # Notes
 /// This struct is not thread safe for concurrent reads and writes. Callers should
 /// synchronize access to the index between reads and writes.
-pub(crate) struct HnswIndex {
+pub struct HnswIndex {
     ffi_ptr: *const IndexPtrFFI,
     dimensionality: i32,
-    pub(crate) id: Uuid,
+    pub id: Uuid,
 }
 
 // Make index sync, we should wrap index so that it is sync in the way we expect but for now this implements the trait
@@ -134,7 +134,7 @@ unsafe impl Send for HnswIndex {}
 
 #[derive(Error, Debug)]
 
-pub(crate) enum HnswIndexInitError {
+pub enum HnswIndexInitError {
     #[error("No config provided")]
     NoConfigProvided,
     #[error("Invalid distance function `{0}`")]
@@ -358,16 +358,14 @@ extern "C" {
 
 #[cfg(test)]
 pub mod test {
-    use std::collections::HashMap;
-
     use super::*;
-
-    use crate::distance::DistanceFunction;
-    use crate::index::utils;
+    use crate::utils;
+    use chroma_distance::DistanceFunction;
     use rand::seq::IteratorRandom;
     use rand::Rng;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
+    use std::collections::HashMap;
     use tempfile::tempdir;
 
     #[test]

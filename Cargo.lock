@@ -1058,8 +1058,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-distance"
+version = "0.1.0"
+dependencies = [
+ "chroma-error",
+ "criterion",
+ "rand",
+ "thiserror",
+]
+
+[[package]]
 name = "chroma-error"
 version = "0.1.0"
+
+[[package]]
+name = "chroma-index"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "cc",
+ "chroma-blockstore",
+ "chroma-cache",
+ "chroma-config",
+ "chroma-distance",
+ "chroma-error",
+ "chroma-storage",
+ "chroma-types",
+ "futures",
+ "parking_lot",
+ "rand",
+ "rayon",
+ "roaring",
+ "serde",
+ "tantivy",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "chroma-storage"
@@ -5275,11 +5313,12 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
- "cc",
  "chroma-blockstore",
  "chroma-cache",
  "chroma-config",
+ "chroma-distance",
  "chroma-error",
+ "chroma-index",
  "chroma-storage",
  "chroma-types",
  "criterion",
@@ -5300,7 +5339,6 @@ dependencies = [
  "rand",
  "rand_xorshift",
  "random-port",
- "rayon",
  "regex",
  "roaring",
  "schemars",

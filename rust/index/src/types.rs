@@ -1,17 +1,17 @@
-use crate::distance::{DistanceFunction, DistanceFunctionError};
+use chroma_distance::{DistanceFunction, DistanceFunctionError};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{MetadataValue, Segment};
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-pub(crate) struct IndexConfig {
-    pub(crate) dimensionality: i32,
-    pub(crate) distance_function: DistanceFunction,
+pub struct IndexConfig {
+    pub dimensionality: i32,
+    pub distance_function: DistanceFunction,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum IndexConfigFromSegmentError {
+pub enum IndexConfigFromSegmentError {
     #[error("Invalid distance function")]
     InvalidDistanceFunction(#[from] DistanceFunctionError),
 }
@@ -25,7 +25,7 @@ impl ChromaError for IndexConfigFromSegmentError {
 }
 
 impl IndexConfig {
-    pub(crate) fn from_segment(
+    pub fn from_segment(
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<Self, Box<IndexConfigFromSegmentError>> {
@@ -57,7 +57,7 @@ impl IndexConfig {
 /// - `delete` - Delete a vector from the index.
 /// - `query` - Query the index for the K nearest neighbors of a given vector.
 /// - `resize` - Resize the index to a new capacity.
-pub(crate) trait Index<C> {
+pub trait Index<C> {
     fn init(
         index_config: &IndexConfig,
         custom_config: Option<&C>,
@@ -86,7 +86,7 @@ pub(crate) trait Index<C> {
 /// # Notes
 /// This defines a rudimentary interface for saving and loading indices.
 /// TODO: Right now load() takes IndexConfig because we don't implement save/load of the config.
-pub(crate) trait PersistentIndex<C>: Index<C> {
+pub trait PersistentIndex<C>: Index<C> {
     fn save(&self) -> Result<(), Box<dyn ChromaError>>;
     fn load(path: &str, index_config: &IndexConfig, id: Uuid) -> Result<Self, Box<dyn ChromaError>>
     where

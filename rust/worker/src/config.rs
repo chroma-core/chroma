@@ -101,7 +101,7 @@ pub(crate) struct QueryServiceConfig {
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
-    pub(crate) hnsw_provider: crate::index::config::HnswProviderConfig,
+    pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
 
 #[derive(Deserialize)]
@@ -128,7 +128,7 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
-    pub(crate) hnsw_provider: crate::index::config::HnswProviderConfig,
+    pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
 
 #[cfg(test)]

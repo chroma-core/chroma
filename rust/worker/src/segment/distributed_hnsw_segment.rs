@@ -1,15 +1,15 @@
 use super::record_segment::ApplyMaterializedLogError;
 use super::{SegmentFlusher, SegmentWriter};
-use crate::index::hnsw_provider::{
+use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError,
 };
-use crate::index::{
+use chroma_index::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use async_trait::async_trait;
-use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{MaterializedLogOperation, Segment};
 use parking_lot::RwLock;
 use std::collections::HashMap;

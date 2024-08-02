@@ -1,9 +1,7 @@
 mod assignment;
 mod compactor;
 mod config;
-pub mod distance;
 mod execution;
-mod index;
 mod log;
 mod memberlist;
 mod segment;
