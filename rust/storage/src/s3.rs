@@ -168,7 +168,7 @@ impl S3Storage {
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
-        self.multipart_upload(key, bytes.len(), move |range| {
+        self.put_object(key, bytes.len(), move |range| {
             let bytes = bytes.clone();
             async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
         })
@@ -183,7 +183,7 @@ impl S3Storage {
 
         let path = path.to_string();
 
-        self.multipart_upload(key, file_size as usize, move |range| {
+        self.put_object(key, file_size as usize, move |range| {
             let path = path.clone();
 
             async move {
@@ -198,6 +198,44 @@ impl S3Storage {
             .boxed()
         })
         .await
+    }
+
+    async fn put_object(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        create_bytestream_fn: impl Fn(
+            Range<usize>,
+        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+    ) -> Result<(), S3PutError> {
+        if total_size_bytes < self.upload_part_size_bytes {
+            return self
+                .oneshot_upload(key, total_size_bytes, create_bytestream_fn)
+                .await;
+        }
+
+        self.multipart_upload(key, total_size_bytes, create_bytestream_fn)
+            .await
+    }
+
+    async fn oneshot_upload(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        create_bytestream_fn: impl Fn(
+            Range<usize>,
+        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+    ) -> Result<(), S3PutError> {
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .body(create_bytestream_fn(0..total_size_bytes).await?)
+            .send()
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+
+        Ok(())
     }
 
     async fn multipart_upload(
