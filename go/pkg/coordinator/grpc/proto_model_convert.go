@@ -173,10 +173,6 @@ func convertSegmentToProto(segment *model.Segment) *coordinatorpb.Segment {
 		FilePaths:  filePaths,
 	}
 
-	collectionID := segment.CollectionID
-	collectionIDString := collectionID.String()
-	segmentpb.Collection = collectionIDString
-
 	if segment.Metadata == nil {
 		return segmentpb
 	}
