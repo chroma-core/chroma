@@ -75,10 +75,7 @@ message GetSegmentsResponse {
 
 message UpdateSegmentRequest {
   string id = 1;
-  oneof collection_update {
-    string collection = 4;
-    bool reset_collection = 5;
-  }
+  string collection = 4;
   oneof metadata_update {
     UpdateMetadata metadata = 6;
     bool reset_metadata = 7;
