@@ -1,4 +1,3 @@
-use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
@@ -18,13 +17,13 @@ use crate::execution::orchestration::common::terminate_with_error;
 use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, ComponentHandle, Handler};
-use crate::types::{Collection, LogRecord, Metadata, SegmentType};
-use crate::types::{Where, WhereDocument};
-use crate::{
-    blockstore::provider::BlockfileProvider, log::log::Log, sysdb::sysdb::SysDb, system::System,
-    types::Segment,
-};
+use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Segment;
+use chroma_types::{Collection, LogRecord, Metadata, SegmentType};
+use chroma_types::{Where, WhereDocument};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;

@@ -4,9 +4,7 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
     terminate_with_error,
 };
-use crate::blockstore::provider::BlockfileProvider;
 use crate::distance::DistanceFunction;
-use crate::errors::{ChromaError, ErrorCodes};
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
@@ -35,12 +33,14 @@ use crate::segment::distributed_hnsw_segment::{
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
-use crate::types::{Collection, LogRecord, Segment, VectorQueryResult};
 use crate::{
     log::log::Log,
     system::{Component, Handler, ReceiverForMessage},
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Collection, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;

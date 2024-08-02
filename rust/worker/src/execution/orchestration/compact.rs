@@ -1,7 +1,5 @@
 use super::super::operator::{wrap, TaskMessage};
-use crate::blockstore::provider::BlockfileProvider;
 use crate::compactor::CompactionJob;
-use crate::errors::ChromaError;
 use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
@@ -39,11 +37,11 @@ use crate::system::ComponentHandle;
 use crate::system::Handler;
 use crate::system::ReceiverForMessage;
 use crate::system::System;
-use crate::types::LogRecord;
-use crate::types::Segment;
-use crate::types::SegmentFlushInfo;
-use crate::types::SegmentType;
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::ChromaError;
+use chroma_error::ErrorCodes;
+use chroma_types::{LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -131,8 +129,8 @@ enum GetSegmentWritersError {
 }
 
 impl ChromaError for GetSegmentWritersError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        crate::errors::ErrorCodes::Internal
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
@@ -143,8 +141,8 @@ enum CompactionError {
 }
 
 impl ChromaError for CompactionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        crate::errors::ErrorCodes::Internal
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
