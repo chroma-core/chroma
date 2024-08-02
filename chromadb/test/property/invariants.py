@@ -344,10 +344,14 @@ def log_size_below_max(
         # We purge per-collection as the sync_threshold is a per-collection setting
         sync_threshold_sum = sum(
             collection.metadata.get("hnsw:sync_threshold", 1000)
+            if collection.metadata is not None
+            else 1000
             for collection in collections
         )
         batch_size_sum = sum(
-            collection.metadata.get("hnsw:batch_size", 1000)
+            collection.metadata.get("hnsw:batch_size", 100)
+            if collection.metadata is not None
+            else 100
             for collection in collections
         )
 
