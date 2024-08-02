@@ -16,6 +16,11 @@ name = "distance_metrics"
 path = "src/benches/distance_metrics.rs"
 harness = false
 
+[[bench]]
+name = "fts"
+path = "src/index/fulltext/benches/write.rs"
+harness = false
+
 [dependencies]
 tonic = "0.10"
 prost = "0.12"
@@ -67,6 +72,8 @@ criterion = "0.3"
 random-port = "0.1.1"
 serial_test = "3.1.1"
 rand_xorshift = "0.3.0"
+reqwest = {version = "0.12.5", features = ["blocking"] }
+flate2 = "1.0.30"
 
 [build-dependencies]
 tonic-build = "0.10"
