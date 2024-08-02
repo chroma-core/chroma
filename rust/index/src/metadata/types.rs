@@ -1,4 +1,4 @@
-use crate::index::fulltext::types::FullTextIndexError;
+use crate::fulltext::types::FullTextIndexError;
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use chroma_blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -13,7 +13,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 #[derive(Debug, Error)]
-pub(crate) enum MetadataIndexError {
+pub enum MetadataIndexError {
     #[error("Invalid key type")]
     InvalidKeyType,
     #[error("Blockfile error: {0}")]
@@ -40,7 +40,7 @@ impl ChromaError for MetadataIndexError {
 //  into MetadataIndexWriter store and long term we probably want to. But for now
 //  this gets the job done.
 #[derive(Clone)]
-pub(crate) enum MetadataIndexWriter<'me> {
+pub enum MetadataIndexWriter<'me> {
     // TODO(Sanket): Move off this tokio::sync::mutex and use
     // a lightweight lock instead. This is needed currently to
     // keep holding the lock across an await point.
@@ -75,7 +75,7 @@ pub(crate) enum MetadataIndexWriter<'me> {
     ),
 }
 
-pub(crate) fn process_where_clause_with_callback<
+pub fn process_where_clause_with_callback<
     F: Fn(&str, &KeyWrapper, MetadataType, WhereClauseComparator) -> RoaringBitmap,
 >(
     where_clause: &Where,
@@ -723,7 +723,7 @@ impl<'me> MetadataIndexWriter<'me> {
     }
 }
 
-pub(crate) enum MetadataIndexFlusher {
+pub enum MetadataIndexFlusher {
     StringMetadataIndexFlusher(BlockfileFlusher),
     U32MetadataIndexFlusher(BlockfileFlusher),
     F32MetadataIndexFlusher(BlockfileFlusher),
@@ -771,7 +771,7 @@ impl MetadataIndexFlusher {
 }
 
 #[derive(Clone)]
-pub(crate) enum MetadataIndexReader<'me> {
+pub enum MetadataIndexReader<'me> {
     StringMetadataIndexReader(BlockfileReader<'me, &'me str, RoaringBitmap>),
     U32MetadataIndexReader(BlockfileReader<'me, u32, RoaringBitmap>),
     F32MetadataIndexReader(BlockfileReader<'me, f32, RoaringBitmap>),

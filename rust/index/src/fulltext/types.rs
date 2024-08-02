@@ -1,5 +1,5 @@
-use crate::index::fulltext::tokenizer::ChromaTokenizer;
-use crate::index::metadata::types::MetadataIndexError;
+use crate::fulltext::tokenizer::ChromaTokenizer;
+use crate::metadata::types::MetadataIndexError;
 use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use arrow::array::Int32Array;
 use chroma_blockstore::positional_posting_list_value::{
@@ -35,7 +35,7 @@ impl ChromaError for FullTextIndexError {
 }
 
 #[derive(Debug)]
-pub(crate) struct UncommittedPostings {
+pub struct UncommittedPostings {
     // token -> {doc -> [start positions]}
     positional_postings: HashMap<String, PositionalPostingListBuilder>,
     // (token, doc) pairs that should be deleted from storage.
@@ -43,7 +43,7 @@ pub(crate) struct UncommittedPostings {
 }
 
 impl UncommittedPostings {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             positional_postings: HashMap::new(),
             deleted_token_doc_pairs: HashSet::new(),
@@ -52,7 +52,7 @@ impl UncommittedPostings {
 }
 
 #[derive(Clone)]
-pub(crate) struct FullTextIndexWriter<'me> {
+pub struct FullTextIndexWriter<'me> {
     full_text_index_reader: Option<FullTextIndexReader<'me>>,
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
@@ -365,7 +365,7 @@ impl<'me> FullTextIndexWriter<'me> {
     }
 }
 
-pub(crate) struct FullTextIndexFlusher {
+pub struct FullTextIndexFlusher {
     posting_lists_blockfile_flusher: BlockfileFlusher,
     frequencies_blockfile_flusher: BlockfileFlusher,
 }
@@ -405,7 +405,7 @@ impl FullTextIndexFlusher {
 }
 
 #[derive(Clone)]
-pub(crate) struct FullTextIndexReader<'me> {
+pub struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, Int32Array>,
     frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
     tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
@@ -579,7 +579,7 @@ impl<'me> FullTextIndexReader<'me> {
     }
 }
 
-pub(crate) fn process_where_document_clause_with_callback<
+pub fn process_where_document_clause_with_callback<
     F: Fn(&str, WhereDocumentOperator) -> Vec<i32>,
 >(
     where_document_clause: &WhereDocument,
@@ -632,7 +632,7 @@ pub(crate) fn process_where_document_clause_with_callback<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
+    use crate::fulltext::tokenizer::TantivyChromaTokenizer;
     use chroma_blockstore::provider::BlockfileProvider;
     use tantivy::tokenizer::NgramTokenizer;
 

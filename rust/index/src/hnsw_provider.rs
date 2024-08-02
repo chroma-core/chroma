@@ -3,7 +3,7 @@ use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use crate::index::types::PersistentIndex;
+use crate::types::PersistentIndex;
 use async_trait::async_trait;
 use chroma_cache::cache;
 use chroma_cache::cache::Cache;
@@ -35,9 +35,9 @@ const FILES: [&'static str; 4] = [
 ];
 
 #[derive(Clone)]
-pub(crate) struct HnswIndexProvider {
+pub struct HnswIndexProvider {
     cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
-    pub(crate) temporary_storage_path: PathBuf,
+    pub temporary_storage_path: PathBuf,
     storage: Storage,
 }
 
@@ -67,7 +67,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
 }
 
 impl HnswIndexProvider {
-    pub(crate) fn new(
+    pub fn new(
         storage: Storage,
         storage_path: PathBuf,
         cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
@@ -79,7 +79,7 @@ impl HnswIndexProvider {
         }
     }
 
-    pub(crate) fn get(&self, id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
+    pub fn get(&self, id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
         match self.cache.get(id) {
             Some(index) => Some(index.clone()),
             None => None,
@@ -90,7 +90,7 @@ impl HnswIndexProvider {
         format!("hnsw/{}/{}", id, file)
     }
 
-    pub(crate) async fn fork(
+    pub async fn fork(
         &self,
         source_id: &Uuid,
         segment: &Segment,
@@ -231,7 +231,7 @@ impl HnswIndexProvider {
         }
     }
 
-    pub(crate) async fn open(
+    pub async fn open(
         &self,
         id: &Uuid,
         segment: &Segment,
@@ -293,7 +293,7 @@ impl HnswIndexProvider {
     // Cases
     // A query comes in and the index is in the cache -> we can query the index based on segment files id (Same as compactor case 3 where we have the index)
     // A query comes in and the index is not in the cache -> we need to load the index from s3 based on the segment files id
-    pub(crate) fn create(
+    pub fn create(
         &self,
         // TODO: This should not take Segment. The index layer should not know about the segment concept
         segment: &Segment,
@@ -334,7 +334,7 @@ impl HnswIndexProvider {
         Ok(index)
     }
 
-    pub(crate) fn commit(&self, index: Arc<RwLock<HnswIndex>>) -> Result<(), Box<dyn ChromaError>> {
+    pub fn commit(&self, index: Arc<RwLock<HnswIndex>>) -> Result<(), Box<dyn ChromaError>> {
         match index.write().save() {
             Ok(_) => {}
             Err(e) => {
@@ -345,7 +345,7 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    pub(crate) async fn flush(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
+    pub async fn flush(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
@@ -375,7 +375,7 @@ impl HnswIndexProvider {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexProviderOpenError {
+pub enum HnswIndexProviderOpenError {
     #[error("Index configuration error")]
     IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
@@ -398,7 +398,7 @@ impl ChromaError for HnswIndexProviderOpenError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexProviderForkError {
+pub enum HnswIndexProviderForkError {
     #[error("Index configuration error")]
     IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
@@ -424,7 +424,7 @@ impl ChromaError for HnswIndexProviderForkError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexProviderCreateError {
+pub enum HnswIndexProviderCreateError {
     #[error("Index configuration error")]
     IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
@@ -447,7 +447,7 @@ impl ChromaError for HnswIndexProviderCreateError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexProviderCommitError {
+pub enum HnswIndexProviderCommitError {
     #[error("No index found for id: {0}")]
     NoIndexFound(Uuid),
     #[error("HNSW Save Error")]
@@ -464,7 +464,7 @@ impl ChromaError for HnswIndexProviderCommitError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexProviderFlushError {
+pub enum HnswIndexProviderFlushError {
     #[error("No index found for id: {0}")]
     NoIndexFound(Uuid),
     #[error("HNSW Save Error")]
@@ -484,7 +484,7 @@ impl ChromaError for HnswIndexProviderFlushError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HnswIndexProviderFileError {
+pub enum HnswIndexProviderFileError {
     #[error("IO Error")]
     IOError(#[from] std::io::Error),
     #[error("Storage Get Error")]

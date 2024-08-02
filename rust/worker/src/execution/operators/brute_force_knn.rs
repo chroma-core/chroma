@@ -1,10 +1,11 @@
+use crate::execution::operator::Operator;
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
-use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Chunk;
 use chroma_types::{LogRecord, MaterializedLogOperation, Segment};

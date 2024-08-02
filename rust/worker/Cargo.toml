@@ -11,18 +11,12 @@ path = "src/bin/query_service.rs"
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
 
-[[bench]]
-name = "distance_metrics"
-path = "src/benches/distance_metrics.rs"
-harness = false
-
 [dependencies]
 rand = "0.8.5"
 murmur3 = "0.5.2"
 schemars = "0.8.16"
 kube = { version = "0.87.1", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
-tantivy = "0.21.1"
 tracing-bunyan-formatter = "0.3.3"
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -51,6 +45,7 @@ prost = { workspace = true }
 prost-types = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
+tantivy = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-error = { workspace = true }
@@ -58,10 +53,10 @@ chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-types = { workspace = true }
 chroma-cache = { workspace = true }
+chroma-index = { workspace = true }
+chroma-distance = { workspace = true }
 
 [dev-dependencies]
-rayon = "1.8.0"
-criterion = "0.3"
 random-port = "0.1.1"
 serial_test = "3.1.1"
 
@@ -71,6 +66,4 @@ tempfile = { workspace = true }
 shuttle = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
-
-[build-dependencies]
-cc = "1.0"
+criterion = { workspace = true }

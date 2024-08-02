@@ -4,11 +4,11 @@ use crate::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    utils::merge_sorted_vecs_conjunction,
 };
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::utils::merge_sorted_vecs_conjunction;
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
 };
@@ -391,11 +391,7 @@ mod test {
     use chroma_types::{
         Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
     };
-    use std::{
-        collections::HashMap,
-        str::FromStr,
-        sync::{atomic::AtomicU32, Arc},
-    };
+    use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
     #[tokio::test]

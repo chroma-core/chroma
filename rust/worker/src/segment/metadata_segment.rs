@@ -1,23 +1,20 @@
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
-use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
-use crate::index::fulltext::types::{
-    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher,
-    FullTextIndexReader, FullTextIndexWriter,
-};
-use crate::index::metadata::types::{
-    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher,
-    MetadataIndexReader, MetadataIndexWriter,
-};
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use arrow::array::Int32Array;
 use async_trait::async_trait;
-use chroma_blockstore::key::KeyWrapper;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::fulltext::tokenizer::TantivyChromaTokenizer;
+use chroma_index::fulltext::types::{
+    FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader, FullTextIndexWriter,
+};
+use chroma_index::metadata::types::{
+    MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
+};
+use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use chroma_types::{
-    BooleanOperator, Chunk, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    BooleanOperator, Chunk, MaterializedLogOperation, MetadataValue, Segment, Where,
     WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use chroma_types::{SegmentType, WhereComparison};

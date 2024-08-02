@@ -4,7 +4,6 @@ use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
 };
-use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{ComponentHandle, System};
@@ -13,6 +12,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -23,7 +23,7 @@ use chroma_types::{MetadataValue, ScalarEncoding};
 use std::collections::HashMap;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{trace, trace_span, Instrument};
+use tracing::{trace_span, Instrument};
 use uuid::Uuid;
 
 #[derive(Clone)]
