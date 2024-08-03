@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::Storage;
+use chroma_storage::{network_admission_control::NetworkAdmissionControl, Storage};
 use core::panic;
 use futures::StreamExt;
 use thiserror::Error;
@@ -36,9 +36,15 @@ impl ArrowBlockfileProvider {
         max_block_size_bytes: usize,
         block_cache: Cache<Uuid, Block>,
         sparse_index_cache: Cache<Uuid, SparseIndex>,
+        network_admission_control: NetworkAdmissionControl,
     ) -> Self {
         Self {
-            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
+            block_manager: BlockManager::new(
+                storage.clone(),
+                max_block_size_bytes,
+                block_cache,
+                network_admission_control,
+            ),
             sparse_index_manager: SparseIndexManager::new(storage, sparse_index_cache),
         }
     }
@@ -97,11 +103,21 @@ impl ArrowBlockfileProvider {
 }
 
 #[async_trait]
-impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
+impl
+    Configurable<(
+        ArrowBlockfileProviderConfig,
+        Storage,
+        NetworkAdmissionControl,
+    )> for ArrowBlockfileProvider
+{
     async fn try_from_config(
-        config: &(ArrowBlockfileProviderConfig, Storage),
+        config: &(
+            ArrowBlockfileProviderConfig,
+            Storage,
+            NetworkAdmissionControl,
+        ),
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let (blockfile_config, storage) = config;
+        let (blockfile_config, storage, nac) = config;
         let block_cache = match chroma_cache::from_config(
             &blockfile_config.block_manager_config.block_cache_config,
         )
@@ -129,6 +145,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
             blockfile_config.block_manager_config.max_block_size_bytes,
             block_cache,
             sparse_index_cache,
+            nac.clone(),
         ))
     }
 }
@@ -144,6 +161,7 @@ pub(super) struct BlockManager {
     block_cache: Cache<Uuid, Block>,
     storage: Storage,
     max_block_size_bytes: usize,
+    network_admission_control: NetworkAdmissionControl,
 }
 
 impl BlockManager {
@@ -151,11 +169,13 @@ impl BlockManager {
         storage: Storage,
         max_block_size_bytes: usize,
         block_cache: Cache<Uuid, Block>,
+        network_admission_control: NetworkAdmissionControl,
     ) -> Self {
         Self {
             block_cache,
             storage,
             max_block_size_bytes,
+            network_admission_control,
         }
     }
 

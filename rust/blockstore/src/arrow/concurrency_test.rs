@@ -5,7 +5,9 @@ mod tests {
         cache::Cache,
         config::{CacheConfig, LruConfig},
     };
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::{
+        local::LocalStorage, network_admission_control::NetworkAdmissionControl, Storage,
+    };
     use rand::Rng;
     use shuttle::{future, thread};
 
@@ -23,11 +25,13 @@ mod tests {
                 let sparse_index_cache = Cache::new(&CacheConfig::Lru(LruConfig {
                     capacity: SPARSE_INDEX_CACHE_CAPACITY,
                 }));
+                let network_admission_control = NetworkAdmissionControl::new(storage.clone());
                 let blockfile_provider = ArrowBlockfileProvider::new(
                     storage,
                     TEST_MAX_BLOCK_SIZE_BYTES,
                     block_cache,
                     sparse_index_cache,
+                    network_admission_control,
                 );
                 let writer = blockfile_provider.create::<&str, u32>().unwrap();
                 let id = writer.id();
