@@ -11,6 +11,7 @@ export const items = [
         { href: '/integrations/jinaai', children: 'JinaAI' },
         { href: '/integrations/roboflow', children: 'Roboflow' },
         { href: '/integrations/ollama', children: 'Ollama Embeddings' },
+        { href: '/integrations/spacy', children: 'Spacy Embeddings' }
       ]
     },
     {
