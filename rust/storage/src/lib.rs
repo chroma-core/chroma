@@ -6,6 +6,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 
 pub mod config;
 pub mod local;
+pub mod network_admission_control;
 pub mod s3;
 pub mod stream;
 use futures::Stream;
@@ -17,7 +18,7 @@ pub enum Storage {
     Local(local::LocalStorage),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum GetError {
     #[error("No such key: {0}")]
     NoSuchKey(String),
