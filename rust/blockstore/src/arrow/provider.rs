@@ -266,13 +266,27 @@ impl BlockManager {
                             }
                         },
                         Err(e) => {
-                            tracing::error!("Error reading block from storage: {}", e);
-                            None
+                            tracing::error!("Error converting bytes to Block {:?}", e);
+                            return Err(Box::new(
+                                NetworkAdmissionControlError::DeserializationError,
+                            ));
                         }
                     }
+                    Ok(())
+                };
+                match self.network_admission_control.get(key, cb).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        // TODO: Return error here.
+                        tracing::error!(
+                            "Error getting block from the network admission control {}",
+                            e
+                        );
+                        return None;
+                    }
                 }
-                .instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold"))
-                .await
+                // Cache must be populated now.
+                self.block_cache.get(id)
             }
         }
     }

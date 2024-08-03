@@ -157,7 +157,8 @@ impl HnswIndexProvider {
         source_id: &Uuid,
         index_storage_path: &Path,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        // Fetch the files from storage and put them in the index storage path
+        // Fetch the files from storage and put them in the index storage path.
+        // TODO: Fetch multiple chunks in parallel from S3.
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
@@ -173,62 +174,40 @@ impl HnswIndexProvider {
             let file_path = index_storage_path.join(file);
             // For now, we never evict from the cache, so if the index is being loaded, the file does not exist
             let file_handle = tokio::fs::File::create(&file_path).await;
-            let file_handle = match file_handle {
+            let mut file_handle = match file_handle {
                 Ok(file) => file,
                 Err(e) => {
                     tracing::error!("Failed to create file: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
-            let total_bytes_written = self
-                .copy_stream_to_local_file(reader, file_handle)
-                .instrument(tracing::info_span!(parent: Span::current(), "hnsw provider file read", file = file))
-                .await?;
-            tracing::info!(
-                "Copied {} bytes from storage key: {} to file: {}",
-                total_bytes_written,
-                key,
-                file_path.to_str().unwrap()
-            );
-            // bytes is an AsyncBufRead, so we fil and consume it to a file
+            let cb = move |buf: Vec<u8>| async move {
+                let res = file_handle.write_all(&buf).await;
+                match res {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Failed to copy file: {}", e);
+                        return Err(Box::new(NetworkAdmissionControlError::IOError));
+                    }
+                }
+                match file_handle.flush().await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Failed to flush file: {}", e);
+                        return Err(Box::new(NetworkAdmissionControlError::IOError));
+                    }
+                }
+                Ok(())
+            };
+            match self.network_admission_control.get(key, cb).await {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Box::new(HnswIndexProviderFileError::NACError(*e)));
+                }
+            }
             tracing::info!("Loaded hnsw index file: {}", file);
         }
         Ok(())
-    }
-
-    async fn copy_stream_to_local_file(
-        &self,
-        stream: Box<dyn stream::Stream<Item = ByteStreamItem> + Unpin + Send>,
-        file_handle: tokio::fs::File,
-    ) -> Result<u64, Box<HnswIndexProviderFileError>> {
-        let mut total_bytes_written = 0;
-        let mut file_handle = file_handle;
-        let mut stream = stream;
-        while let Some(res) = stream.next().await {
-            let chunk = match res {
-                Ok(chunk) => chunk,
-                Err(e) => {
-                    return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
-                }
-            };
-
-            let res = file_handle.write_all(&chunk).await;
-            match res {
-                Ok(_) => {
-                    total_bytes_written += chunk.len() as u64;
-                }
-                Err(e) => {
-                    tracing::error!("Failed to copy file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            }
-        }
-        match file_handle.flush().await {
-            Ok(_) => Ok(total_bytes_written),
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-            }
-        }
     }
 
     pub async fn open(
@@ -487,10 +466,8 @@ impl ChromaError for HnswIndexProviderFlushError {
 pub enum HnswIndexProviderFileError {
     #[error("IO Error")]
     IOError(#[from] std::io::Error),
-    #[error("Storage Get Error")]
-    StorageGetError(#[from] chroma_storage::GetError),
-    #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    #[error("NAC Error")]
+    NACError(#[from] NetworkAdmissionControlError),
 }
 
 #[cfg(test)]
