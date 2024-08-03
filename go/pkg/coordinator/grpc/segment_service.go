@@ -53,9 +53,9 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 		return res, nil
 	}
 
-	parsedCollectionID, err := types.ToUniqueID(collectionID)
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
 	if err != nil {
-		log.Error("collection id format error", zap.String("collectionpd.id", *collectionID))
+		log.Error("collection id format error", zap.String("collectionpd.id", collectionID))
 		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
 		return res, nil
 	}
