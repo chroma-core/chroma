@@ -5,6 +5,7 @@ use crate::config::Configurable;
 use crate::errors::{ChromaError, ErrorCodes};
 pub(crate) mod config;
 pub(crate) mod local;
+pub(crate) mod network_admission_control;
 pub(crate) mod s3;
 pub(crate) mod stream;
 use futures::Stream;
@@ -16,7 +17,7 @@ pub(crate) enum Storage {
     Local(local::LocalStorage),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum GetError {
     #[error("No such key: {0}")]
     NoSuchKey(String),

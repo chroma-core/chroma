@@ -195,6 +195,7 @@ mod test {
     use crate::cache::cache::Cache;
     use crate::cache::config::CacheConfig;
     use crate::cache::config::UnboundedCacheConfig;
+    use crate::storage::network_admission_control::NetworkAdmissionControl;
     use crate::{
         blockstore::arrow::{
             block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager,
@@ -229,7 +230,13 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            network_admission_control,
+        );
         let delta = block_manager.create::<&str, &Int32Array>();
 
         let n = 2000;
@@ -272,7 +279,13 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            network_admission_control,
+        );
         let delta = block_manager.create::<&str, &str>();
         let delta_id = delta.id.clone();
 
@@ -329,7 +342,13 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            network_admission_control,
+        );
         let delta = block_manager.create::<f32, &str>();
 
         let n = 2000;
@@ -366,7 +385,13 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            network_admission_control,
+        );
         let delta = block_manager.create::<&str, &RoaringBitmap>();
 
         let n = 2000;
@@ -401,7 +426,13 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            network_admission_control,
+        );
         let ids = vec!["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = vec![
             vec![1.0, 2.0, 3.0],
@@ -464,7 +495,13 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            network_admission_control,
+        );
         let delta = block_manager.create::<u32, &str>();
 
         let n = 2000;

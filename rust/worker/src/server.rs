@@ -14,6 +14,7 @@ use crate::execution::orchestration::{
 };
 use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
+use crate::storage::network_admission_control::NetworkAdmissionControl;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
@@ -67,14 +68,20 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             }
         };
 
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+
         let blockfile_provider = BlockfileProvider::try_from_config(&(
             config.blockfile_provider.clone(),
             storage.clone(),
+            network_admission_control.clone(),
         ))
         .await?;
-        let hnsw_index_provider =
-            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
-                .await?;
+        let hnsw_index_provider = HnswIndexProvider::try_from_config(&(
+            config.hnsw_provider.clone(),
+            storage.clone(),
+            network_admission_control,
+        ))
+        .await?;
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
@@ -583,6 +590,7 @@ mod tests {
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let hnsw_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let port = random_port::PortPicker::new().pick().unwrap();
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
@@ -592,12 +600,14 @@ mod tests {
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
                 hnsw_index_cache,
+                network_admission_control.clone(),
             ),
             blockfile_provider: BlockfileProvider::new_arrow(
                 storage,
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                network_admission_control,
             ),
             port,
         };

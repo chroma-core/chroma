@@ -14,7 +14,8 @@ use crate::cache::cache::Cache;
 use crate::config::Configurable;
 use crate::errors::ChromaError;
 use crate::storage::config::StorageConfig;
-use crate::storage::Storage;
+use crate::storage::network_admission_control::NetworkAdmissionControl;
+use crate::storage::{network_admission_control, Storage};
 use async_trait::async_trait;
 use core::fmt::{self, Debug};
 use std::fmt::Formatter;
@@ -50,12 +51,14 @@ impl BlockfileProvider {
         max_block_size_bytes: usize,
         block_cache: Cache<Uuid, Block>,
         sparse_index_cache: Cache<Uuid, SparseIndex>,
+        network_admission_control: NetworkAdmissionControl,
     ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
             storage,
             max_block_size_bytes,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         ))
     }
 
@@ -100,17 +103,20 @@ impl BlockfileProvider {
 // =================== Configurable ===================
 
 #[async_trait]
-impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
+impl Configurable<(BlockfileProviderConfig, Storage, NetworkAdmissionControl)>
+    for BlockfileProvider
+{
     async fn try_from_config(
-        config: &(BlockfileProviderConfig, Storage),
+        config: &(BlockfileProviderConfig, Storage, NetworkAdmissionControl),
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let (blockfile_config, storage) = config;
+        let (blockfile_config, storage, nac) = config;
         match blockfile_config {
             BlockfileProviderConfig::Arrow(blockfile_config) => {
                 Ok(BlockfileProvider::ArrowBlockfileProvider(
                     ArrowBlockfileProvider::try_from_config(&(
                         blockfile_config.clone(),
                         storage.clone(),
+                        nac.clone(),
                     ))
                     .await?,
                 ))
