@@ -94,7 +94,7 @@ impl TestSysDb {
         if scope.is_some() && scope.unwrap() != segment.scope {
             return false;
         }
-        if collection && (collection != segment.collection) {
+        if collection != segment.collection {
             return false;
         }
         true
