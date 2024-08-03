@@ -13,6 +13,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_storage::network_admission_control::NetworkAdmissionControl;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -67,14 +68,20 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             }
         };
 
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
+
         let blockfile_provider = BlockfileProvider::try_from_config(&(
             config.blockfile_provider.clone(),
             storage.clone(),
+            network_admission_control.clone(),
         ))
         .await?;
-        let hnsw_index_provider =
-            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
-                .await?;
+        let hnsw_index_provider = HnswIndexProvider::try_from_config(&(
+            config.hnsw_provider.clone(),
+            storage.clone(),
+            network_admission_control,
+        ))
+        .await?;
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
@@ -613,6 +620,7 @@ mod tests {
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let hnsw_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let port = random_port::PortPicker::new().pick().unwrap();
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
@@ -622,12 +630,14 @@ mod tests {
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
                 hnsw_index_cache,
+                network_admission_control.clone(),
             ),
             blockfile_provider: BlockfileProvider::new_arrow(
                 storage,
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                network_admission_control,
             ),
             port,
         };

@@ -751,7 +751,9 @@ mod test {
         provider::BlockfileProvider,
     };
     use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::{
+        local::LocalStorage, network_admission_control::NetworkAdmissionControl, Storage,
+    };
     use chroma_types::{
         Chunk, DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
         UpdateMetadataValue, Where, WhereComparison, WhereDocument,
@@ -765,11 +767,13 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -982,11 +986,13 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -1170,11 +1176,13 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);

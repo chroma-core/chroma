@@ -585,7 +585,9 @@ mod tests {
         cache::Cache,
         config::{CacheConfig, UnboundedCacheConfig},
     };
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::{
+        local::LocalStorage, network_admission_control::NetworkAdmissionControl, Storage,
+    };
     use chroma_types::{DataRecord, MetadataValue};
     use proptest::prelude::*;
     use proptest::test_runner::Config;
@@ -599,11 +601,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
@@ -639,11 +643,13 @@ mod tests {
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
             let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
             let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let network_admission_control = NetworkAdmissionControl::new(storage.clone());
             let blockfile_provider = ArrowBlockfileProvider::new(
                 storage,
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                network_admission_control,
             );
             let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
@@ -704,11 +710,13 @@ mod tests {
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
             let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
             let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let network_admission_control = NetworkAdmissionControl::new(storage.clone());
             let blockfile_provider = ArrowBlockfileProvider::new(
                 storage,
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                network_admission_control,
             );
             let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
@@ -819,11 +827,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id = writer.id();
@@ -859,11 +869,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
@@ -973,11 +985,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
@@ -1015,11 +1029,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
@@ -1052,11 +1068,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
 
         let writer = provider.create::<f32, &str>().unwrap();
@@ -1086,11 +1104,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
 
         let writer = blockfile_provider
@@ -1132,11 +1152,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
 
         let writer = blockfile_provider.create::<u32, u32>().unwrap();
@@ -1166,11 +1188,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
 
         let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
@@ -1218,11 +1242,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
 
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
@@ -1250,11 +1276,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &str>().unwrap();
         let id = writer.id();
@@ -1313,11 +1341,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
@@ -1352,11 +1382,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            network_admission_control,
         );
         let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
         let id_1 = writer.id();
