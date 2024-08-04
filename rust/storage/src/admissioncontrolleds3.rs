@@ -1,5 +1,5 @@
 use crate::{
-    config::StorageConfig,
+    config::{CountBasedPolicyConfig, RateLimitingConfig, StorageConfig},
     s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
     stream::ByteStreamItem,
 };
@@ -10,6 +10,7 @@ use futures::{future::Shared, FutureExt, Stream};
 use parking_lot::Mutex;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
+use tokio::sync::{Semaphore, SemaphorePermit};
 use tracing::{Instrument, Span};
 
 /// Wrapper over s3 storage that provides proxy features such as
@@ -37,6 +38,7 @@ pub struct AdmissionControlledS3Storage {
             >,
         >,
     >,
+    rate_limiter: Arc<RateLimitPolicy>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -54,10 +56,19 @@ impl ChromaError for AdmissionControlledS3StorageError {
 }
 
 impl AdmissionControlledS3Storage {
-    pub fn new(storage: S3Storage) -> Self {
+    pub fn new_with_default_policy(storage: S3Storage) -> Self {
         Self {
             storage,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(15))),
+        }
+    }
+
+    pub fn new(storage: S3Storage, policy: RateLimitPolicy) -> Self {
+        Self {
+            storage,
+            outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(policy),
         }
     }
 
@@ -102,10 +113,27 @@ impl AdmissionControlledS3Storage {
         }
     }
 
+    async fn enter(&self) -> SemaphorePermit<'_> {
+        match &*self.rate_limiter {
+            RateLimitPolicy::CountBasedPolicy(policy) => {
+                return policy.acquire().await;
+            }
+        }
+    }
+
+    async fn exit(&self, permit: SemaphorePermit<'_>) {
+        match &*self.rate_limiter {
+            RateLimitPolicy::CountBasedPolicy(policy) => {
+                policy.drop(permit).await;
+            }
+        }
+    }
+
     pub async fn get(
         &self,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
+        let permit = self.enter().await;
         let future_to_await;
         {
             let mut requests = self.outstanding_requests.lock();
@@ -129,6 +157,8 @@ impl AdmissionControlledS3Storage {
             let mut requests = self.outstanding_requests.lock();
             requests.remove(&key);
         }
+        // Release permit.
+        self.exit(permit).await;
         res
     }
 
@@ -149,10 +179,59 @@ impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
                 let s3_storage =
                     S3Storage::try_from_config(&StorageConfig::S3(nacconfig.s3_config.clone()))
                         .await?;
-                return Ok(Self::new(s3_storage));
+                let policy =
+                    RateLimitPolicy::try_from_config(&nacconfig.rate_limiting_policy).await?;
+                return Ok(Self::new(s3_storage, policy));
             }
             _ => {
                 return Err(Box::new(StorageConfigError::InvalidStorageConfig));
+            }
+        }
+    }
+}
+
+// Prefer enum dispatch over dyn since there could
+// only be a handful of these policies.
+#[derive(Debug)]
+enum RateLimitPolicy {
+    CountBasedPolicy(CountBasedPolicy),
+}
+
+#[derive(Debug)]
+struct CountBasedPolicy {
+    max_allowed_outstanding: usize,
+    remaining_tokens: Semaphore,
+}
+
+impl CountBasedPolicy {
+    fn new(max_allowed_outstanding: usize) -> Self {
+        Self {
+            max_allowed_outstanding,
+            remaining_tokens: Semaphore::new(max_allowed_outstanding),
+        }
+    }
+    async fn acquire(&self) -> SemaphorePermit<'_> {
+        let token_res = self.remaining_tokens.acquire().await;
+        match token_res {
+            Ok(token) => {
+                return token;
+            }
+            Err(e) => panic!("AcquireToken Failed {}", e),
+        }
+    }
+    async fn drop(&self, permit: SemaphorePermit<'_>) {
+        drop(permit);
+    }
+}
+
+#[async_trait]
+impl Configurable<RateLimitingConfig> for RateLimitPolicy {
+    async fn try_from_config(config: &RateLimitingConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            RateLimitingConfig::CountBasedPolicy(count_policy) => {
+                return Ok(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
+                    count_policy.max_concurrent_requests,
+                )));
             }
         }
     }
