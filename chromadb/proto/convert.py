@@ -129,9 +129,6 @@ def from_proto_submit(
 
 
 def from_proto_segment(segment: proto.Segment) -> Segment:
-    if not segment.HasField("collection"):
-        raise ValueError("Collection ID is required in segment")
-
     return Segment(
         id=UUID(hex=segment.id),
         type=segment.type,

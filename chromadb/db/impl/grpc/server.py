@@ -201,9 +201,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             if request.HasField("scope")
             else None
         )
-        target_collection = (
-            UUID(hex=request.collection) if request.HasField("collection") else None
-        )
+        target_collection = UUID(hex=request.collection)
 
         found_segments = []
         for segment in self._segments.values():
