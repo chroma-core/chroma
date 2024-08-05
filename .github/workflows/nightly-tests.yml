@@ -31,7 +31,7 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}"
+          bin/get-logs.sh "${{ matrix.test-globs }}" "3.12"
           # Output the logs zip file path as a job output
           echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
