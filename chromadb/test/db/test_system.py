@@ -728,14 +728,6 @@ def test_update_segment(sysdb: SysDB) -> None:
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
-    # Update collection to new value
-    # TODO: not currently supported
-    # segment["collection"] = sample_collections[1]["id"]
-    # sysdb.update_segment(segment["id"], collection=segment["collection"])
-    # result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
-    # result[0]["collection"] = segment["collection"]
-    # assert result == [segment]
-
     # Add a new metadata key
     metadata["test_str2"] = "str2"
     sysdb.update_segment(
