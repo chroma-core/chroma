@@ -85,8 +85,6 @@ enum HnswSegmentQueryError {
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Record segment not found for collection: {0}")]
     RecordSegmentNotFound(Uuid),
-    #[error("HNSW segment has no collection")]
-    HnswSegmentHasNoCollection,
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
 }
@@ -99,7 +97,6 @@ impl ChromaError for HnswSegmentQueryError {
             HnswSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            HnswSegmentQueryError::HnswSegmentHasNoCollection => ErrorCodes::InvalidArgument,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
         }
     }

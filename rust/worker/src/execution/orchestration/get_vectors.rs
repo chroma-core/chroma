@@ -39,8 +39,6 @@ enum ExecutionState {
 
 #[derive(Debug, Error)]
 enum GetVectorsError {
-    #[error("Hnsw segment has no collection")]
-    HnswSegmentHasNoCollection,
     #[error("Error sending task to dispatcher")]
     TaskSendError(#[from] ChannelError),
     #[error("System time error")]
@@ -50,7 +48,6 @@ enum GetVectorsError {
 impl ChromaError for GetVectorsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetVectorsError::HnswSegmentHasNoCollection => ErrorCodes::Internal,
             GetVectorsError::TaskSendError(e) => e.code(),
             GetVectorsError::SystemTimeError(_) => ErrorCodes::Internal,
         }
