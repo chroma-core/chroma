@@ -9,6 +9,7 @@ import uvicorn
 import os
 import webbrowser
 
+from chromadb.api.client import Client
 from chromadb.cli.utils import get_directory_size, set_log_file_path, sizeof_fmt
 from chromadb.config import Settings, System
 from chromadb.db.impl.sqlite import SqliteDB
@@ -131,6 +132,8 @@ def vacuum(
     settings.is_persistent = True
     settings.persist_directory = path
     system = System(settings=settings)
+    system.start()
+    client = Client.from_system(system)
     sqlite = system.instance(SqliteDB)
 
     directory_size_before_vacuum = get_directory_size(path)
@@ -142,18 +145,21 @@ def vacuum(
         TextColumn("[progress.description]{task.description}"),
         transient=True,
     ) as progress:
-        task = progress.add_task("Purging the log...")
+        collections = client.list_collections()
+        task = progress.add_task("Purging the log...", total=len(collections))
         try:
             # Cleaning the log after upgrading to >=0.6 is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
             # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
             trigger_vector_segments_max_seq_id_migration(
                 sqlite, system.instance(SegmentManager)
             )
-            sqlite.purge_log()
+
+            for collection in collections:
+                sqlite.purge_log(collection_id=collection.id)
+                progress.update(task, advance=1)
         except Exception as e:
             console.print(f"[bold red]Error purging the log:[/bold red] {e}")
             raise typer.Exit(code=1)
-        progress.update(task, advance=100)
 
         task = progress.add_task("Vacuuming (this may take a while)...")
         try:

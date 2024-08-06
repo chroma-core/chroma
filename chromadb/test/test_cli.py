@@ -4,12 +4,17 @@ from multiprocessing.synchronize import Event
 
 from typer.testing import CliRunner
 
+from chromadb.api.client import Client
+from chromadb.api.models.Collection import Collection
 from chromadb.cli.cli import app
 from chromadb.cli.utils import set_log_file_path
 from chromadb.config import Settings, System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from pypika import Table
+import numpy as np
+
+from chromadb.test.property import invariants
 
 runner = CliRunner()
 
@@ -44,6 +49,19 @@ def test_vacuum(sqlite_persistent: System) -> None:
     config.set_parameter("automatically_purge", False)
     sqlite.set_config(config)
 
+    # Add some data
+    client = Client.from_system(system)
+    collection1 = client.create_collection("collection1")
+    collection2 = client.create_collection("collection2")
+
+    def add_records(collection: Collection, num: int) -> None:
+        ids = [str(i) for i in range(num)]
+        embeddings = np.random.rand(num, 2)
+        collection.add(ids=ids, embeddings=embeddings)
+
+    add_records(collection1, 100)
+    add_records(collection2, 2_000)
+
     # Maintenance log should be empty
     with sqlite.tx() as cur:
         t = Table("maintenance_log")
@@ -70,7 +88,13 @@ def test_vacuum(sqlite_persistent: System) -> None:
         assert rows[0][2] == "vacuum"
 
     # Automatic pruning should have been enabled
+    del (
+        sqlite.config
+    )  # the CLI will end up starting a new instance of sqlite, so we need to force-refresh the cached config here
     assert sqlite.config.get_parameter("automatically_purge").value
+
+    # Log should be clean
+    invariants.log_size_below_max(system, [collection1, collection2], True)
 
 
 def simulate_transactional_write(
