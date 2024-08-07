@@ -10,7 +10,6 @@ use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
-use chroma_storage::network_admission_control::NetworkAdmissionControl;
 use chroma_storage::stream::ByteStreamItem;
 use chroma_storage::Storage;
 use chroma_types::Segment;
@@ -40,7 +39,6 @@ pub struct HnswIndexProvider {
     cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
-    network_admission_control: NetworkAdmissionControl,
 }
 
 impl Debug for HnswIndexProvider {
@@ -54,17 +52,16 @@ impl Debug for HnswIndexProvider {
 }
 
 #[async_trait]
-impl Configurable<(HnswProviderConfig, Storage, NetworkAdmissionControl)> for HnswIndexProvider {
+impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
     async fn try_from_config(
-        config: &(HnswProviderConfig, Storage, NetworkAdmissionControl),
+        config: &(HnswProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let (hnsw_config, storage, nac) = config;
+        let (hnsw_config, storage) = config;
         let cache = chroma_cache::from_config(&hnsw_config.hnsw_cache_config).await?;
         Ok(Self {
             cache,
             storage: storage.clone(),
             temporary_storage_path: PathBuf::from(&hnsw_config.hnsw_temporary_path),
-            network_admission_control: nac.clone(),
         })
     }
 }
@@ -74,13 +71,11 @@ impl HnswIndexProvider {
         storage: Storage,
         storage_path: PathBuf,
         cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
-        network_admission_control: NetworkAdmissionControl,
     ) -> Self {
         Self {
             cache,
             storage,
             temporary_storage_path: storage_path,
-            network_admission_control,
         }
     }
 
@@ -166,7 +161,7 @@ impl HnswIndexProvider {
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
-            let stream = self.storage.get(&key).await;
+            let stream = self.storage.get_internal(&key).await;
             let reader = match stream {
                 Ok(reader) => reader,
                 Err(e) => {
@@ -516,9 +511,7 @@ mod tests {
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
-        let provider =
-            HnswIndexProvider::new(storage, hnsw_tmp_path, cache, network_admission_control);
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache);
         let segment = Segment {
             id: Uuid::new_v4(),
             r#type: SegmentType::HnswDistributed,
