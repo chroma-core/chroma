@@ -9,13 +9,46 @@ import (
 	"context"
 )
 
-const garbageCollectCollections = `-- name: GarbageCollectCollections :exec
-DELETE FROM record_log r where r.collection_id = ANY($1::string[])
+const deleteCollection = `-- name: DeleteCollection :exec
+DELETE FROM collection c where c.id = ANY($1::text[])
 `
 
-func (q *Queries) GarbageCollectCollections(ctx context.Context, collectionIds []string) error {
-	_, err := q.db.Exec(ctx, garbageCollectCollections, collectionIds)
+func (q *Queries) DeleteCollection(ctx context.Context, collectionIds []string) error {
+	_, err := q.db.Exec(ctx, deleteCollection, collectionIds)
 	return err
+}
+
+const deleteRecords = `-- name: DeleteRecords :exec
+DELETE FROM record_log r where r.collection_id = ANY($1::text[])
+`
+
+func (q *Queries) DeleteRecords(ctx context.Context, collectionIds []string) error {
+	_, err := q.db.Exec(ctx, deleteRecords, collectionIds)
+	return err
+}
+
+const getAllCollections = `-- name: GetAllCollections :many
+SELECT id FROM collection
+`
+
+func (q *Queries) GetAllCollections(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, getAllCollections)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAllCollectionsToCompact = `-- name: GetAllCollectionsToCompact :many

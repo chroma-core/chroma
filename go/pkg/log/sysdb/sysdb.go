@@ -9,6 +9,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+type ISysDB interface {
+	CheckCollection(ctx context.Context, collectionId string) (bool, error)
+	AddCollection(ctx context.Context, collectionId string) error
+}
+
 type SysDB struct {
 	client coordinatorpb.SysDBClient
 }
@@ -39,4 +44,9 @@ func (s *SysDB) CheckCollection(ctx context.Context, collectionId string) (bool,
 		}
 	}
 	return false, nil
+}
+
+func (s *SysDB) AddCollection(ctx context.Context, collectionId string) error {
+	// TODO: We only use this for testing.
+	return nil
 }
