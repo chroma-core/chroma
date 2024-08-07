@@ -6,8 +6,10 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
+// Wrapper over s3 storage that provides proxy features such as
+// request coalescing, rate limiting, etc.
 #[derive(Clone)]
-pub struct NetworkAdmissionControl {
+pub struct AdmissionControlledS3Storage {
     storage: Storage,
     outstanding_requests: Arc<
         Mutex<
@@ -16,7 +18,7 @@ pub struct NetworkAdmissionControl {
                 Shared<
                     Pin<
                         Box<
-                            dyn Future<Output = Result<(), Box<NetworkAdmissionControlError>>>
+                            dyn Future<Output = Result<Vec<u8>, AdmissionControlledS3StorageError>>
                                 + Send
                                 + 'static,
                         >,
@@ -28,26 +30,20 @@ pub struct NetworkAdmissionControl {
 }
 
 #[derive(Error, Debug, Clone)]
-pub enum NetworkAdmissionControlError {
+pub enum AdmissionControlledS3StorageError {
     #[error("Error performing a get call from storage {0}")]
     StorageGetError(#[from] GetError),
-    #[error("IO Error")]
-    IOError,
-    #[error("Error deserializing to block")]
-    DeserializationError,
 }
 
-impl ChromaError for NetworkAdmissionControlError {
+impl ChromaError for AdmissionControlledS3StorageError {
     fn code(&self) -> ErrorCodes {
         match self {
-            NetworkAdmissionControlError::StorageGetError(e) => e.code(),
-            NetworkAdmissionControlError::IOError => ErrorCodes::Internal,
-            NetworkAdmissionControlError::DeserializationError => ErrorCodes::Internal,
+            AdmissionControlledS3StorageError::StorageGetError(e) => e.code(),
         }
     }
 }
 
-impl NetworkAdmissionControl {
+impl AdmissionControlledS3Storage {
     pub fn new(storage: Storage) -> Self {
         Self {
             storage,
@@ -55,15 +51,10 @@ impl NetworkAdmissionControl {
         }
     }
 
-    pub async fn read_from_storage<F, R>(
+    async fn read_from_storage(
         storage: Storage,
         key: String,
-        f: F,
-    ) -> Result<(), Box<NetworkAdmissionControlError>>
-    where
-        R: Future<Output = Result<(), Box<NetworkAdmissionControlError>>> + Send + 'static,
-        F: (FnOnce(Vec<u8>) -> R) + Send + 'static,
-    {
+    ) -> Result<Vec<u8>, AdmissionControlledS3StorageError> {
         let stream = storage
             .get(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
@@ -82,41 +73,32 @@ impl NetworkAdmissionControl {
                                 }
                                 Err(e) => {
                                     tracing::error!("Error reading from storage: {}", e);
-                                    return Err(Box::new(
-                                        NetworkAdmissionControlError::StorageGetError(e),
-                                    ));
+                                    return Err(
+                                        AdmissionControlledS3StorageError::StorageGetError(e),
+                                    );
                                 }
                             }
                         }
+                        tracing::info!("Read {:?} bytes from s3", buf.len());
                         Ok(Some(buf))
                     })
                     .await?;
-                let buf = match buf {
-                    Some(buf) => buf,
+                match buf {
+                    Some(buf) => Ok(buf),
                     None => {
                         // Buffer is empty. Nothing interesting to do.
-                        return Ok(());
+                        Ok(vec![])
                     }
-                };
-                tracing::info!("Read {:?} bytes from s3", buf.len());
-                return f(buf).await;
+                }
             }
             Err(e) => {
                 tracing::error!("Error reading from storage: {}", e);
-                return Err(Box::new(NetworkAdmissionControlError::StorageGetError(e)));
+                return Err(AdmissionControlledS3StorageError::StorageGetError(e));
             }
         }
     }
 
-    pub async fn get<F, R>(
-        &self,
-        key: String,
-        f: F,
-    ) -> Result<(), Box<NetworkAdmissionControlError>>
-    where
-        R: Future<Output = Result<(), Box<NetworkAdmissionControlError>>> + Send + 'static,
-        F: (FnOnce(Vec<u8>) -> R) + Send + 'static,
-    {
+    pub async fn get(&self, key: String) -> Result<Vec<u8>, AdmissionControlledS3StorageError> {
         let future_to_await;
         {
             let mut requests = self.outstanding_requests.lock();
@@ -124,10 +106,9 @@ impl NetworkAdmissionControl {
             future_to_await = match maybe_inflight {
                 Some(fut) => fut,
                 None => {
-                    let get_storage_future = NetworkAdmissionControl::read_from_storage(
+                    let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
                         self.storage.clone(),
                         key.clone(),
-                        f,
                     )
                     .boxed()
                     .shared();

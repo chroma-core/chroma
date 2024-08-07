@@ -6,7 +6,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 
 pub mod config;
 pub mod local;
-pub mod network_admission_control;
+pub mod admissioncontrolleds3;
 pub mod s3;
 pub mod stream;
 use futures::Stream;
