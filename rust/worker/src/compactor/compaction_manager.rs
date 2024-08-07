@@ -16,7 +16,6 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_storage::network_admission_control::NetworkAdmissionControl;
 use chroma_storage::Storage;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -232,21 +231,15 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             assignment_policy,
         );
 
-        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
-
         let blockfile_provider = BlockfileProvider::try_from_config(&(
             config.blockfile_provider.clone(),
             storage.clone(),
-            network_admission_control.clone(),
         ))
         .await?;
 
-        let hnsw_index_provider = HnswIndexProvider::try_from_config(&(
-            config.hnsw_provider.clone(),
-            storage.clone(),
-            network_admission_control,
-        ))
-        .await?;
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
+                .await?;
 
         Ok(CompactionManager::new(
             scheduler,
@@ -515,7 +508,6 @@ mod tests {
         let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let hnsw_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let network_admission_control = NetworkAdmissionControl::new(storage.clone());
         let mut manager = CompactionManager::new(
             scheduler,
             log,
@@ -526,13 +518,11 @@ mod tests {
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
-                network_admission_control.clone(),
             ),
             HnswIndexProvider::new(
                 storage,
                 PathBuf::from(tmpdir.path().to_str().unwrap()),
                 hnsw_cache,
-                network_admission_control,
             ),
             compaction_manager_queue_size,
             compaction_interval,

@@ -1,5 +1,5 @@
 use super::GetError;
-use crate::s3::{S3GetError, S3Storage};
+use crate::s3::{S3GetError, S3PutError, S3Storage};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::{future::Shared, FutureExt, StreamExt};
 use parking_lot::Mutex;
@@ -61,7 +61,7 @@ impl AdmissionControlledS3Storage {
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
         let stream = storage
-            .get(&key)
+            .get_stream(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
             .await;
         match stream {
@@ -143,5 +143,13 @@ impl AdmissionControlledS3Storage {
             requests.remove(&key);
         }
         res
+    }
+
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+        self.storage.put_file(key, path).await
+    }
+
+    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+        self.storage.put_bytes(key, bytes).await
     }
 }
