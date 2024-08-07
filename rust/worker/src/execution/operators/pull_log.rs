@@ -1,9 +1,7 @@
-use crate::execution::operator::Operator;
-use crate::log::log::Log;
-use crate::log::log::PullLogsError;
+use crate::execution::operator::{Operator, OperatorType};
+use crate::log::log::{Log, PullLogsError};
 use async_trait::async_trait;
-use chroma_types::Chunk;
-use chroma_types::LogRecord;
+use chroma_types::{Chunk, LogRecord};
 use uuid::Uuid;
 
 /// The pull logs operator is responsible for reading logs from the log service.
@@ -90,6 +88,10 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
 
     fn get_name(&self) -> &'static str {
         "PullLogsOperator"
+    }
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
     }
 
     async fn run(&self, input: &PullLogsInput) -> Result<PullLogsOutput, PullLogsError> {

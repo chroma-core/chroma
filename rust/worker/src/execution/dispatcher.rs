@@ -95,7 +95,7 @@ impl Dispatcher {
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, task: TaskMessage) {
         match task.get_type() {
-            OperatorType::IoOperator => {
+            OperatorType::IO => {
                 tokio::spawn(async move {
                     task.run().await;
                 });
@@ -292,7 +292,7 @@ mod tests {
         }
 
         fn get_type(&self) -> OperatorType {
-            OperatorType::IoOperator
+            OperatorType::IO
         }
     }
 
