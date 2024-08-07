@@ -43,7 +43,6 @@ from chromadb.api.types import (
     maybe_cast_one_to_many_uri,
     validate_ids,
     validate_include,
-    validate_metadata,
     validate_metadatas,
     validate_embeddings,
     validate_embedding_function,
@@ -433,14 +432,6 @@ class CollectionCommon(Generic[ClientT]):
             response["uris"] = None
 
         return response
-
-    def _validate_modify_request(self, metadata: Optional[CollectionMetadata]) -> None:
-        if metadata is not None:
-            validate_metadata(metadata)
-            if "hnsw:space" in metadata:
-                raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently."
-                )
 
     def _update_model_after_modify_success(
         self, name: Optional[str], metadata: Optional[CollectionMetadata]

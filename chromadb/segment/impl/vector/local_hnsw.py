@@ -1,11 +1,14 @@
 from overrides import override
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
+from chromadb.api.configuration import (
+    CollectionConfigurationInternal,
+    HNSWConfigurationInternal,
+)
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
-from chromadb.segment.impl.vector.hnsw_params import HnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
@@ -18,7 +21,6 @@ from chromadb.types import (
     VectorQueryResult,
     SeqId,
     Segment,
-    Metadata,
     Operation,
     Vector,
 )
@@ -38,7 +40,7 @@ class LocalHnswSegment(VectorReader):
     _collection: Optional[UUID]
     _subscription: Optional[UUID]
     _settings: Settings
-    _params: HnswParams
+    _configuration: HNSWConfigurationInternal
 
     _index: Optional[hnswlib.Index]
     _dimensionality: Optional[int]
@@ -62,7 +64,7 @@ class LocalHnswSegment(VectorReader):
         self._collection = segment["collection"]
         self._subscription = None
         self._settings = system.settings
-        self._params = HnswParams(segment["metadata"] or {})
+        self._configuration = cast(HNSWConfigurationInternal, segment["configuration"])
 
         self._index = None
         self._dimensionality = None
@@ -78,10 +80,13 @@ class LocalHnswSegment(VectorReader):
 
     @staticmethod
     @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Extract relevant metadata
-        segment_metadata = HnswParams.extract(metadata)
-        return segment_metadata
+    def configuration_from_collection_configuration(
+        collection_configuration: CollectionConfigurationInternal,
+    ) -> HNSWConfigurationInternal:
+        return cast(
+            HNSWConfigurationInternal,
+            collection_configuration.get_parameter("hnsw_configuration").value,
+        )
 
     @trace_method("LocalHnswSegment.start", OpenTelemetryGranularity.ALL)
     @override
@@ -194,17 +199,21 @@ class LocalHnswSegment(VectorReader):
     @trace_method("LocalHnswSegment._init_index", OpenTelemetryGranularity.ALL)
     def _init_index(self, dimensionality: int) -> None:
         # more comments available at the source: https://github.com/nmslib/hnswlib
-
+        space = self._configuration.get_parameter("space").value
+        ef_construction = self._configuration.get_parameter("ef_construction").value
+        M = self._configuration.get_parameter("M").value
+        ef_search = self._configuration.get_parameter("ef_search").value
+        num_threads = self._configuration.get_parameter("num_threads").value
         index = hnswlib.Index(
-            space=self._params.space, dim=dimensionality
+            space=space, dim=dimensionality
         )  # possible options are l2, cosine or ip
         index.init_index(
             max_elements=DEFAULT_CAPACITY,
-            ef_construction=self._params.construction_ef,
-            M=self._params.M,
+            ef_construction=ef_construction,
+            M=M,
         )
-        index.set_ef(self._params.search_ef)
-        index.set_num_threads(self._params.num_threads)
+        index.set_ef(ef_search)
+        index.set_num_threads(num_threads)
 
         self._index = index
         self._dimensionality = dimensionality
@@ -225,9 +234,10 @@ class LocalHnswSegment(VectorReader):
         index = cast(hnswlib.Index, self._index)
 
         if (self._total_elements_added + n) > index.get_max_elements():
-            new_size = int(
-                (self._total_elements_added + n) * self._params.resize_factor
+            resize_factor: int = cast(
+                int, self._configuration.get_parameter("resize_factor").value
             )
+            new_size = int((self._total_elements_added + n) * resize_factor)
             index.resize_index(max(new_size, DEFAULT_CAPACITY))
 
     @trace_method("LocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL)
