@@ -213,66 +213,41 @@ impl BlockManager {
         match block {
             Some(block) => Some(block.clone()),
             None => {
-                // TODO: NAC register/deregister/validation goes here.
-                async {
-                    let key = format!("block/{}", id);
-                    let stream = self.storage.get_internal(&key).instrument(
+                let key = format!("block/{}", id);
+                let bytes_res = self
+                    .storage
+                    .get(&key)
+                    .instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
-                    ).await;
-                    match stream {
-                        Ok(mut bytes) => {
-                            let read_block_span = tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end");
-                            let buf = read_block_span.in_scope(|| async {
-                                let mut buf: Vec<u8> = Vec::new();
-                                while let Some(res) = bytes.next().await {
-                                    match res {
-                                        Ok(chunk) => {
-                                            buf.extend(chunk);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("Error reading block from storage: {}", e);
-                                            return None;
-                                        }
-                                    }
-                                }
-                                Some(buf)
+                    )
+                    .await;
+                match bytes_res {
+                    Ok(bytes) => {
+                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
+                        let block =
+                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
+                        match block {
+                            Ok(block) => {
+                                self.block_cache.insert(*id, block.clone());
+                                Some(block)
                             }
-                            ).await;
-                            let buf =  match buf {
-                                Some(buf) => {
-                                    buf
-                                }
-                                None => {
-                                    return None;
-                                }
-                            };
-                            tracing::info!("Read {:?} bytes from s3", buf.len());
-                            let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                            let block = deserialization_span.in_scope(|| Block::from_bytes(&buf, *id));
-                            match block {
-                                Ok(block) => {
-                                    self.block_cache.insert(*id, block.clone());
-                                    Some(block)
-                                }
-                                Err(e) => {
-                                    // TODO: Return an error to callsite instead of None.
-                                    tracing::error!(
-                                        "Error converting bytes to Block {:?}/{:?}",
-                                        key,
-                                        e
-                                    );
-                                    None
-                                }
+                            Err(e) => {
+                                // TODO: Return an error to callsite instead of None.
+                                tracing::error!(
+                                    "Error converting bytes to Block {:?}/{:?}",
+                                    key,
+                                    e
+                                );
+                                None
                             }
-                        },
-                        Err(e) => {
-                            tracing::error!("Error reading block from storage: {}", e);
-                            None
                         }
                     }
+                    Err(e) => {
+                        tracing::error!("Error converting bytes to Block {:?}", e);
+                        // TODO: Return error instead of None.
+                        return None;
+                    }
                 }
-                .instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold"))
-                .await
             }
         }
     }
