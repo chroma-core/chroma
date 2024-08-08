@@ -1,3 +1,5 @@
+use crate::s3::{S3GetError, S3PutError, S3Storage};
+
 use super::{GetError, Storage};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::{future::Shared, FutureExt, StreamExt};
@@ -10,7 +12,7 @@ use tracing::{Instrument, Span};
 // request coalescing, rate limiting, etc.
 #[derive(Clone)]
 pub struct AdmissionControlledS3Storage {
-    storage: Storage,
+    storage: S3Storage,
     outstanding_requests: Arc<
         Mutex<
             HashMap<
@@ -32,19 +34,19 @@ pub struct AdmissionControlledS3Storage {
 #[derive(Error, Debug, Clone)]
 pub enum AdmissionControlledS3StorageError {
     #[error("Error performing a get call from storage {0}")]
-    StorageGetError(#[from] GetError),
+    S3GetError(#[from] S3GetError),
 }
 
 impl ChromaError for AdmissionControlledS3StorageError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AdmissionControlledS3StorageError::StorageGetError(e) => e.code(),
+            AdmissionControlledS3StorageError::S3GetError(e) => e.code(),
         }
     }
 }
 
 impl AdmissionControlledS3Storage {
-    pub fn new(storage: Storage) -> Self {
+    pub fn new(storage: S3Storage) -> Self {
         Self {
             storage,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
@@ -52,11 +54,11 @@ impl AdmissionControlledS3Storage {
     }
 
     async fn read_from_storage(
-        storage: Storage,
+        storage: S3Storage,
         key: String,
     ) -> Result<Vec<u8>, AdmissionControlledS3StorageError> {
         let stream = storage
-            .get(&key)
+            .get_stream(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
             .await;
         match stream {
@@ -71,11 +73,23 @@ impl AdmissionControlledS3Storage {
                                 Ok(chunk) => {
                                     buf.extend(chunk);
                                 }
-                                Err(e) => {
-                                    tracing::error!("Error reading from storage: {}", e);
-                                    return Err(
-                                        AdmissionControlledS3StorageError::StorageGetError(e),
-                                    );
+                                Err(err) => {
+                                    tracing::error!("Error reading from storage: {}", err);
+                                    match err {
+                                        GetError::S3Error(e) => {
+                                            return Err(
+                                                AdmissionControlledS3StorageError::S3GetError(e),
+                                            );
+                                        }
+                                        GetError::NoSuchKey(e) => {
+                                            return Err(
+                                                AdmissionControlledS3StorageError::S3GetError(
+                                                    S3GetError::NoSuchKey(e),
+                                                ),
+                                            );
+                                        }
+                                        GetError::LocalError(_) => unreachable!(),
+                                    }
                                 }
                             }
                         }
@@ -93,7 +107,7 @@ impl AdmissionControlledS3Storage {
             }
             Err(e) => {
                 tracing::error!("Error reading from storage: {}", e);
-                return Err(AdmissionControlledS3StorageError::StorageGetError(e));
+                return Err(AdmissionControlledS3StorageError::S3GetError(e));
             }
         }
     }
@@ -123,5 +137,13 @@ impl AdmissionControlledS3Storage {
             requests.remove(&key);
         }
         res
+    }
+
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+        self.storage.put_file(key, path).await
+    }
+
+    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+        self.storage.put_bytes(key, bytes).await
     }
 }
