@@ -78,10 +78,12 @@ class CreateSegmentResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class DeleteSegmentRequest(_message.Message):
-    __slots__ = ("id",)
+    __slots__ = ("id", "collection")
     ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_FIELD_NUMBER: _ClassVar[int]
     id: str
-    def __init__(self, id: _Optional[str] = ...) -> None: ...
+    collection: str
+    def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ...) -> None: ...
 
 class DeleteSegmentResponse(_message.Message):
     __slots__ = ("status",)

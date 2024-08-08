@@ -197,10 +197,12 @@ class OperationRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
 
 class CountRecordsRequest(_message.Message):
-    __slots__ = ("segment_id",)
+    __slots__ = ("segment_id", "collection_id")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
-    def __init__(self, segment_id: _Optional[str] = ...) -> None: ...
+    collection_id: str
+    def __init__(self, segment_id: _Optional[str] = ..., collection_id: _Optional[str] = ...) -> None: ...
 
 class CountRecordsResponse(_message.Message):
     __slots__ = ("count",)
@@ -209,20 +211,22 @@ class CountRecordsResponse(_message.Message):
     def __init__(self, count: _Optional[int] = ...) -> None: ...
 
 class QueryMetadataRequest(_message.Message):
-    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset")
+    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     WHERE_FIELD_NUMBER: _ClassVar[int]
     WHERE_DOCUMENT_FIELD_NUMBER: _ClassVar[int]
     IDS_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
     where: Where
     where_document: WhereDocument
     ids: _containers.RepeatedScalarFieldContainer[str]
     limit: int
     offset: int
-    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
+    collection_id: str
+    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ...) -> None: ...
 
 class QueryMetadataResponse(_message.Message):
     __slots__ = ("records",)
@@ -369,12 +373,14 @@ class SingleDoubleComparison(_message.Message):
     def __init__(self, value: _Optional[float] = ..., generic_comparator: _Optional[_Union[GenericComparator, str]] = ..., number_comparator: _Optional[_Union[NumberComparator, str]] = ...) -> None: ...
 
 class GetVectorsRequest(_message.Message):
-    __slots__ = ("ids", "segment_id")
+    __slots__ = ("ids", "segment_id", "collection_id")
     IDS_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     ids: _containers.RepeatedScalarFieldContainer[str]
     segment_id: str
-    def __init__(self, ids: _Optional[_Iterable[str]] = ..., segment_id: _Optional[str] = ...) -> None: ...
+    collection_id: str
+    def __init__(self, ids: _Optional[_Iterable[str]] = ..., segment_id: _Optional[str] = ..., collection_id: _Optional[str] = ...) -> None: ...
 
 class GetVectorsResponse(_message.Message):
     __slots__ = ("records",)
@@ -391,18 +397,20 @@ class VectorEmbeddingRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class QueryVectorsRequest(_message.Message):
-    __slots__ = ("vectors", "k", "allowed_ids", "include_embeddings", "segment_id")
+    __slots__ = ("vectors", "k", "allowed_ids", "include_embeddings", "segment_id", "collection_id")
     VECTORS_FIELD_NUMBER: _ClassVar[int]
     K_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_IDS_FIELD_NUMBER: _ClassVar[int]
     INCLUDE_EMBEDDINGS_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     vectors: _containers.RepeatedCompositeFieldContainer[Vector]
     k: int
     allowed_ids: _containers.RepeatedScalarFieldContainer[str]
     include_embeddings: bool
     segment_id: str
-    def __init__(self, vectors: _Optional[_Iterable[_Union[Vector, _Mapping]]] = ..., k: _Optional[int] = ..., allowed_ids: _Optional[_Iterable[str]] = ..., include_embeddings: bool = ..., segment_id: _Optional[str] = ...) -> None: ...
+    collection_id: str
+    def __init__(self, vectors: _Optional[_Iterable[_Union[Vector, _Mapping]]] = ..., k: _Optional[int] = ..., allowed_ids: _Optional[_Iterable[str]] = ..., include_embeddings: bool = ..., segment_id: _Optional[str] = ..., collection_id: _Optional[str] = ...) -> None: ...
 
 class QueryVectorsResponse(_message.Message):
     __slots__ = ("results",)

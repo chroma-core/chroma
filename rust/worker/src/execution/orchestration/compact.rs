@@ -386,7 +386,7 @@ impl CompactOrchestrator {
 
         let segments = self
             .sysdb
-            .get_segments(None, None, None, Some(self.collection_id))
+            .get_segments(None, None, None, self.collection_id)
             .await;
 
         tracing::info!("Retrived segments: {:?}", segments);

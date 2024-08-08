@@ -132,9 +132,10 @@ class GrpcSysDB(SysDB):
             raise UniqueConstraintError()
 
     @overrides
-    def delete_segment(self, id: UUID) -> None:
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
         request = DeleteSegmentRequest(
             id=id.hex,
+            collection=collection.hex,
         )
         response = self._sys_db_stub.DeleteSegment(request)
         if response.status.code == 404:
@@ -143,16 +144,16 @@ class GrpcSysDB(SysDB):
     @overrides
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         request = GetSegmentsRequest(
             id=id.hex if id else None,
             type=type,
             scope=to_proto_segment_scope(scope) if scope else None,
-            collection=collection.hex if collection else None,
+            collection=collection.hex,
         )
         response = self._sys_db_stub.GetSegments(request)
         results: List[Segment] = []
@@ -164,21 +165,17 @@ class GrpcSysDB(SysDB):
     @overrides
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_collection = None
-        if collection != Unspecified():
-            write_collection = cast(Union[UUID, None], collection)
-
         write_metadata = None
         if metadata != Unspecified():
             write_metadata = cast(Union[UpdateMetadata, None], metadata)
 
         request = UpdateSegmentRequest(
             id=id.hex,
-            collection=write_collection.hex if write_collection else None,
+            collection=collection.hex,
             metadata=to_proto_update_metadata(write_metadata)
             if write_metadata
             else None,

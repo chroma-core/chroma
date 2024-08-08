@@ -55,7 +55,11 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        request = GetVectorsRequest(ids=ids, segment_id=self._segment["id"].hex)
+        request = GetVectorsRequest(
+            ids=ids,
+            segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
+        )
         response: GetVectorsResponse = self._vector_reader_stub.GetVectors(request)
         results: List[VectorEmbeddingRecord] = []
         for vector in response.records:
@@ -77,6 +81,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             allowed_ids=query["allowed_ids"],
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
         )
         response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(request)
         results: List[List[VectorQueryResult]] = []
