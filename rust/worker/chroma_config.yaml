@@ -29,6 +29,9 @@ query_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 30000 # 1 minute
             upload_part_size_bytes: 536870912 # 512MiB
+    storage_admission:
+        CountBasedPolicy:
+            max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"
@@ -82,6 +85,9 @@ compaction_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 60000 # 1 minute
             upload_part_size_bytes: 536870912 # 512MiB
+    storage_admission:
+        CountBasedPolicy:
+            max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"

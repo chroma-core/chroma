@@ -43,3 +43,13 @@ pub struct S3StorageConfig {
 pub struct LocalStorageConfig {
     pub root: String,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct CountBasedPolicyConfig {
+    pub max_concurrent_requests: usize,
+}
+
+#[derive(Deserialize, Debug)]
+pub enum StorageAdmissionConfig {
+    CountBasedPolicy(CountBasedPolicyConfig),
+}
