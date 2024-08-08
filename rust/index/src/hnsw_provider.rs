@@ -162,9 +162,9 @@ impl HnswIndexProvider {
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
-            let stream = self.storage.get_stream(&key).await;
-            let reader = match stream {
-                Ok(reader) => reader,
+            let bytes_res = self.storage.get(&key).await;
+            let buf = match bytes_res {
+                Ok(buf) => buf,
                 Err(e) => {
                     tracing::error!("Failed to load hnsw index file from storage: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
@@ -181,28 +181,18 @@ impl HnswIndexProvider {
                     return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             };
-            let cb = move |buf: Vec<u8>| async move {
-                let res = file_handle.write_all(&buf).await;
-                match res {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!("Failed to copy file: {}", e);
-                        return Err(Box::new(NetworkAdmissionControlError::IOError));
-                    }
-                }
-                match file_handle.flush().await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!("Failed to flush file: {}", e);
-                        return Err(Box::new(NetworkAdmissionControlError::IOError));
-                    }
-                }
-                Ok(())
-            };
-            match self.network_admission_control.get(key, cb).await {
+            let res = file_handle.write_all(&buf).await;
+            match res {
                 Ok(_) => {}
                 Err(e) => {
-                    return Err(Box::new(HnswIndexProviderFileError::NACError(*e)));
+                    tracing::error!("Failed to copy file: {}", e);
+                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+                }
+            }
+            match file_handle.flush().await {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
                 }
             }
             tracing::info!("Loaded hnsw index file: {}", file);
@@ -466,8 +456,10 @@ impl ChromaError for HnswIndexProviderFlushError {
 pub enum HnswIndexProviderFileError {
     #[error("IO Error")]
     IOError(#[from] std::io::Error),
-    #[error("NAC Error")]
-    NACError(#[from] NetworkAdmissionControlError),
+    #[error("Storage Get Error")]
+    StorageGetError(#[from] chroma_storage::GetError),
+    #[error("Storage Put Error")]
+    StoragePutError(#[from] chroma_storage::PutError),
 }
 
 #[cfg(test)]
