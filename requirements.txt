@@ -1,5 +1,5 @@
 bcrypt>=4.0.1
-chroma-hnswlib==0.7.5
+chroma-hnswlib==0.7.6
 fastapi>=0.95.2
 graphlib_backport==1.0.3; python_version < '3.9'
 grpcio>=1.58.0
@@ -19,6 +19,7 @@ posthog>=2.4.0
 pydantic>=1.9
 pypika>=0.48.9
 PyYAML>=6.0.0
+rich>=10.11.0
 tenacity>=8.2.3
 tokenizers>=0.13.2
 tqdm>=4.65.0

@@ -1,18 +1,17 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::{ChromaError, ErrorCodes},
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
     },
-    types::{
-        LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Operation,
-        Segment,
-    },
-    utils::merge_sorted_vecs_conjunction,
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::utils::merge_sorted_vecs_conjunction;
+use chroma_types::{
+    Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
+};
 use std::collections::HashSet;
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
@@ -368,25 +367,8 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
 #[cfg(test)]
 mod test {
-    use crate::blockstore::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-        provider::BlockfileProvider,
-    };
-    use std::{
-        collections::HashMap,
-        str::FromStr,
-        sync::{atomic::AtomicU32, Arc},
-    };
-
-    use uuid::Uuid;
-
-    use crate::cache::cache::Cache;
-    use crate::cache::config::CacheConfig;
-    use crate::cache::config::UnboundedCacheConfig;
     use crate::{
-        cache,
         execution::{
-            data::data_chunk::Chunk,
             operator::Operator,
             operators::merge_metadata_results::{
                 MergeMetadataResultsOperator, MergeMetadataResultsOperatorInput,
@@ -399,9 +381,18 @@ mod test {
             },
             LogMaterializer, SegmentFlusher, SegmentWriter,
         },
-        storage::{local::LocalStorage, Storage},
-        types::{LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue},
     };
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{
+        Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
+    };
+    use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_merge_and_hydrate() {
@@ -417,23 +408,21 @@ mod test {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -581,7 +570,7 @@ mod test {
             &String,
             (
                 &Option<String>,
-                &Option<HashMap<String, crate::types::MetadataValue>>,
+                &Option<HashMap<String, chroma_types::MetadataValue>>,
             ),
         > = HashMap::new();
         id_to_data.insert(
@@ -712,23 +701,21 @@ mod test {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -876,7 +863,7 @@ mod test {
             &String,
             (
                 &Option<String>,
-                &Option<HashMap<String, crate::types::MetadataValue>>,
+                &Option<HashMap<String, chroma_types::MetadataValue>>,
             ),
         > = HashMap::new();
         id_to_data.insert(

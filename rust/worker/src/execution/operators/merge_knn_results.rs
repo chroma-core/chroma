@@ -1,11 +1,11 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::ChromaError,
     execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    types::Segment,
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Segment;
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -61,8 +61,8 @@ pub struct MergeKnnResultsOperatorOutput {
 pub enum MergeKnnResultsOperatorError {}
 
 impl ChromaError for MergeKnnResultsOperatorError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        return crate::errors::ErrorCodes::UNKNOWN;
+    fn code(&self) -> ErrorCodes {
+        return ErrorCodes::UNKNOWN;
     }
 }
 
@@ -95,7 +95,6 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                     if input.include_vectors {
                         hnsw_result_vectors = Some(Vec::new());
                     }
-
                     for offset_id in &input.hnsw_result_offset_ids {
                         let user_id = reader.get_user_id_for_offset_id(*offset_id as u32).await;
                         match user_id {

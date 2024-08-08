@@ -1,5 +1,6 @@
 name: Run (intensive) tests nightly
 on:
+  workflow_dispatch:
   schedule:
       # 2:15 AM PDT, offseted by a few minutes because:
       # "The schedule event can be delayed during periods of high loads of GitHub Actions workflow runs. High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped."
@@ -30,7 +31,7 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}"
+          bin/get-logs.sh "${{ matrix.test-globs }}" "3.12"
           # Output the logs zip file path as a job output
           echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
         shell: bash

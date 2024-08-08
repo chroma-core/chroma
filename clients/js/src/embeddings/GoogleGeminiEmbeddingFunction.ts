@@ -37,7 +37,7 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       if (_a.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the @google/generative-ai package to use the GoogleGenerativeAiEmbeddingFunction, `npm install -S @google/generative-ai`",
+          "Please install the @google/generative-ai package to use the GoogleGenerativeAiEmbeddingFunction, `npm install @google/generative-ai`",
         );
       }
       throw _a; // Re-throw other errors
@@ -68,10 +68,11 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const googleGenAi = GoogleGenerativeAI;
+      // @ts-ignore
       return { googleGenAi };
     } catch (e) {
       throw new Error(
-        "Please install @google/generative-ai as a dependency with, e.g. `yarn add @google/generative-ai`",
+        "Please install @google/generative-ai as a dependency with, e.g. `npm install @google/generative-ai`",
       );
     }
   }

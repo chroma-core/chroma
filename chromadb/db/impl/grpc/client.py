@@ -1,6 +1,7 @@
 import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
+from chromadb.proto.utils import get_default_grpc_options
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
@@ -63,9 +64,9 @@ class GrpcSysDB(SysDB):
 
     @overrides
     def start(self) -> None:
-        # TODO: add retry policy here
         self._channel = grpc.insecure_channel(
-            f"{self._coordinator_url}:{self._coordinator_port}"
+            f"{self._coordinator_url}:{self._coordinator_port}",
+            options=get_default_grpc_options(),
         )
         interceptors = [OtelInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
@@ -182,10 +183,6 @@ class GrpcSysDB(SysDB):
             if write_metadata
             else None,
         )
-
-        if collection is None:
-            request.ClearField("collection")
-            request.reset_collection = True
 
         if metadata is None:
             request.ClearField("metadata")

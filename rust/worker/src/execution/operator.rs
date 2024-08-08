@@ -1,13 +1,15 @@
-use crate::{
-    errors::{ChromaError, ErrorCodes},
-    system::ReceiverForMessage,
-    utils::get_panic_message,
-};
+use crate::{system::ReceiverForMessage, utils::get_panic_message};
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
 use std::{fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
 use uuid::Uuid;
+
+pub(crate) enum OperatorType {
+    IO,
+    Other,
+}
 
 /// An operator takes a generic input and returns a generic output.
 /// It is a definition of a function.
@@ -22,6 +24,9 @@ where
     // but that's not stable in rust yet.
     async fn run(&self, input: &I) -> Result<O, Self::Error>;
     fn get_name(&self) -> &'static str;
+    fn get_type(&self) -> OperatorType {
+        OperatorType::Other
+    }
 }
 
 #[derive(Debug, Error)]
@@ -95,6 +100,7 @@ pub(crate) trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
     async fn run(&self);
     fn id(&self) -> Uuid;
+    fn get_type(&self) -> OperatorType;
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -120,6 +126,8 @@ where
             Ok(result) => {
                 // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
                 // There are valid reasons for this to happen (e.g. the component was stopped) so we ignore the error.
+                // Another valid case is when the PrefetchIoOperator finishes
+                // after the orchestrator component was stopped.
                 match self
                     .reply_channel
                     .send(
@@ -176,6 +184,10 @@ where
 
     fn id(&self) -> Uuid {
         self.task_id
+    }
+
+    fn get_type(&self) -> OperatorType {
+        self.operator.get_type()
     }
 }
 

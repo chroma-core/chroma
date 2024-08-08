@@ -1,8 +1,10 @@
 import sqlite3
+import weakref
 from abc import ABC, abstractmethod
 from typing import Any, Set
 import threading
 from overrides import override
+from typing_extensions import Annotated
 
 
 class Connection:
@@ -70,7 +72,7 @@ class LockPool(Pool):
     shared cache mode. We use the shared cache mode to allow multiple threads to share a database.
     """
 
-    _connections: Set[Connection]
+    _connections: Set[Annotated[weakref.ReferenceType, Connection]]
     _lock: threading.RLock
     _connection: threading.local
     _db_file: str
@@ -93,7 +95,7 @@ class LockPool(Pool):
                 self, self._db_file, self._is_uri, *args, **kwargs
             )
             self._connection.conn = new_connection
-            self._connections.add(new_connection)
+            self._connections.add(weakref.ref(new_connection))
             return new_connection
 
     @override
@@ -106,7 +108,8 @@ class LockPool(Pool):
     @override
     def close(self) -> None:
         for conn in self._connections:
-            conn.close_actual()
+            if conn() is not None:
+                conn().close_actual()  # type: ignore
         self._connections.clear()
         self._connection = threading.local()
         try:
@@ -120,7 +123,7 @@ class PerThreadPool(Pool):
     extended to do so and block on connect() if the cap is reached.
     """
 
-    _connections: Set[Connection]
+    _connections: Set[Annotated[weakref.ReferenceType, Connection]]
     _lock: threading.Lock
     _connection: threading.local
     _db_file: str
@@ -143,14 +146,15 @@ class PerThreadPool(Pool):
             )
             self._connection.conn = new_connection
             with self._lock:
-                self._connections.add(new_connection)
+                self._connections.add(weakref.ref(new_connection))
             return new_connection
 
     @override
     def close(self) -> None:
         with self._lock:
             for conn in self._connections:
-                conn.close_actual()
+                if conn() is not None:
+                    conn().close_actual()  # type: ignore
             self._connections.clear()
             self._connection = threading.local()
 

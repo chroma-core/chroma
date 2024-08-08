@@ -2,10 +2,7 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
 };
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::{ChromaError, ErrorCodes},
     execution::{
-        data::data_chunk::Chunk,
         dispatcher::Dispatcher,
         operator::{wrap, TaskResult},
         operators::{
@@ -23,9 +20,11 @@ use crate::{
         ChannelError, Component, ComponentContext, ComponentHandle, Handler, ReceiverForMessage,
         System,
     },
-    types::{Collection, GetVectorsResult, LogRecord, Segment},
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, Collection, GetVectorsResult, LogRecord, Segment};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};
@@ -40,8 +39,6 @@ enum ExecutionState {
 
 #[derive(Debug, Error)]
 enum GetVectorsError {
-    #[error("Hnsw segment has no collection")]
-    HnswSegmentHasNoCollection,
     #[error("Error sending task to dispatcher")]
     TaskSendError(#[from] ChannelError),
     #[error("System time error")]
@@ -51,7 +48,6 @@ enum GetVectorsError {
 impl ChromaError for GetVectorsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetVectorsError::HnswSegmentHasNoCollection => ErrorCodes::Internal,
             GetVectorsError::TaskSendError(e) => e.code(),
             GetVectorsError::SystemTimeError(_) => ErrorCodes::Internal,
         }
@@ -227,17 +223,7 @@ impl Component for GetVectorsOrchestrator {
                 }
             };
 
-        let collection_id = match &hnsw_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(GetVectorsError::HnswSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = &hnsw_segment.collection;
 
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,

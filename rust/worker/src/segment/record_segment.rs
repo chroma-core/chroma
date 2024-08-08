@@ -1,11 +1,11 @@
 use super::types::{MaterializedLogRecord, SegmentWriter};
-use super::{DataRecord, SegmentFlusher};
-use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
-use crate::blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
-use crate::types::{MaterializedLogOperation, Operation, Segment, SegmentType};
+use super::SegmentFlusher;
 use async_trait::async_trait;
+use chroma_blockstore::arrow::types::ArrowReadableKey;
+use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
+use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -308,7 +308,7 @@ pub enum ApplyMaterializedLogError {
 }
 
 impl ChromaError for ApplyMaterializedLogError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             ApplyMaterializedLogError::BlockfileSetError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
@@ -810,5 +810,24 @@ impl RecordSegmentReader<'_> {
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         self.id_to_data.count().await
+    }
+
+    pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) -> () {
+        let prefixes = vec![""; keys.len()];
+        self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
+    }
+
+    pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) -> () {
+        let prefixes = vec![""; keys.len()];
+        self.user_id_to_id
+            .load_blocks_for_keys(&prefixes, &keys)
+            .await
+    }
+
+    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) -> () {
+        let prefixes = vec![""; keys.len()];
+        self.id_to_user_id
+            .load_blocks_for_keys(&prefixes, keys)
+            .await
     }
 }

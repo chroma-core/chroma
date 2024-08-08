@@ -4,10 +4,6 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
     terminate_with_error,
 };
-use crate::blockstore::provider::BlockfileProvider;
-use crate::distance::DistanceFunction;
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
@@ -22,20 +18,28 @@ use crate::execution::operators::merge_knn_results::{
 };
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::execution::operators::pull_log::PullLogsOutput;
-use crate::index::hnsw_provider::HnswIndexProvider;
-use crate::index::IndexConfig;
+use crate::execution::operators::record_segment_prefetch::{
+    Keys, OffsetIdToDataKeys, OffsetIdToUserIdKeys, RecordSegmentPrefetchIoInput,
+    RecordSegmentPrefetchIoOperator, RecordSegmentPrefetchIoOperatorError,
+    RecordSegmentPrefetchIoOutput,
+};
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
-use crate::types::{Collection, LogRecord, Segment, VectorQueryResult};
 use crate::{
     log::log::Log,
     system::{Component, Handler, ReceiverForMessage},
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::DistanceFunction;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::IndexConfig;
+use chroma_types::{Chunk, Collection, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -73,16 +77,14 @@ enum ExecutionState {
 enum HnswSegmentQueryError {
     #[error(transparent)]
     HnswSegmentQueryError(#[from] super::common::GetHnswSegmentByIdError),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Collection: {0} not found")]
     CollectionNotFound(Uuid),
-    #[error("Get collection error")]
+    #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Record segment not found for collection: {0}")]
     RecordSegmentNotFound(Uuid),
-    #[error("HNSW segment has no collection")]
-    HnswSegmentHasNoCollection,
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
 }
@@ -95,7 +97,6 @@ impl ChromaError for HnswSegmentQueryError {
             HnswSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            HnswSegmentQueryError::HnswSegmentHasNoCollection => ErrorCodes::InvalidArgument,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
         }
     }
@@ -372,22 +373,85 @@ impl HnswQueryOrchestrator {
         }
     }
 
+    async fn prefetch_record_data(&mut self, ctx: &ComponentContext<Self>, offset_ids: Vec<u32>) {
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record Segment is not set");
+        // TODO: Divide this into multiple tasks based on some criteria.
+        let offsetid_to_data_keys =
+            Keys::OffsetIdToDataKeys(OffsetIdToDataKeys { keys: offset_ids });
+        let prefetch_input = RecordSegmentPrefetchIoInput {
+            keys: offsetid_to_data_keys,
+            segment: record_segment.clone(),
+            provider: self.blockfile_provider.clone(),
+        };
+        let operator = RecordSegmentPrefetchIoOperator::new();
+        let prefetch_task = wrap(operator, prefetch_input, ctx.receiver());
+        match self
+            .dispatcher
+            .send(prefetch_task, Some(Span::current()))
+            .await
+        {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error
+                tracing::error!("Error sending record segment Prefetch data task: {:?}", e);
+            }
+        }
+    }
+
+    async fn prefetch_user_ids(&mut self, ctx: &ComponentContext<Self>, offset_ids: Vec<u32>) {
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record Segment is not set");
+        // TODO: Divide this into multiple tasks based on some criteria.
+        let offsetid_to_userid_keys =
+            Keys::OffsetIdToUserIdKeys(OffsetIdToUserIdKeys { keys: offset_ids });
+        let prefetch_input = RecordSegmentPrefetchIoInput {
+            keys: offsetid_to_userid_keys,
+            segment: record_segment.clone(),
+            provider: self.blockfile_provider.clone(),
+        };
+        let operator = RecordSegmentPrefetchIoOperator::new();
+        let prefetch_task = wrap(operator, prefetch_input, ctx.receiver());
+        match self
+            .dispatcher
+            .send(prefetch_task, Some(Span::current()))
+            .await
+        {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error
+                tracing::error!("Error sending Prefetch data task: {:?}", e);
+            }
+        }
+    }
+
     async fn merge_results_for_index(
         &mut self,
         ctx: &ComponentContext<Self>,
         query_vector_index: usize,
     ) {
-        let record_segment = self
-            .record_segment
-            .as_ref()
-            .expect("Invariant violation. Record Segment is not set");
-
         let hnsw_result_offset_ids = self
             .hnsw_result_offset_ids
             .remove(&query_vector_index)
             .expect(
                 "Invariant violation. HNSW result offset ids are not set for query vector index",
             );
+
+        // Eagerly dispatch prefetch tasks.
+        let offset_ids_to_prefetch: Vec<u32> =
+            hnsw_result_offset_ids.iter().map(|x| *x as u32).collect();
+        self.prefetch_record_data(ctx, offset_ids_to_prefetch.clone())
+            .await;
+        self.prefetch_user_ids(ctx, offset_ids_to_prefetch).await;
+
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record Segment is not set");
 
         let hnsw_result_distances = self
             .hnsw_result_distances
@@ -492,17 +556,7 @@ impl Component for HnswQueryOrchestrator {
                 }
             };
 
-        let collection_id = match &hnsw_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(HnswSegmentQueryError::HnswSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = &hnsw_segment.collection;
 
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,
@@ -767,5 +821,20 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
                 }
             }
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<RecordSegmentPrefetchIoOutput, RecordSegmentPrefetchIoOperatorError>>
+    for HnswQueryOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _message: TaskResult<RecordSegmentPrefetchIoOutput, RecordSegmentPrefetchIoOperatorError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        // Nothing to do.
     }
 }

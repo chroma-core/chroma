@@ -24,13 +24,12 @@ type CreateSegment struct {
 }
 
 type UpdateSegment struct {
-	ID              types.UniqueID
-	ResetTopic      bool
-	Collection      *string
-	ResetCollection bool
-	Metadata        *SegmentMetadata[SegmentMetadataValueType]
-	ResetMetadata   bool
-	Ts              types.Timestamp
+	ID            types.UniqueID
+	ResetTopic    bool
+	Collection    *string
+	Metadata      *SegmentMetadata[SegmentMetadataValueType]
+	ResetMetadata bool
+	Ts            types.Timestamp
 }
 
 type GetSegments struct {

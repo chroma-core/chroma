@@ -1,13 +1,11 @@
-use crate::chroma_proto;
-use crate::chroma_proto::log_service_client::LogServiceClient;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
 use crate::tracing::util::client_interceptor;
-use crate::types::LogRecord;
-use crate::types::RecordConversionError;
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::chroma_proto;
+use chroma_types::chroma_proto::log_service_client::LogServiceClient;
+use chroma_types::{LogRecord, RecordConversionError};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;

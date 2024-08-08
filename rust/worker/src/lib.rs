@@ -1,34 +1,23 @@
 mod assignment;
-mod blockstore;
-mod cache;
 mod compactor;
 mod config;
-pub mod distance;
-mod errors;
 mod execution;
-mod index;
 mod log;
 mod memberlist;
 mod segment;
 mod server;
-mod storage;
 mod sysdb;
 mod system;
 mod tracing;
-mod types;
 mod utils;
 
-use config::Configurable;
+use chroma_config::Configurable;
 use memberlist::MemberlistProvider;
 
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
-
-mod chroma_proto {
-    tonic::include_proto!("chroma");
-}
 
 pub async fn query_service_entrypoint() {
     // Check if the config path is set in the env var

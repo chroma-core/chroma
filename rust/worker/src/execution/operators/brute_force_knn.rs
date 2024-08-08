@@ -1,24 +1,18 @@
-use crate::blockstore::provider::BlockfileProvider;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
-use crate::execution::data::data_chunk::Chunk;
+use crate::execution::operator::Operator;
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
-use crate::segment::MaterializedLogRecord;
-use crate::types::LogRecord;
-use crate::types::MaterializedLogOperation;
-use crate::types::Operation;
-use crate::types::Segment;
-use crate::{distance::DistanceFunction, execution::operator::Operator};
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::DistanceFunction;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Chunk;
+use chroma_types::{LogRecord, MaterializedLogOperation, Segment};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::trace;
 use tracing::Instrument;
 use tracing::Span;
 
@@ -232,9 +226,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
+    use chroma_types::{LogRecord, Operation, OperationRecord};
     use std::collections::HashMap;
     use uuid::uuid;
 
@@ -246,9 +238,9 @@ mod tests {
         // Create an empty record segment definition
         let record_segment_definition = Segment {
             id: uuid!("00000000-0000-0000-0000-000000000000"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(uuid!("00000000-0000-0000-0000-000000000000")),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: uuid!("00000000-0000-0000-0000-000000000000"),
             metadata: None,
             file_path: HashMap::new(),
         };

@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/notification"
 	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/chroma-core/chroma/go/shared/otel"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
@@ -311,6 +312,12 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 }
 
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollections")
+		defer span.End()
+	}
+
 	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
 		return nil, err
@@ -468,6 +475,12 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 }
 
 func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetSegments")
+		defer span.End()
+	}
+
 	segmentAndMetadataList, err := tc.metaDomain.SegmentDb(ctx).GetSegments(segmentID, segmentType, scope, collectionID)
 	if err != nil {
 		return nil, err
@@ -539,9 +552,8 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 
 		// update segment
 		dbSegment := &dbmodel.UpdateSegment{
-			ID:              updateSegment.ID.String(),
-			Collection:      updateSegment.Collection,
-			ResetCollection: updateSegment.ResetCollection,
+			ID:         updateSegment.ID.String(),
+			Collection: updateSegment.Collection,
 		}
 
 		err := tc.metaDomain.SegmentDb(txCtx).Update(dbSegment)
