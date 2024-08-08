@@ -552,9 +552,8 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 
 		// update segment
 		dbSegment := &dbmodel.UpdateSegment{
-			ID:              updateSegment.ID.String(),
-			Collection:      updateSegment.Collection,
-			ResetCollection: updateSegment.ResetCollection,
+			ID:         updateSegment.ID.String(),
+			Collection: updateSegment.Collection,
 		}
 
 		err := tc.metaDomain.SegmentDb(txCtx).Update(dbSegment)

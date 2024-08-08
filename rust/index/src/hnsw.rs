@@ -791,7 +791,7 @@ pub mod test {
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(HashMap::new()),
-            collection: Some(Uuid::new_v4()),
+            collection: Uuid::new_v4(),
             file_path: HashMap::new(),
         };
 
@@ -815,7 +815,7 @@ pub mod test {
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(metadata),
-            collection: Some(Uuid::new_v4()),
+            collection: Uuid::new_v4(),
             file_path: HashMap::new(),
         };
 

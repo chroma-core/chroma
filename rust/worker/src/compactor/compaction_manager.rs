@@ -398,7 +398,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -407,7 +407,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -416,7 +416,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -425,7 +425,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -434,7 +434,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -443,7 +443,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: HashMap::new(),
         };

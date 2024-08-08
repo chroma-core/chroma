@@ -516,7 +516,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            collection: Some(Uuid::new_v4()),
+            collection: Uuid::new_v4(),
             metadata: None,
             file_path: HashMap::new(),
         };

@@ -156,18 +156,7 @@ impl CountQueryOrchestrator {
             }
         };
 
-        let collection_id = match metadata_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                tracing::error!("Metadata segment has no collection");
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = metadata_segment.collection;
 
         let record_segment = self
             .get_record_segment_from_collection_id(self.sysdb.clone(), &collection_id)
@@ -474,17 +463,7 @@ impl MetadataQueryOrchestrator {
             }
         };
 
-        let collection_id = match metadata_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = metadata_segment.collection;
         self.metadata_segment = Some(metadata_segment);
 
         let record_segment = self

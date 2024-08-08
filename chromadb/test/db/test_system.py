@@ -613,22 +613,15 @@ sample_segments = [
         id=uuid.UUID("00000000-d7d7-413b-92e1-731098a6e492"),
         type="test_type_a",
         scope=SegmentScope.VECTOR,
-        collection=sample_collections[0]["id"],
+        collection=sample_collections[0].id,
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
     ),
     Segment(
         id=uuid.UUID("11111111-d7d7-413b-92e1-731098a6e492"),
         type="test_type_b",
         scope=SegmentScope.VECTOR,
-        collection=sample_collections[1]["id"],
+        collection=sample_collections[1].id,
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
-    ),
-    Segment(
-        id=uuid.UUID("22222222-d7d7-413b-92e1-731098a6e492"),
-        type="test_type_b",
-        scope=SegmentScope.METADATA,
-        collection=None,
-        metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
     ),
 ]
 
@@ -709,7 +702,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         id=uuid.uuid4(),
         type="test_type_a",
         scope=SegmentScope.VECTOR,
-        collection=sample_collections[0]["id"],
+        collection=sample_collections[0].id,
         metadata=metadata,
     )
 
@@ -736,14 +729,7 @@ def test_update_segment(sysdb: SysDB) -> None:
     assert result == [segment]
 
     # Update collection to new value
-    segment["collection"] = sample_collections[1]["id"]
-    sysdb.update_segment(segment["id"], collection=segment["collection"])
-    result = sysdb.get_segments(id=segment["id"])
-    result[0]["collection"] = segment["collection"]
-    assert result == [segment]
-
-    # Update collection to None
-    segment["collection"] = None
+    segment["collection"] = sample_collections[1].id
     sysdb.update_segment(segment["id"], collection=segment["collection"])
     result = sysdb.get_segments(id=segment["id"])
     result[0]["collection"] = segment["collection"]

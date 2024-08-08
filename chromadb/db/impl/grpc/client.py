@@ -184,10 +184,6 @@ class GrpcSysDB(SysDB):
             else None,
         )
 
-        if collection is None:
-            request.ClearField("collection")
-            request.reset_collection = True
-
         if metadata is None:
             request.ClearField("metadata")
             request.reset_metadata = True

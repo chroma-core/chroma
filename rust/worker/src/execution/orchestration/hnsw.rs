@@ -85,8 +85,6 @@ enum HnswSegmentQueryError {
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Record segment not found for collection: {0}")]
     RecordSegmentNotFound(Uuid),
-    #[error("HNSW segment has no collection")]
-    HnswSegmentHasNoCollection,
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
 }
@@ -99,7 +97,6 @@ impl ChromaError for HnswSegmentQueryError {
             HnswSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            HnswSegmentQueryError::HnswSegmentHasNoCollection => ErrorCodes::InvalidArgument,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
         }
     }
@@ -559,17 +556,7 @@ impl Component for HnswQueryOrchestrator {
                 }
             };
 
-        let collection_id = match &hnsw_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(HnswSegmentQueryError::HnswSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = &hnsw_segment.collection;
 
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,

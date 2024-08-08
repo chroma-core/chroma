@@ -6,6 +6,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/model"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -192,6 +193,6 @@ func TestConvertSegmentToProto(t *testing.T) {
 	assert.Equal(t, segment.ID.String(), segmentpb.Id)
 	assert.Equal(t, segment.Type, segmentpb.Type)
 	assert.Equal(t, coordinatorpb.SegmentScope_METADATA, segmentpb.Scope)
-	assert.Nil(t, segmentpb.Collection)
+	assert.Equal(t, uuid.Nil.String(), segmentpb.Collection)
 	assert.Nil(t, segmentpb.Metadata)
 }

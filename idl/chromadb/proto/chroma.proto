@@ -43,7 +43,7 @@ message Segment {
     string id = 1;
     string type = 2;
     SegmentScope scope = 3;
-    optional string collection = 5;
+    string collection = 5;
     optional UpdateMetadata metadata = 6;
     map<string,FilePaths> file_paths = 7;
 }

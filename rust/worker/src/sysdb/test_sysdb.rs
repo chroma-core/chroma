@@ -94,9 +94,7 @@ impl TestSysDb {
         if scope.is_some() && scope.unwrap() != segment.scope {
             return false;
         }
-        if collection.is_some()
-            && (segment.collection.is_none() || collection.unwrap() != segment.collection.unwrap())
-        {
+        if collection.is_some() && (collection.unwrap() != segment.collection) {
             return false;
         }
         true
