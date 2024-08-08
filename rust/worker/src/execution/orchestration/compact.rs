@@ -695,27 +695,6 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
 
         match message {
             Ok(_) => {
-                match self
-                    .hnsw_index_provider
-                    .cleanup(
-                        &self
-                            .hnsw_index_id
-                            .expect("Invariant violation. HNSW Index ID is not set."),
-                    )
-                    .await
-                {
-                    Ok(_) => (),
-                    Err(e) => {
-                        tracing::error!("Error cleaning up HNSW index: {:?}", e);
-                        terminate_with_error(
-                            Some(result_channel),
-                            Box::new(CompactionError::CleanupFailed(e)),
-                            ctx,
-                        );
-                        return;
-                    }
-                };
-
                 let response = CompactionResponse {
                     id: self.id,
                     compaction_job: self.compaction_job.clone(),
