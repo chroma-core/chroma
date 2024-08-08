@@ -51,6 +51,17 @@ impl<K: Send + Sync + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cac
             }
         }
     }
+
+    pub fn remove(&self, key: &K) {
+        match self {
+            Cache::Unbounded(cache) => {
+                cache.cache.write().remove(key);
+            }
+            Cache::Foyer(cache) => {
+                cache.cache.remove(key);
+            }
+        }
+    }
 }
 
 #[derive(Clone)]

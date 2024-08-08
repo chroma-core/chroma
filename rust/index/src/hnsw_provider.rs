@@ -366,6 +366,12 @@ impl HnswIndexProvider {
         Ok(())
     }
 
+    pub async fn cleanup(&self, id: &Uuid) -> tokio::io::Result<()> {
+        self.cache.remove(id);
+        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+        tokio::fs::remove_dir_all(index_storage_path).await
+    }
+
     fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
         match std::fs::create_dir_all(path) {
             Ok(_) => Ok(()),
