@@ -374,6 +374,15 @@ impl Configurable<StorageConfig> for S3Storage {
                     }
                     super::config::S3CredentialsConfig::AWS => {
                         let config = aws_config::load_from_env().await;
+                        let timeout_config_builder = TimeoutConfigBuilder::default()
+                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
+                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
+                        let retry_config = RetryConfig::standard();
+                        let config = config
+                            .to_builder()
+                            .timeout_config(timeout_config_builder.build())
+                            .retry_config(retry_config)
+                            .build();
                         aws_sdk_s3::Client::new(&config)
                     }
                 };
