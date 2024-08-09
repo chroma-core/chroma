@@ -132,7 +132,7 @@ export function CodeBlock({children, 'data-language': language, filename, codeta
   }
 
   return (
-    <div className="rounded-md code reset text-sm" aria-live="polite"
+    <div className="rounded-md code reset text-sm overflow-hidden" aria-live="polite"
       style={{borderRadius: '0.5rem', position: 'relative', marginBottom: marginBottom}}
     >
       <CopyToClipboardButton className={`absolute ${copyIconColor} border-0 right-3 p-0.5`} textToCopy={newChildren} customStyle={{top: copyButtonTop}}/>
