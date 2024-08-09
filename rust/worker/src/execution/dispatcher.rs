@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use std::fmt::Debug;
-use tracing::Span;
+use tracing::{trace_span, Instrument, Span};
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
@@ -96,8 +96,9 @@ impl Dispatcher {
     async fn enqueue_task(&mut self, task: TaskMessage) {
         match task.get_type() {
             OperatorType::IO => {
+                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
                 tokio::spawn(async move {
-                    task.run().await;
+                    task.run().instrument(child_span).await;
                 });
             }
             OperatorType::Other => {
