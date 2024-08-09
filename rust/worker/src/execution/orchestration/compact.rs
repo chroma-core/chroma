@@ -223,7 +223,7 @@ impl CompactOrchestrator {
             Some(end_timestamp),
         );
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching pull logs for compaction {:?}", e);
@@ -247,7 +247,7 @@ impl CompactOrchestrator {
         println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, max_partition_size);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching partition for compaction {:?}", e);
@@ -356,7 +356,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching register for compaction {:?}", e);

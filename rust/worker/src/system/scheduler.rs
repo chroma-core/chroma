@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
+use tracing::Span;
 
 use super::{Component, ComponentContext, Handler, Message};
 
@@ -24,10 +25,20 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn schedule<C, M>(&self, message: M, duration: Duration, ctx: &ComponentContext<C>)
-    where
+    /// Schedule a message to be sent to the component after the specified duration.
+    ///
+    /// `span_factory` is called immediately before sending the scheduled message to the component.
+    pub(crate) fn schedule<C, M, S>(
+        &self,
+        message: M,
+        duration: Duration,
+        ctx: &ComponentContext<C>,
+        // (This needs to be a factory, otherwise the span duration will include the time spent waiting for the scheduler to trigger).
+        span_factory: S,
+    ) where
         C: Component + Handler<M>,
         M: Message,
+        S: (Fn() -> Option<Span>) + Send + Sync + 'static,
     {
         let cancel = ctx.cancellation_token.clone();
         let sender = ctx.receiver().clone();
@@ -37,7 +48,8 @@ impl Scheduler {
                     return;
                 }
                 _ = tokio::time::sleep(duration) => {
-                    match sender.send(message, None).await {
+                    let span = span_factory();
+                    match sender.send(message, span).await {
                         Ok(_) => {
                             return;
                         },
@@ -57,15 +69,20 @@ impl Scheduler {
         self.handles.write().push(handle);
     }
 
-    pub(crate) fn schedule_interval<C, M>(
+    /// Schedule a message to be sent to the component at a regular interval.
+    ///
+    /// `span_factory` is called immediately before sending the scheduled message to the component.
+    pub(crate) fn schedule_interval<C, M, S>(
         &self,
         message: M,
         duration: Duration,
         num_times: Option<usize>,
         ctx: &ComponentContext<C>,
+        span_factory: S,
     ) where
         C: Component + Handler<M>,
         M: Message + Clone,
+        S: (Fn() -> Option<Span>) + Send + Sync + 'static,
     {
         let cancel = ctx.cancellation_token.clone();
 
@@ -79,7 +96,8 @@ impl Scheduler {
                         return;
                     }
                     _ = tokio::time::sleep(duration) => {
-                        match sender.send(message.clone(), None).await {
+                        let span = span_factory();
+                        match sender.send(message.clone(), span).await {
                             Ok(_) => {
                             },
                             Err(e) => {
@@ -184,11 +202,17 @@ mod tests {
 
         async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
-            ctx.scheduler.schedule(ScheduleMessage {}, duration, ctx);
+            ctx.scheduler
+                .schedule(ScheduleMessage {}, duration, ctx, || None);
 
             let num_times = 4;
-            ctx.scheduler
-                .schedule_interval(ScheduleMessage {}, duration, Some(num_times), ctx);
+            ctx.scheduler.schedule_interval(
+                ScheduleMessage {},
+                duration,
+                Some(num_times),
+                ctx,
+                || None,
+            );
         }
     }
 

@@ -318,7 +318,7 @@ mod tests {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
-                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx, || None);
         }
     }
     #[async_trait]
@@ -381,7 +381,7 @@ mod tests {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
-                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx, || None);
         }
     }
     #[async_trait]
