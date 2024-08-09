@@ -316,6 +316,7 @@ impl SparseIndexManager {
                 tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
                 tracing::debug!("Reading sparse index from storage with key: {}", key);
+                // TODO: This should pass through NAC as well.
                 let stream = self.storage.get_stream(&key).await;
                 let mut buf: Vec<u8> = Vec::new();
                 match stream {
