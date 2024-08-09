@@ -20,6 +20,12 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.6.0
+
+Chroma internally uses a write-ahead log. In all versions prior to v0.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
+
+In v0.6.0 the write-ahead log is pruned automatically. However, this is not enabled by default for existing databases. After upgrading, you should run `chroma utils vacuum` once to reduce your database size and enable continuous pruning. See the [CLI reference](/reference/cli#vacuuming) for more details.
+
 ### Javascript Client Refactor (v2.0.0) - July 2024
 
 We've moved to a flat client on the JS/TS client. Whereas previously, you would construct a Collection object that you would then call methods on, Collections are now data objects which are passed into methods on the ChromaClient object.
