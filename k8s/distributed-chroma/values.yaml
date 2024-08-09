@@ -70,6 +70,7 @@ compactionService:
     repository: 'local'
     tag: 'compaction-service'
   env:
+  replicaCount: 1
 
 sysdbMigration:
   image:

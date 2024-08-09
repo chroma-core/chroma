@@ -18,7 +18,7 @@ metadata:
   name: compaction-service
   namespace: {{ .Values.namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.compactionService.replicaCount }}
   selector:
     matchLabels:
       app: compaction-service
