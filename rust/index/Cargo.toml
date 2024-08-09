@@ -6,6 +6,11 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 
+[[bench]]
+name = "write"
+path = "benches/write.rs"
+harness = false
+
 [dependencies]
 rand = { workspace = true }
 thiserror = { workspace = true }
@@ -31,6 +36,9 @@ chroma-distance = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 rayon = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { version = "0.12.5", features = ["blocking", "json"] }
+flate2 = "1.0.30"
 
 [build-dependencies]
 cc = "1.0"
