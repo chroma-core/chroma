@@ -1,7 +1,13 @@
 use super::GetError;
-use crate::s3::{S3GetError, S3PutError, S3Storage};
+use crate::{
+    config::StorageConfig,
+    s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
+    stream::ByteStreamItem,
+};
+use async_trait::async_trait;
+use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::{future::Shared, FutureExt, StreamExt};
+use futures::{future::Shared, FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
@@ -53,6 +59,28 @@ impl AdmissionControlledS3Storage {
         Self {
             storage,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    // TODO: Remove this once the upstream consumers switch to non-streaming APIs.
+    pub async fn get_stream(
+        &self,
+        key: &str,
+    ) -> Result<
+        Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
+        AdmissionControlledS3StorageError,
+    > {
+        match self
+            .storage
+            .get_stream(key)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
+            .await
+        {
+            Ok(res) => Ok(res),
+            Err(e) => {
+                tracing::error!("Error reading from storage: {}", e);
+                return Err(AdmissionControlledS3StorageError::S3GetError(e));
+            }
         }
     }
 
@@ -151,5 +179,23 @@ impl AdmissionControlledS3Storage {
 
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         self.storage.put_bytes(key, bytes).await
+    }
+}
+
+#[async_trait]
+impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
+    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            StorageConfig::AdmissionControlledS3(nacconfig) => {
+                let s3_storage = S3Storage::try_from_config(&StorageConfig::S3(
+                    nacconfig.s3_config.clone(),
+                ))
+                .await?;
+                return Ok(Self::new(s3_storage));
+            }
+            _ => {
+                return Err(Box::new(StorageConfigError::InvalidStorageConfig));
+            }
+        }
     }
 }

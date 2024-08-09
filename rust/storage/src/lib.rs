@@ -94,7 +94,8 @@ impl Storage {
         }
     }
 
-    pub async fn get_internal(
+    // TODO: Remove this once the upstream switches to consume non-streaming.
+    pub async fn get_stream(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, GetError> {
@@ -116,7 +117,18 @@ impl Storage {
                     Err(e) => Err(GetError::LocalError(e)),
                 }
             }
-            _ => unimplemented!(),
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                let res = admission_controlled_storage.get_stream(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
+                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                            _ => Err(GetError::S3Error(e)),
+                        },
+                    },
+                }
+            }
         }
     }
 
@@ -160,6 +172,9 @@ pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn Chro
         StorageConfig::S3(_) => Ok(Storage::S3(s3::S3Storage::try_from_config(config).await?)),
         StorageConfig::Local(_) => Ok(Storage::Local(
             local::LocalStorage::try_from_config(config).await?,
+        )),
+        StorageConfig::AdmissionControlledS3(_) => Ok(Storage::AdmissionControlledS3(
+            AdmissionControlledS3Storage::try_from_config(config).await?,
         )),
     }
 }
