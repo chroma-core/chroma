@@ -242,7 +242,7 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
-        let max_partition_size = 100;
+        let max_partition_size = 10_000;
         let operator = PartitionOperator::new();
         println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, max_partition_size);
