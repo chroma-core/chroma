@@ -9,7 +9,7 @@ use std::hash::Hash;
 
 pub async fn from_config<K, V>(config: &CacheConfig) -> Result<Cache<K, V>, Box<dyn ChromaError>>
 where
-    K: Send + Sync + Hash + Eq + 'static,
+    K: Send + Sync + Clone + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
 {
     match config {
