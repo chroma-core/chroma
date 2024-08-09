@@ -1,4 +1,5 @@
-use super::{GetError, Storage};
+use super::GetError;
+use crate::s3::{S3GetError, S3Storage};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::{future::Shared, FutureExt, StreamExt};
 use parking_lot::Mutex;
@@ -10,7 +11,7 @@ use tracing::{Instrument, Span};
 // request coalescing, rate limiting, etc.
 #[derive(Clone)]
 pub struct AdmissionControlledS3Storage {
-    storage: Storage,
+    storage: S3Storage,
     outstanding_requests: Arc<
         Mutex<
             HashMap<
@@ -18,8 +19,12 @@ pub struct AdmissionControlledS3Storage {
                 Shared<
                     Pin<
                         Box<
-                            dyn Future<Output = Result<Vec<u8>, AdmissionControlledS3StorageError>>
-                                + Send
+                            dyn Future<
+                                    Output = Result<
+                                        Arc<Vec<u8>>,
+                                        AdmissionControlledS3StorageError,
+                                    >,
+                                > + Send
                                 + 'static,
                         >,
                     >,
@@ -31,20 +36,20 @@ pub struct AdmissionControlledS3Storage {
 
 #[derive(Error, Debug, Clone)]
 pub enum AdmissionControlledS3StorageError {
-    #[error("Error performing a get call from storage {0}")]
-    StorageGetError(#[from] GetError),
+    #[error("Error performing a get call from s3 storage {0}")]
+    S3GetError(#[from] S3GetError),
 }
 
 impl ChromaError for AdmissionControlledS3StorageError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AdmissionControlledS3StorageError::StorageGetError(e) => e.code(),
+            AdmissionControlledS3StorageError::S3GetError(e) => e.code(),
         }
     }
 }
 
 impl AdmissionControlledS3Storage {
-    pub fn new(storage: Storage) -> Self {
+    pub fn new(storage: S3Storage) -> Self {
         Self {
             storage,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
@@ -52,9 +57,9 @@ impl AdmissionControlledS3Storage {
     }
 
     async fn read_from_storage(
-        storage: Storage,
+        storage: S3Storage,
         key: String,
-    ) -> Result<Vec<u8>, AdmissionControlledS3StorageError> {
+    ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
         let stream = storage
             .get(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
@@ -71,11 +76,23 @@ impl AdmissionControlledS3Storage {
                                 Ok(chunk) => {
                                     buf.extend(chunk);
                                 }
-                                Err(e) => {
-                                    tracing::error!("Error reading from storage: {}", e);
-                                    return Err(
-                                        AdmissionControlledS3StorageError::StorageGetError(e),
-                                    );
+                                Err(err) => {
+                                    tracing::error!("Error reading from storage: {}", err);
+                                    match err {
+                                        GetError::S3Error(e) => {
+                                            return Err(
+                                                AdmissionControlledS3StorageError::S3GetError(e),
+                                            );
+                                        }
+                                        GetError::NoSuchKey(e) => {
+                                            return Err(
+                                                AdmissionControlledS3StorageError::S3GetError(
+                                                    S3GetError::NoSuchKey(e),
+                                                ),
+                                            );
+                                        }
+                                        GetError::LocalError(_) => unreachable!(),
+                                    }
                                 }
                             }
                         }
@@ -84,21 +101,24 @@ impl AdmissionControlledS3Storage {
                     })
                     .await?;
                 match buf {
-                    Some(buf) => Ok(buf),
+                    Some(buf) => Ok(Arc::new(buf)),
                     None => {
                         // Buffer is empty. Nothing interesting to do.
-                        Ok(vec![])
+                        Ok(Arc::new(vec![]))
                     }
                 }
             }
             Err(e) => {
                 tracing::error!("Error reading from storage: {}", e);
-                return Err(AdmissionControlledS3StorageError::StorageGetError(e));
+                return Err(AdmissionControlledS3StorageError::S3GetError(e));
             }
         }
     }
 
-    pub async fn get(&self, key: String) -> Result<Vec<u8>, AdmissionControlledS3StorageError> {
+    pub async fn get(
+        &self,
+        key: String,
+    ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
         let future_to_await;
         {
             let mut requests = self.outstanding_requests.lock();
