@@ -1,7 +1,7 @@
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
-from typing_extensions import TypedDict, Protocol, runtime_checkable
+from typing_extensions import TypedDict, Protocol, runtime_checkable, ClassVar
 from enum import Enum
 from pydantic import Field
 import chromadb.errors as errors
@@ -199,6 +199,9 @@ class IndexMetadata(TypedDict):
 
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
+    dim: ClassVar[Optional[int]] = None
+    space: ClassVar[Optional[str]] = None
+
     def __call__(self, input: D) -> Embeddings:
         ...
 
