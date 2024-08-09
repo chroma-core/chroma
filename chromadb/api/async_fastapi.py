@@ -80,6 +80,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         await self._cleanup()
 
     @override
+    def start(self) -> None:
+        super().start()
+
+    @override
     def stop(self) -> None:
         super().stop()
 
@@ -128,6 +132,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     async def heartbeat(self) -> int:
+        self._raise_for_running()
         response = await self._make_request("get", "")
         return int(response["nanosecond heartbeat"])
 
@@ -138,6 +143,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         name: str,
         tenant: str = DEFAULT_TENANT,
     ) -> None:
+        self._raise_for_running()
         await self._make_request(
             "post",
             "/databases",
@@ -152,6 +158,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         name: str,
         tenant: str = DEFAULT_TENANT,
     ) -> Database:
+        self._raise_for_running()
         response = await self._make_request(
             "get",
             "/databases/" + name,
@@ -165,6 +172,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def create_tenant(self, name: str) -> None:
+        self._raise_for_running()
         await self._make_request(
             "post",
             "/tenants",
@@ -174,6 +182,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_tenant(self, name: str) -> Tenant:
+        self._raise_for_running()
         resp_json = await self._make_request(
             "get",
             "/tenants/" + name,
@@ -190,6 +199,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
+        self._raise_for_running()
         resp_json = await self._make_request(
             "get",
             "/collections",
@@ -213,6 +223,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
+        self._raise_for_running()
         resp_json = await self._make_request(
             "get",
             "/count_collections",
@@ -233,6 +244,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Creates a collection"""
+        self._raise_for_running()
         resp_json = await self._make_request(
             "post",
             "/collections",
@@ -258,6 +270,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self._raise_for_running()
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
@@ -287,6 +300,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self._raise_for_running()
         return await self.create_collection(
             name=name,
             configuration=configuration,
@@ -304,6 +318,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
+        self._raise_for_running()
         await self._make_request(
             "put",
             "/collections/" + str(id),
@@ -318,6 +333,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self._raise_for_running()
         await self._make_request(
             "delete",
             "/collections/" + name,
@@ -331,6 +347,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         collection_id: UUID,
     ) -> int:
         """Returns the number of embeddings in the database"""
+        self._raise_for_running()
         resp_json = await self._make_request(
             "get",
             "/collections/" + str(collection_id) + "/count",
@@ -345,6 +362,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         collection_id: UUID,
         n: int = 10,
     ) -> GetResult:
+        self._raise_for_running()
         return await self._get(
             collection_id,
             limit=n,
@@ -366,6 +384,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
+        self._raise_for_running()
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
@@ -403,6 +422,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
+        self._raise_for_running()
         resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/delete",
@@ -426,6 +446,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        self._raise_for_running()
         return await self._make_request(
             "post",
             url,
@@ -449,6 +470,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._raise_for_running()
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
@@ -465,6 +487,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._raise_for_running()
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
@@ -485,6 +508,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
+        self._raise_for_running()
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
@@ -503,6 +527,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
+        self._raise_for_running()
         resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/query",
@@ -529,12 +554,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.reset", OpenTelemetryGranularity.ALL)
     @override
     async def reset(self) -> bool:
+        self._raise_for_running()
         resp_json = await self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
     @trace_method("AsyncFastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_version(self) -> str:
+        self._raise_for_running()
         resp_json = await self._make_request("get", "/version")
         return cast(str, resp_json)
 
@@ -545,7 +572,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_max_batch_size(self) -> int:
+        self._raise_for_running()
         if self._max_batch_size == -1:
             resp_json = await self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
+
+    @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def close(self) -> None:
+        await self._cleanup()  # this is a bit hacky but when running close in a loop the async to sync cleanup doesn't work
+        self.stop()
+        self._system.stop()
