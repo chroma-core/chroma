@@ -1,4 +1,5 @@
 # type: ignore
+import asyncio
 import traceback
 import httpx
 
@@ -1608,13 +1609,29 @@ def test_dimensionality_exception_upsert(client):
 def test_ssl_self_signed(client_ssl):
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
         pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
+    if (
+        client_ssl.get_settings().chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        asyncio.get_event_loop().run_until_complete(client_ssl.heartbeat())
+    else:
+        client_ssl.heartbeat()
 
 
 def test_ssl_self_signed_without_ssl_verify(client_ssl):
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        try:
+            client_ssl.heartbeat()
+        except Exception as e:
+            print("Ignoring HTTPS exception: ", e)
         pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
+    if (
+        client_ssl.get_settings().chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        asyncio.get_event_loop().run_until_complete(client_ssl.heartbeat())
+    else:
+        client_ssl.heartbeat()
     _port = client_ssl._server._settings.chroma_server_http_port
     with pytest.raises(ValueError) as e:
         chromadb.HttpClient(ssl=True, port=_port)
