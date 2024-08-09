@@ -25,6 +25,8 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::instrument;
+use tracing::span;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -84,6 +86,7 @@ impl CompactionManager {
         }
     }
 
+    #[instrument(name = "CompactionManager::compact")]
     async fn compact(
         &self,
         compaction_job: &CompactionJob,
@@ -131,6 +134,7 @@ impl CompactionManager {
     }
 
     // TODO: make the return type more informative
+    #[instrument(name = "CompactionManager::compact_batch")]
     pub(crate) async fn compact_batch(&mut self) -> (u32, u32) {
         self.scheduler.schedule().await;
         let mut jobs = FuturesUnordered::new();
@@ -138,6 +142,7 @@ impl CompactionManager {
             jobs.push(self.compact(job));
         }
         println!("Compacting {} jobs", jobs.len());
+        tracing::info!("Compacting {} jobs", jobs.len());
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
         while let Some(job) = jobs.next().await {
@@ -254,7 +259,9 @@ impl Component for CompactionManager {
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
         ctx.scheduler
-            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
+                Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction"))
+            });
     }
 }
 
@@ -278,7 +285,9 @@ impl Handler<ScheduleMessage> for CompactionManager {
         self.compact_batch().await;
         // Compaction is done, schedule the next compaction
         ctx.scheduler
-            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
+                Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction"))
+            });
     }
 }
 
