@@ -10,7 +10,7 @@ from typing import (
     cast,
 )
 import numpy as np
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
@@ -243,7 +243,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_and_prepare_embedding_set(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -261,6 +261,30 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Documents],
         Optional[URIs],
     ]:
+        def count_one_or_many(value: OneOrMany[Any]) -> int:
+            if isinstance(value, list):
+                return len(value)
+            return 1
+
+        if ids is None:
+            if embeddings:
+                if isinstance(embeddings[0], list) and len(embeddings[0]) > 1:
+                    set_size = len(embeddings)
+                else:
+                    set_size = 1
+            elif documents:
+                set_size = count_one_or_many(documents)
+            elif images:
+                set_size = count_one_or_many(images)
+            elif uris:
+                set_size = count_one_or_many(uris)
+            else:
+                raise ValueError(
+                    "You must provide either ids, embeddings, documents, images, or uris."
+                )
+
+            ids = [str(uuid4()) for _ in range(set_size)]
+
         (
             ids,
             embeddings,
@@ -269,7 +293,7 @@ class CollectionCommon(Generic[ClientT]):
             images,
             uris,
         ) = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
+            cast(OneOrMany[ID], ids), embeddings, metadatas, documents, images, uris
         )
 
         # We need to compute the embeddings if they're not provided

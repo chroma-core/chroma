@@ -4,6 +4,7 @@ import numpy as np
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
     URI,
+    AddResult,
     CollectionMetadata,
     Embedding,
     Include,
@@ -39,7 +40,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]] = None,
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -50,10 +51,10 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+    ) -> AddResult:
         """Add embeddings to the data store.
         Args:
-            ids: The ids of the embeddings you wish to add
+            ids: The ids of the embeddings you wish to add. If None, ids will be generated for you. Optional.
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
             metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
@@ -82,6 +83,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
         self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        return {"ids": ids}
 
     def get(
         self,
