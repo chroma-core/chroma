@@ -202,6 +202,7 @@ class LocalHnswSegment(VectorReader):
             max_elements=DEFAULT_CAPACITY,
             ef_construction=self._params.construction_ef,
             M=self._params.M,
+            allow_replace_deleted=True,
         )
         index.set_ef(self._params.search_ef)
         index.set_num_threads(self._params.num_threads)
@@ -266,7 +267,7 @@ class LocalHnswSegment(VectorReader):
             index = cast(hnswlib.Index, self._index)
 
             # First, update the index
-            index.add_items(vectors_to_write, labels_to_write)
+            index.add_items(vectors_to_write, labels_to_write, replace_deleted=True)
 
             # If that succeeds, update the mappings
             for i, id in enumerate(written_ids):
