@@ -86,7 +86,7 @@ Since the embedding function is multi-modal, you can also add text to the same c
 ```python
 collection.add(
     ids=['id4', 'id5', 'id6'],
-    texts=["This is a document", "This is another document", "This is a third document"]
+    documents=["This is a document", "This is another document", "This is a third document"]
 )
 ```
 
