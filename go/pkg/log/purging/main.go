@@ -2,10 +2,11 @@ package purging
 
 import (
 	"context"
-	"github.com/chroma-core/chroma/go/pkg/log/repository"
-	"github.com/pingcap/log"
 	"os"
 	"time"
+
+	"github.com/chroma-core/chroma/go/pkg/log/repository"
+	"github.com/pingcap/log"
 
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,6 +100,13 @@ func performPurgingLoop(ctx context.Context, le *leaderelection.LeaderElector, l
 					continue
 				}
 				log.Info("purged records")
+				// TODO: Add a RPC to manually trigger garbage collection
+				if err := lg.GarbageCollection(ctx); err != nil {
+					log.Error("failed to garbage collect", zap.Error(err))
+					continue
+				}
+				log.Info("garbage collected")
+
 			} else {
 				log.Info("leader is inactive")
 				break
