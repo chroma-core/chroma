@@ -1111,6 +1111,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "futures",
+ "parking_lot",
  "rand",
  "rand_xorshift",
  "serde",
