@@ -20,6 +20,7 @@ from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    add_attributes_to_current_span,
     trace_method,
 )
 from overrides import override
@@ -96,6 +97,12 @@ class LogService(Producer, Consumer):
     ) -> Sequence[SeqId]:
         logger.info(
             f"Submitting {len(embeddings)} embeddings to log for collection {collection_id}"
+        )
+
+        add_attributes_to_current_span(
+            {
+                "records_count": len(embeddings),
+            }
         )
 
         if not self._running:
