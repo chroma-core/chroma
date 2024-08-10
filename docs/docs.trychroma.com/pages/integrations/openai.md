@@ -51,13 +51,13 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 {% /tab %}
 {% tab label="Javascript" %}
 
-You can pass in an optional `model` argument, which lets you choose which OpenAI embeddings model to use. By default, Chroma uses `text-embedding-ada-002`.
+You can pass in an optional `openai_model` argument, which lets you choose which OpenAI embeddings model to use. By default, Chroma uses `text-embedding-ada-002`.
 
 ```javascript
 const {OpenAIEmbeddingFunction} = require('chromadb');
 const embeddingFunction = new OpenAIEmbeddingFunction({
     openai_api_key: "apiKey",
-    model: "text-embedding-3-small"
+    openai_model: "text-embedding-3-small"
 })
 
 // use directly
