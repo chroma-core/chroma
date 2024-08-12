@@ -214,7 +214,7 @@ console.log(results)
 
 ### 6. See Results
 
-A query about `What should I make for a Hawaiin themed dinner?` returns the document about pineapples.
+A query about `What should I make for a Hawaiian themed dinner?` returns the document about pineapples.
 
 This makes sense if you consider that conceptually pineapples are most closely related to tropical places like Hawaii, and that the fact that it is edible is conceptually related to a question about food.
 
@@ -236,7 +236,7 @@ The JSON has an array of ararys because you can pass multiple query texts and ge
 
 ### 7. Add Metadata
 
-You can also add metadata to your records. This might be data that you would want to search over later (such as keywords), or data that you will need when you retrieve the original documents (such as the URL that the document originally came from).
+You can also add metadata to your records. This might be data that you would want to search over later, or data that you will need when you retrieve the original documents (such as the URL that the document originally came from).
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
@@ -283,7 +283,7 @@ await collection.add({
 
 ### 8. More ways to search your Collection
 
-Use `metadata search` and its operators to search over metadata fields. Use the `.get` API if you want to search metadata.
+Use {%u%}**metadata search**{%/u%} and its operators to search over metadata fields. Use the `.get` API if you want to search metadata.
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
@@ -302,7 +302,7 @@ const recentlyUpdated = await collection.get({
 {% /tab %}
 {% /tabs %}
 
-Use `document search` to do full-text search. Use the `.get` API if you want to search metadata.
+Use {%u%}**document search**{%/u%} to do full-text search. Use the `.get` API if you want to search metadata.
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}

@@ -1,6 +1,7 @@
 import MathComponent from "../../components/markdoc/Math";
 import { Note } from "../../components/markdoc/Note";
-import { Br } from "../../components/markdoc/misc";
+import { Br, Underline } from "../../components/markdoc/misc";
+
 
 export const note = {
   render: Note,
@@ -25,4 +26,8 @@ export const math = {
       type: String
     },
   }
+};
+
+export const u = {
+  render: Underline,
 };
