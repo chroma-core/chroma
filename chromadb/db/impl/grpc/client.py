@@ -1,7 +1,6 @@
 import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
-from chromadb.proto.utils import get_default_grpc_options
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
@@ -30,6 +29,7 @@ from chromadb.proto.coordinator_pb2 import (
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
@@ -66,9 +66,8 @@ class GrpcSysDB(SysDB):
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}",
-            options=get_default_grpc_options(),
         )
-        interceptors = [OtelInterceptor()]
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._sys_db_stub = SysDBStub(self._channel)  # type: ignore
         return super().start()

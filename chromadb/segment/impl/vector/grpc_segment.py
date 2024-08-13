@@ -1,4 +1,3 @@
-from chromadb.proto.utils import get_default_grpc_options
 from overrides import EnforceOverrides, override
 from typing import List, Optional, Sequence
 from chromadb.config import System
@@ -7,6 +6,7 @@ from chromadb.proto.convert import (
     from_proto_vector_query_result,
     to_proto_vector,
 )
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import VectorReader
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
@@ -42,10 +42,8 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         if segment["metadata"] is None or segment["metadata"]["grpc_url"] is None:
             raise Exception("Missing grpc_url in segment metadata")
 
-        channel = grpc.insecure_channel(
-            segment["metadata"]["grpc_url"], options=get_default_grpc_options()
-        )
-        interceptors = [OtelInterceptor()]
+        channel = grpc.insecure_channel(segment["metadata"]["grpc_url"])
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         channel = grpc.intercept_channel(channel, *interceptors)
         self._vector_reader_stub = VectorReaderStub(channel)  # type: ignore
         self._segment = segment
