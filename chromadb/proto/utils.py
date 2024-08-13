@@ -1,7 +1,6 @@
 from typing import Optional, Set
 import grpc
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_result
-from chromadb.telemetry.opentelemetry import tracer
 from opentelemetry.trace import Span
 
 
@@ -31,8 +30,10 @@ class RetryOnRpcErrorClientInterceptor(
         sleep_span: Optional[Span] = None
 
         def before_sleep(_):
+            from chromadb.telemetry.opentelemetry import tracer
+
+            nonlocal sleep_span
             if tracer is not None:
-                nonlocal sleep_span
                 sleep_span = tracer.start_span("Waiting to retry RPC")
 
         @retry(
@@ -45,6 +46,7 @@ class RetryOnRpcErrorClientInterceptor(
             nonlocal sleep_span
             if sleep_span is not None:
                 sleep_span.end()
+                sleep_span = None
             return continuation(*args, **kwargs)
 
         return wrapped(client_call_details, request_or_iterator)

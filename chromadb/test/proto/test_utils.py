@@ -1,8 +1,9 @@
 from concurrent import futures
 from queue import Queue
 from threading import Thread
-from typing import Any
+from typing import Any, Generator, Tuple
 import grpc
+import pytest
 
 from chromadb.proto.convert import to_proto_submit
 from chromadb.proto.logservice_pb2 import PushLogsRequest, PushLogsResponse
@@ -73,7 +74,10 @@ class LogServiceRetryClient:
         self.stub.PushLogs(request)
 
 
-def test_retry_interceptor() -> None:
+@pytest.fixture()
+def client_for_flaky_server_and_received_requests() -> (
+    Generator[Tuple[LogServiceRetryClient, Queue[Any]], None, None]
+):
     received_requests: Queue[Any] = Queue()
     started_queue: Queue[Any] = Queue()
     stop_queue: Queue[Any] = Queue()
@@ -85,27 +89,37 @@ def test_retry_interceptor() -> None:
     # Wait for server to be ready
     started_queue.get()
 
-    try:
-        client = LogServiceRetryClient("localhost:50051")
-        client.push_log(
-            "test",
-            OperationRecord(
-                id="1",
-                embedding=None,
-                encoding=None,
-                metadata=None,
-                operation=Operation.ADD,
-            ),
-        )
+    client = LogServiceRetryClient("localhost:50051")
 
-        requests = []
-        while not received_requests.empty():
-            requests.append(received_requests.get())
+    yield client, received_requests
 
-        # There should be 3 failed requests and 1 successful request
-        assert len(requests) == 4
-        assert all(r["status"] == "failed" for r in requests[:3])
-        assert requests[3]["status"] == "success"
-    finally:
-        stop_queue.put(1)
-        server_thread.join()
+    stop_queue.put(1)
+    server_thread.join()
+
+
+def test_retry_interceptor(
+    client_for_flaky_server_and_received_requests: Tuple[
+        LogServiceRetryClient, Queue[Any]
+    ]
+) -> None:
+    (client, received_requests) = client_for_flaky_server_and_received_requests
+    client = LogServiceRetryClient("localhost:50051")
+    client.push_log(
+        "test",
+        OperationRecord(
+            id="1",
+            embedding=None,
+            encoding=None,
+            metadata=None,
+            operation=Operation.ADD,
+        ),
+    )
+
+    requests = []
+    while not received_requests.empty():
+        requests.append(received_requests.get())
+
+    # There should be 3 failed requests and 1 successful request
+    assert len(requests) == 4
+    assert all(r["status"] == "failed" for r in requests[:3])
+    assert requests[3]["status"] == "success"
