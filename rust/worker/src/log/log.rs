@@ -22,30 +22,30 @@ use uuid::Uuid;
 /// - first_log_offset: the offset of the first log entry in the collection that needs to be compacted
 /// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
 #[derive(Debug)]
-pub(crate) struct CollectionInfo {
-    pub(crate) collection_id: String,
-    pub(crate) first_log_offset: i64,
-    pub(crate) first_log_ts: i64,
+pub struct CollectionInfo {
+    pub collection_id: String,
+    pub first_log_offset: i64,
+    pub first_log_ts: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CollectionRecord {
-    pub(crate) id: Uuid,
-    pub(crate) tenant_id: String,
-    pub(crate) last_compaction_time: i64,
-    pub(crate) first_record_time: i64,
-    pub(crate) offset: i64,
-    pub(crate) collection_version: i32,
+pub struct CollectionRecord {
+    pub id: Uuid,
+    pub tenant_id: String,
+    pub last_compaction_time: i64,
+    pub first_record_time: i64,
+    pub offset: i64,
+    pub collection_version: i32,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Log {
+pub enum Log {
     Grpc(GrpcLog),
     InMemory(InMemoryLog),
 }
 
 impl Log {
-    pub(crate) async fn read(
+    pub async fn read(
         &mut self,
         collection_id: Uuid,
         offset: i64,
@@ -64,7 +64,7 @@ impl Log {
         }
     }
 
-    pub(crate) async fn get_collections_with_new_data(
+    pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
@@ -74,7 +74,7 @@ impl Log {
         }
     }
 
-    pub(crate) async fn update_collection_log_offset(
+    pub async fn update_collection_log_offset(
         &mut self,
         collection_id: Uuid,
         new_offset: i64,
@@ -93,7 +93,7 @@ impl Log {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct GrpcLog {
+pub struct GrpcLog {
     client: LogServiceClient<
         interceptor::InterceptedService<
             tonic::transport::Channel,
@@ -103,7 +103,7 @@ pub(crate) struct GrpcLog {
 }
 
 impl GrpcLog {
-    pub(crate) fn new(
+    pub fn new(
         client: LogServiceClient<
             interceptor::InterceptedService<
                 tonic::transport::Channel,
@@ -116,7 +116,7 @@ impl GrpcLog {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum GrpcLogError {
+pub enum GrpcLogError {
     #[error("Failed to connect to log service")]
     FailedToConnect(#[from] tonic::transport::Error),
 }
@@ -269,7 +269,7 @@ impl GrpcLog {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum PullLogsError {
+pub enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]
@@ -286,7 +286,7 @@ impl ChromaError for PullLogsError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum GetCollectionsWithNewDataError {
+pub enum GetCollectionsWithNewDataError {
     #[error("Failed to fetch")]
     FailedGetCollectionsWithNewData(#[from] tonic::Status),
 }
@@ -302,7 +302,7 @@ impl ChromaError for GetCollectionsWithNewDataError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum UpdateCollectionLogOffsetError {
+pub enum UpdateCollectionLogOffsetError {
     #[error("Failed to update collection log offset")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
 }
@@ -320,11 +320,11 @@ impl ChromaError for UpdateCollectionLogOffsetError {
 // This is used for testing only, it represents a log record that is stored in memory
 // internal to a mock log implementation
 #[derive(Clone)]
-pub(crate) struct InternalLogRecord {
-    pub(crate) collection_id: Uuid,
-    pub(crate) log_offset: i64,
-    pub(crate) log_ts: i64,
-    pub(crate) record: LogRecord,
+pub struct InternalLogRecord {
+    pub collection_id: Uuid,
+    pub log_offset: i64,
+    pub log_ts: i64,
+    pub record: LogRecord,
 }
 
 impl Debug for InternalLogRecord {
@@ -340,7 +340,7 @@ impl Debug for InternalLogRecord {
 
 // This is used for testing only
 #[derive(Clone, Debug)]
-pub(crate) struct InMemoryLog {
+pub struct InMemoryLog {
     collection_to_log: HashMap<String, Vec<Box<InternalLogRecord>>>,
     offsets: HashMap<String, i64>,
 }

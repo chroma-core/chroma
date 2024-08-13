@@ -1,10 +1,10 @@
 mod assignment;
 mod compactor;
 mod config;
-mod execution;
-mod log;
+pub mod execution;
+pub mod log;
 mod memberlist;
-mod segment;
+pub mod segment;
 mod server;
 mod sysdb;
 mod system;

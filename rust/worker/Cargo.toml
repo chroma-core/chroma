@@ -11,6 +11,11 @@ path = "src/bin/query_service.rs"
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
 
+[[bench]]
+name = "fts_index"
+path = "benches/fts_index.rs"
+harness = false
+
 [dependencies]
 rand = "0.8.5"
 murmur3 = "0.5.2"
@@ -67,3 +72,5 @@ shuttle = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 criterion = { workspace = true }
+reqwest = { workspace = true }
+flate2 = { workspace = true }

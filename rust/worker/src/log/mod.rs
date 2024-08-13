@@ -1,5 +1,5 @@
 pub(crate) mod config;
-pub(crate) mod log;
+pub mod log;
 use self::config::LogConfig;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;

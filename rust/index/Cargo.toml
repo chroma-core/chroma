@@ -37,8 +37,8 @@ chroma-distance = { workspace = true }
 tempfile = { workspace = true }
 rayon = { workspace = true }
 serde_json = { workspace = true }
-reqwest = { version = "0.12.5", features = ["blocking", "json"] }
-flate2 = "1.0.30"
+reqwest = { workspace = true }
+flate2 = { workspace = true }
 
 [build-dependencies]
 cc = "1.0"

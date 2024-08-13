@@ -19,7 +19,7 @@ const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
 const MAX_OFFSET_ID: &str = "max_offset_id";
 
 #[derive(Clone)]
-pub(crate) struct RecordSegmentWriter {
+pub struct RecordSegmentWriter {
     // These are Option<> so that we can take() them when we commit
     user_id_to_id: Option<BlockfileWriter>,
     id_to_user_id: Option<BlockfileWriter>,
@@ -27,7 +27,7 @@ pub(crate) struct RecordSegmentWriter {
     // TODO: for now we store the max offset ID in a separate blockfile, this is not ideal
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
-    pub(crate) id: Uuid,
+    pub id: Uuid,
     // If there is an old version of the data, we need to keep it around to be able to
     // materialize the log records
     // old_id_to_data: Option<BlockfileReader<'a, u32, DataRecord<'a>>>,
@@ -94,7 +94,7 @@ impl RecordSegmentWriter {
         Ok(())
     }
 
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, RecordSegmentWriterCreationError> {
@@ -512,7 +512,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
     }
 }
 
-pub(crate) struct RecordSegmentFlusher {
+pub struct RecordSegmentFlusher {
     user_id_to_id_flusher: BlockfileFlusher,
     id_to_user_id_flusher: BlockfileFlusher,
     id_to_data_flusher: BlockfileFlusher,
@@ -592,7 +592,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
 }
 
 #[derive(Clone)]
-pub(crate) struct RecordSegmentReader<'me> {
+pub struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
@@ -620,7 +620,7 @@ impl ChromaError for RecordSegmentReaderCreationError {
 }
 
 impl RecordSegmentReader<'_> {
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
@@ -726,32 +726,32 @@ impl RecordSegmentReader<'_> {
         })
     }
 
-    pub(crate) fn get_current_max_offset_id(&self) -> Arc<AtomicU32> {
+    pub fn get_current_max_offset_id(&self) -> Arc<AtomicU32> {
         self.curr_max_offset_id.clone()
     }
 
-    pub(crate) async fn get_user_id_for_offset_id(
+    pub async fn get_user_id_for_offset_id(
         &self,
         offset_id: u32,
     ) -> Result<&str, Box<dyn ChromaError>> {
         self.id_to_user_id.get("", offset_id).await
     }
 
-    pub(crate) async fn get_offset_id_for_user_id(
+    pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
     ) -> Result<u32, Box<dyn ChromaError>> {
         self.user_id_to_id.get("", user_id).await
     }
 
-    pub(crate) async fn get_data_for_offset_id(
+    pub async fn get_data_for_offset_id(
         &self,
         offset_id: u32,
     ) -> Result<DataRecord, Box<dyn ChromaError>> {
         self.id_to_data.get("", offset_id).await
     }
 
-    pub(crate) async fn get_data_and_offset_id_for_user_id(
+    pub async fn get_data_and_offset_id_for_user_id(
         &self,
         user_id: &str,
     ) -> Result<(DataRecord, u32), Box<dyn ChromaError>> {
@@ -767,7 +767,7 @@ impl RecordSegmentReader<'_> {
         }
     }
 
-    pub(crate) async fn data_exists_for_user_id(
+    pub async fn data_exists_for_user_id(
         &self,
         user_id: &str,
     ) -> Result<bool, Box<dyn ChromaError>> {
@@ -785,7 +785,7 @@ impl RecordSegmentReader<'_> {
 
     /// Returns all data in the record segment, sorted by
     /// embedding id
-    pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
+    pub async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
         let mut data = Vec::new();
         let max_size = self.user_id_to_id.count().await?;
         for i in 0..max_size {
@@ -808,23 +808,23 @@ impl RecordSegmentReader<'_> {
         Ok(data)
     }
 
-    pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+    pub async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         self.id_to_data.count().await
     }
 
-    pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) -> () {
+    pub async fn prefetch_id_to_data(&self, keys: &[u32]) -> () {
         let prefixes = vec![""; keys.len()];
         self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
     }
 
-    pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) -> () {
+    pub async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) -> () {
         let prefixes = vec![""; keys.len()];
         self.user_id_to_id
             .load_blocks_for_keys(&prefixes, &keys)
             .await
     }
 
-    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) -> () {
+    pub async fn prefetch_id_to_user_id(&self, keys: &[u32]) -> () {
         let prefixes = vec![""; keys.len()];
         self.id_to_user_id
             .load_blocks_for_keys(&prefixes, keys)

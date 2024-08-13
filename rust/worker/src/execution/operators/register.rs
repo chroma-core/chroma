@@ -79,7 +79,7 @@ pub struct RegisterOutput {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum RegisterError {
+pub enum RegisterError {
     #[error("Flush compaction error: {0}")]
     FlushCompactionError(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]

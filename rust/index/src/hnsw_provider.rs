@@ -5,7 +5,6 @@ use super::{
 };
 use crate::types::PersistentIndex;
 use async_trait::async_trait;
-use chroma_cache::cache;
 use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;

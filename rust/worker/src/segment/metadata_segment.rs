@@ -37,7 +37,7 @@ const F32_METADATA: &str = "f32_metadata";
 const U32_METADATA: &str = "u32_metadata";
 
 #[derive(Clone)]
-pub(crate) struct MetadataSegmentWriter<'me> {
+pub struct MetadataSegmentWriter<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter<'me>>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -95,7 +95,7 @@ impl ChromaError for MetadataSegmentError {
 }
 
 impl<'me> MetadataSegmentWriter<'me> {
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
@@ -571,7 +571,11 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         &self,
         records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
+        println!("Applying {} records", records.len());
+        let mut i = 0;
         for record in records.iter() {
+            let start_time = std::time::Instant::now();
+
             let segment_offset_id = record.0.offset_id;
             match record.0.final_operation {
                 MaterializedLogOperation::AddNew => {
@@ -813,6 +817,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                 },
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
+            let elapsed = start_time.elapsed();
+            println!("Adding record {} took {:?}", i, elapsed);
+            i += 1;
         }
         Ok(())
     }

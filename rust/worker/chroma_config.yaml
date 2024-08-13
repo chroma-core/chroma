@@ -42,7 +42,7 @@ query_service:
     blockfile_provider:
         Arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608 # 8MiB
                 block_cache_config:
                     lru:
                         capacity: 1000
@@ -100,7 +100,7 @@ compaction_service:
     blockfile_provider:
         Arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608
                 block_cache_config:
                     lru:
                         capacity: 1000

@@ -242,7 +242,7 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
-        let max_partition_size = 100;
+        let max_partition_size = 10000;
         let operator = PartitionOperator::new();
         println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, max_partition_size);
@@ -623,6 +623,7 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             // how to do that since commit is per partition but write_to_blockfiles
             // only need to be called once across all partitions combined.
             let mut writer = output.metadata_segment_writer.clone();
+            println!("Writing to blockfiles");
             match writer.write_to_blockfiles().await {
                 Ok(()) => (),
                 Err(e) => {
@@ -631,6 +632,7 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
                     return;
                 }
             }
+            println!("All write tasks completed");
             self.flush_s3(
                 output.record_segment_writer,
                 output.hnsw_segment_writer,

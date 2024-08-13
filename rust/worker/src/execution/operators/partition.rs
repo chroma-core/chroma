@@ -18,8 +18,8 @@ pub struct PartitionOperator {}
 /// * `records` - The records to partition.
 #[derive(Debug)]
 pub struct PartitionInput {
-    pub(crate) records: Chunk<LogRecord>,
-    pub(crate) max_partition_size: usize,
+    pub records: Chunk<LogRecord>,
+    pub max_partition_size: usize,
 }
 
 impl PartitionInput {
@@ -42,7 +42,7 @@ impl PartitionInput {
 /// * `records` - The partitioned records.
 #[derive(Debug)]
 pub struct PartitionOutput {
-    pub(crate) records: Vec<Chunk<LogRecord>>,
+    pub records: Vec<Chunk<LogRecord>>,
 }
 
 #[derive(Debug, Error)]
