@@ -73,6 +73,9 @@ class LogServiceRetryClient:
         self.stub.PushLogs(request)
 
 
+NUM_REQUESTS_TO_FAIL = 3
+
+
 @pytest.fixture()
 def client_for_flaky_server_and_received_requests() -> (
     Generator[Tuple[LogServiceRetryClient, Queue], None, None]  # type: ignore[type-arg]
@@ -82,7 +85,8 @@ def client_for_flaky_server_and_received_requests() -> (
     stop_queue: Queue = Queue()  # type: ignore[type-arg]
 
     server_thread = Thread(
-        target=start_server, args=(3, received_requests, started_queue, stop_queue)
+        target=start_server,
+        args=(NUM_REQUESTS_TO_FAIL, received_requests, started_queue, stop_queue),
     )
     server_thread.start()
     # Wait for server to be ready
@@ -117,6 +121,6 @@ def test_retry_interceptor(
         requests.append(received_requests.get())
 
     # There should be 3 failed requests and 1 successful request
-    assert len(requests) == 4
-    assert all(r["status"] == "failed" for r in requests[:3])
-    assert requests[3]["status"] == "success"
+    assert len(requests) == NUM_REQUESTS_TO_FAIL + 1
+    assert all(r["status"] == "failed" for r in requests[:NUM_REQUESTS_TO_FAIL])
+    assert requests[NUM_REQUESTS_TO_FAIL]["status"] == "success"
