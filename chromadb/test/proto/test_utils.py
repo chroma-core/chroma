@@ -1,7 +1,7 @@
 from concurrent import futures
 from queue import Queue
 from threading import Thread
-from typing import Any, Generator, Tuple
+from typing import Generator, Tuple
 import grpc
 import pytest
 
@@ -18,11 +18,10 @@ from chromadb.types import Operation, OperationRecord
 
 class FlakyLogServiceServicer(LogServiceServicer):
     num_requests_to_fail: int
-    received_requests: Queue[Any]
+    # New versions of mypy require type annotations for Queue, whereas older versions error on them
+    received_requests: Queue  # type: ignore[type-arg]
 
-    def __init__(
-        self, num_requests_to_fail: int, received_requests: Queue[Any]
-    ) -> None:
+    def __init__(self, num_requests_to_fail: int, received_requests: Queue) -> None:  # type: ignore[type-arg]
         super().__init__()
         self.num_requests_to_fail = num_requests_to_fail
         self.received_requests = received_requests
@@ -43,9 +42,9 @@ class FlakyLogServiceServicer(LogServiceServicer):
 
 def start_server(
     num_requests_to_fail: int,
-    received_requests: Queue[Any],
-    started_queue: Queue[Any],
-    stop_queue: Queue[Any],
+    received_requests: Queue,  # type: ignore[type-arg]
+    started_queue: Queue,  # type: ignore[type-arg]
+    stop_queue: Queue,  # type: ignore[type-arg]
 ) -> None:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
     add_LogServiceServicer_to_server(  # type: ignore
@@ -76,11 +75,11 @@ class LogServiceRetryClient:
 
 @pytest.fixture()
 def client_for_flaky_server_and_received_requests() -> (
-    Generator[Tuple[LogServiceRetryClient, Queue[Any]], None, None]
+    Generator[Tuple[LogServiceRetryClient, Queue], None, None]  # type: ignore[type-arg]
 ):
-    received_requests: Queue[Any] = Queue()
-    started_queue: Queue[Any] = Queue()
-    stop_queue: Queue[Any] = Queue()
+    received_requests: Queue = Queue()  # type: ignore[type-arg]
+    started_queue: Queue = Queue()  # type: ignore[type-arg]
+    stop_queue: Queue = Queue()  # type: ignore[type-arg]
 
     server_thread = Thread(
         target=start_server, args=(3, received_requests, started_queue, stop_queue)
@@ -98,9 +97,7 @@ def client_for_flaky_server_and_received_requests() -> (
 
 
 def test_retry_interceptor(
-    client_for_flaky_server_and_received_requests: Tuple[
-        LogServiceRetryClient, Queue[Any]
-    ]
+    client_for_flaky_server_and_received_requests: Tuple[LogServiceRetryClient, Queue]  # type: ignore[type-arg]
 ) -> None:
     (client, received_requests) = client_for_flaky_server_and_received_requests
     client = LogServiceRetryClient("localhost:50051")
