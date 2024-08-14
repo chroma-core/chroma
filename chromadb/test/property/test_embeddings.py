@@ -67,6 +67,7 @@ class EmbeddingStateMachineStates:
     delete_by_ids = "delete_by_ids"
     update_embeddings = "update_embeddings"
     upsert_embeddings = "upsert_embeddings"
+    batch_upsert_embeddings = "batch_upsert_embeddings"
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
@@ -188,6 +189,66 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
         self.collection.upsert(**record_set)  # type: ignore[arg-type]
         self._upsert_embeddings(record_set)
+
+    # Using a value < 3 causes more retries and lowers the number of valid samples
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
+    @rule(
+        record_set=strategies.recordsets(
+            collection_strategy=collection_st,
+            id_strategy=st.one_of(embedding_ids, strategies.safe_text),
+            min_size=1,
+            max_size=5,
+        ),
+        batch_size=st.integers(
+            min_value=1, max_value=5
+        ),  # make multiple batches more likely
+    )
+    def batch_upsert_embeddings(
+        self, record_set: strategies.RecordSet, batch_size: int
+    ) -> None:
+        trace("batch upsert embeddings")
+        self.on_state_change(EmbeddingStateMachineStates.batch_upsert_embeddings)
+
+        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
+            record_set
+        )
+
+        def on_batch_ingested(ingested_ids: IDs) -> None:
+            ingested_records: strategies.RecordSet = {
+                "ids": [],
+                "metadatas": None,
+                "documents": None,
+                "embeddings": None,
+            }
+
+            def append_to(field: str, value: Any) -> None:
+                nonlocal ingested_records
+                if not ingested_records[field]:  # type: ignore
+                    ingested_records[field] = []  # type: ignore
+
+                ingested_records[field].append(value)  # type: ignore
+
+            for i, id in enumerate(cast(List[str], normalized_record_set.get("ids"))):
+                if id in ingested_ids:
+                    cast(List[str], ingested_records["ids"]).append(id)
+                    metadatas = normalized_record_set.get("metadatas")
+                    documents = normalized_record_set.get("documents")
+                    embeddings = normalized_record_set.get("embeddings")
+
+                    if metadatas:
+                        append_to("metadatas", metadatas[i])
+                    if documents:
+                        append_to("documents", documents[i])
+                    if embeddings:
+                        append_to("embeddings", embeddings[i])
+
+            self._upsert_embeddings(ingested_records)
+
+        self.collection.batch_upsert(
+            **normalized_record_set,  # type: ignore[arg-type]
+            batch_size=batch_size,
+            progress_callback=on_batch_ingested,
+        )
 
     @invariant()
     def count(self) -> None:

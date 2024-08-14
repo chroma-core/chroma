@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 import numpy as np
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -6,6 +6,7 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
+    Embeddings,
     Include,
     Metadata,
     Document,
@@ -18,6 +19,7 @@ from chromadb.api.types import (
     OneOrMany,
     WhereDocument,
 )
+from chromadb.utils.batch_utils import create_batches
 
 import logging
 
@@ -90,7 +92,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -152,7 +154,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -305,6 +307,29 @@ class Collection(CollectionCommon["ServerAPI"]):
             documents=documents,
             uris=uris,
         )
+
+    def batch_upsert(
+        self,
+        ids: IDs,
+        embeddings: Optional[Union[Embeddings, List[np.ndarray]]] = None,  # type: ignore[type-arg]
+        metadatas: Optional[List[Optional[Metadata]]] = None,
+        documents: Optional[List[Optional[Document]]] = None,
+        images: Optional[List[Optional[Image]]] = None,
+        uris: Optional[List[Optional[URI]]] = None,
+        batch_size: int = 1024,
+        progress_callback: Optional[Callable[[IDs], None]] = None,
+        print_progress: bool = False,
+    ) -> None:
+        for batch in create_batches(
+            (ids, embeddings, metadatas, documents, images, uris),
+            print_progress_description=f"Upserting {len(ids)} documents..."
+            if print_progress
+            else None,
+            max_batch_size=batch_size,
+        ):
+            self.upsert(*batch)  # type: ignore[arg-type]
+            if progress_callback:
+                progress_callback(batch[0])
 
     def delete(
         self,

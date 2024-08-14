@@ -1,5 +1,7 @@
 from typing import (
     TYPE_CHECKING,
+    Callable,
+    List,
     Optional,
     Union,
 )
@@ -9,6 +11,7 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
+    Embeddings,
     Include,
     Metadata,
     Document,
@@ -23,6 +26,7 @@ from chromadb.api.types import (
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
+from chromadb.utils.batch_utils import create_batches
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -32,7 +36,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -91,7 +95,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -141,7 +145,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def query(
         self,
-        query_embeddings: Optional[
+        query_embeddings: Optional[  # type: ignore
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -153,7 +157,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -229,7 +233,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def update(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -266,7 +270,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def upsert(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -306,6 +310,29 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             documents=documents,
             uris=uris,
         )
+
+    async def batch_upsert(
+        self,
+        ids: IDs,
+        embeddings: Optional[Union[Embeddings, List[np.ndarray]]] = None,  # type: ignore
+        metadatas: Optional[List[Optional[Metadata]]] = None,
+        documents: Optional[List[Optional[Document]]] = None,
+        images: Optional[List[Optional[Image]]] = None,
+        uris: Optional[List[Optional[URI]]] = None,
+        batch_size: int = 1024,
+        progress_callback: Optional[Callable[[IDs], None]] = None,
+        print_progress: bool = False,
+    ) -> None:
+        for batch in create_batches(
+            (ids, embeddings, metadatas, documents, images, uris),
+            print_progress_description=f"Upserting {len(ids)} documents..."
+            if print_progress
+            else None,
+            max_batch_size=batch_size,
+        ):
+            await self.upsert(*batch)  # type: ignore
+            if progress_callback:
+                progress_callback(batch[0])
 
     async def delete(
         self,

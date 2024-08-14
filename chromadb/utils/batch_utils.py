@@ -1,5 +1,4 @@
 from typing import Any, Iterator, List, Optional, Tuple, TypeVar, Union, cast
-from chromadb.api import ClientAPI
 import numpy as np
 from rich.progress import track
 
@@ -8,7 +7,6 @@ T = TypeVar("T", bound=Tuple[Union[List[Any], np.ndarray, None], ...])  # type: 
 
 
 def create_batches(
-    client: ClientAPI,
     records: T,
     max_batch_size: Optional[int] = 1024,
     print_progress_description: Optional[str] = None,
@@ -39,7 +37,7 @@ def create_batches(
         max_batch_size: The maximum batch size to use, defaults to 1024
         print_progress_description: If specified, a progress bar will be displayed with this description
     """
-    max_batch_size = min(client.get_max_batch_size(), max_batch_size or 1024)
+    max_batch_size = max_batch_size or 1024
 
     set_size = -1
     for field in records:
