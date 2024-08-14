@@ -161,7 +161,15 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                             ),
                             None => {
                                 // There are no HNSW results and no brute force results
-                                (Vec::new(), Vec::new(), None)
+                                (
+                                    Vec::new(),
+                                    Vec::new(),
+                                    if input.include_vectors {
+                                        Some(Vec::new())
+                                    } else {
+                                        None
+                                    },
+                                )
                             }
                         }
                     }
