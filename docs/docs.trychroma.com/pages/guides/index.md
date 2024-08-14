@@ -313,10 +313,10 @@ await client.countRecords(collection); // returns the number of items in the col
 `create_collection` also takes an optional `metadata` argument which can be used to customize the distance method of the embedding space by setting the value of `hnsw:space`.
 
 ```python
- collection = client.create_collection(
-        name="collection_name",
-        metadata={"hnsw:space": "cosine"} # l2 is the default
-    )
+collection = client.create_collection(
+    name="collection_name",
+    metadata={"hnsw:space": "cosine"}, # l2 is the default
+)
 ```
 
 {% /tab %}
@@ -516,8 +516,8 @@ You can also retrieve items from a collection by `id` using `.get`.
 
 ```python
 collection.get(
-	ids=["id1", "id2", "id3", ...],
-	where={"style": "style1"}
+    ids=["id1", "id2", "id3", ...],
+    where={"style": "style1"}
 )
 ```
 
@@ -536,8 +536,8 @@ You can also retrieve records from a collection by `id` using `.getRecords`.
 
 ```javascript
 await client.getRecords(collection, {
-	ids: ["id1", "id2", "id3", ...], //ids
-	where: {"style": "style1"} // where
+  ids: ["id1", "id2", "id3", ...],
+  where: {"style": "style1"}
 })
 ```
 
@@ -754,13 +754,13 @@ Any property of records in a collection can be updated using `.updateRecords`.
 
 ```javascript
 client.updateRecords(
-    collection,
-    {
-      ids: ["id1", "id2", "id3", ...],
-      embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
-      metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-      documents: ["doc1", "doc2", "doc3", ...],
-    },
+  collection,
+  {
+    ids: ["id1", "id2", "id3", ...],
+    embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
+    metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
+    documents: ["doc1", "doc2", "doc3", ...],
+  },
 )
 ```
 
@@ -823,7 +823,7 @@ Chroma supports deleting items from a collection by `id` using `.delete`. The em
 ```python
 collection.delete(
     ids=["id1", "id2", "id3",...],
-	where={"chapter": "20"}
+    where={"chapter": "20"},
 )
 ```
 
@@ -832,8 +832,8 @@ collection.delete(
 
 ```javascript
 await client.deleteRecords(collection, {
-    ids: ["id1", "id2", "id3",...], //ids
-	where: {"chapter": "20"} //where
+  ids: ["id1", "id2", "id3",...],
+  where: {"chapter": "20"},
 })
 ```
 
