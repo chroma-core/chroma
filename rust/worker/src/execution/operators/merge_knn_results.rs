@@ -12,7 +12,7 @@ use thiserror::Error;
 pub struct MergeKnnResultsOperator {}
 
 #[derive(Debug)]
-pub struct BruteForceResult {
+pub struct MergeKnnBruteForceResultInput {
     pub user_ids: Vec<String>,
     pub distances: Vec<f32>,
     pub vectors: Vec<Vec<f32>>,
@@ -22,7 +22,7 @@ pub struct BruteForceResult {
 pub struct MergeKnnResultsOperatorInput {
     hnsw_result_offset_ids: Vec<usize>,
     hnsw_result_distances: Vec<f32>,
-    brute_force_result: Option<BruteForceResult>,
+    brute_force_result: Option<MergeKnnBruteForceResultInput>,
     include_vectors: bool,
     k: usize,
     record_segment_definition: Segment,
@@ -33,7 +33,7 @@ impl MergeKnnResultsOperatorInput {
     pub fn new(
         hnsw_result_offset_ids: Vec<usize>,
         hnsw_result_distances: Vec<f32>,
-        brute_force_result: Option<BruteForceResult>,
+        brute_force_result: Option<MergeKnnBruteForceResultInput>,
         include_vectors: bool,
         k: usize,
         record_segment_definition: Segment,

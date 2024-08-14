@@ -14,7 +14,7 @@ use crate::execution::operators::hnsw_knn::{
     HnswKnnOperator, HnswKnnOperatorInput, HnswKnnOperatorOutput,
 };
 use crate::execution::operators::merge_knn_results::{
-    BruteForceResult, MergeKnnResultsOperator, MergeKnnResultsOperatorInput,
+    MergeKnnBruteForceResultInput, MergeKnnResultsOperator, MergeKnnResultsOperatorInput,
     MergeKnnResultsOperatorOutput,
 };
 use crate::execution::operators::normalize_vectors::normalize;
@@ -472,7 +472,7 @@ impl HnswQueryOrchestrator {
         let input = MergeKnnResultsOperatorInput::new(
             hnsw_result_offset_ids,
             hnsw_result_distances,
-            brute_force_result.map(|r| BruteForceResult {
+            brute_force_result.map(|r| MergeKnnBruteForceResultInput {
                 user_ids: r.user_ids,
                 distances: r.distances,
                 vectors: r.embeddings,
