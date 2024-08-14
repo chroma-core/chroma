@@ -44,6 +44,7 @@ docker_build(
   '.',
   only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
   dockerfile='./Dockerfile',
+  ignore=['**/*.pyc', 'chromadb/test/'],
 )
 
 docker_build(
