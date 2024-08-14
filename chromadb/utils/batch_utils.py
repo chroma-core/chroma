@@ -52,6 +52,8 @@ def create_batches(
         range(0, set_size, batch_size),
         description=print_progress_description or "",
         disable=not print_progress_description,
+        complete_style="#f3d846",
+        finished_style="#4b77f7",
     ):
         yield cast(
             T,
