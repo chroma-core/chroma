@@ -316,16 +316,18 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[List[Optional[Document]]] = None,
         images: Optional[List[Optional[Image]]] = None,
         uris: Optional[List[Optional[URI]]] = None,
-        batch_size: int = 1024,
+        max_batch_size: int = 1024,
         progress_callback: Optional[Callable[[IDs], None]] = None,
         print_progress: bool = False,
     ) -> None:
+        absolute_max_batch_size = self._client.get_max_batch_size()
+
         for batch in create_batches(
             (ids, embeddings, metadatas, documents, images, uris),
             print_progress_description=f"Upserting {len(ids)} documents..."
             if print_progress
             else None,
-            max_batch_size=batch_size,
+            batch_size=min(absolute_max_batch_size, max_batch_size),
         ):
             self.upsert(*batch)  # type: ignore[arg-type]
             if progress_callback:

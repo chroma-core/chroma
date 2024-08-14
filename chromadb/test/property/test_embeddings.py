@@ -246,7 +246,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
         self.collection.batch_upsert(
             **normalized_record_set,  # type: ignore[arg-type]
-            batch_size=batch_size,
+            max_batch_size=batch_size,
             progress_callback=on_batch_ingested,
         )
 

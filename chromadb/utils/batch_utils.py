@@ -8,7 +8,7 @@ T = TypeVar("T", bound=Tuple[Union[List[Any], np.ndarray, None], ...])  # type: 
 
 def create_batches(
     records: T,
-    max_batch_size: Optional[int] = 1024,
+    batch_size: Optional[int] = 1024,
     print_progress_description: Optional[str] = None,
 ) -> Iterator[T]:
     """
@@ -34,10 +34,10 @@ def create_batches(
     Args:
         client: A chromadb client
         records: A tuple of lists or numpy arrays
-        max_batch_size: The maximum batch size to use, defaults to 1024
+        batch_size: The batch size to use, defaults to 1024
         print_progress_description: If specified, a progress bar will be displayed with this description
     """
-    max_batch_size = max_batch_size or 1024
+    batch_size = batch_size or 1024
 
     set_size = -1
     for field in records:
@@ -49,14 +49,14 @@ def create_batches(
         raise ValueError("Records must contain a list field")
 
     for i in track(
-        range(0, set_size, max_batch_size),
+        range(0, set_size, batch_size),
         description=print_progress_description or "",
         disable=not print_progress_description,
     ):
         yield cast(
             T,
             tuple(
-                None if field is None else field[i : i + max_batch_size]
+                None if field is None else field[i : i + batch_size]
                 for field in records
             ),
         )

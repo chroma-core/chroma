@@ -182,7 +182,6 @@ def test_add_large(
     initial_version = coll.get_model()["version"]
 
     for ids, embeddings, metadatas, documents in create_batches(
-        client,
         (
             cast(List[str], record_set["ids"]),
             cast(Embeddings, record_set["embeddings"]),
