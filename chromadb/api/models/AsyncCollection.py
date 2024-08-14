@@ -311,7 +311,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             uris=uris,
         )
 
-    async def batch_upsert(
+    async def bulk_upsert(
         self,
         ids: IDs,
         embeddings: Optional[Union[Embeddings, List[np.ndarray]]] = None,  # type: ignore

@@ -308,7 +308,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris=uris,
         )
 
-    def batch_upsert(
+    def bulk_upsert(
         self,
         ids: IDs,
         embeddings: Optional[Union[Embeddings, List[np.ndarray]]] = None,  # type: ignore[type-arg]
