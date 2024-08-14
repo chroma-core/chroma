@@ -317,9 +317,25 @@ class Collection(CollectionCommon["ServerAPI"]):
         images: Optional[List[Optional[Image]]] = None,
         uris: Optional[List[Optional[URI]]] = None,
         max_batch_size: int = 1024,
-        progress_callback: Optional[Callable[[IDs], None]] = None,
+        on_batch_processed: Optional[Callable[[IDs], None]] = None,
         print_progress: bool = False,
     ) -> None:
+        """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist. This method is optimized for inserting large amounts of data, but unlike other collection methods it is not atomic. If an error occurs during the bulk upsert, some of your data may be inserted and some may not.
+
+        Args:
+            ids: The ids of the embeddings to update
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            documents: The documents to associate with the embeddings. Optional.
+            images: The images to associate with the embeddings. Optional.
+            uris: The uris of the images to associate with the embeddings. Optional.
+            max_batch_size: The maximum number of embeddings to insert in a single batch. Optional.
+            on_batch_processed: A callback function that will be called after each batch is processed. The function will be passed the ids of the embeddings that were just inserted. Optional.
+            print_progress: Whether to print progress information to the console. Optional. Defaults to True in interactive environments and otherwise False.
+
+        Returns:
+            None
+        """
         absolute_max_batch_size = self._client.get_max_batch_size()
 
         for batch in create_batches(
@@ -330,8 +346,8 @@ class Collection(CollectionCommon["ServerAPI"]):
             batch_size=min(absolute_max_batch_size, max_batch_size),
         ):
             self.upsert(*batch)  # type: ignore[arg-type]
-            if progress_callback:
-                progress_callback(batch[0])
+            if on_batch_processed:
+                on_batch_processed(batch[0])
 
     def delete(
         self,
