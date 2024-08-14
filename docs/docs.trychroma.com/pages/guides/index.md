@@ -351,9 +351,17 @@ Valid options for `hnsw:space` are "l2", "ip, "or "cosine". The **default** is "
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-Add data to Chroma with `.add`.
+When ingesting data for the first time, we recommend using the `.bulk_upsert()` method as it's optimized for large amounts of data (it also displays a progress bar by default):
 
-Raw documents:
+```python
+collection.bulk_upsert(
+    documents=["lorem ipsum...", "doc2", "doc3", ...],
+    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
+    ids=["id1", "id2", "id3", ...]
+)
+```
+
+You can also add data to Chroma with `.add()`:
 
 ```python
 collection.add(
@@ -362,6 +370,8 @@ collection.add(
     ids=["id1", "id2", "id3", ...]
 )
 ```
+
+Note that `.bulk_upsert()` is not atomic: if it fails partway through some of your data will have been added/updated and some of it will not have been. You should use `.add()` or `.upsert()` if you require atomicity for your application.
 
 {% /tab %}
 {% tab label="Javascript" %}
