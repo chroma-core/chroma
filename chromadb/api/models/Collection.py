@@ -1,4 +1,3 @@
-import sys
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 import numpy as np
 
@@ -21,6 +20,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.utils.batch_utils import create_batches
+from chromadb.utils.environment import running_in_interactive_environment
 
 import logging
 
@@ -319,7 +319,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         uris: Optional[List[Optional[URI]]] = None,
         max_batch_size: int = 1024,
         on_batch_processed: Optional[Callable[[IDs], None]] = None,
-        print_progress: bool = sys.stdout.isatty(),
+        print_progress: bool = running_in_interactive_environment(),
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist. This method is optimized for inserting large amounts of data, but unlike other collection methods it is not atomic. If an error occurs during the bulk upsert, some of your data may be inserted and some may not.
 

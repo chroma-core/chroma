@@ -1,5 +1,4 @@
 import inspect
-import sys
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -31,6 +30,7 @@ from chromadb.api.types import (
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.utils.batch_utils import create_batches
+from chromadb.utils.environment import running_in_interactive_environment
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -327,7 +327,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         on_batch_processed: Optional[
             Callable[[IDs], Union[Awaitable[Any], None]]
         ] = None,
-        print_progress: bool = sys.stdout.isatty(),
+        print_progress: bool = running_in_interactive_environment(),
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist. This method is optimized for inserting large amounts of data, but unlike other collection methods it is not atomic. If an error occurs during the bulk upsert, some of your data may be inserted and some may not.
 
