@@ -1,6 +1,6 @@
 import sys
 
-from chromadb.proto.utils import get_default_grpc_options
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 import grpc
 import time
 from chromadb.ingest import (
@@ -52,9 +52,8 @@ class LogService(Producer, Consumer):
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._log_service_url}:{self._log_service_port}",
-            options=get_default_grpc_options(),
         )
-        interceptors = [OtelInterceptor()]
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
         super().start()

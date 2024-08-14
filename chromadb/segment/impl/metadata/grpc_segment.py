@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Sequence
-from chromadb.proto.utils import get_default_grpc_options
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
 from chromadb.types import Segment
@@ -37,10 +37,8 @@ class GrpcMetadataSegment(MetadataReader):
         if not self._segment["metadata"] or not self._segment["metadata"]["grpc_url"]:
             raise Exception("Missing grpc_url in segment metadata")
 
-        channel = grpc.insecure_channel(
-            self._segment["metadata"]["grpc_url"], options=get_default_grpc_options()
-        )
-        interceptors = [OtelInterceptor()]
+        channel = grpc.insecure_channel(self._segment["metadata"]["grpc_url"])
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         channel = grpc.intercept_channel(channel, *interceptors)
         self._metadata_reader_stub = MetadataReaderStub(channel)  # type: ignore
 
