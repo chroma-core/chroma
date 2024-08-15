@@ -284,7 +284,7 @@ impl HnswQueryOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error
-                    println!("Error sending Brute Force KNN task: {:?}", e);
+                    tracing::error!("Error sending Brute Force KNN task: {:?}", e);
                 }
             }
         }
@@ -335,7 +335,6 @@ impl HnswQueryOrchestrator {
                 }
             }
         };
-        println!("Created HNSW Segment Reader: {:?}", hnsw_segment_reader);
 
         let record_segment = self
             .record_segment
@@ -360,7 +359,7 @@ impl HnswQueryOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error
-                    println!("Error sending HNSW KNN task: {:?}", e);
+                    tracing::error!("Error sending HNSW KNN task: {:?}", e);
                 }
             }
         }
@@ -490,7 +489,7 @@ impl HnswQueryOrchestrator {
             Ok(_) => (),
             Err(e) => {
                 // Log an error
-                println!("Error sending Merge KNN task: {:?}", e);
+                tracing::error!("Error sending Merge KNN task: {:?}", e);
             }
         }
     }

@@ -89,7 +89,6 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
             .await
             {
                 Ok(reader) => {
-                    println!("Record Segment Reader created successfully");
                     // Convert the HNSW result offset IDs to user IDs
                     let mut hnsw_result_user_ids = Vec::new();
                     let mut hnsw_result_vectors = None;
