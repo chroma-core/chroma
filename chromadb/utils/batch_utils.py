@@ -2,6 +2,8 @@ from typing import Any, Iterator, List, Optional, Tuple, TypeVar, Union, cast
 import numpy as np
 from rich.progress import track
 
+from chromadb.utils.environment import running_in_interactive_environment
+
 # (Can't provide type arguments to ndarray < 3.9.)
 T = TypeVar("T", bound=Tuple[Union[List[Any], np.ndarray, None], ...])  # type: ignore[type-arg]
 
@@ -10,6 +12,7 @@ def create_batches(
     records: T,
     batch_size: Optional[int] = 1024,
     print_progress_description: Optional[str] = None,
+    print_progress: Optional[bool] = None,
 ) -> Iterator[T]:
     """
     Takes tuples like `([0, 1], [2, 3])` and yields batches of the tuple like `([0], [2])` and `([1], [3])`.
@@ -48,10 +51,16 @@ def create_batches(
     if set_size == -1:
         raise ValueError("Records must contain a list field")
 
+    print_progress = (
+        print_progress
+        if print_progress is not None
+        else running_in_interactive_environment()
+    )
+
     for i in track(
         range(0, set_size, batch_size),
         description=print_progress_description or "",
-        disable=not print_progress_description,
+        disable=not print_progress,
         complete_style="#f3d846",
         finished_style="#4b77f7",
     ):
