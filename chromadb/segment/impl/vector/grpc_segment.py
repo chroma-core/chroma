@@ -35,6 +35,7 @@ import grpc
 class GrpcVectorSegment(VectorReader, EnforceOverrides):
     _vector_reader_stub: VectorReaderStub
     _segment: Segment
+    _request_timeout_seconds: int
 
     def __init__(self, system: System, segment: Segment):
         # TODO: move to start() method
@@ -47,6 +48,9 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         channel = grpc.intercept_channel(channel, *interceptors)
         self._vector_reader_stub = VectorReaderStub(channel)  # type: ignore
         self._segment = segment
+        self._request_timeout_seconds = system.settings.require(
+            "chroma_query_request_timeout_seconds"
+        )
 
     @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
@@ -58,7 +62,9 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
         )
-        response: GetVectorsResponse = self._vector_reader_stub.GetVectors(request)
+        response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
+            request, timeout=self._request_timeout_seconds
+        )
         results: List[VectorEmbeddingRecord] = []
         for vector in response.records:
             result = from_proto_vector_embedding_record(vector)
@@ -81,7 +87,9 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
         )
-        response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(request)
+        response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
+            request, timeout=self._request_timeout_seconds
+        )
         results: List[List[VectorQueryResult]] = []
         for result in response.results:
             curr_result: List[VectorQueryResult] = []
