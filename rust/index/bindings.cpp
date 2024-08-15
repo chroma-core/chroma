@@ -202,8 +202,11 @@ public:
     }
 };
 
-// All these methods except for len and capacity can throw std::exception
-// and populate the last_error thread-local variable
+// All these methods except for len() and capacity() can "throw" a std::exception
+// and populate the last_error thread-local variable. This is how we communicate
+// errors across the FFI boundary - the C++ layer will catch all exceptions and
+// set the last_error variable, which the Rust layer can then check.
+// Comments referring to "throwing" exceptions in this block refer to this mechanism.
 extern "C"
 {
 
