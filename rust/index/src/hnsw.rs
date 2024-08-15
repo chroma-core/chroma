@@ -1,7 +1,6 @@
 use super::{Index, IndexConfig, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
-use rand::Error;
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
 use std::str::Utf8Error;
@@ -218,7 +217,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
                     dimensionality: index_config.dimensionality,
                     id,
                 };
-                hnsw_index.set_ef(config.ef_search);
+                hnsw_index.set_ef(config.ef_search)?;
                 Ok(hnsw_index)
             }
         }
@@ -321,24 +320,32 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
 }
 
 impl HnswIndex {
-    pub fn set_ef(&self, ef: usize) {
+    fn set_ef(&self, ef: usize) -> Result<(), Box<dyn ChromaError>> {
         unsafe { set_ef(self.ffi_ptr, ef as c_int) }
-    }
-
-    pub fn get_ef(&self) -> usize {
-        unsafe { get_ef(self.ffi_ptr) as usize }
+        read_and_return_hnsw_error(self.ffi_ptr)
     }
 
     pub fn len(&self) -> usize {
         unsafe { len(self.ffi_ptr) as usize }
+        // Does not return an error
     }
 
     pub fn capacity(&self) -> usize {
         unsafe { capacity(self.ffi_ptr) as usize }
+        // Does not return an error
     }
 
-    pub fn resize(&mut self, new_size: usize) {
+    pub fn resize(&mut self, new_size: usize) -> Result<(), Box<dyn ChromaError>> {
         unsafe { resize_index(self.ffi_ptr, new_size) }
+        read_and_return_hnsw_error(self.ffi_ptr)
+    }
+
+    #[cfg(test)]
+    fn get_ef(&self) -> Result<usize, Box<dyn ChromaError>> {
+        let ret_val;
+        unsafe { ret_val = get_ef(self.ffi_ptr) as usize }
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok(ret_val)
     }
 }
 
@@ -392,7 +399,9 @@ extern "C" {
         disallowed_ids_length: usize,
     ) -> c_int;
 
+    #[cfg(test)]
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
+
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
     fn len(index: *const IndexPtrFFI) -> c_int;
     fn capacity(index: *const IndexPtrFFI) -> c_int;
@@ -459,9 +468,9 @@ pub mod test {
         match index {
             Err(e) => panic!("Error initializing index: {}", e),
             Ok(index) => {
-                assert_eq!(index.get_ef(), 10);
-                index.set_ef(100);
-                assert_eq!(index.get_ef(), 100);
+                assert_eq!(index.get_ef().unwrap(), 10);
+                index.set_ef(100).expect("Should not error");
+                assert_eq!(index.get_ef().unwrap(), 100);
             }
         }
     }
@@ -542,7 +551,7 @@ pub mod test {
             Err(e) => panic!("Error initializing index: {}", e),
             Ok(index) => index,
         };
-        assert_eq!(index.get_ef(), 100);
+        assert_eq!(index.get_ef().unwrap(), 100);
 
         let data: Vec<f32> = utils::generate_random_data(n, d);
         let ids: Vec<usize> = (0..n).collect();
@@ -691,7 +700,7 @@ pub mod test {
             Ok(index) => index,
         };
         // TODO: This should be set by the load
-        index.set_ef(100);
+        index.set_ef(100).expect("Should not error");
         assert_eq!(index.id, id);
 
         // Query the data
@@ -791,7 +800,7 @@ pub mod test {
         assert_eq!(index.capacity(), n);
 
         // Resize the index to 2*n
-        index.resize(2 * n);
+        index.resize(2 * n).expect("Should not error");
 
         assert_eq!(index.len(), n);
         assert_eq!(index.capacity(), 2 * n);

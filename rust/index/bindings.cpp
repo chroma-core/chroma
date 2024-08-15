@@ -201,8 +201,12 @@ public:
     }
 };
 
+// All these methods except for len and capacity can throw std::exception
+// and populate the last_error thread-local variable
 extern "C"
 {
+
+    // Can throw std::exception
     Index<float> *create_index(const char *space_name, const int dim)
     {
         Index<float> *index;
@@ -219,6 +223,7 @@ extern "C"
         return new Index<float>(space_name, dim);
     }
 
+    // Can throw std::exception
     void init_index(Index<float> *index, const size_t max_elements, const size_t M, const size_t ef_construction, const size_t random_seed, const bool allow_replace_deleted, const bool is_persistent_index, const char *persistence_location)
     {
         try
@@ -232,6 +237,7 @@ extern "C"
         last_error.clear();
     }
 
+    // Can throw std::exception
     void load_index(Index<float> *index, const char *path_to_index, const bool allow_replace_deleted, const bool is_persistent_index)
     {
         try
@@ -245,6 +251,7 @@ extern "C"
         last_error.clear();
     }
 
+    // Can throw std::exception
     void persist_dirty(Index<float> *index)
     {
         try
@@ -258,6 +265,7 @@ extern "C"
         last_error.clear();
     }
 
+    // Can throw std::exception
     void add_item(Index<float> *index, const float *data, const hnswlib::labeltype id, const bool replace_deleted)
     {
         try
@@ -271,6 +279,7 @@ extern "C"
         last_error.clear();
     }
 
+    // Can throw std::exception
     void get_item(Index<float> *index, const hnswlib::labeltype id, float *data)
     {
         try
@@ -284,6 +293,7 @@ extern "C"
         last_error.clear();
     }
 
+    // Can throw std::exception
     void mark_deleted(Index<float> *index, const hnswlib::labeltype id)
     {
         try
@@ -297,6 +307,7 @@ extern "C"
         last_error.clear();
     }
 
+    // Can throw std::exception
     size_t knn_query(Index<float> *index, const float *query_vector, const size_t k, hnswlib::labeltype *ids, float *distance, const hnswlib::labeltype *allowed_ids, const size_t allowed_id_length, const hnswlib::labeltype *disallowed_ids, const size_t disallowed_id_length)
     {
         size_t result;
@@ -313,6 +324,7 @@ extern "C"
         return result;
     }
 
+    // Can throw std::exception
     int get_ef(Index<float> *index)
     {
         int ret;
@@ -329,6 +341,7 @@ extern "C"
         return ret;
     }
 
+    // Can throw std::exception
     void set_ef(Index<float> *index, const size_t ef)
     {
         try
@@ -342,38 +355,29 @@ extern "C"
         last_error.clear();
     }
 
+    // Can not throw std::exception
     int len(Index<float> *index)
     {
-        int ret;
-        try
+        if (!index->index_inited)
         {
-            ret = index->appr_alg->getCurrentElementCount();
-        }
-        catch (std::exception &e)
-        {
-            last_error = e.what();
-            return -1;
-        }
-        last_error.clear();
-        return ret;
-    }
-
-    size_t capacity(Index<float> *index)
-    {
-        size_t ret;
-        try
-        {
-            ret = index->appr_alg->max_elements_;
-        }
-        catch (std::exception &e)
-        {
-            last_error = e.what();
             return 0;
         }
-        last_error.clear();
-        return ret;
+
+        return index->appr_alg->getCurrentElementCount() - index->appr_alg->getDeletedCount();
     }
 
+    // Can not throw std::exception
+    size_t capacity(Index<float> *index)
+    {
+        if (!index->index_inited)
+        {
+            return 0;
+        }
+
+        return index->appr_alg->max_elements_;
+    }
+
+    // Can throw std::exception
     void resize_index(Index<float> *index, size_t new_size)
     {
         try

@@ -198,14 +198,24 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                         });
                     }
 
-                    index.add(record.offset_id as usize, embedding);
+                    match index.add(record.offset_id as usize, embedding) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(ApplyMaterializedLogError::HnswIndexError(e));
+                        }
+                    }
                 }
                 MaterializedLogOperation::DeleteExisting => {
                     // HNSW segment does not perform validation of any sort. So,
                     // the assumption here is that the materialized log records
                     // contain the correct offset ids pertaining to records that
                     // are actually meant to be deleted.
-                    self.index.read().delete(record.offset_id as usize);
+                    match self.index.read().delete(record.offset_id as usize) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(ApplyMaterializedLogError::HnswIndexError(e));
+                        }
+                    }
                 }
                 MaterializedLogOperation::Initial => panic!(
                     "Invariant violation. Mat records should not contain logs in initial state"
