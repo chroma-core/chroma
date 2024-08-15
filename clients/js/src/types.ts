@@ -183,7 +183,7 @@ export type SingleAddRecordOperationParams =
   | SingleEmbeddingRecordOperationParams
   | SingleContentRecordOperationParams;
 
-export type MultiRecordOperationParams = BaseRecordOperationParams & {
+export type MultiRecordOperationParams = {
   ids: IDs;
   embeddings?: Embeddings;
   metadatas?: Metadatas;
@@ -207,6 +207,13 @@ export type AddRecordsParams =
   | MultiAddRecordsOperationParams;
 
 export type UpsertRecordsParams = AddRecordsParams;
+
+export type BulkUpsertRecordsParams = AddRecordsParams & {
+  maxBatchSize?: number;
+  printProgress?: boolean;
+  onBatchProcessed?: (processedIds: string[]) => void | Promise<void>;
+};
+
 export type UpdateRecordsParams =
   | MultiRecordOperationParams
   | SingleRecordOperationParams;

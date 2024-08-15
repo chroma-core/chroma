@@ -2,7 +2,8 @@ import { AdminClient } from "./AdminClient";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
-import { ChromaConnectionError, ChromaServerError } from "./Errors";
+import cliProgress from "cli-progress";
+import chalk from "chalk";
 import {
   Configuration,
   ApiApi as DefaultApi,
@@ -10,15 +11,14 @@ import {
 } from "./generated";
 import type {
   AddRecordsParams,
-  AddResponse,
   BaseGetParams,
+  BulkUpsertRecordsParams,
   ChromaClientParams,
   Collection,
   ConfigOptions,
   CreateCollectionParams,
   DeleteCollectionParams,
   DeleteParams,
-  Embedding,
   Embeddings,
   GetCollectionParams,
   GetOrCreateCollectionParams,
@@ -32,6 +32,7 @@ import type {
   UpsertRecordsParams,
 } from "./types";
 import {
+  arrayifyParams,
   prepareRecordRequest,
   toArray,
   toArrayOfArrays,
@@ -461,6 +462,78 @@ export class ChromaClient {
       )) as GeneratedApi.AddEmbedding,
       this.api.options,
     );
+  }
+
+  /**
+   * Bulk upsert items to the collection. Prefer this over `.addRecords()` or `.upsertRecords()` for large datasets. Note that this method is not atomic: if it fails partway through some of your data will have been added or updated. Use `.addRecords()` or `.upsertRecords()` if you need atomicity.
+   *
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
+   * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
+   * @param {number} [params.maxBatchSize] - Batch size to use during upsert. Defaults to 1024.
+   * @param {boolean} [params.printProgress] - Whether to print progress bar. Defaults to true if stdout is a TTY.
+   * @param {(processedIds: string[]) => void | Promise<void>} [params.onBatchProcessed] - Callback function to call after each batch is processed.
+   * @returns {Promise<void>}
+   *
+   * @example
+   * ```typescript
+   * const response = await client.bulkUpsertRecords(collection, {
+   *   ids: ["id1", "id2"],
+   *   embeddings: [[1, 2, 3], [4, 5, 6]],
+   *   metadatas: [{ "key": "value" }, { "key": "value" }],
+   *   documents: ["document1", "document2"],
+   * });
+   * ```
+   */
+  async bulkUpsertRecords(
+    collection: Collection,
+    params: BulkUpsertRecordsParams,
+  ) {
+    await this.init();
+
+    const { ids, embeddings, metadatas, documents } = arrayifyParams(params);
+
+    const progress =
+      params.printProgress ?? process.stdout.isTTY
+        ? new cliProgress.SingleBar(
+            {
+              format:
+                "Upserting records... {bar} {percentage}% | ETA: {eta}s | {value}/{total}",
+              formatBar: (progress, options) => {
+                const completeSize = Math.round(progress * options.barsize!);
+                const incompleteSize = options.barsize! - completeSize;
+
+                const coloredCompletedBar = chalk.hex(
+                  progress === 1 ? "#4b77f7" : "#f3d846",
+                )(options.barCompleteString!.slice(0, completeSize));
+
+                return (
+                  coloredCompletedBar +
+                  options.barGlue +
+                  options.barIncompleteString!.slice(0, incompleteSize)
+                );
+              },
+              stopOnComplete: true,
+            },
+            cliProgress.Presets.shades_grey,
+          )
+        : null;
+    progress?.start(ids.length, 0);
+
+    const maxBatchSize = params.maxBatchSize ?? 1024;
+    for (let i = 0; i < ids.length; i += maxBatchSize) {
+      await this.upsertRecords(collection, {
+        ids: ids.slice(i, i + maxBatchSize),
+        embeddings: embeddings?.slice(i, i + maxBatchSize),
+        metadatas: metadatas?.slice(i, i + maxBatchSize),
+        documents: documents?.slice(i, i + maxBatchSize),
+      } as AddRecordsParams);
+      params.onBatchProcessed?.(ids.slice(i, i + maxBatchSize));
+      progress?.update(i);
+    }
+    progress?.update(ids.length);
   }
 
   /**

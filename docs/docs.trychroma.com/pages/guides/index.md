@@ -376,9 +376,17 @@ Note that `.bulk_upsert()` is not atomic: if it fails partway through some of yo
 {% /tab %}
 {% tab label="Javascript" %}
 
-Add data to Chroma with `.addRecords`.
+When ingesting data for the first time, we recommend using the `.bulkUpsertRecords()` method as it's optimized for large amounts of data (it also displays a progress bar by default):
 
-Raw documents:
+```javascript
+await client.bulkUpsertRecords(collection, {
+    ids: ["id1", "id2", "id3", ...],
+    metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
+    documents: ["lorem ipsum...", "doc2", "doc3", ...],
+})
+```
+
+You can also add data to Chroma with `.addRecords()`:
 
 ```javascript
 await client.addRecords(collection, {
@@ -386,12 +394,9 @@ await client.addRecords(collection, {
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
 })
-// input order
-// ids - required
-// embeddings - optional
-// metadata - optional
-// documents - optional
 ```
+
+Note that `.bulkUpsertRecords()` is not atomic: if it fails partway through some of your data will have been added or updated. You should use `.addRecords()` or `.upsertRecords()` if you require atomicity for your application.
 
 {% /tab %}
 

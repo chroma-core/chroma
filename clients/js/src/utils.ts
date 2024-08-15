@@ -81,7 +81,7 @@ export function isBrowser() {
   );
 }
 
-function arrayifyParams(
+export function arrayifyParams(
   params: BaseRecordOperationParams,
 ): MultiRecordOperationParams {
   return {
