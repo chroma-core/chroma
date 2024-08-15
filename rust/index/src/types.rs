@@ -65,16 +65,16 @@ pub trait Index<C> {
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
-    fn add(&self, id: usize, vector: &[f32]);
-    fn delete(&self, id: usize);
+    fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>>;
+    fn delete(&self, id: usize) -> Result<(), Box<dyn ChromaError>>;
     fn query(
         &self,
         vector: &[f32],
         k: usize,
         allowed_ids: &[usize],
         disallow_ids: &[usize],
-    ) -> (Vec<usize>, Vec<f32>);
-    fn get(&self, id: usize) -> Option<Vec<f32>>;
+    ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>>;
+    fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>>;
 }
 
 /// The persistent index trait.

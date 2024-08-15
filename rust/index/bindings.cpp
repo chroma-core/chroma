@@ -1,5 +1,6 @@
 // Assumes that chroma-hnswlib is checked out at the same level as chroma
 #include "../../../hnswlib/hnswlib/hnswlib.h"
+#include <thread>
 
 class AllowAndDisallowListFilterFunctor : public hnswlib::BaseFilterFunctor
 {
@@ -22,6 +23,12 @@ public:
         return true;
     }
 };
+
+// thread-local for the last error message, callers are expected to check this
+// the empty string represents no error
+// this is currently shared across all instances of Index, but that's fine for now
+// since it is thread-local
+thread_local std::string last_error;
 
 template <typename dist_t, typename data_t = float>
 class Index
@@ -57,6 +64,7 @@ public:
         }
         appr_alg = NULL;
         index_inited = false;
+        last_error.clear();
     }
 
     ~Index()
@@ -72,7 +80,7 @@ public:
     {
         if (index_inited)
         {
-            std::runtime_error("Index already inited");
+            throw std::runtime_error("Index already inited");
         }
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, max_elements, M, ef_construction, random_seed, allow_replace_deleted, normalize, is_persistent_index, persistence_location);
         appr_alg->ef_ = 10; // This is a default value for ef_
@@ -83,7 +91,7 @@ public:
     {
         if (index_inited)
         {
-            std::runtime_error("Index already inited");
+            throw std::runtime_error("Index already inited");
         }
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted, normalize, is_persistent_index);
         index_inited = true;
@@ -93,7 +101,7 @@ public:
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         appr_alg->persistDirty();
     }
@@ -102,7 +110,7 @@ public:
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         appr_alg->addPoint(data, id);
     }
@@ -111,7 +119,7 @@ public:
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         std::vector<data_t> ret_data = appr_alg->template getDataByLabel<data_t>(id); // This checks if id is deleted
         for (int i = 0; i < dim; i++)
@@ -120,21 +128,20 @@ public:
         }
     }
 
-    int mark_deleted(const hnswlib::labeltype id)
+    void mark_deleted(const hnswlib::labeltype id)
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         appr_alg->markDelete(id);
-        return 0;
     }
 
     size_t knn_query(const data_t *query_vector, const size_t k, hnswlib::labeltype *ids, data_t *distance, const hnswlib::labeltype *allowed_ids, const size_t allowed_id_length, const hnswlib::labeltype *disallowed_ids, const size_t disallowed_id_length)
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
 
         std::unordered_set<hnswlib::labeltype> allow_list;
@@ -155,11 +162,6 @@ public:
         }
         AllowAndDisallowListFilterFunctor filter = AllowAndDisallowListFilterFunctor(allow_list, disallow_list);
         std::priority_queue<std::pair<dist_t, hnswlib::labeltype>> res = appr_alg->searchKnn(query_vector, k, &filter);
-        if (res.size() < k)
-        {
-            // TODO: This is ok and we should return < K results, but for maintining compatibility with the old API we throw an error for now
-            std::runtime_error("Not enough results");
-        }
         int total_results = std::min(res.size(), k);
         for (int i = total_results - 1; i >= 0; i--)
         {
@@ -175,7 +177,7 @@ public:
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         return appr_alg->ef_;
     }
@@ -184,7 +186,7 @@ public:
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         appr_alg->ef_ = ef;
     }
@@ -193,7 +195,7 @@ public:
     {
         if (!index_inited)
         {
-            std::runtime_error("Index not inited");
+            throw std::runtime_error("Index not inited");
         }
         appr_alg->resizeIndex(new_size);
     }
@@ -203,66 +205,194 @@ extern "C"
 {
     Index<float> *create_index(const char *space_name, const int dim)
     {
+        Index<float> *index;
+        try
+        {
+            index = new Index<float>(space_name, dim);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return nullptr;
+        }
+        last_error.clear();
         return new Index<float>(space_name, dim);
     }
 
     void init_index(Index<float> *index, const size_t max_elements, const size_t M, const size_t ef_construction, const size_t random_seed, const bool allow_replace_deleted, const bool is_persistent_index, const char *persistence_location)
     {
-        index->init_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted, is_persistent_index, persistence_location);
+        try
+        {
+            index->init_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted, is_persistent_index, persistence_location);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
     void load_index(Index<float> *index, const char *path_to_index, const bool allow_replace_deleted, const bool is_persistent_index)
     {
-        index->load_index(path_to_index, allow_replace_deleted, is_persistent_index);
+        try
+        {
+            index->load_index(path_to_index, allow_replace_deleted, is_persistent_index);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
     void persist_dirty(Index<float> *index)
     {
-        index->persist_dirty();
+        try
+        {
+            index->persist_dirty();
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
     void add_item(Index<float> *index, const float *data, const hnswlib::labeltype id, const bool replace_deleted)
     {
-        index->add_item(data, id);
+        try
+        {
+            index->add_item(data, id, replace_deleted);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
     void get_item(Index<float> *index, const hnswlib::labeltype id, float *data)
     {
-        index->get_item(id, data);
+        try
+        {
+            index->get_item(id, data);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
-    int mark_deleted(Index<float> *index, const hnswlib::labeltype id)
+    void mark_deleted(Index<float> *index, const hnswlib::labeltype id)
     {
-        return index->mark_deleted(id);
+        try
+        {
+            index->mark_deleted(id);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
     size_t knn_query(Index<float> *index, const float *query_vector, const size_t k, hnswlib::labeltype *ids, float *distance, const hnswlib::labeltype *allowed_ids, const size_t allowed_id_length, const hnswlib::labeltype *disallowed_ids, const size_t disallowed_id_length)
     {
-        return index->knn_query(query_vector, k, ids, distance, allowed_ids, allowed_id_length, disallowed_ids, disallowed_id_length);
+        size_t result;
+        try
+        {
+            result = index->knn_query(query_vector, k, ids, distance, allowed_ids, allowed_id_length, disallowed_ids, disallowed_id_length);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return 0;
+        }
+        last_error.clear();
+        return result;
     }
 
     int get_ef(Index<float> *index)
     {
-        return index->appr_alg->ef_;
+        int ret;
+        try
+        {
+            ret = index->get_ef();
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return -1;
+        }
+        last_error.clear();
+        return ret;
     }
 
     void set_ef(Index<float> *index, const size_t ef)
     {
-        index->set_ef(ef);
+        try
+        {
+            index->set_ef(ef);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
     }
 
     int len(Index<float> *index)
     {
-        return index->appr_alg->getCurrentElementCount() - index->appr_alg->getDeletedCount();
+        int ret;
+        try
+        {
+            ret = index->appr_alg->getCurrentElementCount();
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return -1;
+        }
+        last_error.clear();
+        return ret;
     }
 
     size_t capacity(Index<float> *index)
     {
-        return index->appr_alg->max_elements_;
+        size_t ret;
+        try
+        {
+            ret = index->appr_alg->max_elements_;
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return 0;
+        }
+        last_error.clear();
+        return ret;
     }
 
     void resize_index(Index<float> *index, size_t new_size)
     {
-        index->resize_index(new_size);
+        try
+        {
+            index->resize_index(new_size);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+        }
+        last_error.clear();
+    }
+
+    const char *get_last_error(Index<float> *index)
+    {
+        if (last_error.empty())
+        {
+            return nullptr;
+        }
+        return last_error.c_str();
     }
 }
