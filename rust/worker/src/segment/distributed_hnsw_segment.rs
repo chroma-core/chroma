@@ -349,7 +349,7 @@ impl DistributedHNSWSegmentReader {
         k: usize,
         allowed_ids: &[usize],
         disallowd_ids: &[usize],
-    ) -> (Vec<usize>, Vec<f32>) {
+    ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>> {
         let index = self.index.read();
         index.query(vector, k, allowed_ids, disallowd_ids)
     }
