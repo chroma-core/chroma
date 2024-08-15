@@ -321,7 +321,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
-            ApplyMaterializedLogError::HnswIndexAddError(_) => ErrorCodes::Internal,
+            ApplyMaterializedLogError::HnswIndexError(_) => ErrorCodes::Internal,
         }
     }
 }
