@@ -860,7 +860,7 @@ pub mod test {
 
     #[test]
     fn it_can_catch_error() {
-        let n = 1;
+        let n = 10;
         let d: usize = 960;
         let distance_function = DistanceFunction::Euclidean;
         let tmp_dir = tempdir().unwrap();
@@ -872,7 +872,7 @@ pub mod test {
             },
             Some(&HnswIndexConfig {
                 max_elements: n,
-                m: 16,
+                m: 10,
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
@@ -894,17 +894,12 @@ pub mod test {
             index.add(ids[i], data).expect("Should not error");
         });
 
-        // Query the data
-        let query = &data[0..d];
-        let allow_ids = &[];
-        let disallow_ids = &[];
-        let (ids, distances) = index.query(query, 1, allow_ids, disallow_ids).unwrap();
-
-        // inserted error should print at this point
-
-        // assert_eq!(ids.len(), 1);
-        // assert_eq!(distances.len(), 1);
-        // assert_eq!(ids[0], 0);
-        // assert_eq!(distances[0], 0.0);
+        // Add more elements than the index can hold
+        let data = &data[0..d];
+        let res = index.add(n, data);
+        match res {
+            Err(_) => {}
+            Ok(_) => panic!("Expected error"),
+        }
     }
 }

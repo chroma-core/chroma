@@ -112,6 +112,7 @@ public:
         {
             throw std::runtime_error("Index not inited");
         }
+
         appr_alg->addPoint(data, id);
     }
 
@@ -119,7 +120,7 @@ public:
     {
         if (!index_inited)
         {
-            throw std::runtime_error("Index not inited");
+            throw std::runtime_error("Inde not inited");
         }
         std::vector<data_t> ret_data = appr_alg->template getDataByLabel<data_t>(id); // This checks if id is deleted
         for (int i = 0; i < dim; i++)
@@ -233,6 +234,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -247,6 +249,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -261,6 +264,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -275,6 +279,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -289,6 +294,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -303,6 +309,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -351,6 +358,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
@@ -387,6 +395,7 @@ extern "C"
         catch (std::exception &e)
         {
             last_error = e.what();
+            return;
         }
         last_error.clear();
     }
