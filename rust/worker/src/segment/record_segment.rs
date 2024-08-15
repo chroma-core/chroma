@@ -305,6 +305,8 @@ pub enum ApplyMaterializedLogError {
     FTSDocumentDeleteError,
     #[error("FTS Document update error")]
     FTSDocumentUpdateError,
+    #[error("Error writing to hnsw index")]
+    HnswIndexError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -319,6 +321,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
+            ApplyMaterializedLogError::HnswIndexError(_) => ErrorCodes::Internal,
         }
     }
 }
