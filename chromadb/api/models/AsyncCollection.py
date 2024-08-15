@@ -40,7 +40,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -99,7 +99,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -149,7 +149,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def query(
         self,
-        query_embeddings: Optional[  # type: ignore
+        query_embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -161,7 +161,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -237,7 +237,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def update(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -274,7 +274,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def upsert(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -318,7 +318,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def bulk_upsert(
         self,
         ids: IDs,
-        embeddings: Optional[Union[Embeddings, List[np.ndarray]]] = None,  # type: ignore
+        embeddings: Optional[Union[Embeddings, List[np.ndarray]]] = None,  # type: ignore[type-arg]
         metadatas: Optional[List[Optional[Metadata]]] = None,
         documents: Optional[List[Optional[Document]]] = None,
         images: Optional[List[Optional[Image]]] = None,
@@ -354,7 +354,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             else None,
             batch_size=min(absolute_max_batch_size, max_batch_size),
         ):
-            await self.upsert(*batch)  # type: ignore
+            await self.upsert(*batch)  # type: ignore[arg-type]
             if on_batch_processed:
                 if inspect.iscoroutinefunction(on_batch_processed):
                     await on_batch_processed(batch[0])
