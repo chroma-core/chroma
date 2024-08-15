@@ -371,7 +371,7 @@ collection.add(
 )
 ```
 
-Note that `.bulk_upsert()` is not atomic: if it fails partway through some of your data will have been added/updated and some of it will not have been. You should use `.add()` or `.upsert()` if you require atomicity for your application.
+Note that `.bulk_upsert()` is not atomic: if it fails partway through some of your data will have been added or updated. You should use `.add()` or `.upsert()` if you require atomicity for your application.
 
 {% /tab %}
 {% tab label="Javascript" %}
