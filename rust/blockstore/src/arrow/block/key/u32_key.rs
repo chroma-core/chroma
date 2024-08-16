@@ -1,11 +1,12 @@
+use crate::arrow::{
+    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
+};
+use arrow::array::{Array, StringBuilder, UInt32Array, UInt32Builder};
 use std::sync::Arc;
 
-use super::delta::BlockKeyArrowBuilder;
-use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
-use arrow::array::{Array, Float32Array, Float32Builder, StringBuilder};
-
-impl ArrowWriteableKey for f32 {
-    type ReadableKey<'referred_data> = f32;
+impl ArrowWriteableKey for u32 {
+    type ReadableKey<'referred_data> = u32;
 
     fn offset_size(_: usize) -> usize {
         0
@@ -16,16 +17,16 @@ impl ArrowWriteableKey for f32 {
         _: usize,
     ) -> BlockKeyArrowBuilder {
         let prefix_builder = StringBuilder::with_capacity(item_count, prefix_capacity);
-        let key_builder = Float32Builder::with_capacity(item_count);
-        BlockKeyArrowBuilder::Float32((prefix_builder, key_builder))
+        let key_builder = UInt32Builder::with_capacity(item_count);
+        BlockKeyArrowBuilder::UInt32((prefix_builder, key_builder))
     }
 }
 
-impl ArrowReadableKey<'_> for f32 {
+impl ArrowReadableKey<'_> for u32 {
     fn get(array: &Arc<dyn Array>, index: usize) -> Self {
         array
             .as_any()
-            .downcast_ref::<Float32Array>()
+            .downcast_ref::<UInt32Array>()
             .unwrap()
             .value(index)
     }
@@ -34,7 +35,7 @@ impl ArrowReadableKey<'_> for f32 {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut super::delta::BlockDelta,
+        delta: &mut BlockDelta,
     ) {
         V::add_to_delta(prefix, key, value, delta);
     }

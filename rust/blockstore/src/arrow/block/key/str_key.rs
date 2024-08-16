@@ -1,11 +1,12 @@
-use std::sync::Arc;
-
-use super::{delta::BlockDelta, delta::BlockKeyArrowBuilder};
-use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
+use crate::arrow::{
+    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
+};
 use arrow::{
     array::{Array, StringArray, StringBuilder},
     util::bit_util,
 };
+use std::sync::Arc;
 
 impl ArrowWriteableKey for &str {
     type ReadableKey<'referred_data> = &'referred_data str;
