@@ -1,8 +1,9 @@
-use crate::arrow::types::{ArrowReadableValue, ArrowWriteableValue};
+use crate::arrow::{
+    block::delta::{roaring_bitmap::RoaringBitmapStorage, BlockDelta, BlockStorage},
+    types::{ArrowReadableValue, ArrowWriteableValue},
+};
 use arrow::{array::BinaryArray, util::bit_util};
 use roaring::RoaringBitmap;
-
-use super::delta::roaring_bitmap::RoaringBitmapStorage;
 
 impl ArrowWriteableValue for &RoaringBitmap {
     type ReadableValue<'referred_data> = RoaringBitmap;
@@ -15,14 +16,9 @@ impl ArrowWriteableValue for &RoaringBitmap {
         0 // We don't support None values for RoaringBitmap
     }
 
-    fn add(
-        prefix: &str,
-        key: crate::key::KeyWrapper,
-        value: Self,
-        delta: &super::delta::BlockDelta,
-    ) {
+    fn add(prefix: &str, key: crate::key::KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
-            super::delta::BlockStorage::RoaringBitmap(builder) => {
+            BlockStorage::RoaringBitmap(builder) => {
                 let mut builder = builder.storage.write();
                 let mut serialized = Vec::with_capacity(value.serialized_size());
                 let res = value.serialize_into(&mut serialized);
@@ -43,9 +39,9 @@ impl ArrowWriteableValue for &RoaringBitmap {
         }
     }
 
-    fn delete(prefix: &str, key: crate::key::KeyWrapper, delta: &super::delta::BlockDelta) {
+    fn delete(prefix: &str, key: crate::key::KeyWrapper, delta: &BlockDelta) {
         match &delta.builder {
-            super::delta::BlockStorage::RoaringBitmap(builder) => {
+            BlockStorage::RoaringBitmap(builder) => {
                 let mut builder = builder.storage.write();
                 builder.remove(&crate::key::CompositeKey {
                     prefix: prefix.to_string(),
@@ -56,8 +52,8 @@ impl ArrowWriteableValue for &RoaringBitmap {
         }
     }
 
-    fn get_delta_builder() -> super::delta::BlockStorage {
-        super::delta::BlockStorage::RoaringBitmap(RoaringBitmapStorage::new())
+    fn get_delta_builder() -> BlockStorage {
+        BlockStorage::RoaringBitmap(RoaringBitmapStorage::new())
     }
 }
 
@@ -73,7 +69,7 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut super::delta::BlockDelta,
+        delta: &mut BlockDelta,
     ) {
         delta.add(prefix, key, &value);
     }

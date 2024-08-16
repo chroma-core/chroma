@@ -1,6 +1,8 @@
-use super::delta::{data_record::DataRecordStorage, BlockDelta, BlockStorage};
 use crate::{
-    arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
+    arrow::{
+        block::delta::{data_record::DataRecordStorage, BlockDelta, BlockStorage},
+        types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
+    },
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::array::BinaryArray;

@@ -1,6 +1,8 @@
-use super::delta::{uint32::UInt32Storage, BlockDelta, BlockStorage};
 use crate::{
-    arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
+    arrow::{
+        block::delta::{uint32::UInt32Storage, BlockDelta, BlockStorage},
+        types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
+    },
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::array::{Array, UInt32Array};
