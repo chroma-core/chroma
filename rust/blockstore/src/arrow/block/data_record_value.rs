@@ -1,6 +1,6 @@
 use super::{
     delta::BlockDelta,
-    delta_storage::{BlockStorage, DataRecordStorage},
+    delta::{BlockStorage, DataRecordStorage},
 };
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},

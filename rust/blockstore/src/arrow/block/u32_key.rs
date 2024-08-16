@@ -1,4 +1,4 @@
-use super::delta_storage::BlockKeyArrowBuilder;
+use super::delta::BlockKeyArrowBuilder;
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
 use arrow::array::{Array, Float32Builder, StringBuilder, UInt32Array, UInt32Builder};
 use std::sync::Arc;

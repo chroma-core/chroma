@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// - split: splits the block delta into two block deltas.
 #[derive(Clone)]
 pub struct BlockDelta {
-    pub(super) builder: BlockStorage,
+    pub builder: BlockStorage,
     pub id: Uuid,
 }
 

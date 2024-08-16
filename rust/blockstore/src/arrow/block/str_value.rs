@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{
     delta::BlockDelta,
-    delta_storage::{BlockStorage, StringValueStorage},
+    delta::{BlockStorage, StringValueStorage},
 };
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},

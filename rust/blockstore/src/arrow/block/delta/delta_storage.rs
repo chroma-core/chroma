@@ -149,12 +149,12 @@ impl BlockKeyArrowBuilder {
 }
 
 #[derive(Clone)]
-pub(super) struct StringValueStorage {
-    pub(super) storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
+pub struct StringValueStorage {
+    pub storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
 }
 
 impl StringValueStorage {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
         }
@@ -190,7 +190,7 @@ impl StringValueStorage {
         }
     }
 
-    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_value_size(&self, start: usize, end: usize) -> usize {
         let storage = self.storage.read();
         match storage.as_ref() {
             None => unreachable!("Invariant violation. A StringValueBuilder should have storage."),
@@ -205,7 +205,7 @@ impl StringValueStorage {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let storage = self.storage.read();
         match storage.as_ref() {
             None => unreachable!("Invariant violation. A StringValueBuilder should have storage."),
@@ -273,12 +273,12 @@ impl StringValueStorage {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct UInt32Storage {
-    pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
+pub struct UInt32Storage {
+    pub storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
 }
 
 impl UInt32Storage {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
         }
@@ -304,7 +304,7 @@ impl UInt32Storage {
         calculate_key_size(key_stream)
     }
 
-    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_value_size(&self, start: usize, end: usize) -> usize {
         let storage = self.storage.read();
         let value_stream = storage
             .iter()
@@ -340,7 +340,7 @@ impl UInt32Storage {
         builder
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let storage = self.storage.read();
         storage.len()
     }
@@ -366,12 +366,12 @@ impl UInt32Storage {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Int32ArrayStorage {
-    pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
+pub struct Int32ArrayStorage {
+    pub storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
 }
 
 impl Int32ArrayStorage {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
         }
@@ -480,12 +480,12 @@ impl Int32ArrayStorage {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct RoaringBitmapStorage {
-    pub(super) storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
+pub struct RoaringBitmapStorage {
+    pub storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
 }
 
 impl RoaringBitmapStorage {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
         }
@@ -511,7 +511,7 @@ impl RoaringBitmapStorage {
         calculate_key_size(key_stream)
     }
 
-    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_value_size(&self, start: usize, end: usize) -> usize {
         let storage = self.storage.read();
         let value_stream = storage
             .iter()
@@ -537,7 +537,7 @@ impl RoaringBitmapStorage {
         storage.iter().fold(0, |acc, (_, value)| acc + value.len())
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let storage = self.storage.read();
         storage.len()
     }
@@ -581,15 +581,15 @@ impl RoaringBitmapStorage {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct DataRecordStorage {
-    pub(super) id_storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
-    pub(super) embedding_storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<f32>>>>,
-    pub(super) metadata_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<Vec<u8>>>>>,
-    pub(super) document_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<String>>>>,
+pub struct DataRecordStorage {
+    pub id_storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
+    pub embedding_storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<f32>>>>,
+    pub metadata_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<Vec<u8>>>>>,
+    pub document_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<String>>>>,
 }
 
 impl DataRecordStorage {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             id_storage: Arc::new(RwLock::new(BTreeMap::new())),
             embedding_storage: Arc::new(RwLock::new(BTreeMap::new())),
@@ -618,7 +618,7 @@ impl DataRecordStorage {
         calculate_key_size(key_stream)
     }
 
-    pub(super) fn get_id_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_id_size(&self, start: usize, end: usize) -> usize {
         let id_storage = self.id_storage.read();
         let id_stream = id_storage
             .iter()
@@ -628,7 +628,7 @@ impl DataRecordStorage {
         id_stream.fold(0, |acc, value| acc + value.len())
     }
 
-    pub(super) fn get_embedding_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_embedding_size(&self, start: usize, end: usize) -> usize {
         let embedding_storage = self.embedding_storage.read();
         let embedding_stream = embedding_storage
             .iter()
@@ -638,7 +638,7 @@ impl DataRecordStorage {
         embedding_stream.fold(0, |acc, value| acc + value.len() * 4)
     }
 
-    pub(super) fn get_metadata_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_metadata_size(&self, start: usize, end: usize) -> usize {
         let metadata_storage = self.metadata_storage.read();
         let metadata_stream = metadata_storage
             .iter()
@@ -648,7 +648,7 @@ impl DataRecordStorage {
         metadata_stream.fold(0, |acc, value| acc + value.as_ref().map_or(0, |v| v.len()))
     }
 
-    pub(super) fn get_document_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_document_size(&self, start: usize, end: usize) -> usize {
         let document_storage = self.document_storage.read();
         let document_stream = document_storage
             .iter()
@@ -703,7 +703,7 @@ impl DataRecordStorage {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let id_storage = self.id_storage.read();
         id_storage.len()
     }
@@ -827,7 +827,7 @@ impl DataRecordStorage {
 }
 
 impl BlockStorage {
-    pub(super) fn get_prefix_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_prefix_size(&self, start: usize, end: usize) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_prefix_size(start, end),
             BlockStorage::UInt32(builder) => builder.get_prefix_size(start, end),
@@ -837,7 +837,7 @@ impl BlockStorage {
         }
     }
 
-    pub(super) fn get_key_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_key_size(&self, start: usize, end: usize) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_key_size(start, end),
             BlockStorage::UInt32(builder) => builder.get_key_size(start, end),
@@ -848,7 +848,7 @@ impl BlockStorage {
     }
 
     /// Returns the arrow-padded (rounded to 64 bytes) size of the value data for the given range.
-    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_value_size(&self, start: usize, end: usize) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_value_size(start, end),
             BlockStorage::UInt32(builder) => builder.get_value_size(start, end),
@@ -858,7 +858,7 @@ impl BlockStorage {
         }
     }
 
-    pub(super) fn split(&self, prefix: &str, key: KeyWrapper) -> BlockStorage {
+    pub fn split(&self, prefix: &str, key: KeyWrapper) -> BlockStorage {
         match self {
             BlockStorage::String(builder) => BlockStorage::String(builder.split(prefix, key)),
             BlockStorage::UInt32(builder) => BlockStorage::UInt32(builder.split(prefix, key)),
@@ -874,7 +874,7 @@ impl BlockStorage {
         }
     }
 
-    pub(super) fn get_key(&self, index: usize) -> CompositeKey {
+    pub fn get_key(&self, index: usize) -> CompositeKey {
         match self {
             BlockStorage::String(builder) => {
                 let storage = builder.storage.read();
@@ -895,7 +895,7 @@ impl BlockStorage {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             BlockStorage::String(builder) => builder.len(),
             BlockStorage::UInt32(builder) => builder.len(),
@@ -905,7 +905,7 @@ impl BlockStorage {
         }
     }
 
-    pub(super) fn to_record_batch<K: ArrowWriteableKey>(&self) -> RecordBatch {
+    pub fn to_record_batch<K: ArrowWriteableKey>(&self) -> RecordBatch {
         let mut key_builder = K::get_arrow_builder(
             self.len(),
             self.get_prefix_size(0, self.len()),
