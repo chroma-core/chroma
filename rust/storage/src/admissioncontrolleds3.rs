@@ -7,8 +7,8 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-// Wrapper over s3 storage that provides proxy features such as
-// request coalescing, rate limiting, etc.
+/// Wrapper over s3 storage that provides proxy features such as
+/// request coalescing, rate limiting, etc.
 #[derive(Clone)]
 pub struct AdmissionControlledS3Storage {
     storage: S3Storage,
