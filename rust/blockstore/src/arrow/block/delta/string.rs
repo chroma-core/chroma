@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone)]
-pub(crate) struct StringValueStorage {
+pub(in crate::arrow) struct StringValueStorage {
     pub(crate) storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
 }
 

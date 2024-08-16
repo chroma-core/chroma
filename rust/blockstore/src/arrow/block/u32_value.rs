@@ -1,7 +1,4 @@
-use super::{
-    delta::BlockDelta,
-    delta::{BlockStorage, UInt32Storage},
-};
+use super::delta::{uint32::UInt32Storage, BlockDelta, BlockStorage};
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
