@@ -187,10 +187,9 @@ impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::AdmissionControlledS3(nacconfig) => {
-                let s3_storage = S3Storage::try_from_config(&StorageConfig::S3(
-                    nacconfig.s3_config.clone(),
-                ))
-                .await?;
+                let s3_storage =
+                    S3Storage::try_from_config(&StorageConfig::S3(nacconfig.s3_config.clone()))
+                        .await?;
                 return Ok(Self::new(s3_storage));
             }
             _ => {
