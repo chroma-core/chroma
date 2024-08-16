@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use super::{
-    delta::BlockDelta,
-    delta::{BlockStorage, StringValueStorage},
-};
+use super::delta::{string::StringValueStorage, BlockDelta, BlockStorage};
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},

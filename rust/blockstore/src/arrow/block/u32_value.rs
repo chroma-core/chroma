@@ -1,15 +1,12 @@
 use super::{
     delta::BlockDelta,
-    delta::{BlockStorage, StringValueStorage, UInt32Storage},
+    delta::{BlockStorage, UInt32Storage},
 };
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
 };
-use arrow::{
-    array::{Array, StringArray, UInt32Array},
-    util::bit_util,
-};
+use arrow::array::{Array, UInt32Array};
 use std::sync::Arc;
 
 impl ArrowWriteableValue for u32 {

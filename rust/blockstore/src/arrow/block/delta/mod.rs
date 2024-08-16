@@ -1,5 +1,6 @@
 mod delta;
-mod delta_storage;
+mod storage;
+pub(super) mod string;
 
 pub use delta::*;
-pub use delta_storage::*;
+pub use storage::*;

@@ -1,4 +1,4 @@
-use super::delta_storage::BlockStorage;
+use super::storage::BlockStorage;
 use crate::{
     arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::CompositeKey,
@@ -53,7 +53,7 @@ impl BlockDelta {
     }
 
     /// Gets the minimum key in the block delta.
-    pub fn get_min_key(&self) -> Option<CompositeKey> {
+    pub(crate) fn get_min_key(&self) -> Option<CompositeKey> {
         if self.builder.len() == 0 {
             return None;
         }
@@ -117,7 +117,7 @@ impl BlockDelta {
     /// A tuple containing the the key of the split point and the new block delta.
     /// The new block delta contains all the key value pairs after, but not including the
     /// split point.
-    pub fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub(crate) fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &'referred_data self,
         max_block_size_bytes: usize,
     ) -> Vec<(CompositeKey, BlockDelta)> {
@@ -189,7 +189,6 @@ impl BlockDelta {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
     use arrow::array::Int32Array;
     use chroma_cache::{
@@ -197,7 +196,7 @@ mod test {
         config::{CacheConfig, UnboundedCacheConfig},
     };
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{DataRecord, MetadataValue, UpdateMetadata};
+    use chroma_types::{DataRecord, MetadataValue};
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
